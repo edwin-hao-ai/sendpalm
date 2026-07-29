@@ -412,8 +412,8 @@ if (D.agentTasks && D.agentTasks.length) {
 }
 if (D.agentDrafts && D.agentDrafts.length) {
   D.agentDrafts.forEach((d, i) => {
-    if (!d.sessionId) d.sessionId = 'as-1';
-    if (!d.sourceContext) d.sourceContext = { kind: 'message', id: 'msg-1', preview: '张磊 - 合同附件' };
+    if (!d.sessionId) d.sessionId = 'as-draft-' + (i + 1);
+    if (!d.sourceContext) d.sourceContext = { kind: 'message', id: 'msg-' + i, preview: d.to + ' - ' + d.subj };
   });
 }
 

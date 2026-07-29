@@ -3705,15 +3705,18 @@
       ctxLink.addEventListener('click', () => {
         if (session.context.kind === 'message') {
           const m = D._msgs.find(x => x.id === session.context.id);
-          if (m) openMessage(m);
+          if (m) { openMessage(m); return; }
         } else if (session.context.kind === 'contact') {
-          openContact(session.context.id);
+          const c = D.getP(session.context.id);
+          if (c) { openContact(session.context.id); return; }
         } else if (session.context.kind === 'meeting') {
           const m = D._meetings.find(x => x.id === session.context.id);
-          if (m) openMeeting(m);
+          if (m) { openMeeting(m); return; }
         } else if (session.context.kind === 'file') {
-          openFile(D._files.find(f => f.id === session.context.id));
+          const f = D._files.find(f => f.id === session.context.id);
+          if (f) { openFile(f); return; }
         }
+        showToast('Context no longer available');
       });
       header.appendChild(ctxLink);
     }
@@ -3771,7 +3774,7 @@
     }
 
     // Drafts
-    const drafts = D.agentDrafts;
+    const drafts = D.agentDrafts || [];
     if (drafts.length) {
       body.appendChild(el('div', 'agent-right-section-title', 'Drafts (' + drafts.length + ')'));
       drafts.slice(0, 5).forEach(d => {
@@ -3863,7 +3866,7 @@
       });
     }
 
-    const drafts = D.agentDrafts.filter(d =>
+    const drafts = (D.agentDrafts || []).filter(d =>
       d.to.toLowerCase().includes(q) || d.preview.toLowerCase().includes(q)
     );
     if (drafts.length) {
@@ -3875,12 +3878,12 @@
         info.appendChild(el('div', 'agent-search-result-title', d.to));
         info.appendChild(el('div', 'agent-search-result-preview', d.preview));
         row.appendChild(info);
-        row.addEventListener('click', () => editAgentDraft(d.id));
+        row.addEventListener('click', () => editAgentDraft(d));
         wrap.appendChild(row);
       });
     }
 
-    const tasks = D.agentTasks.filter(t => t.name.toLowerCase().includes(q));
+    const tasks = (D.agentTasks || []).filter(t => t.name.toLowerCase().includes(q));
     if (tasks.length) {
       wrap.appendChild(el('div', 'agent-search-group-title', 'Tasks'));
       tasks.forEach(t => {
@@ -4818,11 +4821,25 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     const modal = el('div', 'modal-overlay');
     const content = el('div', 'modal agent-memory-modal');
 
+    function closeModal() {
+      modal.remove();
+      document.removeEventListener('keydown', onKeyDown);
+    }
+
+    function onKeyDown(e) {
+      if (e.key === 'Escape') closeModal();
+    }
+
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal();
+    });
+    document.addEventListener('keydown', onKeyDown);
+
     const header = el('div', 'modal-header');
     header.appendChild(el('h3', 'modal-title', 'Agent Memory'));
     const close = el('button', 'icon-btn');
     close.appendChild(icon('ph-x'));
-    close.addEventListener('click', () => modal.remove());
+    close.addEventListener('click', closeModal);
     header.appendChild(close);
     content.appendChild(header);
 

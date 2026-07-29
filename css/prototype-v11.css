@@ -7748,6 +7748,7 @@ button:focus-visible, input:focus-visible {
 }
 .agent-search-result-row:hover { background: var(--bg-hover); }
 .agent-search-result-row i { font-size: 14px; color: var(--accent); margin-top: 2px; flex-shrink: 0; }
+.agent-search-result-info { flex: 1; min-width: 0; }
 .agent-search-result-title {
   font-size: 13px;
   font-weight: 600;
