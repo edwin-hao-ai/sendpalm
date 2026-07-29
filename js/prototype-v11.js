@@ -3559,9 +3559,43 @@
     return container;
   }
 
+  function renderAgentSessionList() {
+    const col = el('div', 'agent-workspace-col agent-session-list-col');
+    col.appendChild(el('div', 'agent-col-header', 'Sessions'));
+    const list = el('div', 'agent-session-list');
+    state.agentSessions.filter(s => s.status !== 'archived').forEach(s => {
+      const item = el('div', 'agent-session-list-item' + (s.id === state.currentAgentSessionId ? ' active' : ''), s.title);
+      item.addEventListener('click', () => { switchAgentSession(s.id); renderMain(); });
+      list.appendChild(item);
+    });
+    col.appendChild(list);
+    return col;
+  }
+
+  function renderAgentConversation() {
+    const col = el('div', 'agent-workspace-col agent-conversation-col');
+    const session = getCurrentAgentSession();
+    col.appendChild(el('div', 'agent-col-header', session ? session.title : 'Conversation'));
+    col.appendChild(el('div', 'agent-conversation-body', session && session.messages.length ? session.messages.map(m => m.role + ': ' + m.text).join('\n') : 'No messages yet.'));
+    return col;
+  }
+
+  function renderAgentRightPanel() {
+    const col = el('div', 'agent-workspace-col agent-right-col');
+    col.appendChild(el('div', 'agent-col-header', 'Tasks & Memory'));
+    col.appendChild(el('div', 'agent-right-body', 'In progress tasks and memory will appear here.'));
+    return col;
+  }
+
   function renderAgentView() {
     const container = el('div', 'view agent-view');
-    container.appendChild(el('div', 'agent-view-placeholder', 'Agent workspace coming next...'));
+
+    const workspace = el('div', 'agent-workspace');
+    workspace.appendChild(renderAgentSessionList());
+    workspace.appendChild(renderAgentConversation());
+    workspace.appendChild(renderAgentRightPanel());
+    container.appendChild(workspace);
+
     return container;
   }
 
