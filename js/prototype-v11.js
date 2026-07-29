@@ -75,6 +75,7 @@
         { id: 'contacts', label: 'Contacts', icon: 'ph-users', hint: '⌘5' },
         { id: 'calendar', label: 'Calendar', icon: 'ph-calendar', hint: '⌘6' },
         { id: 'files', label: 'Files', icon: 'ph-files', hint: '⌘7' },
+        { id: 'agent', label: 'Agent', icon: 'ph-sparkle', hint: '⌘8' },
       ]
     },
     {
@@ -809,6 +810,8 @@
       viewEl = renderCalendar();
     } else if (state.view === 'files') {
       viewEl = renderFiles();
+    } else if (state.view === 'agent') {
+      viewEl = renderAgentView();
     } else if (state.view === 'drafts') {
       viewEl = renderDrafts();
     } else if (state.view === 'settings') {
@@ -829,6 +832,7 @@
         screenerHistory: 'Your past screening decisions.',
         contacts: 'People and companies you talk to.',
         files: 'Attachments and files from your email.',
+        agent: 'Your AI workspace: sessions, tasks, drafts, and memory.',
         drafts: 'Messages you are working on.',
         settings: 'Preferences and account options.',
         trash: 'Deleted emails.',
@@ -3552,6 +3556,12 @@
     });
 
     container.appendChild(list);
+    return container;
+  }
+
+  function renderAgentView() {
+    const container = el('div', 'view agent-view');
+    container.appendChild(el('div', 'agent-view-placeholder', 'Agent workspace coming next...'));
     return container;
   }
 
