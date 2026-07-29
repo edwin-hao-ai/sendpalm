@@ -507,6 +507,7 @@
       calendar: 'Calendar',
       files: 'Files',
       drafts: 'Drafts',
+      agent: 'Agent',
       settings: 'Settings',
       trash: 'Trash',
       spam: 'Spam',
@@ -3576,7 +3577,7 @@
     const col = el('div', 'agent-workspace-col agent-conversation-col');
     const session = getCurrentAgentSession();
     col.appendChild(el('div', 'agent-col-header', session ? session.title : 'Conversation'));
-    col.appendChild(el('div', 'agent-conversation-body', session && session.messages.length ? session.messages.map(m => m.role + ': ' + m.text).join('\n') : 'No messages yet.'));
+    col.appendChild(el('div', 'agent-conversation-body', session && session.messages?.length ? session.messages.map(m => m.role + ': ' + m.text).join('\n') : 'No messages yet.'));
     return col;
   }
 
