@@ -185,9 +185,9 @@ const D = {
     {id:'m6',title:'Q3合作复盘',pids:['cx','zl'],ppl:'陈欣 + 张磊',dt:'已结束 7/15',tm:'14:00-15:30',br:true,notes:'Q3复盘已完成',prep:[],post:'纪要已生成 - Action: 发送Q4规划'},
   ],
   agentTasks:[
-    {name:'Q4 跟进方案',status:'go',steps:[{l:'分析王洋邮件历史',d:true},{l:'起草跟进邮件',d:true},{l:'等待你的审批',d:false}]},
-    {name:'本周沟通总结',status:'go',steps:[{l:'收集47条消息',d:true},{l:'跨渠道分析',d:true},{l:'生成报告',d:false}]},
-    {name:'激活李晨关系',status:'wt',steps:[{l:'分析冷淡原因',d:true},{l:'建议联系策略',d:true},{l:'等待你批准',d:false}]},
+    {id:'at-1',name:'Q4 跟进方案',sessionId:'as-task-1',status:'go',steps:[{l:'分析王洋邮件历史',d:true},{l:'起草跟进邮件',d:true},{l:'等待你的审批',d:false}],eta:'2 min',createdAt:Date.now()-3600000},
+    {id:'at-2',name:'本周沟通总结',sessionId:'as-task-2',status:'go',steps:[{l:'收集47条消息',d:true},{l:'跨渠道分析',d:true},{l:'生成报告',d:false}],eta:'5 min',createdAt:Date.now()-7200000},
+    {id:'at-3',name:'激活李晨关系',sessionId:'as-task-3',status:'wt',steps:[{l:'分析冷淡原因',d:true},{l:'建议联系策略',d:true},{l:'等待你批准',d:false}],eta:'1 min',createdAt:Date.now()-1800000},
   ],
   agentDrafts:[
     {id:'d1',to:'王洋',subj:'Re: Q4 合作提案',preview:'Hi 王洋，希望一切顺利。之前发您的Q4提案，想了解一下内部对齐的进展。不知下周是否有空通个电话？',v:1},

@@ -5684,18 +5684,49 @@ ${D.stageSuggest[c.stage] || ''}
   }
 
   function runAgentAction(text) {
+    const isTaskIntent = /帮我|帮我做|请帮我|帮我.*并.*|draft.*and.*send|generate.*and.*send/i.test(text);
     let session = getCurrentAgentSession();
+
     if (!session) {
-      session = createAgentSession('freeform', null, text.slice(0, 30));
+      session = createAgentSession(isTaskIntent ? 'task' : 'freeform', null, text.slice(0, 30));
     }
+
     addAgentMessage(session.id, 'user', text, []);
 
-    // Simulate agent processing
+    if (isTaskIntent) {
+      const taskId = generateId('at');
+      session.type = 'task';
+      session.taskId = taskId;
+      D.agentTasks.push({
+        id: taskId,
+        name: text.slice(0, 40),
+        sessionId: session.id,
+        status: 'go',
+        steps: [
+          { l: '分析请求', d: true },
+          { l: '收集上下文', d: false },
+          { l: '生成结果', d: false },
+          { l: '等待确认', d: false }
+        ],
+        eta: '2 min',
+        createdAt: Date.now()
+      });
+    }
+
     showToast('Agent is thinking...');
     setTimeout(() => {
       const reply = generateAgentReply(text, session);
-      addAgentMessage(session.id, 'agent', reply, ['copy', 'regenerate']);
+      const actions = session.type === 'task' ? ['copy', 'create-task'] : ['copy', 'regenerate', 'use-draft'];
+      addAgentMessage(session.id, 'agent', reply, actions);
+      if (session.type === 'task') {
+        const task = D.agentTasks.find(t => t.sessionId === session.id);
+        if (task) {
+          task.steps[1].d = true;
+          task.steps[2].d = true;
+        }
+      }
       renderAgentPanel();
+      renderMain();
     }, 600);
   }
 
@@ -5703,6 +5734,33 @@ ${D.stageSuggest[c.stage] || ''}
     if (text.includes('总结')) return '这是当前内容的摘要：...';
     if (text.includes('草稿') || text.includes('回复')) return '已为你草拟回复：\n\n您好，...';
     return '收到。我已记录你的请求，接下来可以帮你继续处理。';
+  }
+
+  function createAgentTaskFromMessage(message, session) {
+    const taskId = generateId('at');
+    const taskSession = createAgentSession('task', session ? session.context : null, 'Task: ' + message.text.slice(0, 30));
+    taskSession.taskId = taskId;
+
+    const task = {
+      id: taskId,
+      name: message.text.slice(0, 40),
+      sessionId: taskSession.id,
+      status: 'go',
+      steps: [
+        { l: '分析请求', d: true },
+        { l: '收集上下文', d: false },
+        { l: '生成结果', d: false },
+        { l: '等待确认', d: false }
+      ],
+      eta: '2 min',
+      createdAt: Date.now()
+    };
+    D.agentTasks.push(task);
+
+    addAgentMessage(taskSession.id, 'agent', '已创建任务：' + task.name + '\n\n我将分步执行，你可以随时在这个会话中调整方向。', []);
+    switchAgentSession(taskSession.id);
+    renderAgentPanel();
+    renderMain();
   }
 
   function openAgentWithContext(context) {
@@ -5956,7 +6014,7 @@ ${D.stageSuggest[c.stage] || ''}
     } else if (action === 'use-draft') {
       openCompose({ body: message.text, mode: 'new' });
     } else if (action === 'create-task') {
-      showToast('Task creation will be implemented in Task 11');
+      createAgentTaskFromMessage(message, session);
     }
   }
 
