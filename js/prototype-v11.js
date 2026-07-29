@@ -5649,7 +5649,7 @@ ${D.stageSuggest[c.stage] || ''}
 
   function handleAgentMessageAction(action, message, session) {
     if (action === 'copy') {
-      copyToClipboard(message.text, 'Message copied');
+      copyToClipboard(message.text, 'Message');
     } else if (action === 'regenerate') {
       showToast('Regenerating...');
       setTimeout(() => {
@@ -5659,7 +5659,7 @@ ${D.stageSuggest[c.stage] || ''}
     } else if (action === 'use-draft') {
       openCompose({ body: message.text, mode: 'new' });
     } else if (action === 'create-task') {
-      createAgentTaskFromMessage(message, session);
+      showToast('Task creation will be implemented in Task 11');
     }
   }
 
@@ -5721,7 +5721,7 @@ ${D.stageSuggest[c.stage] || ''}
 
     const messagesWrap = el('div', 'agent-messages');
     const session = getCurrentAgentSession();
-    if (session && session.messages.length) {
+    if (session && session.messages && session.messages.length) {
       session.messages.forEach(m => {
         const row = el('div', 'agent-message agent-message-' + m.role);
         const bubble = el('div', 'agent-message-bubble');
