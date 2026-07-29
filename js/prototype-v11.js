@@ -5577,9 +5577,17 @@ ${D.stageSuggest[c.stage] || ''}
     return 'What would you like me to do?';
   }
 
+  function removeAgentSessionDropdown(dropdown) {
+    if (dropdown._closeDropdown) {
+      document.removeEventListener('click', dropdown._closeDropdown);
+      dropdown._closeDropdown = null;
+    }
+    dropdown.remove();
+  }
+
   function showAgentSessionDropdown(anchor) {
     const existing = document.querySelector('.agent-session-dropdown');
-    if (existing) { existing.remove(); return; }
+    if (existing) { removeAgentSessionDropdown(existing); return; }
 
     const dropdown = el('div', 'agent-session-dropdown');
     const activeSessions = state.agentSessions.filter(s => s.status !== 'archived');
@@ -5594,7 +5602,7 @@ ${D.stageSuggest[c.stage] || ''}
       item.addEventListener('click', () => {
         switchAgentSession(s.id);
         renderAgentPanel();
-        dropdown.remove();
+        removeAgentSessionDropdown(dropdown);
       });
       dropdown.appendChild(item);
     });
@@ -5609,7 +5617,7 @@ ${D.stageSuggest[c.stage] || ''}
         item.addEventListener('click', () => {
           switchAgentSession(s.id);
           renderAgentPanel();
-          dropdown.remove();
+          removeAgentSessionDropdown(dropdown);
         });
         dropdown.appendChild(item);
       });
@@ -5622,10 +5630,10 @@ ${D.stageSuggest[c.stage] || ''}
 
     const closeDropdown = (e) => {
       if (!dropdown.contains(e.target) && e.target !== anchor) {
-        dropdown.remove();
-        document.removeEventListener('click', closeDropdown);
+        removeAgentSessionDropdown(dropdown);
       }
     };
+    dropdown._closeDropdown = closeDropdown;
     setTimeout(() => document.addEventListener('click', closeDropdown), 0);
   }
 

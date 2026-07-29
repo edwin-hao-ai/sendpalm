@@ -6257,15 +6257,6 @@ img.file-cell-avatar {
   border-bottom: 1px solid var(--border);
 }
 
-.agent-title {
-  font-weight: 700;
-  color: var(--text-primary);
-  font-size: 14px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .agent-session-select-wrap { position: relative; flex: 1; min-width: 0; }
 .agent-session-select {
   display: inline-flex;
@@ -6341,15 +6332,6 @@ img.file-cell-avatar {
   height: 1px;
   background: var(--border);
   margin: 6px 0;
-}
-
-.agent-title::before {
-  content: '';
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 10px var(--accent-glow);
 }
 
 .agent-close { color: var(--text-muted); }
