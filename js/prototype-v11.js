@@ -397,7 +397,10 @@
       const logo = el('a', 'topbar-logo');
       logo.href = '#';
       logo.title = 'SendPalm';
-      logo.appendChild(icon('ph-paper-plane-right'));
+      const mark = el('span', 'topbar-logo-mark');
+      mark.appendChild(icon('ph-paper-plane-tilt'));
+      mark.appendChild(el('span', 'logo-dot'));
+      logo.appendChild(mark);
       logo.appendChild(el('span', '', 'SendPalm'));
       logo.addEventListener('click', (e) => {
         e.preventDefault();
@@ -1744,21 +1747,18 @@
     scoreWrap.style.color = c.scC;
     top.appendChild(scoreWrap);
 
-    const meta = el('div', 'person-meta');
-    const coRole = el('span', 'person-co-role', c.co + (c.tl ? ' · ' + c.tl : ''));
-    meta.appendChild(coRole);
-
     const bottom = el('div', 'person-bottom');
-    const last = el('span', 'person-last');
-    last.appendChild(icon(statusIconFor(c.grp)));
-    last.appendChild(el('span', '', c.lc));
-    last.style.color = statusColorFor(c.grp);
-    bottom.appendChild(last);
-    const topic = el('span', 'person-topic', c.topics.slice(0, 2).join(' · '));
+    const coRole = el('span', 'person-co-role');
+    const statusI = icon(statusIconFor(c.grp));
+    statusI.style.color = statusColorFor(c.grp);
+    coRole.appendChild(statusI);
+    coRole.appendChild(el('span', '', c.co + (c.tl ? ' · ' + c.tl : '')));
+    bottom.appendChild(coRole);
+    const topicText = c.lc + (c.topics && c.topics.length ? ' · ' + c.topics.slice(0, 2).join(' · ') : '');
+    const topic = el('span', 'person-topic', topicText);
     bottom.appendChild(topic);
 
     body.appendChild(top);
-    body.appendChild(meta);
     body.appendChild(bottom);
 
     card.appendChild(avatar);
@@ -2603,7 +2603,7 @@
   function renderCalendarHeader() {
     const header = el('div', 'cal-header');
 
-    const left = el('div', 'cal-header-left');
+    const left = el('div', 'cal-header-left view-header-left');
     const title = el('h1', 'cal-title');
     title.textContent = 'Calendar';
     const subline = el('div', 'cal-subline');

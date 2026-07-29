@@ -2,3 +2,6 @@
 .mddock/*
 # …but keep the workspace manifest tracked
 !.mddock/mddock.md
+
+# Node dependencies installed for local verification only
+node_modules/
