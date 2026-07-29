@@ -5560,21 +5560,58 @@ ${D.stageSuggest[c.stage] || ''}
   function buildAgentContext() {
     if (state.selectedMessageId && state.selectedContactId) {
       const c = D.getP(state.selectedContactId);
-      return c ? '正在看：' + c.name + ' 的邮件' : 'What would you like me to do?';
+      const m = D._msgs.find(x => x.id === state.selectedMessageId);
+      return {
+        kind: 'message',
+        id: state.selectedMessageId,
+        preview: (c ? c.name + ' - ' : '') + (m ? (m.subj || 'No subject') : '')
+      };
     }
     if (state.selectedMeetingId) {
       const m = D._meetings.find(x => x.id === state.selectedMeetingId);
-      if (m) return '正在看：' + m.title;
+      return { kind: 'meeting', id: state.selectedMeetingId, preview: m ? m.title : '' };
     }
     if (state.selectedContactId) {
       const c = D.getP(state.selectedContactId);
-      if (c) return '正在看：' + c.name;
+      return { kind: 'contact', id: state.selectedContactId, preview: c ? c.name : '' };
     }
     if (state.selectedFileId) {
       const f = D._files.find(x => x.id === state.selectedFileId);
-      if (f) return '正在看：' + f.name;
+      return { kind: 'file', id: state.selectedFileId, preview: f ? f.name : '' };
     }
-    return 'What would you like me to do?';
+    return { kind: null, id: null, preview: '' };
+  }
+
+  function agentSuggestionsForContext(kind) {
+    const defaults = [
+      { text: 'Morning briefing', action: () => runAgentAction('Give me a morning briefing') },
+      { text: 'What needs attention?', action: () => runAgentAction('What needs my attention?') },
+      { text: 'Draft weekly update', action: () => runAgentAction('Draft my weekly update') }
+    ];
+    const map = {
+      message: [
+        { text: 'Summarize', action: () => runAgentAction('Summarize this email') },
+        { text: 'Draft reply', action: () => runAgentAction('Draft a reply to this email') },
+        { text: 'Extract todos', action: () => runAgentAction('Extract todos from this email') },
+        { text: 'Set follow-up', action: () => runAgentAction('Set a follow-up for this email') }
+      ],
+      contact: [
+        { text: 'Relationship summary', action: () => runAgentAction('Summarize my relationship with this contact') },
+        { text: 'Suggest next action', action: () => runAgentAction('What should I do next with this contact?') },
+        { text: 'Draft catch-up', action: () => runAgentAction('Draft a catch-up message') }
+      ],
+      meeting: [
+        { text: 'Generate briefing', action: () => runAgentAction('Generate a meeting briefing') },
+        { text: 'Extract todos', action: () => runAgentAction('Extract todos from this meeting') },
+        { text: 'Draft follow-up', action: () => runAgentAction('Draft a follow-up email') }
+      ],
+      file: [
+        { text: 'Summarize file', action: () => runAgentAction('Summarize this file') },
+        { text: 'Copy context', action: () => runAgentAction('Copy file context as markdown') },
+        { text: 'Find related emails', action: () => runAgentAction('Find emails related to this file') }
+      ]
+    };
+    return map[kind] || defaults;
   }
 
   function removeAgentSessionDropdown(dropdown) {
@@ -5701,17 +5738,26 @@ ${D.stageSuggest[c.stage] || ''}
 
     panel.appendChild(header);
 
-    const context = el('div', 'agent-context');
-    context.textContent = buildAgentContext();
-    panel.appendChild(context);
+    const ctx = buildAgentContext();
+    if (ctx.kind) {
+      const ctxWrap = el('div', 'agent-context');
+      const ctxPill = el('button', 'agent-context-pill');
+      ctxPill.appendChild(icon(agentContextKindIcon(ctx.kind)));
+      ctxPill.appendChild(el('span', '', ctx.preview));
+      ctxPill.title = 'Click to reference this context';
+      ctxPill.addEventListener('click', () => {
+        const input = panel.querySelector('.agent-input');
+        if (input) {
+          input.value = input.value ? input.value + ' [context:' + ctx.kind + ':' + ctx.id + ']' : '[context:' + ctx.kind + ':' + ctx.id + ']';
+          input.focus();
+        }
+      });
+      ctxWrap.appendChild(ctxPill);
+      panel.appendChild(ctxWrap);
+    }
 
     const suggestions = el('div', 'agent-suggestions');
-    const suggestionActions = [
-      { text: 'Summarize', action: () => runAgentAction('Summarize this') },
-      { text: 'Draft reply', action: () => runAgentAction('Draft a reply') },
-      { text: 'Schedule meeting', action: () => runAgentAction('Find a meeting time') },
-      { text: 'Extract todos', action: () => runAgentAction('Extract todos') },
-    ];
+    const suggestionActions = agentSuggestionsForContext(ctx.kind);
     suggestionActions.forEach(s => {
       const chip = el('button', 'agent-chip', s.text);
       chip.addEventListener('click', s.action);

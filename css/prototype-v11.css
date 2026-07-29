@@ -6337,12 +6337,28 @@ img.file-cell-avatar {
 .agent-close { color: var(--text-muted); }
 
 .agent-context {
-  padding: 12px 16px;
-  color: var(--text-muted);
-  font-size: 12px;
-  border-bottom: 1px solid var(--border);
-  line-height: 1.5;
+  padding: 0 14px 8px;
 }
+.agent-context-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: var(--accent-soft);
+  border: 1px solid rgba(10,143,99,0.18);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s var(--ease-out);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-context-pill:hover { background: var(--accent-glow); }
+.agent-context-pill i { font-size: 12px; }
 
 .agent-suggestions {
   display: flex;
