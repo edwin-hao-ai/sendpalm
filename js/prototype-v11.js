@@ -4814,6 +4814,59 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     return container;
   }
 
+  function renderAgentMemoryModal() {
+    const modal = el('div', 'modal-overlay');
+    const content = el('div', 'modal agent-memory-modal');
+
+    const header = el('div', 'modal-header');
+    header.appendChild(el('h3', 'modal-title', 'Agent Memory'));
+    const close = el('button', 'icon-btn');
+    close.appendChild(icon('ph-x'));
+    close.addEventListener('click', () => modal.remove());
+    header.appendChild(close);
+    content.appendChild(header);
+
+    const body = el('div', 'modal-body');
+    body.appendChild(el('div', 'agent-memory-section-title', 'Global preferences'));
+    const memoryFields = [
+      { key: 'tone', label: 'Tone', placeholder: 'formal / casual / friendly' },
+      { key: 'defaultLength', label: 'Default length', placeholder: 'short / medium / long' },
+      { key: 'signature', label: 'Signature', placeholder: 'Your default sign-off' },
+      { key: 'language', label: 'Language', placeholder: 'zh-CN / en-US' }
+    ];
+    memoryFields.forEach(f => {
+      const row = el('div', 'settings-row');
+      row.appendChild(el('span', 'settings-label', f.label));
+      const input = el('input', 'settings-input');
+      input.value = state.agentMemory.global[f.key] || '';
+      input.placeholder = f.placeholder;
+      input.addEventListener('change', () => {
+        state.agentMemory.global[f.key] = input.value;
+      });
+      row.appendChild(input);
+      body.appendChild(row);
+    });
+
+    body.appendChild(el('div', 'agent-memory-section-title', 'Contact memory'));
+    Object.entries(state.agentMemory.contacts).forEach(([pid, mem]) => {
+      const c = D.getP(pid);
+      const card = el('div', 'agent-memory-contact-card');
+      card.appendChild(el('div', 'agent-memory-contact-name', c ? c.name : pid));
+      const topics = el('input', 'settings-input');
+      topics.value = (mem.topics || []).join(', ');
+      topics.placeholder = 'Topics';
+      topics.addEventListener('change', () => {
+        mem.topics = topics.value.split(',').map(s => s.trim()).filter(Boolean);
+      });
+      card.appendChild(topics);
+      body.appendChild(card);
+    });
+
+    content.appendChild(body);
+    modal.appendChild(content);
+    document.body.appendChild(modal);
+  }
+
   function renderToggleRow(label, desc, value, onChange) {
     const row = el('div', 'settings-row');
     const left = el('div', '');
