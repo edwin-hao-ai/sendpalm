@@ -5447,6 +5447,90 @@ ${D.stageSuggest[c.stage] || ''}
     if (input) input.value = context;
   }
 
+  function generateId(prefix) {
+    return prefix + '-' + Math.random().toString(36).slice(2, 9);
+  }
+
+  function createAgentSession(type, context, title) {
+    const session = {
+      id: generateId('as'),
+      type: type || 'freeform',
+      title: title || (context && context.preview ? context.preview : 'New conversation'),
+      context: context || { kind: null, id: null, preview: '' },
+      messages: [],
+      taskId: null,
+      memoryTags: [],
+      status: 'active',
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+    state.agentSessions.unshift(session);
+    state.currentAgentSessionId = session.id;
+    return session;
+  }
+
+  function getCurrentAgentSession() {
+    return state.agentSessions.find(s => s.id === state.currentAgentSessionId) || null;
+  }
+
+  function switchAgentSession(id) {
+    const s = state.agentSessions.find(x => x.id === id);
+    if (!s) return;
+    state.currentAgentSessionId = id;
+    s.status = s.status === 'archived' ? 'active' : s.status;
+    s.updatedAt = Date.now();
+  }
+
+  function archiveAgentSession(id) {
+    const s = state.agentSessions.find(x => x.id === id);
+    if (s) {
+      s.status = 'archived';
+      if (state.currentAgentSessionId === id) {
+        const next = state.agentSessions.find(x => x.status !== 'archived');
+        state.currentAgentSessionId = next ? next.id : null;
+      }
+    }
+  }
+
+  function pinAgentSession(id) {
+    const s = state.agentSessions.find(x => x.id === id);
+    if (s) s.status = s.status === 'pinned' ? 'active' : 'pinned';
+  }
+
+  function updateAgentSessionTitle(id, title) {
+    const s = state.agentSessions.find(x => x.id === id);
+    if (s) {
+      s.title = title;
+      s.updatedAt = Date.now();
+    }
+  }
+
+  function addAgentMessage(sessionId, role, text, actions) {
+    const s = state.agentSessions.find(x => x.id === sessionId);
+    if (!s) return;
+    s.messages.push({ role, text, actions: actions || [], ts: Date.now() });
+    s.updatedAt = Date.now();
+  }
+
+  function agentContextKindIcon(kind) {
+    const map = {
+      message: 'ph-envelope',
+      contact: 'ph-user',
+      meeting: 'ph-calendar',
+      file: 'ph-file'
+    };
+    return map[kind] || 'ph-sparkle';
+  }
+
+  window.createAgentSession = createAgentSession;
+  window.getCurrentAgentSession = getCurrentAgentSession;
+  window.switchAgentSession = switchAgentSession;
+  window.archiveAgentSession = archiveAgentSession;
+  window.pinAgentSession = pinAgentSession;
+  window.updateAgentSessionTitle = updateAgentSessionTitle;
+  window.addAgentMessage = addAgentMessage;
+  window.agentContextKindIcon = agentContextKindIcon;
+
   function renderAgentFab() {
     const fab = document.getElementById('agent-fab');
     fab.innerHTML = '';
