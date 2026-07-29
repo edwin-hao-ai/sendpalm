@@ -3562,15 +3562,116 @@
 
   function renderAgentSessionList() {
     const col = el('div', 'agent-workspace-col agent-session-list-col');
-    col.appendChild(el('div', 'agent-col-header', 'Sessions'));
-    const list = el('div', 'agent-session-list');
-    state.agentSessions.filter(s => s.status !== 'archived').forEach(s => {
-      const item = el('div', 'agent-session-list-item' + (s.id === state.currentAgentSessionId ? ' active' : ''), s.title);
-      item.addEventListener('click', () => { switchAgentSession(s.id); renderMain(); });
-      list.appendChild(item);
+
+    const header = el('div', 'agent-col-header');
+    header.appendChild(el('span', '', 'Sessions'));
+    const newBtn = el('button', 'icon-btn agent-new-session-btn');
+    newBtn.title = 'New session';
+    newBtn.appendChild(icon('ph-plus'));
+    newBtn.addEventListener('click', () => { createAgentSession('freeform', null, null); renderMain(); });
+    header.appendChild(newBtn);
+    col.appendChild(header);
+
+    const searchWrap = el('div', 'agent-session-search');
+    const searchInput = el('input', '');
+    searchInput.placeholder = 'Search sessions...';
+    searchInput.addEventListener('input', (e) => {
+      const q = e.target.value.toLowerCase();
+      list.querySelectorAll('.agent-session-list-item').forEach(item => {
+        const title = item.dataset.title || '';
+        item.style.display = title.includes(q) ? '' : 'none';
+      });
     });
+    searchWrap.appendChild(icon('ph-magnifying-glass'));
+    searchWrap.appendChild(searchInput);
+    col.appendChild(searchWrap);
+
+    const list = el('div', 'agent-session-list');
+
+    const pinned = state.agentSessions.filter(s => s.status === 'pinned');
+    const active = state.agentSessions.filter(s => s.status === 'active' || s.status === 'idle');
+    const archived = state.agentSessions.filter(s => s.status === 'archived');
+
+    const renderGroup = (sessions, container, emptyText) => {
+      if (!sessions.length && emptyText) return;
+      sessions.forEach(s => {
+        const item = el('div', 'agent-session-list-item' + (s.id === state.currentAgentSessionId ? ' active' : ''));
+        item.dataset.title = s.title.toLowerCase();
+        item.dataset.id = s.id;
+        item.appendChild(icon(agentContextKindIcon(s.context.kind)));
+        const info = el('div', 'agent-session-list-info');
+        info.appendChild(el('div', 'agent-session-list-title', s.title));
+        const last = s.messages[s.messages.length - 1];
+        info.appendChild(el('div', 'agent-session-list-preview', last ? last.text.slice(0, 36) : ''));
+        item.appendChild(info);
+        const meta = el('div', 'agent-session-list-meta');
+        meta.appendChild(el('span', '', formatTimeAgo(s.updatedAt)));
+        if (s.status === 'pinned') meta.appendChild(icon('ph-push-pin'));
+        item.appendChild(meta);
+
+        item.addEventListener('click', () => { switchAgentSession(s.id); renderMain(); });
+        item.addEventListener('contextmenu', (e) => showSessionContextMenu(e, s));
+        container.appendChild(item);
+      });
+    };
+
+    renderGroup(pinned, list, null);
+    renderGroup(active, list, null);
+
+    if (archived.length) {
+      const archiveToggle = el('button', 'agent-archive-toggle', 'Archived (' + archived.length + ')');
+      let expanded = false;
+      const archiveList = el('div', 'agent-archive-list hidden');
+      renderGroup(archived, archiveList, null);
+      archiveToggle.addEventListener('click', () => {
+        expanded = !expanded;
+        archiveList.classList.toggle('hidden', !expanded);
+      });
+      list.appendChild(archiveToggle);
+      list.appendChild(archiveList);
+    }
+
     col.appendChild(list);
     return col;
+  }
+
+  function showSessionContextMenu(e, session) {
+    e.preventDefault();
+    const existing = document.querySelector('.agent-session-context-menu');
+    if (existing) existing.remove();
+
+    const menu = el('div', 'agent-session-context-menu');
+    const items = [
+      { label: session.status === 'pinned' ? 'Unpin' : 'Pin', icon: 'ph-push-pin', action: () => { pinAgentSession(session.id); renderMain(); } },
+      { label: 'Rename', icon: 'ph-pencil-simple', action: () => {
+        const newTitle = prompt('Rename session', session.title);
+        if (newTitle) { updateAgentSessionTitle(session.id, newTitle); renderMain(); }
+      }},
+      { label: session.status === 'archived' ? 'Restore' : 'Archive', icon: 'ph-archive', action: () => { archiveAgentSession(session.id); renderMain(); } },
+    ];
+    items.forEach(item => {
+      const row = el('div', 'agent-context-menu-item');
+      row.appendChild(icon(item.icon));
+      row.appendChild(el('span', '', item.label));
+      row.addEventListener('click', () => { item.action(); menu.remove(); });
+      menu.appendChild(row);
+    });
+
+    document.body.appendChild(menu);
+    menu.style.top = e.clientY + 'px';
+    menu.style.left = e.clientX + 'px';
+    const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('click', close); } };
+    setTimeout(() => document.addEventListener('click', close), 0);
+  }
+
+  function formatTimeAgo(ts) {
+    const diff = Date.now() - ts;
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return 'now';
+    if (m < 60) return m + 'm';
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + 'h';
+    return Math.floor(h / 24) + 'd';
   }
 
   function renderAgentConversation() {
