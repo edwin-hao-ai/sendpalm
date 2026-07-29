@@ -7415,6 +7415,107 @@ button:focus-visible, input:focus-visible {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
+
+.agent-right-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 16px 0 8px;
+}
+.agent-right-section-title:first-child { margin-top: 0; }
+
+.agent-task-card {
+  padding: 10px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: background 0.12s var(--ease-out);
+}
+.agent-task-card:hover { background: var(--bg-hover); }
+.agent-task-card-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.agent-task-card-steps { display: flex; gap: 6px; margin-bottom: 6px; }
+.agent-task-step-dot {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 10px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+.agent-task-step-dot.done { background: var(--accent-soft); color: var(--accent); }
+.agent-task-card-eta {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.agent-draft-card {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  margin-bottom: 8px;
+  background: var(--bg-elevated);
+}
+.agent-draft-card-to {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.agent-draft-card-preview {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-draft-card-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+}
+.agent-draft-card-action {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+.agent-draft-card-action:hover { text-decoration: underline; }
+
+.agent-memory-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+.agent-memory-key {
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: capitalize;
+}
+.agent-memory-value {
+  color: var(--text-primary);
+}
+
 .agent-session-list-col { background: var(--paper-light); }
 .agent-session-list {
   flex: 1;

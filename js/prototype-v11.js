@@ -3738,7 +3738,61 @@
   function renderAgentRightPanel() {
     const col = el('div', 'agent-workspace-col agent-right-col');
     col.appendChild(el('div', 'agent-col-header', 'Tasks & Memory'));
-    col.appendChild(el('div', 'agent-right-body', 'In progress tasks and memory will appear here.'));
+
+    const body = el('div', 'agent-right-body');
+
+    // In Progress
+    const inProgress = D.agentTasks.filter(t => t.status === 'go');
+    if (inProgress.length) {
+      body.appendChild(el('div', 'agent-right-section-title', 'In Progress'));
+      inProgress.forEach(t => {
+        const card = el('div', 'agent-task-card');
+        card.appendChild(el('div', 'agent-task-card-name', t.name));
+        const steps = el('div', 'agent-task-card-steps');
+        t.steps.forEach(s => {
+          const dot = el('span', 'agent-task-step-dot' + (s.d ? ' done' : ''), s.d ? '✓' : '○');
+          dot.title = s.l;
+          steps.appendChild(dot);
+        });
+        card.appendChild(steps);
+        if (t.eta) card.appendChild(el('div', 'agent-task-card-eta', 'ETA: ' + t.eta));
+        card.addEventListener('click', () => {
+          if (t.sessionId) { switchAgentSession(t.sessionId); renderMain(); }
+        });
+        body.appendChild(card);
+      });
+    }
+
+    // Drafts
+    const drafts = D.agentDrafts;
+    if (drafts.length) {
+      body.appendChild(el('div', 'agent-right-section-title', 'Drafts (' + drafts.length + ')'));
+      drafts.slice(0, 5).forEach(d => {
+        const card = el('div', 'agent-draft-card');
+        card.appendChild(el('div', 'agent-draft-card-to', d.to));
+        card.appendChild(el('div', 'agent-draft-card-preview', d.preview));
+        const actions = el('div', 'agent-draft-card-actions');
+        const edit = el('button', 'agent-draft-card-action', 'Edit');
+        edit.addEventListener('click', (e) => { e.stopPropagation(); editAgentDraft(d.id); });
+        actions.appendChild(edit);
+        card.appendChild(actions);
+        body.appendChild(card);
+      });
+    }
+
+    // Memory
+    const memory = state.agentMemory.global;
+    if (memory && Object.keys(memory).length) {
+      body.appendChild(el('div', 'agent-right-section-title', 'Memory'));
+      Object.entries(memory).forEach(([k, v]) => {
+        const chip = el('div', 'agent-memory-chip');
+        chip.appendChild(el('span', 'agent-memory-key', k));
+        chip.appendChild(el('span', 'agent-memory-value', String(v)));
+        body.appendChild(chip);
+      });
+    }
+
+    col.appendChild(body);
     return col;
   }
 
