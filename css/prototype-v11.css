@@ -7376,6 +7376,45 @@ button:focus-visible, input:focus-visible {
   border-bottom: 1px solid var(--border);
   background: linear-gradient(180deg, rgba(255,255,255,0.7) 0%, transparent 100%);
 }
+.agent-context-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.12s var(--ease-out);
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-context-link:hover { background: var(--bg-hover); color: var(--text-primary); }
+.agent-context-link i { font-size: 11px; color: var(--accent); }
+.agent-workspace-input-wrap {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--paper-light);
+}
+.agent-workspace-input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  font-size: 13px;
+  color: var(--text-primary);
+  outline: none;
+}
+.agent-workspace-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
 .agent-session-list-col { background: var(--paper-light); }
 .agent-session-list {
   flex: 1;

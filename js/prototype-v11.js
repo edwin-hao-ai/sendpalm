@@ -3674,11 +3674,64 @@
     return Math.floor(h / 24) + 'd';
   }
 
+  function renderAgentMessage(m, session) {
+    const row = el('div', 'agent-message agent-message-' + m.role);
+    const bubble = el('div', 'agent-message-bubble');
+    bubble.textContent = m.text;
+    row.appendChild(bubble);
+
+    if (m.role === 'agent' && m.actions && m.actions.length) {
+      const actions = el('div', 'agent-message-actions');
+      m.actions.forEach(a => {
+        const btn = el('button', 'agent-message-action-btn', actionLabel(a));
+        btn.addEventListener('click', (e) => { e.stopPropagation(); handleAgentMessageAction(a, m, session); });
+        actions.appendChild(btn);
+      });
+      row.appendChild(actions);
+    }
+    return row;
+  }
+
   function renderAgentConversation() {
     const col = el('div', 'agent-workspace-col agent-conversation-col');
     const session = getCurrentAgentSession();
-    col.appendChild(el('div', 'agent-col-header', session ? session.title : 'Conversation'));
-    col.appendChild(el('div', 'agent-conversation-body', session && session.messages?.length ? session.messages.map(m => m.role + ': ' + m.text).join('\n') : 'No messages yet.'));
+
+    const header = el('div', 'agent-col-header');
+    header.appendChild(el('span', '', session ? session.title : 'Conversation'));
+    if (session && session.context.kind) {
+      const ctxLink = el('button', 'agent-context-link');
+      ctxLink.appendChild(icon(agentContextKindIcon(session.context.kind)));
+      ctxLink.appendChild(el('span', '', session.context.preview));
+      ctxLink.addEventListener('click', () => {
+        if (session.context.kind === 'message') openMessage(session.context.id);
+        else if (session.context.kind === 'contact') openContact(session.context.id);
+        else if (session.context.kind === 'meeting') openMeeting(session.context.id);
+        else if (session.context.kind === 'file') openFile(D._files.find(f => f.id === session.context.id));
+      });
+      header.appendChild(ctxLink);
+    }
+    col.appendChild(header);
+
+    const body = el('div', 'agent-conversation-body');
+    if (session && session.messages.length) {
+      session.messages.forEach(m => body.appendChild(renderAgentMessage(m, session)));
+    } else {
+      body.appendChild(el('div', 'agent-empty-messages', 'Start a conversation with SendPalm Agent.'));
+    }
+    col.appendChild(body);
+
+    const inputWrap = el('div', 'agent-workspace-input-wrap');
+    const input = el('input', 'agent-workspace-input');
+    input.placeholder = 'Ask SendPalm...';
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && input.value.trim()) {
+        runAgentAction(input.value.trim());
+        input.value = '';
+      }
+    });
+    inputWrap.appendChild(input);
+    col.appendChild(inputWrap);
+
     return col;
   }
 
@@ -5914,26 +5967,7 @@ ${D.stageSuggest[c.stage] || ''}
     const messagesWrap = el('div', 'agent-messages');
     const session = getCurrentAgentSession();
     if (session && session.messages && session.messages.length) {
-      session.messages.forEach(m => {
-        const row = el('div', 'agent-message agent-message-' + m.role);
-        const bubble = el('div', 'agent-message-bubble');
-        bubble.textContent = m.text;
-        row.appendChild(bubble);
-
-        if (m.role === 'agent' && m.actions && m.actions.length) {
-          const actions = el('div', 'agent-message-actions');
-          m.actions.forEach(a => {
-            const btn = el('button', 'agent-message-action-btn', actionLabel(a));
-            btn.addEventListener('click', (e) => {
-              e.stopPropagation();
-              handleAgentMessageAction(a, m, session);
-            });
-            actions.appendChild(btn);
-          });
-          row.appendChild(actions);
-        }
-        messagesWrap.appendChild(row);
-      });
+      session.messages.forEach(m => messagesWrap.appendChild(renderAgentMessage(m, session)));
     } else {
       messagesWrap.appendChild(el('div', 'agent-empty-messages', 'Ask SendPalm anything about what you are viewing.'));
     }
