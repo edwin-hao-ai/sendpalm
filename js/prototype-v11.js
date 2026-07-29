@@ -5637,6 +5637,32 @@ ${D.stageSuggest[c.stage] || ''}
     setTimeout(() => document.addEventListener('click', closeDropdown), 0);
   }
 
+  function actionLabel(action) {
+    const labels = {
+      copy: 'Copy',
+      regenerate: 'Regenerate',
+      'use-draft': 'Use as draft',
+      'create-task': 'Create task'
+    };
+    return labels[action] || action;
+  }
+
+  function handleAgentMessageAction(action, message, session) {
+    if (action === 'copy') {
+      copyToClipboard(message.text, 'Message copied');
+    } else if (action === 'regenerate') {
+      showToast('Regenerating...');
+      setTimeout(() => {
+        message.text = generateAgentReply('regenerate', session);
+        renderAgentPanel();
+      }, 600);
+    } else if (action === 'use-draft') {
+      openCompose({ body: message.text, mode: 'new' });
+    } else if (action === 'create-task') {
+      createAgentTaskFromMessage(message, session);
+    }
+  }
+
   function renderAgentPanel() {
     const panel = document.getElementById('agent-panel');
     panel.innerHTML = '';
@@ -5692,6 +5718,34 @@ ${D.stageSuggest[c.stage] || ''}
       suggestions.appendChild(chip);
     });
     panel.appendChild(suggestions);
+
+    const messagesWrap = el('div', 'agent-messages');
+    const session = getCurrentAgentSession();
+    if (session && session.messages.length) {
+      session.messages.forEach(m => {
+        const row = el('div', 'agent-message agent-message-' + m.role);
+        const bubble = el('div', 'agent-message-bubble');
+        bubble.textContent = m.text;
+        row.appendChild(bubble);
+
+        if (m.role === 'agent' && m.actions && m.actions.length) {
+          const actions = el('div', 'agent-message-actions');
+          m.actions.forEach(a => {
+            const btn = el('button', 'agent-message-action-btn', actionLabel(a));
+            btn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              handleAgentMessageAction(a, m, session);
+            });
+            actions.appendChild(btn);
+          });
+          row.appendChild(actions);
+        }
+        messagesWrap.appendChild(row);
+      });
+    } else {
+      messagesWrap.appendChild(el('div', 'agent-empty-messages', 'Ask SendPalm anything about what you are viewing.'));
+    }
+    panel.appendChild(messagesWrap);
 
     const tasks = el('div', 'agent-tasks');
     if (D.agentTasks.length) {
