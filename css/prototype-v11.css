@@ -103,6 +103,7 @@ body {
   grid-template-areas:
     "sidebar topbar"
     "sidebar main";
+  height: 100dvh;
   background:
     radial-gradient(ellipse at 20% 0%, rgba(10,143,99,0.028) 0%, transparent 45%),
     radial-gradient(ellipse at 85% 100%, rgba(10,143,99,0.015) 0%, transparent 35%),
@@ -6901,11 +6902,36 @@ button:focus-visible, input:focus-visible {
 
 /* Tablet / iPad portrait */
 @media (min-width: 768px) and (max-width: 1023px) {
-  /* Task 8 will populate this section. */
+  html, body, #app { height: 100dvh; }
+
+  #app {
+    grid-template-columns: 56px 1fr;
+    grid-template-rows: 52px 1fr;
+    grid-template-areas:
+      "sidebar topbar"
+      "sidebar main";
+  }
+
+  #app.detail-open {
+    grid-template-columns: 56px 1fr 380px;
+    grid-template-areas:
+      "sidebar topbar topbar"
+      "sidebar main detail";
+  }
+
+  #sidebar { width: 56px; padding: 10px 0; }
+  .nav-item { width: 44px; height: 42px; }
+  .nav-item i { font-size: 18px; }
+  .nav-label { display: none; }
+  .nav-section-label { display: none; }
+
+  #topbar { height: 52px; padding: 0 18px; }
+  .view { padding: 20px 24px; }
+  .view-title { font-size: 24px; }
 }
 
 /* Responsive / iOS PWA */
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   html, body, #app { height: 100dvh; }
 
   #titlebar { display: none; }
