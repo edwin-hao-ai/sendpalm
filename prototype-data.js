@@ -353,3 +353,67 @@ const D = {
   seedWorkflow('sj', '发票 #1024', 'setAside');
   seedWorkflow('lh', 'AI 合作项目更新', 'bubbleUp', '2026-07-22T09:00');
 })();
+
+window.D = window.D || {};
+D.agentSessions = [
+  {
+    id: 'as-1',
+    type: 'contextual',
+    title: '张磊合同跟进',
+    context: { kind: 'message', id: 'msg-1', preview: '张磊 - 合同附件 - 验收标准 v2' },
+    messages: [
+      { role: 'user', text: '帮我草拟回复', ts: Date.now() - 3600000 },
+      { role: 'agent', text: '好的，我已根据合同附件为你草拟回复：\n\n张磊，\n\n验收标准 v2 已收到...', actions: ['copy', 'regenerate', 'use-draft'], ts: Date.now() - 3500000 }
+    ],
+    taskId: null,
+    memoryTags: ['formal-tone'],
+    status: 'active',
+    createdAt: Date.now() - 3600000,
+    updatedAt: Date.now() - 3500000
+  },
+  {
+    id: 'as-2',
+    type: 'freeform',
+    title: '我的写作风格',
+    context: { kind: null, id: null, preview: '' },
+    messages: [
+      { role: 'user', text: '我喜欢正式的邮件语气', ts: Date.now() - 86400000 },
+      { role: 'agent', text: '已记录：你偏好正式语气。后续草稿会默认采用正式表达。', actions: [], ts: Date.now() - 86300000 }
+    ],
+    taskId: null,
+    memoryTags: ['preference-tone-formal'],
+    status: 'pinned',
+    createdAt: Date.now() - 86400000,
+    updatedAt: Date.now() - 86300000
+  }
+];
+
+D.agentMemory = {
+  global: {
+    tone: 'formal',
+    defaultLength: 'medium',
+    signature: 'Best, Edwin',
+    language: 'zh-CN'
+  },
+  contacts: {
+    'p-1': {
+      topics: ['Q4合同', '付款条款'],
+      preferences: ['喜欢数据驱动', '回复慢但决策快'],
+      avoid: ['不要在周五下午发邮件']
+    }
+  }
+};
+
+// 扩展现有任务和草稿，增加 sessionId 字段
+if (D.agentTasks && D.agentTasks.length) {
+  D.agentTasks.forEach((t, i) => {
+    if (!t.sessionId) t.sessionId = 'as-task-' + (i + 1);
+  });
+}
+if (D.agentDrafts && D.agentDrafts.length) {
+  D.agentDrafts.forEach((d, i) => {
+    if (!d.sessionId) d.sessionId = 'as-1';
+    if (!d.sourceContext) d.sourceContext = { kind: 'message', id: 'msg-1', preview: '张磊 - 合同附件' };
+  });
+}
+

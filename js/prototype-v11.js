@@ -46,6 +46,9 @@
     searchOpen: false,
     contactThreadFilter: 'all',
     loading: true,
+    agentSessions: JSON.parse(JSON.stringify(D.agentSessions || [])),
+    currentAgentSessionId: (D.agentSessions && D.agentSessions[0] && D.agentSessions[0].id) || null,
+    agentMemory: JSON.parse(JSON.stringify(D.agentMemory || { global: {}, contacts: {} })),
   };
 
   function isMobile() { return window.innerWidth < 768; }
