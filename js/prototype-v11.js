@@ -3698,15 +3698,22 @@
 
     const header = el('div', 'agent-col-header');
     header.appendChild(el('span', '', session ? session.title : 'Conversation'));
-    if (session && session.context.kind) {
+    if (session && session.context?.kind) {
       const ctxLink = el('button', 'agent-context-link');
       ctxLink.appendChild(icon(agentContextKindIcon(session.context.kind)));
       ctxLink.appendChild(el('span', '', session.context.preview));
       ctxLink.addEventListener('click', () => {
-        if (session.context.kind === 'message') openMessage(session.context.id);
-        else if (session.context.kind === 'contact') openContact(session.context.id);
-        else if (session.context.kind === 'meeting') openMeeting(session.context.id);
-        else if (session.context.kind === 'file') openFile(D._files.find(f => f.id === session.context.id));
+        if (session.context.kind === 'message') {
+          const m = D._msgs.find(x => x.id === session.context.id);
+          if (m) openMessage(m);
+        } else if (session.context.kind === 'contact') {
+          openContact(session.context.id);
+        } else if (session.context.kind === 'meeting') {
+          const m = D._meetings.find(x => x.id === session.context.id);
+          if (m) openMeeting(m);
+        } else if (session.context.kind === 'file') {
+          openFile(D._files.find(f => f.id === session.context.id));
+        }
       });
       header.appendChild(ctxLink);
     }
@@ -3742,7 +3749,7 @@
     const body = el('div', 'agent-right-body');
 
     // In Progress
-    const inProgress = D.agentTasks.filter(t => t.status === 'go');
+    const inProgress = (D.agentTasks || []).filter(t => t.status === 'go');
     if (inProgress.length) {
       body.appendChild(el('div', 'agent-right-section-title', 'In Progress'));
       inProgress.forEach(t => {
@@ -3773,7 +3780,7 @@
         card.appendChild(el('div', 'agent-draft-card-preview', d.preview));
         const actions = el('div', 'agent-draft-card-actions');
         const edit = el('button', 'agent-draft-card-action', 'Edit');
-        edit.addEventListener('click', (e) => { e.stopPropagation(); editAgentDraft(d.id); });
+        edit.addEventListener('click', (e) => { e.stopPropagation(); editAgentDraft(d); });
         actions.appendChild(edit);
         card.appendChild(actions);
         body.appendChild(card);
@@ -5800,7 +5807,7 @@ ${D.stageSuggest[c.stage] || ''}
     fab.title = 'Ask SendPalm Agent';
     fab.addEventListener('click', toggleAgent);
 
-    fab.classList.toggle('has-tasks', D.agentTasks.some(t => t.status === 'go'));
+    fab.classList.toggle('has-tasks', (D.agentTasks || []).some(t => t.status === 'go'));
   }
 
   function toggleAgent() {
@@ -6028,9 +6035,9 @@ ${D.stageSuggest[c.stage] || ''}
     panel.appendChild(messagesWrap);
 
     const tasks = el('div', 'agent-tasks');
-    if (D.agentTasks.length) {
+    if ((D.agentTasks || []).length) {
       tasks.appendChild(el('div', 'agent-section-title', 'In progress'));
-      D.agentTasks.forEach(t => {
+      (D.agentTasks || []).forEach(t => {
         const row = el('div', 'agent-task');
         row.appendChild(el('div', 'agent-task-name', t.name));
         const steps = el('div', 'agent-task-steps');
