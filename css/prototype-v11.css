@@ -6266,6 +6266,83 @@ img.file-cell-avatar {
   gap: 8px;
 }
 
+.agent-session-select-wrap { position: relative; flex: 1; min-width: 0; }
+.agent-session-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s var(--ease-out), border-color 0.15s var(--ease-out);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-session-select:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+.agent-session-select i { font-size: 14px; color: var(--accent); flex-shrink: 0; }
+.agent-session-select i:last-child { font-size: 10px; color: var(--text-muted); }
+.agent-session-select span { overflow: hidden; text-overflow: ellipsis; }
+
+.agent-header-actions { display: flex; align-items: center; gap: 4px; }
+.agent-new-session-btn { color: var(--text-secondary); }
+.agent-new-session-btn:hover { color: var(--accent); }
+
+.agent-session-dropdown {
+  position: fixed;
+  width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  z-index: 100;
+}
+.agent-session-dropdown-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background 0.12s var(--ease-out);
+}
+.agent-session-dropdown-item:hover,
+.agent-session-dropdown-item.active { background: var(--bg-hover); }
+.agent-session-dropdown-item i { font-size: 14px; color: var(--accent); margin-top: 2px; flex-shrink: 0; }
+.agent-session-dropdown-info { flex: 1; min-width: 0; }
+.agent-session-dropdown-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-session-dropdown-preview {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-session-dropdown-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
+}
+
 .agent-title::before {
   content: '';
   width: 8px;

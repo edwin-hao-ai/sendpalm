@@ -5424,19 +5424,25 @@ ${D.stageSuggest[c.stage] || ''}
   }
 
   function runAgentAction(text) {
-    const taskName = text.length > 24 ? text.slice(0, 24) + '...' : text;
-    D.agentTasks.unshift({
-      name: taskName,
-      status: 'go',
-      steps: [
-        { l: 'Understanding request', d: true },
-        { l: 'Gathering context', d: true },
-        { l: 'Generating output', d: false },
-      ],
-    });
-    showToast('Agent task added: ' + taskName);
-    renderAgentFab();
-    renderAgentPanel();
+    let session = getCurrentAgentSession();
+    if (!session) {
+      session = createAgentSession('freeform', null, text.slice(0, 30));
+    }
+    addAgentMessage(session.id, 'user', text, []);
+
+    // Simulate agent processing
+    showToast('Agent is thinking...');
+    setTimeout(() => {
+      const reply = generateAgentReply(text, session);
+      addAgentMessage(session.id, 'agent', reply, ['copy', 'regenerate']);
+      renderAgentPanel();
+    }, 600);
+  }
+
+  function generateAgentReply(text, session) {
+    if (text.includes('总结')) return '这是当前内容的摘要：...';
+    if (text.includes('草稿') || text.includes('回复')) return '已为你草拟回复：\n\n您好，...';
+    return '收到。我已记录你的请求，接下来可以帮你继续处理。';
   }
 
   function openAgentWithContext(context) {
@@ -5571,16 +5577,94 @@ ${D.stageSuggest[c.stage] || ''}
     return 'What would you like me to do?';
   }
 
+  function showAgentSessionDropdown(anchor) {
+    const existing = document.querySelector('.agent-session-dropdown');
+    if (existing) { existing.remove(); return; }
+
+    const dropdown = el('div', 'agent-session-dropdown');
+    const activeSessions = state.agentSessions.filter(s => s.status !== 'archived');
+    activeSessions.slice(0, 6).forEach(s => {
+      const item = el('div', 'agent-session-dropdown-item' + (s.id === state.currentAgentSessionId ? ' active' : ''));
+      item.appendChild(icon(agentContextKindIcon(s.context.kind)));
+      const info = el('div', 'agent-session-dropdown-info');
+      info.appendChild(el('div', 'agent-session-dropdown-title', s.title));
+      const last = s.messages[s.messages.length - 1];
+      info.appendChild(el('div', 'agent-session-dropdown-preview', last ? last.text.slice(0, 40) : ''));
+      item.appendChild(info);
+      item.addEventListener('click', () => {
+        switchAgentSession(s.id);
+        renderAgentPanel();
+        dropdown.remove();
+      });
+      dropdown.appendChild(item);
+    });
+
+    const archived = state.agentSessions.filter(s => s.status === 'archived');
+    if (archived.length) {
+      dropdown.appendChild(el('div', 'agent-session-dropdown-divider', ''));
+      archived.slice(0, 3).forEach(s => {
+        const item = el('div', 'agent-session-dropdown-item');
+        item.appendChild(icon('ph-archive'));
+        item.appendChild(el('span', '', s.title));
+        item.addEventListener('click', () => {
+          switchAgentSession(s.id);
+          renderAgentPanel();
+          dropdown.remove();
+        });
+        dropdown.appendChild(item);
+      });
+    }
+
+    document.body.appendChild(dropdown);
+    const rect = anchor.getBoundingClientRect();
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+    dropdown.style.left = rect.left + 'px';
+
+    const closeDropdown = (e) => {
+      if (!dropdown.contains(e.target) && e.target !== anchor) {
+        dropdown.remove();
+        document.removeEventListener('click', closeDropdown);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeDropdown), 0);
+  }
+
   function renderAgentPanel() {
     const panel = document.getElementById('agent-panel');
     panel.innerHTML = '';
 
     const header = el('div', 'agent-header');
-    header.appendChild(el('span', 'agent-title', 'SendPalm Agent'));
+
+    const sessionSelectWrap = el('div', 'agent-session-select-wrap');
+    const currentSession = getCurrentAgentSession();
+    const sessionBtn = el('button', 'agent-session-select');
+    sessionBtn.appendChild(icon(agentContextKindIcon(currentSession && currentSession.context.kind)));
+    sessionBtn.appendChild(el('span', '', currentSession ? currentSession.title : 'New conversation'));
+    sessionBtn.appendChild(icon('ph-caret-down'));
+    sessionBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showAgentSessionDropdown(sessionBtn);
+    });
+    sessionSelectWrap.appendChild(sessionBtn);
+    header.appendChild(sessionSelectWrap);
+
+    const headerActions = el('div', 'agent-header-actions');
+    const newSessionBtn = el('button', 'icon-btn agent-new-session-btn');
+    newSessionBtn.title = 'New session';
+    newSessionBtn.appendChild(icon('ph-plus'));
+    newSessionBtn.addEventListener('click', () => {
+      createAgentSession('freeform', null, null);
+      renderAgentPanel();
+    });
+    headerActions.appendChild(newSessionBtn);
+
     const close = el('button', 'icon-btn agent-close');
+    close.title = 'Close';
     close.appendChild(icon('ph-x'));
     close.addEventListener('click', toggleAgent);
-    header.appendChild(close);
+    headerActions.appendChild(close);
+    header.appendChild(headerActions);
+
     panel.appendChild(header);
 
     const context = el('div', 'agent-context');
