@@ -3806,13 +3806,100 @@
   function renderAgentView() {
     const container = el('div', 'view agent-view');
 
+    const searchBar = el('div', 'agent-search-bar');
+    const searchInput = el('input', 'agent-search-input');
+    searchInput.placeholder = 'Search sessions, drafts, tasks...';
+    searchBar.appendChild(icon('ph-magnifying-glass'));
+    searchBar.appendChild(searchInput);
+    container.appendChild(searchBar);
+
+    const resultsWrap = el('div', 'agent-search-results hidden');
+    container.appendChild(resultsWrap);
+
     const workspace = el('div', 'agent-workspace');
     workspace.appendChild(renderAgentSessionList());
     workspace.appendChild(renderAgentConversation());
     workspace.appendChild(renderAgentRightPanel());
     container.appendChild(workspace);
 
+    searchInput.addEventListener('input', (e) => {
+      const q = e.target.value.trim().toLowerCase();
+      if (!q) {
+        resultsWrap.classList.add('hidden');
+        workspace.classList.remove('hidden');
+        return;
+      }
+      workspace.classList.add('hidden');
+      resultsWrap.classList.remove('hidden');
+      resultsWrap.innerHTML = '';
+      resultsWrap.appendChild(renderAgentSearchResults(q));
+    });
+
     return container;
+  }
+
+  function renderAgentSearchResults(q) {
+    const wrap = el('div', 'agent-search-results-inner');
+
+    const sessions = state.agentSessions.filter(s =>
+      s.title.toLowerCase().includes(q) ||
+      s.messages.some(m => m.text.toLowerCase().includes(q))
+    );
+    if (sessions.length) {
+      wrap.appendChild(el('div', 'agent-search-group-title', 'Sessions'));
+      sessions.forEach(s => {
+        const row = el('div', 'agent-search-result-row');
+        row.appendChild(icon(agentContextKindIcon(s.context.kind)));
+        const info = el('div', 'agent-search-result-info');
+        info.appendChild(el('div', 'agent-search-result-title', s.title));
+        const last = s.messages[s.messages.length - 1];
+        info.appendChild(el('div', 'agent-search-result-preview', last ? last.text.slice(0, 60) : ''));
+        row.appendChild(info);
+        row.addEventListener('click', () => {
+          switchAgentSession(s.id);
+          renderMain();
+        });
+        wrap.appendChild(row);
+      });
+    }
+
+    const drafts = D.agentDrafts.filter(d =>
+      d.to.toLowerCase().includes(q) || d.preview.toLowerCase().includes(q)
+    );
+    if (drafts.length) {
+      wrap.appendChild(el('div', 'agent-search-group-title', 'Drafts'));
+      drafts.forEach(d => {
+        const row = el('div', 'agent-search-result-row');
+        row.appendChild(icon('ph-pencil-simple'));
+        const info = el('div', 'agent-search-result-info');
+        info.appendChild(el('div', 'agent-search-result-title', d.to));
+        info.appendChild(el('div', 'agent-search-result-preview', d.preview));
+        row.appendChild(info);
+        row.addEventListener('click', () => editAgentDraft(d.id));
+        wrap.appendChild(row);
+      });
+    }
+
+    const tasks = D.agentTasks.filter(t => t.name.toLowerCase().includes(q));
+    if (tasks.length) {
+      wrap.appendChild(el('div', 'agent-search-group-title', 'Tasks'));
+      tasks.forEach(t => {
+        const row = el('div', 'agent-search-result-row');
+        row.appendChild(icon('ph-check-circle'));
+        const info = el('div', 'agent-search-result-info');
+        info.appendChild(el('div', 'agent-search-result-title', t.name));
+        info.appendChild(el('div', 'agent-search-result-preview', t.steps.map(s => s.l).join(' → ')));
+        row.appendChild(info);
+        row.addEventListener('click', () => { if (t.sessionId) { switchAgentSession(t.sessionId); renderMain(); } });
+        wrap.appendChild(row);
+      });
+    }
+
+    if (!sessions.length && !drafts.length && !tasks.length) {
+      wrap.appendChild(el('div', 'agent-search-empty', 'No results for "' + q + '"'));
+    }
+
+    return wrap;
   }
 
   function filterFiles(files) {
@@ -4694,6 +4781,14 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     });
     approvalRow.appendChild(approvalSelect);
     agentCard.appendChild(approvalRow);
+
+    const memoryRow = el('div', 'settings-row');
+    memoryRow.appendChild(el('span', 'settings-label', 'Memory'));
+    const manageMemoryBtn = el('button', 'btn btn-secondary btn-sm', 'Manage');
+    manageMemoryBtn.addEventListener('click', renderAgentMemoryModal);
+    memoryRow.appendChild(manageMemoryBtn);
+    agentCard.appendChild(memoryRow);
+
     agentSection.appendChild(agentCard);
     container.appendChild(agentSection);
 
