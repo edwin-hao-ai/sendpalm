@@ -57,6 +57,7 @@
   window.isMobile = isMobile;
   window.isTablet = isTablet;
   window.isDesktop = isDesktop;
+  window.state = state;
 
   const navSections = [
     {
