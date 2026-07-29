@@ -1,0 +1,22 @@
+{
+  "name": "SendPalm - Calm Email + Agent Context",
+  "short_name": "SendPalm",
+  "description": "A calm email client with agent-ready context",
+  "start_url": "/prototype-v10.html",
+  "display": "standalone",
+  "background_color": "#f6f6f8",
+  "theme_color": "#0A8F63",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='192' height='192' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='48' fill='%230A8F63'/%3E%3Cpath d='M96 34L154 146L96 122L38 146L96 34Z' fill='white'/%3E%3Cpath d='M96 34V122' stroke='%230A8F63' stroke-width='8' stroke-linecap='round'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='512' height='512' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='48' fill='%230A8F63'/%3E%3Cpath d='M96 34L154 146L96 122L38 146L96 34Z' fill='white'/%3E%3Cpath d='M96 34V122' stroke='%230A8F63' stroke-width='8' stroke-linecap='round'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}

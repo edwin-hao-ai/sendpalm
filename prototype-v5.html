@@ -1,0 +1,1059 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Relay v5 — AI 通信副驾</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+:root{--bg:#070708;--surface:#0d0d0f;--card:#111113;--border:#1a1a1e;--text:#e8e8ed;--text2:#888;--text3:#555;--accent:#5b8def;--accent2:#7c5bef;--green:#4ade80;--yellow:#facc15;--red:#f87171;--purple:#a78bfa;--cyan:#22d3ee;--fm:'Inter','SF Pro',system-ui,sans-serif;--radius:8px;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:var(--fm);font-size:14px;line-height:1.5;overflow:hidden;height:100vh;-webkit-font-smoothing:antialiased;}
+.win{display:flex;flex-direction:column;height:100vh;background:var(--surface);}
+/* Titlebar */
+.titlebar{display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 12px;background:var(--bg);border-bottom:1px solid var(--border);-webkit-app-region:drag;user-select:none;flex-shrink:0;}
+.titlebar-l{display:flex;align-items:center;gap:8px;}
+.titlebar-dots{display:flex;gap:5px;}
+.titlebar-dot{width:8px;height:8px;border-radius:50%;background:var(--border);}
+.titlebar-dot:nth-child(1){background:#f87171;}
+.titlebar-dot:nth-child(2){background:#facc15;}
+.titlebar-dot:nth-child(3){background:#4ade80;}
+.titlebar-text{font-size:.55rem;color:var(--text3);font-weight:500;letter-spacing:.02em;}
+.titlebar-r{display:flex;align-items:center;gap:6px;-webkit-app-region:no-drag;}
+.titlebar-btn{width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:4px;cursor:pointer;color:var(--text2);font-size:.55rem;background:transparent;border:1px solid transparent;}
+.titlebar-btn:hover{background:var(--card);border-color:var(--border);color:var(--text);}
+/* Main layout */
+.body{display:flex;flex:1;overflow:hidden;}
+.sb{width:44px;background:var(--bg);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:6px 0;gap:2px;flex-shrink:0;}
+.sb-logo{width:28px;height:28px;border-radius:6px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.65rem;color:#fff;margin-bottom:4px;}
+.sb-item{width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text3);position:relative;border:none;background:transparent;transition:.15s;}
+.sb-item svg{width:16px;height:16px;}
+.sb-item:hover{color:var(--text);background:var(--card);}
+.sb-item.active{color:var(--accent);background:rgba(91,141,239,.12);}
+.sb-item .badge{position:absolute;top:2px;right:2px;width:14px;height:14px;border-radius:50%;background:var(--red);color:#fff;font-size:.4rem;display:flex;align-items:center;justify-content:center;}
+.sb-foot{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:2px;}
+.sb-avatar{width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:.5rem;color:#fff;font-weight:600;cursor:pointer;margin-top:2px;}
+/* Main area */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.topbar{display:flex;align-items:center;height:38px;padding:0 14px;background:var(--surface);border-bottom:1px solid var(--border);gap:10px;flex-shrink:0;}
+.topbar-title{font-size:.65rem;font-weight:600;color:var(--text);white-space:nowrap;}
+.topbar-badge{font-size:.5rem;color:var(--text3);background:var(--card);padding:1px 6px;border-radius:4px;}
+.topbar-s{flex:1;max-width:240px;position:relative;}
+.topbar-s svg{position:absolute;left:8px;top:50%;transform:translateY(-50%);width:12px;height:12px;color:var(--text3);}
+.topbar-s input{width:100%;height:26px;background:var(--card);border:1px solid var(--border);border-radius:5px;padding:0 8px 0 24px;font-size:.55rem;color:var(--text);outline:none;}
+.topbar-s input:focus{border-color:var(--accent);}
+.topbar-s input::placeholder{color:var(--text3);}
+.topbar-r{display:flex;align-items:center;gap:6px;margin-left:auto;}
+.topbar-notif{position:relative;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer;color:var(--text2);background:transparent;border:1px solid transparent;}
+.topbar-notif:hover{background:var(--card);border-color:var(--border);}
+.topbar-notif .nd{position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;background:var(--accent);}
+/* Content */
+.content-wrap{flex:1;overflow:hidden;position:relative;}
+.view{display:none;height:100%;overflow-y:auto;}
+.view.active{display:block;}
+/* Lock screen */
+.lock-overlay{position:fixed;inset:0;z-index:999;background:var(--bg);display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;}
+.lock-overlay.show{display:flex;}
+.lock-overlay .logo{width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:1.2rem;font-weight:700;color:#fff;}
+.lock-hint{font-size:.6rem;color:var(--text2);}
+.pin-row{display:flex;gap:10px;}
+.pin-dot{width:12px;height:12px;border-radius:50%;border:2px solid var(--border);}
+.pin-dot.filled{background:var(--accent);border-color:var(--accent);}
+.keypad{display:grid;grid-template-columns:repeat(3,52px);gap:8px;}
+.keypad button{width:52px;height:52px;border-radius:50%;border:none;background:var(--card);color:var(--text);font-size:.75rem;cursor:pointer;font-family:var(--fm);transition:.1s;}
+.keypad button:hover{background:var(--border);}
+.keypad button.bi{color:var(--text3);font-size:.6rem;}
+/* Toast */
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:8px 14px;font-size:.55rem;color:var(--text);display:flex;align-items:center;gap:10px;z-index:999;opacity:0;transition:.3s;pointer-events:none;white-space:nowrap;}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);pointer-events:auto;}
+.toast .undo{color:var(--accent);cursor:pointer;font-size:.5rem;text-decoration:underline;}
+.toast .close{cursor:pointer;color:var(--text3);font-size:.5rem;}
+/* Notif panel */
+.notif-panel{position:absolute;top:34px;right:0;width:260px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);display:none;z-index:50;max-height:300px;overflow-y:auto;}
+.notif-panel.show{display:block;}
+.ni{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border);font-size:.52rem;}
+.ni:last-child{border:none;}
+.ni-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex-shrink:0;}
+.ni-t{flex:1;color:var(--text2);}
+.ni-tm{color:var(--text3);font-size:.45rem;white-space:nowrap;}
+/* Account dropdown */
+.acct-dropdown{position:absolute;top:28px;right:0;width:220px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);display:none;z-index:50;}
+.acct-dropdown.show{display:block;}
+.ad-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--border);font-size:.52rem;}
+.ad-item:last-child{border:none;}
+.ad-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.ad-m{flex:1;}
+.ad-l{color:var(--text);font-weight:500;}
+.ad-l span{color:var(--red);}
+.ad-e{color:var(--text3);font-size:.45rem;}
+.ad-s{font-size:.45rem;white-space:nowrap;}
+/* People View */
+.sp-split{display:flex;height:100%;}
+.sp-list{width:300px;border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;}
+.sp-detail{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.ls{padding:8px 10px;border-bottom:1px solid var(--border);}
+.ls input{width:100%;height:28px;background:var(--card);border:1px solid var(--border);border-radius:5px;padding:0 8px;font-size:.55rem;color:var(--text);outline:none;}
+.ls input:focus{border-color:var(--accent);}
+.lf{display:flex;gap:2px;padding:6px 10px;border-bottom:1px solid var(--border);flex-wrap:wrap;}
+.lf button{font-size:.5rem;padding:2px 8px;border-radius:4px;border:none;background:transparent;color:var(--text3);cursor:pointer;font-family:var(--fm);}
+.lf button.active{background:rgba(91,141,239,.15);color:var(--accent);}
+.lf button:hover{color:var(--text);}
+.lsc{flex:1;overflow-y:auto;padding:4px;}
+.lc{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:6px;cursor:pointer;transition:.1s;}
+.lc:hover{background:var(--card);}
+.lc.active{background:rgba(91,141,239,.1);}
+.lc-a{width:28px;height:28px;border-radius:6px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:.55rem;color:#fff;font-weight:600;flex-shrink:0;}
+.lc-m{flex:1;min-width:0;}
+.lc-n{font-size:.58rem;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lc-n span{font-weight:400;}
+.lc-s{font-size:.48rem;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lc-r{display:flex;align-items:center;gap:4px;}
+.sc{font-size:.45rem;padding:1px 6px;border-radius:3px;color:#000;font-weight:600;}
+/* Detail */
+.dtl{flex:1;overflow-y:auto;padding:14px;}
+.pd-h{display:flex;align-items:center;gap:10px;padding-bottom:10px;border-bottom:1px solid var(--border);}
+.pd-av{width:40px;height:40px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:.75rem;color:#fff;font-weight:600;}
+.pd-sc{display:flex;align-items:center;gap:6px;margin:8px 0;}
+.pd-info{font-size:.52rem;color:var(--text2);}
+.pd-ig{display:flex;align-items:center;gap:6px;margin:3px 0;}
+.pd-ig svg{flex-shrink:0;}
+.pd-fc{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0;}
+.pd-c{padding:8px;background:var(--card);border-radius:6px;}
+.pd-cl{font-size:.48rem;color:var(--text3);margin-bottom:2px;}
+.pd-cv{font-size:.55rem;color:var(--text);}
+.acct-tag{font-size:.45rem;padding:1px 5px;border-radius:3px;border:1px solid;margin:0 2px;}
+.topic-tag{font-size:.48rem;color:var(--accent);cursor:pointer;margin:0 2px;}
+.topic-tag:hover{text-decoration:underline;}
+.pd-conns{background:var(--card);border-radius:6px;padding:8px;margin:8px 0;}
+.pd-s{font-size:.52rem;font-weight:600;color:var(--text2);margin-bottom:4px;}
+.pd-conn{display:flex;align-items:center;gap:6px;padding:4px;cursor:pointer;border-radius:4px;}
+.pd-conn:hover{background:var(--border);}
+.pd-msgs{margin:8px 0;}
+.pd-msg{padding:6px 0;border-bottom:1px solid var(--border);font-size:.52rem;}
+.pm-h{display:flex;align-items:center;gap:4px;}
+.pm-ic{font-size:.4rem;padding:1px 4px;border-radius:2px;background:var(--card);color:var(--text3);}
+.pm-fm{font-weight:500;color:var(--text);}
+.pm-tm{margin-left:auto;color:var(--text3);font-size:.48rem;}
+.pm-sub{font-size:.55rem;font-weight:500;margin:2px 0;}
+.pm-prev{color:var(--text2);font-size:.5rem;}
+.pm-at{display:flex;gap:4px;margin-top:2px;}
+.pm-a{font-size:.45rem;padding:1px 5px;background:var(--card);border-radius:3px;color:var(--text2);}
+.pd-acts{display:flex;gap:6px;margin-top:10px;}
+.pd-acts button{font-size:.5rem;padding:4px 12px;border-radius:5px;border:none;background:var(--card);color:var(--text2);cursor:pointer;font-family:var(--fm);}
+.pd-acts button:hover{background:var(--border);color:var(--text);}
+/* Agent bar */
+.agent-bar{display:flex;align-items:center;gap:6px;padding:8px 10px;border-top:1px solid var(--border);background:var(--surface);}
+.agent-bar input{flex:1;height:30px;background:var(--card);border:1px solid var(--border);border-radius:5px;padding:0 8px;font-size:.52rem;color:var(--text);outline:none;}
+.agent-bar input:focus{border-color:var(--accent);}
+.agent-bar button{height:30px;padding:0 12px;border-radius:5px;border:none;background:var(--accent);color:#fff;font-size:.5rem;cursor:pointer;font-family:var(--fm);}
+/* Agent View */
+.agv{display:flex;height:100%;}
+.agv-c{flex:1;display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--border);}
+.agv-c .h{font-size:.65rem;font-weight:600;padding:12px 14px 0;}
+.agv-c .s{font-size:.5rem;color:var(--text3);padding:2px 14px 8px;}
+.agv-ms{flex:1;overflow-y:auto;padding:0 14px;}
+.am{padding:8px 0;}
+.am-u{background:var(--card);padding:8px;border-radius:6px;font-size:.55rem;margin-bottom:4px;color:var(--text);}
+.am-r{background:rgba(91,141,239,.06);padding:8px;border-radius:6px;font-size:.52rem;color:var(--text2);line-height:1.6;}
+.am-r b{color:var(--text);}
+.agv-in{display:flex;gap:6px;padding:8px 14px;border-top:1px solid var(--border);}
+.agv-in input{flex:1;height:30px;background:var(--card);border:1px solid var(--border);border-radius:5px;padding:0 8px;font-size:.52rem;color:var(--text);outline:none;}
+.agv-in button{height:30px;padding:0 12px;border-radius:5px;border:none;background:var(--accent);color:#fff;font-size:.5rem;cursor:pointer;font-family:var(--fm);}
+.agv-s{width:280px;overflow-y:auto;flex-shrink:0;}
+.ast{display:flex;border-bottom:1px solid var(--border);padding:6px 8px;gap:2px;}
+.ast button{flex:1;font-size:.5rem;padding:3px 6px;border-radius:4px;border:none;background:transparent;color:var(--text3);cursor:pointer;font-family:var(--fm);}
+.ast button.active{background:rgba(91,141,239,.12);color:var(--accent);}
+.at{padding:6px 10px;border-bottom:1px solid var(--border);}
+.at-h{display:flex;align-items:center;gap:6px;font-size:.52rem;font-weight:500;}
+.at-s{font-size:.4rem;padding:1px 5px;border-radius:3px;}
+.at-s.go{background:rgba(74,222,128,.15);color:var(--green);}
+.at-s.wt{background:rgba(250,204,21,.15);color:var(--yellow);}
+.at-steps{padding:4px 0 0 10px;}
+.at-step{font-size:.48rem;color:var(--text3);padding:1px 0;}
+.at-step.done{color:var(--text2);}
+.at-step.done::before{content:"\\2713 ";color:var(--green);}
+.ad{padding:6px 10px;border-bottom:1px solid var(--border);font-size:.52rem;}
+.ad-to{color:var(--text3);font-size:.48rem;}
+.ad-sub{font-weight:500;}
+.ad-acts{display:flex;gap:4px;margin-top:4px;}
+.ad-acts button{font-size:.45rem;padding:2px 8px;border-radius:4px;border:none;background:var(--card);color:var(--text2);cursor:pointer;font-family:var(--fm);}
+.ad-acts button:hover{background:var(--border);}
+.al{display:flex;align-items:center;gap:4px;padding:5px 10px;border-bottom:1px solid var(--border);font-size:.48rem;}
+.al-high{font-size:.38rem;padding:1px 4px;border-radius:2px;background:rgba(248,113,113,.15);color:var(--red);}
+.al-low{font-size:.38rem;padding:1px 4px;border-radius:2px;background:rgba(74,222,128,.15);color:var(--green);}
+.al-a{color:var(--text);width:40px;}
+.al-t{color:var(--text2);flex:1;}
+.al-tm{color:var(--text3);font-size:.42rem;}
+/* Inbox View */
+.iv{display:flex;height:100%;}
+.il{width:340px;border-right:1px solid var(--border);overflow-y:auto;flex-shrink:0;}
+.ii{display:flex;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;}
+.ii:hover{background:var(--card);}
+.ii-a{width:24px;height:24px;border-radius:5px;background:var(--card);display:flex;align-items:center;justify-content:center;font-size:.45rem;flex-shrink:0;font-weight:600;}
+.ii-m{min-width:0;}
+.ii-h{display:flex;align-items:center;gap:4px;}
+.ii-f{font-size:.55rem;font-weight:500;}
+.ii-p{font-size:.45rem;color:var(--text3);}
+.ii-t{margin-left:auto;font-size:.45rem;color:var(--text3);}
+.ii-s{font-size:.52rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ii-pr{font-size:.48rem;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ii-tag{font-size:.4rem;padding:1px 4px;border-radius:3px;background:rgba(91,141,239,.12);color:var(--accent);margin-right:4px;}
+.ii-fl{font-size:.4rem;padding:1px 4px;border-radius:3px;background:rgba(250,204,21,.12);color:var(--yellow);}
+.id{flex:1;overflow-y:auto;padding:14px;}
+.btn-sm{font-size:.48rem;padding:3px 10px;border-radius:4px;border:none;background:var(--card);color:var(--text2);cursor:pointer;font-family:var(--fm);}
+.btn-sm:hover{background:var(--border);color:var(--text);}
+.att-item{font-size:.5rem;padding:4px 8px;background:var(--card);border-radius:4px;margin:2px 0;display:inline-block;}
+/* Analytics */
+.ang{padding:16px 20px;}
+.stat-card{background:var(--card);padding:10px;border-radius:6px;text-align:center;}
+.stat-v{font-size:.85rem;font-weight:700;color:var(--text);}
+.stat-l{font-size:.5rem;color:var(--text3);margin-top:2px;}
+.barchart{display:flex;gap:8px;height:80px;align-items:flex-end;padding:8px 0;}
+.bc{flex:1;display:flex;flex-direction:column;align-items:center;}
+.bc-b{width:100%;border-radius:4px 4px 0 0;min-height:12px;opacity:.8;transition:.2s;}
+.bc-l{font-size:.45rem;margin-top:4px;color:var(--text2);}
+/* Files */
+.fg{flex:1;overflow-y:auto;padding:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;}
+.fc{display:flex;align-items:center;gap:8px;padding:8px;background:var(--card);border-radius:6px;}
+.fc-ic{width:28px;height:28px;border-radius:6px;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:.5rem;color:var(--text2);}
+.fc-m{min-width:0;}
+.fc-n{font-size:.52rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.fc-meta{font-size:.45rem;color:var(--text3);}
+.file-toolbar{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border);flex-shrink:0;}
+.file-toolbar input{width:200px;height:28px;background:var(--card);border:1px solid var(--border);border-radius:5px;padding:0 8px;font-size:.52rem;color:var(--text);outline:none;}
+/* Calendar */
+.cl{padding:14px;}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;}
+.cal-d{aspect-ratio:1;display:flex;align-items:center;justify-content:center;font-size:.5rem;border-radius:4px;cursor:pointer;color:var(--text2);}
+.cal-d.today{background:var(--accent);color:#fff;font-weight:600;}
+.cal-d.has::after{content:"";position:absolute;width:4px;height:4px;border-radius:50%;background:var(--accent);bottom:2px;}
+.cal-d:hover{background:var(--card);}
+.me{padding:8px;background:var(--card);border-radius:6px;margin-bottom:6px;}
+.me-p{font-size:.5rem;padding:2px 8px;background:rgba(91,141,239,.12);color:var(--accent);border-radius:4px;cursor:pointer;}
+/* Settings */
+.ss{padding:14px;}
+.setting-label{font-size:.55rem;font-weight:600;color:var(--text);margin-bottom:6px;}
+.sd{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);}
+.sd-l{font-size:.52rem;color:var(--text2);}
+.sd-t input[type=checkbox]{accent-color:var(--accent);}
+/* Graph View */
+.gv{height:100%;display:flex;flex-direction:column;}
+.gv-toolbar{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border);flex-shrink:0;}
+.gv-toolbar .h{font-size:.6rem;font-weight:600;}
+.gv canvas{flex:1;width:100%!important;height:auto!important;}
+.gv-info{position:absolute;bottom:10px;left:14px;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:.48rem;color:var(--text2);pointer-events:none;}
+/* Extraction View */
+.exv{padding:14px;}
+.ex-card{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;}
+.ex-card .h{font-size:.58rem;font-weight:600;margin-bottom:6px;}
+.ex-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.ex-item{padding:4px 6px;background:var(--surface);border-radius:4px;}
+.ex-label{font-size:.45rem;color:var(--text3);}
+.ex-val{font-size:.52rem;color:var(--text);}
+.ex-source{font-size:.4rem;color:var(--text3);margin-top:2px;display:flex;gap:4px;}
+.ex-source .tag{padding:1px 4px;border-radius:2px;font-size:.38rem;}
+/* Entity resolution */
+.er-card{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;}
+.er-card .h{font-size:.58rem;font-weight:600;margin-bottom:6px;}
+.er-row{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);}
+.er-row:last-child{border:none;}
+.er-prov{width:40px;font-size:.45rem;color:var(--text3);}
+.er-val{flex:1;font-size:.52rem;}
+.er-match{font-size:.4rem;padding:1px 6px;border-radius:3px;}
+.er-match.high{background:rgba(74,222,128,.15);color:var(--green);}
+.er-match.med{background:rgba(250,204,21,.15);color:var(--yellow);}
+.er-match.low{background:rgba(248,113,113,.15);color:var(--red);}
+/* Unified search */
+.us-overlay{position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);display:none;align-items:flex-start;justify-content:center;padding-top:60px;}
+.us-overlay.show{display:flex;}
+.us-panel{width:520px;max-height:70vh;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
+.us-input{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);}
+.us-input input{flex:1;border:none;background:transparent;font-size:.6rem;color:var(--text);outline:none;font-family:var(--fm);}
+.us-input input::placeholder{color:var(--text3);}
+.us-close{cursor:pointer;color:var(--text3);font-size:.55rem;}
+.us-results{max-height:50vh;overflow-y:auto;}
+.us-item{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;}
+.us-item:hover{background:var(--surface);}
+.us-type{font-size:.4rem;padding:1px 5px;border-radius:3px;background:var(--surface);color:var(--text3);flex-shrink:0;width:36px;text-align:center;}
+.us-t{font-size:.52rem;color:var(--text);flex:1;}
+.us-sub{font-size:.45rem;color:var(--text3);}
+/* Draft preview */
+.draft-preview{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:8px;margin:4px 0;font-size:.5rem;color:var(--text2);}
+/* Search overlay */
+.sr-overlay{position:absolute;top:36px;left:50%;transform:translateX(-50%);width:400px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);display:none;z-index:50;max-height:300px;overflow-y:auto;}
+.sr-overlay.show{display:block;}
+.sr-item{display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1px solid var(--border);font-size:.5rem;cursor:pointer;}
+.sr-item:last-child{border:none;}
+.sr-item:hover{background:var(--surface);}
+.sr-t{font-size:.4rem;padding:1px 4px;border-radius:2px;background:var(--surface);color:var(--text3);}
+/* Onboarding */
+.onboard-overlay{position:fixed;inset:0;z-index:888;background:rgba(0,0,0,.8);backdrop-filter:blur(8px);display:none;align-items:center;justify-content:center;}
+.onboard-overlay.show{display:flex;}
+.ob-card{width:380px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;text-align:center;}
+.ob-card .logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:1rem;font-weight:700;color:#fff;margin:0 auto 10px;}
+.ob-card h2{font-size:.75rem;font-weight:600;margin-bottom:4px;}
+.ob-card p{font-size:.55rem;color:var(--text3);margin-bottom:12px;}
+.ob-steps{display:flex;justify-content:center;gap:6px;margin-bottom:14px;}
+.ob-steps .ss{width:6px;height:6px;border-radius:50%;background:var(--border);}
+.ob-steps .ss.active{background:var(--accent);}
+.ob-providers{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px;}
+.pr{padding:8px;border:1px solid var(--border);border-radius:6px;font-size:.52rem;cursor:pointer;color:var(--text2);}
+.pr:hover{border-color:var(--accent);color:var(--text);}
+.primary{width:100%;padding:8px;border-radius:6px;border:none;background:var(--accent);color:#fff;font-size:.55rem;cursor:pointer;font-family:var(--fm);}
+.primary:hover{opacity:.9;}
+.ob-demo-btn{background:none;border:none;color:var(--text3);font-size:.5rem;cursor:pointer;margin-top:8px;font-family:var(--fm);}
+.ob-demo-btn:hover{color:var(--text);}
+.ob-progress{width:100%;height:4px;background:var(--border);border-radius:2px;margin-bottom:8px;overflow:hidden;}
+.ob-progress .f{height:100%;background:var(--accent);border-radius:2px;transition:width 1s;}
+.ob-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;}
+.ob-grid .item{padding:10px;background:var(--surface);border-radius:6px;}
+.ob-grid .v{font-size:.9rem;font-weight:700;}
+.ob-grid .l{font-size:.5rem;color:var(--text3);}
+/* Graph nodes legend */
+.graph-legend{position:absolute;top:10px;right:14px;display:flex;flex-direction:column;gap:3px;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:.45rem;}
+.graph-legend .gl-item{display:flex;align-items:center;gap:6px;color:var(--text2);}
+.graph-legend .gl-dot{width:8px;height:8px;border-radius:50%;}
+/* Cross-account badge */
+.ca-badge{display:inline-flex;align-items:center;gap:3px;font-size:.38rem;padding:1px 5px;border-radius:3px;background:rgba(91,141,239,.1);color:var(--accent);}
+/* Scrollbar */
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+::-webkit-scrollbar-thumb:hover{background:var(--text3);}
+.h{font-size:.6rem;font-weight:600;margin-bottom:4px;}
+.s{font-size:.5rem;color:var(--text3);}
+/* Lc groups */
+.lc-grp{margin-bottom:4px;}
+.lc-gh{font-size:.48rem;color:var(--text3);padding:4px 8px;font-weight:500;}
+.lc-gh span{color:var(--text2);font-size:.45rem;}
+</style>
+</head>
+<body>
+
+<div class="win" id="app">
+
+<div class="lock-overlay" id="lockScreen">
+  <div class="logo">R</div>
+  <div class="lock-hint" id="lockHint">输入 PIN 解锁</div>
+  <div class="pin-row" id="pinDisplay"></div>
+  <div class="keypad" id="keypad"></div>
+</div>
+
+<div class="onboard-overlay" id="onboardOverlay">
+  <div class="ob-card">
+    <div class="logo">R</div>
+    <h2 id="obTitle">欢迎来到 Relay</h2>
+    <p id="obDesc">你的 AI 通信副驾。数据归你，AI 替你行动。</p>
+    <div class="ob-steps"><span class="ss active"></span><span class="ss"></span><span class="ss"></span></div>
+    <div id="obBody"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"><span id="toastMsg"></span><span class="close" onclick="ht()">x</span></div>
+
+<div class="titlebar">
+  <div class="titlebar-l">
+    <div class="titlebar-dots"><div class="titlebar-dot"></div><div class="titlebar-dot"></div><div class="titlebar-dot"></div></div>
+    <span class="titlebar-text">Relay — AI 通信副驾</span>
+  </div>
+  <div class="titlebar-r">
+    <div class="titlebar-btn" onclick="toggleLock()" id="lockBtn">l</div>
+    <div style="position:relative;">
+      <div class="titlebar-btn" onclick="toggleAcct()">
+        <span class="ca-badge" id="acctSummary">6</span>
+      </div>
+      <div class="acct-dropdown" id="acctDropdown"></div>
+    </div>
+  </div>
+</div>
+
+<div class="body">
+  <div class="sb">
+    <div class="sb-logo">R</div>
+    <button class="sb-item active" data-v="people" title="联系人"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="7" r="3"/><path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6"/></svg></button>
+    <button class="sb-item" data-v="graph" title="关系图谱"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="6" r="2"/><circle cx="14" cy="6" r="2"/><circle cx="10" cy="14" r="2"/><path d="M8 6h4M6 8l2 4M14 8l-2 4"/></svg></button>
+    <button class="sb-item" data-v="agent" title="AI 助手"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7"/><path d="M6 10h8M10 6v8"/></svg><span class="badge" id="agentBadge">3</span></button>
+    <button class="sb-item" data-v="inbox" title="收件箱"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="16" height="14" rx="2"/><path d="M2 10h4l2 3h4l2-3h4"/></svg><span class="badge">5</span></button>
+    <button class="sb-item" data-v="extraction" title="AI 提取"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4h12v12H4z"/><path d="M8 8l4 4M12 8l-4 4"/></svg></button>
+    <div class="sb-foot">
+      <button class="sb-item" data-v="analytics" title="洞察"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 18h16M5 14l3-7 4 4 4-9"/></svg></button>
+      <button class="sb-item" data-v="files" title="文件"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4h7l3 3v9a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2z"/></svg></button>
+      <button class="sb-item" data-v="calendar" title="日历"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="16" height="15" rx="2"/><path d="M2 8h16M6 1v3M14 1v3"/></svg></button>
+      <button class="sb-item" data-v="settings" title="设置"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="2.5"/><path d="M10 1.5v2M10 16.5v2M18.5 10h-2M3.5 10h-2M15.95 4.05l-1.41 1.41M5.46 14.54l-1.41 1.41M15.95 15.95l-1.41-1.41M5.46 5.46L4.05 4.05"/></svg></button>
+      <div class="sb-avatar">E</div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-title" id="vt">联系人</div>
+      <span class="topbar-badge" id="vBadge">v5 · 9 联系人</span>
+      <div class="topbar-s">
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5.5" cy="5.5" r="4"/><path d="M9 9l2.5 2.5"/></svg>
+        <input type="text" placeholder="跨账户统一搜索..." id="gs">
+      </div>
+      <div class="topbar-r">
+        <div style="position:relative">
+          <div class="topbar-notif" onclick="toggleNotif()"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 3a6 6 0 00-6 6c0 3-1 4-2 5h16c-1-1-2-2-2-5a6 6 0 00-6-6zM8 16a2 2 0 004 0"/></svg><span class="nd"></span></div>
+          <div class="notif-panel" id="notifPanel"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="content-wrap">
+
+      <!-- People View -->
+      <div class="view active" id="vp">
+        <div class="sp-split">
+          <div class="sp-list">
+            <div class="ls"><input type="text" placeholder="搜索联系人..." id="ps"></div>
+            <div class="lf" id="pf">
+              <button class="active" data-filter="all">全部</button>
+              <button data-filter="active">活跃</button>
+              <button data-filter="risk">需跟进</button>
+              <button data-filter="cold">已冷淡</button>
+              <button data-filter="merged">跨账户</button>
+            </div>
+            <div class="lsc" id="pl"></div>
+          </div>
+          <div class="sp-detail">
+            <div class="dtl" id="pd"></div>
+            <div class="agent-bar">
+              <input type="text" placeholder="跟 Relay 说：总结 / 起草 / 跟进..." id="pai">
+              <button onclick="hpa()">发送</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Graph View -->
+      <div class="view" id="vg">
+        <div class="gv">
+          <div class="gv-toolbar">
+            <span class="h">关系图谱</span>
+            <span style="font-size:.48rem;color:var(--text3);" id="graphStatus">9 人 · 24 关系</span>
+            <div style="margin-left:auto;display:flex;gap:4px;">
+              <button class="btn-sm" onclick="renderGraph('all')">全部</button>
+              <button class="btn-sm" onclick="renderGraph('active')">活跃</button>
+              <button class="btn-sm" onclick="renderGraph('topic')">按话题</button>
+            </div>
+          </div>
+          <div style="flex:1;position:relative;overflow:hidden;">
+            <canvas id="graphCanvas"></canvas>
+            <div class="graph-legend">
+              <div class="gl-item"><div class="gl-dot" style="background:var(--accent)"></div>联系人</div>
+              <div class="gl-item"><div class="gl-dot" style="background:var(--green)"></div>公司</div>
+              <div class="gl-item"><div class="gl-dot" style="background:var(--yellow)"></div>话题</div>
+              <div class="gl-item"><div class="gl-dot" style="background:var(--purple)"></div>邮件</div>
+            </div>
+            <div class="gv-info" id="graphInfo">悬停查看关系</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agent View -->
+      <div class="view" id="va">
+        <div class="agv">
+          <div class="agv-c">
+            <div class="h" style="padding:12px 14px 0;">AI 助手</div>
+            <div class="s" style="padding:2px 14px 8px;">像跟助理说话一样，让 Relay 帮你处理沟通事务</div>
+            <div class="agv-ms" id="ams">
+              <div class="am"><div class="am-r">你好，我是 Relay。我可以帮你：<br><br>• <b>总结</b> — 分析近期所有沟通<br>• <b>起草</b> — 生成回复或跟进邮件<br>• <b>提取</b> — 从邮件中提取联系人信息<br>• <b>分析</b> — 发现跨账户关联<br>• 直接输入你的需求</div></div>
+            </div>
+            <div class="agv-in">
+              <input type="text" placeholder="跟 Relay 说..." id="ai">
+              <button onclick="sam()">发送</button>
+            </div>
+          </div>
+          <div class="agv-s" id="as"></div>
+        </div>
+      </div>
+
+      <!-- Inbox View -->
+      <div class="view" id="vi">
+        <div class="iv">
+          <div class="il" id="il"></div>
+          <div class="id" id="idd"></div>
+        </div>
+      </div>
+
+      <!-- Extraction View -->
+      <div class="view" id="ve">
+        <div class="exv" id="extractionView"></div>
+      </div>
+
+      <!-- Analytics -->
+      <div class="view" id="van"><div class="ang" id="ac"></div></div>
+
+      <!-- Files -->
+      <div class="view" id="vf">
+        <div style="display:flex;flex-direction:column;height:100%;">
+          <div class="file-toolbar">
+            <input type="text" placeholder="搜索文件...">
+            <div class="lf" id="ff">
+              <button class="active" data-filter="all">全部</button>
+              <button data-filter="pdf">PDF</button>
+              <button data-filter="doc">文档</button>
+              <button data-filter="image">图片</button>
+            </div>
+          </div>
+          <div class="fg" id="fg"></div>
+        </div>
+      </div>
+
+      <!-- Calendar -->
+      <div class="view" id="vc"><div class="cl" id="cal"></div></div>
+
+      <!-- Settings -->
+      <div class="view" id="vs"><div class="ss" id="ss"></div></div>
+
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+// ============== DATA MODEL ==============
+const ACCOUNTS = [
+  {id:'gmail-w',type:'email',provider:'gmail',label:'SendPalm 工作',email:'edwin@sendpalm.com',status:'connected',synced:1247,color:'#ea4335',avatar:'S',privacy:'unified',lastSync:'刚刚',order:0},
+  {id:'gmail-p',type:'email',provider:'gmail',label:'个人 Gmail',email:'edwin.hao@gmail.com',status:'connected',synced:892,color:'#ea4335',avatar:'G',privacy:'unified',lastSync:'5分钟前',order:1},
+  {id:'outlook',type:'email',provider:'outlook',label:'Outlook',email:'edwin@sendpalm.com',status:'error',synced:503,color:'#0078d4',avatar:'O',privacy:'isolated',lastSync:'3天前',order:2},
+  {id:'slack',type:'im',provider:'slack',label:'Slack',status:'syncing',syncProgress:{done:128,total:340},color:'#4a154b',avatar:'S',privacy:'unified',lastSync:'同步中',order:3},
+  {id:'wechat',type:'im',provider:'wechat',label:'微信',status:'connected',synced:156,color:'#22c55e',avatar:'微',privacy:'isolated',lastSync:'1小时前',order:4},
+  {id:'calendar',type:'calendar',provider:'google',label:'Google 日历',status:'connected',synced:24,color:'#a78bfa',avatar:'日',privacy:'unified',lastSync:'2小时前',order:5}
+];
+
+// AI-extracted fields from emails (simulated)
+const AI_EXTRACTED = {
+  'zl':{
+    signature:{name:'张磊',title:'战略合作总监',company:'华为技术有限公司',phone:'138-0001-1234',email:'zhanglei@huawei.com'},
+    patterns:{bestTime:'周一/周二上午',avgReply:'4.2小时',language:'中文为主',sentiment:'positive'},
+    topics:['Q4合同','付款条款','供应链','华为云合作'],
+    extractedMeetings:[{title:'Q4合同评审',date:'2026-07-19',confidence:0.95},{title:'华为云合作启动会',date:'2026-08',confidence:0.7}],
+    enrichment:{linkedin:'linkedin.com/in/zhanglei',companySize:'194,000+',funding:false,revenue:'¥400B+'}
+  },
+  'cx':{
+    signature:{name:'陈欣',title:'战略合作经理',company:'字节跳动',email:'chen.xin@bytedance.com'},
+    patterns:{bestTime:'下午',avgReply:'2.1小时',language:'中英混合',sentiment:'very_positive'},
+    topics:['Q3回顾','Q4规划','API升级','TikTok合作'],
+    extractedMeetings:[{title:'API升级对齐',date:'2026-07-25',confidence:0.9}],
+    enrichment:{linkedin:'linkedin.com/in/chenxin',companySize:'150,000+'}
+  },
+  'wy':{
+    signature:{name:'王洋',title:'采购总监',company:'阿里巴巴集团',email:'wang.yang@alibaba-inc.com',phone:'139-0002-5678'},
+    patterns:{bestTime:'以前周二,近期减少',avgReply:'以前6h,现在3d+',sentiment:'neutral_to_cooling'},
+    topics:['Q4提案','预算规划','供应商评估'],
+    extractedMeetings:[{title:'Q4供应商评审',date:'2026-06',confidence:0.6}],
+    enrichment:{linkedin:'linkedin.com/in/wangyang',companySize:'200,000+'}
+  },
+  'lc':{
+    signature:{name:'李晨',title:'技术VP',company:'腾讯',email:'lichen@tencent.com'},
+    patterns:{bestTime:'未知',avgReply:'中断2月',sentiment:'cold'},
+    topics:['技术合作','AI方案','大模型'],
+    extractedMeetings:[{title:'AI合作一期验收',date:'2026-04',confidence:0.85}],
+    enrichment:{linkedin:'linkedin.com/in/lichen',companySize:'100,000+'}
+  },
+  'sj':{
+    signature:{name:'孙静',title:'产品负责人',company:'美团',email:'sunjing@meituan.com'},
+    patterns:{bestTime:'Slack即时',avgReply:'2小时(Slack)',sentiment:'positive'},
+    topics:['项目部署','测试计划','Alpha上线'],
+    extractedMeetings:[],
+    enrichment:{linkedin:'linkedin.com/in/sunjing'}
+  }
+};
+
+// Cross-account entity resolution (same person across platforms)
+const ENTITY_RESOLUTION = {
+  'zl':{
+    merged:true,
+    accounts:[{id:'gmail-w',field:'zhanglei@huawei.com',match:1.0},{id:'wechat',field:'微信: 张磊',match:0.92}],
+    resolved:{name:'张磊',emails:['zhanglei@huawei.com'],phones:['138-0001-1234'],wechat:'ZhangLei_HW'},
+    method:'AI signature + name match'
+  },
+  'cx':{
+    merged:true,
+    accounts:[{id:'gmail-w',field:'chen.xin@bytedance.com',match:1.0},{id:'slack',field:'Slack: 陈欣',match:0.88}],
+    resolved:{name:'陈欣',emails:['chen.xin@bytedance.com'],phones:['-'],slack:'chenxin'},
+    method:'AI + email domain match'
+  },
+  'wy':{
+    merged:true,
+    accounts:[{id:'gmail-w',field:'wang.yang@alibaba-inc.com',match:1.0},{id:'gmail-p',field:'wang.yang@alibaba-inc.com',match:1.0}],
+    resolved:{name:'王洋',emails:['wang.yang@alibaba-inc.com'],phones:['139-0002-5678']},
+    method:'Exact email match'
+  }
+};
+
+// Knowledge Graph data
+const GRAPH = {
+  nodes:[
+    {id:'p_zl',label:'张磊',type:'person',co:'华为',group:0,sc:94},
+    {id:'p_cx',label:'陈欣',type:'person',co:'字节跳动',group:0,sc:87},
+    {id:'p_wy',label:'王洋',type:'person',co:'阿里巴巴',group:1,sc:34},
+    {id:'p_lc',label:'李晨',type:'person',co:'腾讯',group:1,sc:18},
+    {id:'p_sj',label:'孙静',type:'person',co:'美团',group:0,sc:82},
+    {id:'p_yy',label:'杨雨',type:'person',co:'小红书',group:0,sc:76},
+    {id:'p_xm',label:'谢明',type:'person',co:'京东',group:0,sc:91},
+    {id:'p_lh',label:'刘华',type:'person',co:'百度',group:1,sc:45},
+    {id:'p_zw',label:'赵薇',type:'person',co:'网易',group:0,sc:68},
+    {id:'c_hw',label:'华为',type:'company',group:0},
+    {id:'c_bd',label:'字节跳动',type:'company',group:0},
+    {id:'c_ali',label:'阿里巴巴',type:'company',group:1},
+    {id:'c_tx',label:'腾讯',type:'company',group:1},
+    {id:'c_mt',label:'美团',type:'company',group:0},
+    {id:'c_xhs',label:'小红书',type:'company',group:0},
+    {id:'c_jd',label:'京东',type:'company',group:0},
+    {id:'c_bd2',label:'百度',type:'company',group:1},
+    {id:'c_wy',label:'网易',type:'company',group:0},
+    {id:'t_q4',label:'Q4合同',type:'topic',group:0},
+    {id:'t_ai',label:'AI合作',type:'topic',group:1},
+    {id:'t_api',label:'API升级',type:'topic',group:0},
+    {id:'t_sc',label:'供应链',type:'topic',group:2},
+    {id:'e1',label:'合同提案',type:'email',group:0},
+    {id:'e2',label:'Q3复盘',type:'email',group:0},
+    {id:'e3',label:'付款条款',type:'email',group:0},
+  ],
+  edges:[
+    {s:'p_zl',t:'c_hw',l:'works_at'},{s:'p_cx',t:'c_bd',l:'works_at'},{s:'p_wy',t:'c_ali',l:'works_at'},
+    {s:'p_lc',t:'c_tx',l:'works_at'},{s:'p_sj',t:'c_mt',l:'works_at'},{s:'p_yy',t:'c_xhs',l:'works_at'},
+    {s:'p_xm',t:'c_jd',l:'works_at'},{s:'p_lh',t:'c_bd2',l:'works_at'},{s:'p_zw',t:'c_wy',l:'works_at'},
+    {s:'p_zl',t:'t_q4',l:'has_topic'},{s:'p_zl',t:'t_sc',l:'has_topic'},{s:'p_zl',t:'e1',l:'sent'},
+    {s:'p_cx',t:'t_api',l:'has_topic'},{s:'p_cx',t:'t_q4',l:'has_topic'},{s:'p_cx',t:'e2',l:'sent'},
+    {s:'p_wy',t:'t_q4',l:'has_topic'},{s:'p_wy',t:'t_sc',l:'has_topic'},
+    {s:'p_lc',t:'t_ai',l:'has_topic'},{s:'p_lh',t:'t_ai',l:'has_topic'},
+    {s:'p_sj',t:'e3',l:'sent'},
+    {s:'t_q4',t:'e1',l:'contains'},{s:'t_q4',t:'e2',l:'references'},
+    {s:'t_ai',t:'e1',l:'references'},
+    {s:'p_zl',t:'p_cx',l:'collaborates',strength:0.7},
+    {s:'p_zl',t:'p_wy',l:'communicates',strength:0.3},
+    {s:'p_cx',t:'p_sj',l:'communicates',strength:0.4},
+    {s:'p_lc',t:'p_lh',l:'collaborates',strength:0.6},
+    {s:'p_xm',t:'p_zl',l:'communicates',strength:0.5},
+  ]
+};
+
+const $ = id => document.getElementById(id);
+const D = {
+  contacts:[
+    {id:'zl',name:'张磊',co:'华为',tl:'战略合作总监',sc:94,scC:'#4ade80',scL:'活跃',lc:'2天前',grp:'active',em:'zhanglei@huawei.com',trd:'up',topics:['Q4合同','付款条款','华为云'],accounts:['gmail-w','wechat'],stage:'active',milestones:['合同签署 2026-03-15','Q2评审 2026-06-20'],merged:true,pattern:'周二上午发邮件，均回4.2h',firstContact:'2026-01-10'},
+    {id:'cx',name:'陈欣',co:'字节跳动',tl:'战略合作经理',sc:87,scC:'#4ade80',scL:'活跃',lc:'今天',grp:'active',em:'chen.xin@bytedance.com',trd:'up',topics:['Q3回顾','Q4规划','API升级','TikTok'],accounts:['gmail-w','slack'],stage:'active',milestones:['Q3合作启动 2026-05'],merged:true,pattern:'下午回复，均回2.1h',firstContact:'2026-04-01'},
+    {id:'wy',name:'王洋',co:'阿里巴巴',tl:'采购总监',sc:34,scC:'#facc15',scL:'需跟进',lc:'45天前',grp:'risk',em:'wang.yang@alibaba-inc.com',trd:'dn',topics:['Q4提案','预算规划'],accounts:['gmail-w','gmail-p'],stage:'cooling',milestones:['Q3合同 2025-12'],merged:true,pattern:'以前很快，近期变慢',firstContact:'2025-09-01'},
+    {id:'lc',name:'李晨',co:'腾讯',tl:'技术VP',sc:18,scC:'#f87171',scL:'已冷淡',lc:'62天前',grp:'cold',em:'lichen@tencent.com',trd:'dn',topics:['技术合作','AI方案','大模型'],accounts:['gmail-w','wechat'],stage:'cooling',milestones:['AI项目启动 2025-06','一期交付 2026-04'],merged:true,pattern:'每月1次，已中断2月',firstContact:'2025-03-01'},
+    {id:'sj',name:'孙静',co:'美团',tl:'产品负责人',sc:82,scC:'#4ade80',scL:'活跃',lc:'5天前',grp:'active',em:'sunjing@meituan.com',trd:'up',topics:['项目部署','测试计划','Alpha'],accounts:['gmail-w','slack'],stage:'active',milestones:['Alpha上线 2026-04'],merged:true,pattern:'Slack比邮件快，均2h',firstContact:'2025-11-01'},
+    {id:'yy',name:'杨雨',co:'小红书',tl:'商务合作',sc:76,scC:'#4ade80',scL:'活跃',lc:'3天前',grp:'active',em:'yang.yu@xiaohongshu.com',trd:'stable',topics:['联名活动','创意方案'],accounts:['gmail-w'],stage:'build',milestones:[],merged:false,pattern:'每周1-2次',firstContact:'2026-05-01'},
+    {id:'xm',name:'谢明',co:'京东',tl:'供应链总监',sc:91,scC:'#4ade80',scL:'活跃',lc:'1天前',grp:'active',em:'xieming@jd.com',trd:'up',topics:['供应链评估','Q3报告'],accounts:['gmail-w'],stage:'active',milestones:['供应链框架签约 2025-09'],merged:false,pattern:'固定每周一',firstContact:'2025-05-01'},
+    {id:'lh',name:'刘华',co:'百度',tl:'AI合作负责人',sc:45,scC:'#facc15',scL:'需跟进',lc:'30天前',grp:'risk',em:'liuhua@baidu.com',trd:'dn',topics:['AI项目','一期验收'],accounts:['gmail-p'],stage:'cooling',milestones:['AI项目一期启动 2026-01'],merged:false,pattern:'项目一期后减少',firstContact:'2025-10-01'},
+    {id:'zw',name:'赵薇',co:'网易',tl:'市场总监',sc:68,scC:'#4ade80',scL:'活跃',lc:'1周前',grp:'active',em:'zhaowei@163.com',trd:'stable',topics:['Q3市场活动','资源支持'],accounts:['gmail-w','slack'],stage:'active',milestones:['Q2联合活动 2026-04'],merged:true,pattern:'每月2-3次',firstContact:'2026-02-01'}
+  ],
+  stageLabel:{explore:'探索',build:'建立',active:'活跃',maintain:'维护',cooling:'冷淡'},
+  stageColor:{explore:'#a78bfa',build:'#3b82f6',active:'#4ade80',maintain:'#22d3ee',cooling:'#f87171'},
+  getP(id){return this.contacts.find(c=>c.id===id)},
+  getMsgs(pid){return this._msgs.filter(m=>m.pid===pid).sort((a,b)=>new Date(b.st)-new Date(a.st))},
+  getFiles(pid){return this._files.filter(f=>f.pid===pid)},
+  getMeetings(pid){return this._meetings.filter(m=>m.pids.includes(pid))},
+  getConnections(pid){const p=this.getP(pid);return p?this.contacts.filter(c=>c.id!==pid&&(c.co===p.co||Math.abs(c.sc-p.sc)<30)):[]},
+  getAcct(id){return ACCOUNTS.find(a=>a.id===id)},
+  _msgs:[
+    {pid:'zl',acct:'gmail-w',ic:'e',fm:'你',tag:'Gmail',subj:'Q4 合同提案 v3',prev:'附上最新修改版，调整了付款条款',tm:'2天前',st:'2026-07-16',ch:'Gmail',at:['Q4_Proposal_v3.pdf'],fl:'done'},
+    {pid:'zl',acct:'gmail-w',ic:'e',fm:'张磊',tag:'Gmail',subj:'Re: Q4 合同提案',prev:'收到，有几个条款需要对齐',tm:'1天前',st:'2026-07-17',ch:'Gmail',at:[],fl:'wait'},
+    {pid:'zl',acct:'calendar',ic:'c',fm:'系统',tag:'日历',subj:'Q4合同评审会议',prev:'明天 14:00 · Relay已生成简报',tm:'明天',st:'2026-07-19',ch:'Calendar',at:[],fl:''},
+    {pid:'zl',acct:'wechat',ic:'m',fm:'张磊',tag:'微信',subj:'明天见',prev:'会议室已订好，明天下午见',tm:'今天',st:'2026-07-18',ch:'WeChat',at:[],fl:''},
+    {pid:'cx',acct:'gmail-w',ic:'e',fm:'陈欣',tag:'Gmail',subj:'Re: 合作 — Q3回顾 & Q4规划',prev:'Q4里程碑一致。整合阶段能提前两周吗？',tm:'1小时前',st:'2026-07-18T10',ch:'Gmail',at:[],fl:'todo'},
+    {pid:'cx',acct:'gmail-w',ic:'e',fm:'你',tag:'Gmail',subj:'合作 — Q3回顾 & Q4规划',prev:'附上Q3复盘和Q4规划草案',tm:'昨天',st:'2026-07-17',ch:'Gmail',at:['Q3_Review.pdf','Q4_Plan.docx'],fl:''},
+    {pid:'cx',acct:'slack',ic:'m',fm:'陈欣',tag:'Slack',subj:'API变更讨论',prev:'建议周四下午对齐方案',tm:'2小时前',st:'2026-07-18T09',ch:'Slack',at:[],fl:''},
+    {pid:'wy',acct:'gmail-p',ic:'e',fm:'你',tag:'Gmail',subj:'Q4 合作提案',prev:'按上次方向整理了提案',tm:'45天前',st:'2026-06-03',ch:'Gmail',at:['Q4_Cooperation_Proposal.pdf'],fl:'todo'},
+    {pid:'wy',acct:'gmail-w',ic:'e',fm:'王洋',tag:'Gmail',subj:'Re: Q3 合作总结',prev:'收到，内部对齐后回复',tm:'47天前',st:'2026-06-01',ch:'Gmail',at:[],fl:''},
+    {pid:'lc',acct:'gmail-w',ic:'e',fm:'李晨',tag:'Gmail',subj:'Re: 技术合作方案',prev:'方案内部评审中',tm:'62天前',st:'2026-05-17',ch:'Gmail',at:[],fl:'todo'},
+    {pid:'lc',acct:'gmail-w',ic:'e',fm:'你',tag:'Gmail',subj:'技术合作方案',prev:'整理了一份技术合作方案初稿',tm:'63天前',st:'2026-05-16',ch:'Gmail',at:['Tech_Partnership_v1.pdf'],fl:''},
+    {pid:'sj',acct:'slack',ic:'m',fm:'孙静',tag:'Slack',subj:'#project-alpha: 周五部署',prev:'请先 review 测试计划',tm:'5小时前',st:'2026-07-18T06',ch:'Slack',at:[],fl:'todo'},
+    {pid:'sj',acct:'gmail-w',ic:'e',fm:'孙静',tag:'Gmail',subj:'发票 #1024',prev:'Q3咨询发票，付款30天',tm:'昨天',st:'2026-07-17',ch:'Gmail',at:['Invoice_1024.pdf'],fl:''},
+    {pid:'yy',acct:'gmail-w',ic:'e',fm:'杨雨',tag:'Gmail',subj:'Re: 联名活动方案',prev:'方案内部过了，想对齐创意方向',tm:'3天前',st:'2026-07-15',ch:'Gmail',at:[],fl:''},
+    {pid:'xm',acct:'gmail-w',ic:'e',fm:'谢明',tag:'Gmail',subj:'Q3 供应链评估报告',prev:'Q3评估已完成，整体A-',tm:'1天前',st:'2026-07-17',ch:'Gmail',at:['Supply_Chain_Q3.pdf'],fl:''},
+    {pid:'lh',acct:'gmail-p',ic:'e',fm:'刘华',tag:'Gmail',subj:'AI 合作项目更新',prev:'一期已完成内部验收',tm:'30天前',st:'2026-06-18',ch:'Gmail',at:[],fl:'todo'},
+    {pid:'zw',acct:'gmail-w',ic:'e',fm:'赵薇',tag:'Gmail',subj:'Q3 市场活动排期',prev:'初稿已出，请确认资源',tm:'5天前',st:'2026-07-13',ch:'Gmail',at:['Q3_Marketing_Calendar.xlsx'],fl:''},
+  ],
+  _files:[
+    {id:'f1',pid:'zl',name:'Q4_Proposal_v3.pdf',tp:'pdf',sz:'2.4 MB',dt:'2026-07-16',ch:'Gmail'},
+    {id:'f2',pid:'cx',name:'Q3_Review.pdf',tp:'pdf',sz:'1.8 MB',dt:'2026-07-17',ch:'Gmail'},
+    {id:'f3',pid:'cx',name:'Q4_Plan.docx',tp:'doc',sz:'856 KB',dt:'2026-07-17',ch:'Gmail'},
+    {id:'f4',pid:'wy',name:'Q4_Cooperation_Proposal.pdf',tp:'pdf',sz:'3.2 MB',dt:'2026-06-03',ch:'Gmail'},
+    {id:'f5',pid:'lc',name:'Tech_Partnership_v1.pdf',tp:'pdf',sz:'1.5 MB',dt:'2026-05-16',ch:'Gmail'},
+    {id:'f6',pid:'sj',name:'Invoice_1024.pdf',tp:'pdf',sz:'412 KB',dt:'2026-07-17',ch:'Gmail'},
+    {id:'f7',pid:'xm',name:'Supply_Chain_Q3.pdf',tp:'pdf',sz:'4.1 MB',dt:'2026-07-17',ch:'Gmail'},
+    {id:'f8',pid:'zw',name:'Q3_Marketing_Calendar.xlsx',tp:'doc',sz:'632 KB',dt:'2026-07-13',ch:'Gmail'},
+    {id:'f9',pid:'zl',name:'Contract_Template_v2.docx',tp:'doc',sz:'224 KB',dt:'2026-07-10',ch:'Gmail'},
+    {id:'f10',pid:'cx',name:'Partnership_Agreement.pdf',tp:'pdf',sz:'1.1 MB',dt:'2026-07-05',ch:'Gmail'},
+    {id:'f11',pid:'zl',name:'Meeting_Photo_0720.jpg',tp:'image',sz:'3.8 MB',dt:'2026-07-20',ch:'WeChat'},
+    {id:'f12',pid:'lc',name:'Architecture_Diagram.png',tp:'image',sz:'2.1 MB',dt:'2026-05-16',ch:'Gmail'},
+  ],
+  _meetings:[
+    {id:'m1',title:'Q4合同评审',pids:['zl'],ppl:'张磊',dt:'明天',tm:'14:00-15:00',br:true,notes:'合同条款最终确认',prep:['阅读张磊邮件','确认付款修改']},
+    {id:'m2',title:'API变更对齐',pids:['cx'],ppl:'陈欣+技术',dt:'周四',tm:'15:00-16:00',br:true,notes:'API版本升级',prep:['查看Slack','准备差异文档']},
+    {id:'m3',title:'AI项目验收',pids:['lh'],ppl:'刘华+百度',dt:'下周二',tm:'10:00-11:30',br:false,notes:'一期验收+二期规划',prep:['回顾方案','准备验收清单']},
+    {id:'m4',title:'供应链评审会',pids:['xm'],ppl:'谢明+采购',dt:'明天',tm:'09:30-10:30',br:true,notes:'Q3评估review',prep:['阅读Q3报告','标注问题']},
+    {id:'m5',title:'联名活动创意会',pids:['yy'],ppl:'杨雨+市场',dt:'下周三',tm:'14:00-15:00',br:false,notes:'创意方向对齐',prep:['回顾方案','收集案例']},
+    {id:'m6',title:'Q3合作复盘',pids:['cx','zl'],ppl:'陈欣+张磊',dt:'昨天',tm:'14:00-15:30',br:true,notes:'Q3复盘完成',prep:[]},
+  ],
+  notifications:[
+    {txt:'Relay 从张磊的邮件签名中提取了手机号',tm:'10分钟前'},
+    {txt:'陈欣 在 Slack 和 Gmail 上识别为同一人 (置信度88%)',tm:'30分钟前'},
+    {txt:'王洋 45天未联系，AI建议发送跟进邮件',tm:'2小时前'},
+    {txt:'知识图谱已更新 — 新增3个话题节点',tm:'5小时前'},
+    {txt:'Outlook 令牌过期，需要重新认证',tm:'2天前'},
+  ],
+  agentTasks:[
+    {name:'提取所有联系人信息',status:'go',steps:[{l:'扫描邮件签名',d:true},{l:'识别6个联系人',d:true},{l:'丰富LinkedIn数据',d:false}]},
+    {name:'跨账户实体解析',status:'go',steps:[{l:'发现3组跨账户匹配',d:true},{l:'计算匹配置信度',d:true},{l:'等待确认',d:false}]},
+    {name:'关系图谱构建',status:'go',steps:[{l:'提取话题关系',d:true},{l:'连接共同主题',d:true},{l:'生成可视化',d:false}]},
+  ],
+  agentAuditLog:[
+    {id:'a1',action:'extract',target:'张磊',detail:'从邮件签名提取了手机号、职位',status:'completed',time:'10:32',risk:'low'},
+    {id:'a2',action:'resolve',target:'陈欣',detail:'跨账户匹配: Gmail + Slack',status:'completed',time:'09:15',risk:'low'},
+    {id:'a3',action:'draft',target:'王洋',detail:'起草了 Q4 跟进邮件',status:'pending_approval',time:'09:15',risk:'high'},
+    {id:'a4',action:'graph',target:'知识图谱',detail:'添加了3个话题、2个公司节点',status:'completed',time:'昨天',risk:'low'},
+    {id:'a5',action:'enrich',target:'刘华',detail:'从邮件中识别了AI项目时间线',status:'completed',time:'3天前',risk:'low'},
+  ]
+};
+// state
+let cid='zl',pfilt='all',locked=false,pin='',pinCode='1234',obStep=0,toastTimer=null,acctOpen=false,notifOpen=false,agentTab='tasks',gmode='all';
+const $id=id=>document.getElementById(id);
+// ============== UTILITIES ==============
+function st(msg){const t=$id('toast');$id('toastMsg').textContent=msg;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(ht,5000);}
+function ht(){$id('toast').classList.remove('show');clearTimeout(toastTimer);}
+// ============== LOCK SCREEN ==============
+function renderPin(){const d=$id('pinDisplay');d.innerHTML='';for(let i=0;i<4;i++){const dot=document.createElement('div');dot.className='pin-dot'+(i<pin.length?' filled':'');d.appendChild(dot);}}
+function toggleLock(){if(locked){pin='';$id('lockScreen').classList.remove('show');$id('lockBtn').textContent='l';locked=false;return;}
+  locked=true;$id('lockScreen').classList.add('show');$id('lockBtn').textContent='l';$id('lockHint').textContent='输入 PIN 解锁';pin='';renderPin();}
+(function(){const kp=$id('keypad');
+  for(let i=1;i<=9;i++){const b=document.createElement('button');b.textContent=i;b.onclick=()=>{if(pin.length<4){pin+=String(i);renderPin();if(pin.length===4){if(pin===pinCode){setTimeout(()=>{$id('lockScreen').classList.remove('show');$id('lockBtn').textContent='u';locked=false;},200);}else{$id('lockHint').textContent='PIN 错误';setTimeout(()=>{pin='';renderPin();$id('lockHint').textContent='输入 PIN 解锁';},500);}}}};kp.appendChild(b);}
+  const b0=document.createElement('button');b0.textContent='0';b0.onclick=()=>{if(pin.length<4){pin+='0';renderPin();}};kp.appendChild(b0);
+  const bf=document.createElement('button');bf.textContent='u';bf.className='bi';bf.onclick=()=>{if(pin.length){pin=pin.slice(0,-1);renderPin();}};kp.appendChild(bf);
+  const be=document.createElement('button');be.textContent='v';be.className='bi';be.onclick=()=>{if(pin.length===4&&pin===pinCode){$id('lockScreen').classList.remove('show');$id('lockBtn').textContent='u';locked=false;}};kp.appendChild(be);})();
+// ============== ONBOARDING ==============
+function renderOb(){document.querySelectorAll('.ob-steps .ss').forEach((s,i)=>s.classList.toggle('active',i===obStep));
+  const ob=$id('obBody');
+  if(obStep===0){$id('obTitle').textContent='欢迎来到 Relay';$id('obDesc').textContent='你的 AI 通信副驾。数据归你，AI 替你行动。';
+    ob.innerHTML='<div class="ob-providers"><div class="pr" onclick="obStep=2;renderOb()">Gmail</div><div class="pr" onclick="obStep=2;renderOb()">Outlook</div><div class="pr" onclick="obStep=2;renderOb()">Slack</div><div class="pr" onclick="obStep=2;renderOb()">微信</div><div class="pr" onclick="obStep=2;renderOb()">日历</div><div class="pr">+ 更多</div></div>'+
+      '<button class="primary" onclick="obStep=2;renderOb()">连接我的账户</button><button class="ob-demo-btn" onclick="dismissOb()">先看看演示 (跳过)</button>';
+  }else if(obStep===2){$id('obTitle').textContent='正在建立索引 + AI 提取';$id('obDesc').textContent='Relay 正在学习你的通信模式并提取联系人信息';
+    ob.innerHTML='<div class="ob-progress"><div class="f" style="width:65%"></div></div>'+
+      '<div style="color:var(--text3);font-size:.55rem;margin-bottom:6px;">SendPalm 工作 - 已索引 824/1,247</div>'+
+      '<div style="display:flex;gap:8px;justify-content:center;font-size:.5rem;color:var(--text2);margin-bottom:12px;">'+
+      '<span>12 联系人</span><span>·</span><span>6 签名已提取</span><span>·</span><span>3 跨账户匹配</span></div>'+
+      '<button class="primary" onclick="obStep=3;renderOb()">继续</button>';
+  }else{$id('obTitle').textContent='AI 已经发现了这些';$id('obDesc').textContent='从你的邮件中自动提取';
+    ob.innerHTML='<div class="ob-grid"><div class="item"><div class="v" style="color:var(--accent);">9</div><div class="l">联系人</div></div>'+
+      '<div class="item"><div class="v" style="color:var(--green);">6</div><div class="l">签名已提取</div></div>'+
+      '<div class="item"><div class="v" style="color:var(--yellow);">3</div><div class="l">跨账户合并</div></div>'+
+      '<div class="item"><div class="v">12.8h</div><div class="l">可节省/周</div></div></div>'+
+      '<button class="primary" onclick="dismissOb()">开始使用</button>';
+  }
+}
+function dismissOb(){$id('onboardOverlay').classList.remove('show');}
+// ============== ACCOUNT ==============
+function toggleAcct(){acctOpen=!acctOpen;$id('acctDropdown').classList.toggle('show',acctOpen);}
+// ============== NOTIF ==============
+function toggleNotif(){notifOpen=!notifOpen;$id('notifPanel').classList.toggle('show',notifOpen);}
+// ============== PEOPLE ==============
+function rpl(filter, q){
+  const c=$id('pl');let items=D.contacts;
+  if(filter==='active')items=items.filter(c=>c.grp==='active');
+  else if(filter==='risk')items=items.filter(c=>c.grp==='risk');
+  else if(filter==='cold')items=items.filter(c=>c.grp==='cold');
+  else if(filter==='merged')items=items.filter(c=>c.merged);
+  else if(filter==='company'){const g={};items.forEach(c=>{if(!g[c.co])g[c.co]=[];g[c.co].push(c);});
+    c.innerHTML=Object.entries(g).sort((a,b)=>b[1].length-a[1].length).map(([co,ppl])=>
+      '<div class="lc-grp"><div class="lc-gh">'+co+' <span>'+ppl.length+'</span></div>'+
+      ppl.sort((a,b)=>b.sc-a.sc).map(p=>renderCI(p)).join('')+'</div>').join('');return;}
+  if(q){const lq=q.toLowerCase();items=items.filter(c=>c.name.toLowerCase().includes(lq)||c.co.toLowerCase().includes(lq));}
+  c.innerHTML=items.map(p=>renderCI(p)).join('');
+}
+function renderCI(p){return '<div class="lc" onclick="selectP(\''+p.id+'\')"><div class="lc-a">'+p.name[0]+
+    '</div><div class="lc-m"><div class="lc-n">'+p.name+(p.merged?' <span class="ca-badge">跨账户</span>':'')+
+    ' <span style="color:'+D.stageColor[p.stage]+';font-size:.5rem;">'+D.stageLabel[p.stage]+'</span></div>'+
+    '<div class="lc-s">'+p.co+' · '+p.tl+'</div></div><div class="lc-r"><div class="sc" style="background:'+p.scC+'">'+p.sc+'</div></div></div>';}
+function renderExtractionSection(pid){const ae=AI_EXTRACTED[pid];if(!ae)return'';
+  let h='<div class="pd-conns" style="margin-top:8px;"><div class="pd-s" style="color:var(--accent);">AI 提取</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;">';
+  if(ae.signature){h+='<div style="padding:4px;background:var(--surface);border-radius:4px;"><div style="font-size:.45rem;color:var(--text3);">职位</div><div style="font-size:.52rem;">'+ae.signature.title+'</div></div>'+
+    '<div style="padding:4px;background:var(--surface);border-radius:4px;"><div style="font-size:.45rem;color:var(--text3);">公司</div><div style="font-size:.52rem;">'+ae.signature.company+'</div></div>';}
+  if(ae.signature&&ae.signature.phone){h+='<div style="padding:4px;background:var(--surface);border-radius:4px;"><div style="font-size:.45rem;color:var(--text3);">手机</div><div style="font-size:.52rem;">'+ae.signature.phone+'</div></div>';}
+  if(ae.enrichment&&ae.enrichment.linkedin){h+='<div style="padding:4px;background:var(--surface);border-radius:4px;"><div style="font-size:.45rem;color:var(--text3);">LinkedIn</div><div style="font-size:.45rem;color:var(--accent);">'+ae.enrichment.linkedin+'</div></div>';}
+  h+='</div>';
+  if(ae.patterns){h+='<div style="margin-top:4px;font-size:.45rem;color:var(--text3);">沟通模式: 最佳时间 '+ae.patterns.bestTime+' · 平均回复 '+ae.patterns.avgReply+'</div>';}
+  h+='</div>';return h;}
+function renderEntityResolution(pid){const er=ENTITY_RESOLUTION[pid];if(!er)return'';
+  return '<div class="pd-conns" style="margin-top:8px;"><div class="pd-s" style="color:var(--green);">跨账户解析 ('+er.method+')</div>'+
+    er.accounts.map(a=>'<div style="display:flex;align-items:center;gap:4px;padding:2px 0;font-size:.5rem;"><span class="acct-tag" style="border-color:'+(ACCOUNTS.find(x=>x.id===a.id)?.color||'#666')+'">'+a.id+'</span><span style="color:var(--text2);">'+a.field+'</span><span class="er-match '+(a.match>0.9?'high':a.match>0.8?'med':'low')+'">'+(a.match*100)+'%</span></div>').join('')+'</div>';}
+function selectP(id){cid=id;const p=D.getP(id);if(!p)return;
+  document.querySelectorAll('.lc').forEach(el=>el.classList.remove('active'));
+  const el=document.querySelector('#pl .lc[onclick*="'+id+'"]');if(el)el.classList.add('active');
+  const d=$id('pd');const stl=D.stageColor[p.stage];
+  const accounts_html = p.accounts.map(a=>{const ac=ACCOUNTS.find(x=>x.id===a);return ac?'<span class="acct-tag" style="border-color:'+ac.color+'">'+ac.provider+'</span>':'';}).join('');
+  d.innerHTML='<div class="pd-h"><div class="pd-av">'+p.name[0]+'</div><div><h2 style="font-size:.7rem;font-weight:600;">'+p.name+
+    '<span style="color:'+stl+';font-size:.55rem;margin-left:6px;">'+D.stageLabel[p.stage]+'</span>'+
+    (p.merged?' <span class="ca-badge" style="font-size:.45rem;">跨账户</span>':'')+'</h2>'+
+    '<div style="color:var(--text2);font-size:.55rem;">'+p.co+' · '+p.tl+'</div></div></div>'+
+    '<div class="pd-sc"><div class="sc" style="background:'+p.scC+';font-size:.7rem;padding:3px 10px;">'+p.sc+'</div><span style="color:var(--text2);font-size:.5rem;">'+p.scL+'</span></div>'+
+    '<div class="pd-info"><div class="pd-ig"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="2.5" width="9" height="7" rx="1"/><path d="M1.5 4.5l4.5 3 4.5-3"/></svg>'+p.em+'</div>'+
+    '<div class="pd-ig"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="6" cy="3.5" r="1.5"/><path d="M2 10c0-2.2 1.8-4 4-4s4 1.8 4 4"/></svg>'+accounts_html+'</div></div>'+
+    '<div class="pd-fc"><div class="pd-c"><div class="pd-cl">首次联系</div><div class="pd-cv">'+p.firstContact+'</div></div><div class="pd-c"><div class="pd-cl">最后联系</div><div class="pd-cv">'+p.lc+'</div></div>'+
+    '<div class="pd-c"><div class="pd-cl">沟通模式</div><div class="pd-cv" style="font-size:.5rem;">'+p.pattern+'</div></div>'+
+    '<div class="pd-c"><div class="pd-cl">话题</div><div class="pd-cv">'+(p.topics||[]).map(t=>'<span class="topic-tag" onclick="event.stopPropagation();viewTopic(\''+t+'\')">#'+t+'</span>').join('')+'</div></div></div>'+
+    renderExtractionSection(p.id)+renderEntityResolution(p.id)+
+    renderConnectionSuggestions(p)+
+    '<div class="pd-msgs"><div class="pd-s">消息</div>'+D.getMsgs(p.id).slice(0,5).map(m=>{
+      const tIcon=m.ic==='e'?'e':m.ic==='c'?'c':'m';
+      return '<div class="pd-msg"><div class="pm-h"><span class="pm-ic">'+tIcon+'</span><span class="pm-fm">'+m.fm+'</span><span class="pm-tm">'+m.tm+'</span></div><div class="pm-sub">'+m.subj+'</div><div class="pm-prev">'+m.prev+'</div></div>';
+    }).join('')+'</div>'+
+    '<div class="pd-acts"><button onclick="st(\'Relay 已生成关系摘要\')">摘要</button><button onclick="st(\'已发送跟进提醒\')">跟进</button><button onclick="st(\'Relay 正在起草...\')">起草</button>'+
+    '<button onclick="st(\'AI 提取完成: 职位/公司/手机/LinkedIn\')">AI 提取</button></div>';
+}
+function renderConnectionSuggestions(p){const conns=D.getConnections(p.id);if(!conns.length)return'';
+  return '<div class="pd-conns"><div class="pd-s">人脉建议 (基于AI图谱)</div>'+conns.slice(0,3).map(c=>
+    '<div class="pd-conn" onclick="selectP(\''+c.id+'\')"><div class="lc-a" style="width:22px;height:22px;font-size:.45rem;">'+c.name[0]+'</div><div><div style="font-size:.52rem;">'+c.name+' · '+c.co+'</div><div style="font-size:.45rem;color:var(--text3);">'+(AI_EXTRACTED[c.id]?.enrichment?.linkedin||c.tl)+'</div></div></div>'
+  ).join('')+'</div>';}
+function fp(filter,btn){pfilt=filter;document.querySelectorAll('#pf button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');rpl(filter, $id('ps').value);}
+$id('pf').addEventListener('click',function(e){if(e.target.tagName==='BUTTON')fp(e.target.dataset.filter,e.target);});
+$id('ps').addEventListener('input',function(){rpl(pfilt,this.value);});
+$id('pai').addEventListener('keydown',function(e){if(e.key==='Enter')hpa();});
+function hpa(){const inp=$id('pai');const txt=inp.value.trim();if(!txt)return;st('Relay 已收到指令: '+txt.substring(0,40));inp.value='';}
+// ============== AGENT ==============
+function sam(){const inp=$id('ai');const txt=inp.value.trim();if(!txt)return;
+  const ams=$id('ams');const msg=document.createElement('div');msg.className='am';
+  msg.innerHTML='<div class="am-u">'+txt+'</div><div class="am-r">'+getAR(txt)+'</div>';ams.appendChild(msg);ams.scrollTop=ams.scrollHeight;inp.value='';}
+function getAR(txt){const lt=txt.toLowerCase();
+  if(lt.includes('提取')||lt.includes('签名')) return '已经扫描了所有邮件签名，提取了以下信息：<br><br>'+
+    '<div style="font-size:.5rem;"><b>张磊</b> — 战略合作总监 · 华为 · 138-0001-1234<br>'+
+    '<b>陈欣</b> — 战略合作经理 · 字节跳动<br>'+
+    '<b>王洋</b> — 采购总监 · 阿里巴巴 · 139-0002-5678<br>'+
+    '<b>孙静</b> — 产品负责人 · 美团<br>'+
+    '... 共6个联系人<br><br>✅ 已将信息整合到联系人档案中</div>';
+  if(lt.includes('图谱')||lt.includes('graph')||lt.includes('关系')) return '已构建知识图谱：<br>'+
+    '<div style="font-size:.5rem;margin-top:4px;">• 9 个联系人节点<br>• 7 个公司节点<br>• 4 个话题节点<br>• 24 条关系边<br><br>'+
+    '<b>发现:</b> 张磊 ↔ Q4合同 ↔ 陈欣 (间接连接)<br>'+
+    '<b>发现:</b> 李晨 ↔ AI合作 ↔ 刘华 (共同话题)</div>';
+  if(lt.includes('总结')||lt.includes('summar')) return '分析了近期沟通：<br><br>'+
+    '• <b>张磊</b> — Q4合同条款待对齐，明天会议<br>'+
+    '• <b>陈欣</b> — Q3回顾完成，API升级讨论中<br>'+
+    '• <b>王洋</b> — 45天未联系，建议跟进<br>'+
+    '• <b>李晨</b> — 已冷淡62天，需激活';
+  if(lt.includes('合并')||lt.includes('跨账户')||lt.includes('entity')) return '跨账户实体解析结果：<br><br>'+
+    '<div style="font-size:.5rem;"><b>张磊</b> — Gmail + 微信 (92% 匹配)<br>'+
+    '<b>陈欣</b> — Gmail + Slack (88% 匹配)<br>'+
+    '<b>王洋</b> — Gmail工作 + 个人 (100% 精准匹配)<br>'+
+    '<b>赵薇</b> — Gmail + Slack (85% 匹配)<br><br>'+
+    '✅ 共3组跨账户匹配，已合并为统一联系人</div>';
+  if(lt.includes('搜索')||lt.includes('search')) return '跨账户统一搜索已准备就绪。<br>在顶部的搜索框中输入关键词，可以同时搜索：<br><br>• Gmail + Outlook 邮件<br>• Slack + 微信 消息<br>• 所有联系人和文件';
+  return '我可以帮你：<br>• <b>提取</b> — 从邮件签名提取联系人信息<br>• <b>图谱</b> — 构建关系知识图谱<br>• <b>总结</b> — 分析近期沟通<br>• <b>合并</b> — 跨账户实体解析<br>• <b>搜索</b> — 跨账户统一搜索';
+}
+$id('ai').addEventListener('keydown',function(e){if(e.key==='Enter')sam();});
+function renderAgentSidebar(tab){agentTab=tab;const s=$id('as');
+  s.innerHTML='<div class="ast"><button class="'+(tab==='tasks'?'active':'')+'" onclick="renderAgentSidebar(\'tasks\')">任务</button><button class="'+(tab==='drafts'?'active':'')+'" onclick="renderAgentSidebar(\'drafts\')">草稿</button><button class="'+(tab==='done'?'active':'')+'" onclick="renderAgentSidebar(\'done\')">已完成</button><button class="'+(tab==='audit'?'active':'')+'" onclick="renderAgentSidebar(\'audit\')">审计</button></div>';
+  if(tab==='tasks'){s.innerHTML+='<div style="padding:6px 10px;font-size:.5rem;color:var(--text3);border-bottom:1px solid var(--border);">AI 正在进行</div>'+
+    D.agentTasks.map(t=>'<div class="at"><div class="at-h"><div class="at-s '+t.status+'">'+(t.status==='go'?'进行中':'等待')+'</div><span>'+t.name+'</span></div><div class="at-steps">'+t.steps.map(s=>'<div class="at-step '+(s.d?'done':'')+'">'+s.l+'</div>').join('')+'</div></div>').join('');}
+  else if(tab==='drafts'){s.innerHTML+='<div style="padding:6px 10px;font-size:.5rem;color:var(--text3);border-bottom:1px solid var(--border);">等待审批</div>'+
+    '<div class="ad"><div class="ad-to">收件人: 王洋</div><div class="ad-sub">Re: Q4 合作提案跟进</div><div class="ad-acts"><button class="btn-sm" onclick="st(\'已审批\')">审批</button><button class="btn-sm">编辑</button></div></div>'+
+    '<div class="ad"><div class="ad-to">收件人: 陈欣</div><div class="ad-sub">Re: 合作 — Q3回顾 & Q4规划</div><div class="ad-acts"><button class="btn-sm" onclick="st(\'已审批\')">审批</button><button class="btn-sm">编辑</button></div></div>';}
+  else if(tab==='done'){s.innerHTML+='<div style="padding:6px 10px;font-size:.5rem;color:var(--text3);border-bottom:1px solid var(--border);">已完成 (今日)</div>'+
+    ['从6封邮件提取联系人信息','跨账户匹配: 3组','构建知识图谱: 23条关系','生成张磊会议简报','分析李晨冷淡原因'].map(i=>'<div class="ad"><div class="ad-sub">'+i+'</div></div>').join('');}
+  else if(tab==='audit'){s.innerHTML+='<div style="padding:6px 10px;font-size:.5rem;color:var(--text3);border-bottom:1px solid var(--border);">AI 操作日志</div>'+
+    D.agentAuditLog.map(a=>'<div class="al"><div class="al-'+(a.risk==='high'?'high':'low')+'">'+a.risk.toUpperCase()+'</div>'+
+    '<div class="al-a">'+(a.action==='extract'?'提取':a.action==='resolve'?'解析':a.action==='draft'?'起草':a.action==='graph'?'图谱':'丰富')+'</div>'+
+    '<div class="al-t">'+a.target+'</div><div class="al-tm">'+a.time+'</div></div>').join('');}
+}
+// ============== INBOX ==============
+function renderInbox(){const il=$id('il');
+  il.innerHTML='<div style="padding:8px 10px;font-size:.55rem;color:var(--text3);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:4px;">'+
+    '<span class="ca-badge" style="font-size:.45rem;">统一收件箱</span> 所有账户 ('+D._msgs.length+')</div>'+
+    D._msgs.sort((a,b)=>new Date(b.st)-new Date(a.st)).map(m=>{
+    const p=D.getP(m.pid);const ac=ACCOUNTS.find(a=>a.id===m.acct);
+    return '<div class="ii" onclick="showMsg(\''+m.pid+'\',\''+m.st+'\')"><div class="ii-a">'+(m.fm[0]||'?')+'</div><div class="ii-m">'+
+      '<div class="ii-h"><span class="ii-f">'+m.fm+'</span>'+(p?'<span class="ii-p">'+p.co+'</span>':'')+
+      (ac?'<span class="acct-tag" style="font-size:.4rem;border-color:'+ac.color+'">'+ac.provider+'</span>':'')+
+      '<span class="ii-t">'+m.tm+'</span></div><div class="ii-s">'+m.subj+'</div><div class="ii-pr">'+m.prev+'</div></div></div>';
+  }).join('');if(!$id('idd').innerHTML&&D._msgs.length)showMsg(D._msgs[0].pid,D._msgs[0].st);}
+function showMsg(pid,st){const m=D._msgs.find(msg=>msg.pid===pid&&msg.st===st);if(!m)return;const p=D.getP(pid);
+  const d=$id('idd');const ac=ACCOUNTS.find(a=>a.id===m.acct);
+  d.innerHTML='<div style="padding:8px 0;border-bottom:1px solid var(--border);"><div style="font-size:.65rem;font-weight:600;">'+m.subj+'</div>'+
+    '<div style="display:flex;gap:6px;align-items:center;margin-top:4px;font-size:.5rem;color:var(--text2);">'+
+    '<span style="font-weight:500;color:var(--text);">'+m.fm+'</span>'+(p?'<span>· '+p.co+'</span>':'')+
+    '<span>· '+m.ch+(ac?' · <span class="acct-tag" style="border-color:'+ac.color+'">'+ac.provider+'</span>':'')+'</span>'+
+    '<span>· '+m.tm+'</span></div></div><div style="font-size:.55rem;color:var(--text);line-height:1.6;padding:6px 0;">'+m.prev+'</div>'+
+    (m.at&&m.at.length?'<div style="margin:6px 0;padding-top:6px;border-top:1px solid var(--border);"><div style="font-size:.5rem;color:var(--text3);margin-bottom:4px;">附件</div>'+m.at.map(a=>'<div class="att-item">'+a+'</div>').join('')+'</div>':'')+
+    '<div style="margin-top:8px;display:flex;gap:6px;"><button class="btn-sm" onclick="st(\'回复已发送\')">回复</button>'+
+    '<button class="btn-sm" onclick="st(\'Relay 正在起草回复...\')">AI 起草</button>'+
+    '<button class="btn-sm" onclick="st(\'已归档\')">归档</button></div>';}
+// ============== EXTRACTION VIEW ==============
+function renderExtraction(){const ev=$id('extractionView');
+  ev.innerHTML='<div class="h" style="margin-bottom:4px;">AI 数据提取</div>'+
+    '<div class="s" style="margin-bottom:12px;">Relay 从邮件签名、正文、附件中自动提取的结构化信息</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">'+
+    '<div class="stat-card"><div class="stat-v">9</div><div class="stat-l">联系人</div></div>'+
+    '<div class="stat-card"><div class="stat-v" style="color:var(--green);">6</div><div class="stat-l">签名已解析</div></div>'+
+    '<div class="stat-card"><div class="stat-v" style="color:var(--yellow);">3</div><div class="stat-l">跨账户合并</div></div>'+
+    '<div class="stat-card"><div class="stat-v" style="color:var(--accent);">5</div><div class="stat-l">手机号提取</div></div></div>'+
+    '<div class="h" style="margin-bottom:6px;">邮件签名解析</div>';
+  Object.entries(AI_EXTRACTED).forEach(([pid,ae])=>{
+    const p=D.getP(pid);if(!p)return;
+    ev.innerHTML+='<div class="ex-card"><div class="h" style="color:var(--accent);">'+p.name+' <span style="font-weight:400;color:var(--text3);font-size:.5rem;">'+p.co+'</span></div>'+
+      '<div class="ex-grid">'+
+      (ae.signature?Object.entries(ae.signature).map(([k,v])=>'<div class="ex-item"><div class="ex-label">'+k+'</div><div class="ex-val">'+v+'</div></div>').join(''):'')+
+      '</div>'+
+      (ae.enrichment?'<div class="ex-source">来源: 邮件签名 <span class="tag" style="background:rgba(74,222,128,.15);color:var(--green);">AI 提取</span>'+
+      (ae.enrichment.linkedin?' <span class="tag" style="background:rgba(91,141,239,.15);color:var(--accent);">LinkedIn 丰富</span>':'')+'</div>':'')+
+      (ae.extractedMeetings&&ae.extractedMeetings.length?'<div style="margin-top:4px;font-size:.45rem;color:var(--text3);">'+
+      ae.extractedMeetings.map(m=>'<span style="margin-right:8px;">📅 '+m.title+' ('+m.date+') 置信度:'+(m.confidence*100)+'%</span>').join('')+'</div>':'')+
+      '</div>';
+  });
+  ev.innerHTML+='<div class="h" style="margin:12px 0 6px;">跨账户实体解析</div>';
+  Object.entries(ENTITY_RESOLUTION).forEach(([pid,er])=>{
+    const p=D.getP(pid);if(!p)return;
+    ev.innerHTML+='<div class="er-card"><div class="h">'+p.name+'</div>'+
+      er.accounts.map(a=>'<div class="er-row"><div class="er-prov">'+(ACCOUNTS.find(x=>x.id===a.id)?.provider||a.id)+'</div><div class="er-val">'+a.field+'</div><div class="er-match '+(a.match>0.9?'high':a.match>0.8?'med':'low')+'">'+(a.match*100)+'%</div></div>').join('')+
+      '<div style="font-size:.45rem;color:var(--text3);margin-top:4px;">方法: '+er.method+'</div></div>';
+  });
+  ev.innerHTML+='<div style="margin-top:12px;"><div class="h" style="margin-bottom:6px;">原始邮件签名示例 (AI 解析前)</div>'+
+    '<div class="ex-card" style="font-size:.5rem;color:var(--text2);line-height:1.6;font-family:monospace;">'+
+    'Best regards,<br>张磊 | 战略合作总监<br>华为技术有限公司<br>手机: 138-0001-1234<br>邮箱: zhanglei@huawei.com<br><br>'+
+    '<span style="color:var(--green);">→ AI 解析: 姓名/职位/公司/手机/邮箱 已提取</span></div></div>';
+}
+// ============== ANALYTICS ==============
+function renderAnalytics(){const c=$id('ac');
+  const active=D.contacts.filter(p=>p.grp==='active').length;
+  const risk=D.contacts.filter(p=>p.grp==='risk').length;
+  const cold=D.contacts.filter(p=>p.grp==='cold').length;
+  const avgSc=Math.round(D.contacts.reduce((s,p)=>s+p.sc,0)/D.contacts.length);
+  const merged=D.contacts.filter(p=>p.merged).length;
+  const extracted=Object.keys(AI_EXTRACTED).length;
+  const stages={};D.contacts.forEach(p=>{stages[p.stage]=(stages[p.stage]||0)+1;});
+  c.innerHTML='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;">'+
+    '<div class="stat-card"><div class="stat-v">'+D.contacts.length+'</div><div class="stat-l">联系人</div></div>'+
+    '<div class="stat-card"><div class="stat-v" style="color:var(--green);">'+active+'</div><div class="stat-l">活跃</div></div>'+
+    '<div class="stat-card"><div class="stat-v" style="color:var(--yellow);">'+risk+'</div><div class="stat-l">需跟进</div></div>'+
+    '<div class="stat-card"><div class="stat-v" style="color:var(--red);">'+cold+'</div><div class="stat-l">已冷淡</div></div>'+
+    '<div class="stat-card"><div class="stat-v">'+avgSc+'</div><div class="stat-l">平均评分</div></div>'+
+    '<div class="stat-card"><div class="stat-v">'+merged+'</div><div class="stat-l">跨账户</div></div>'+
+    '<div class="stat-card"><div class="stat-v">'+extracted+'</div><div class="stat-l">AI 提取</div></div>'+
+    '<div class="stat-card"><div class="stat-v">'+D._msgs.length+'</div><div class="stat-l">消息</div></div></div>'+
+    '<div class="h" style="margin-bottom:6px;">关系阶段分布</div>'+
+    '<div class="barchart">'+Object.entries(stages).sort((a,b)=>b[1]-a[1]).map(([stage,count])=>
+      '<div class="bc"><div class="bc-b" style="background:'+(D.stageColor[stage]||'#666')+';height:'+Math.max(12,count*28)+'px;"></div><div class="bc-l">'+D.stageLabel[stage]+'</div></div>'
+    ).join('')+'</div>'+
+    '<div style="margin-top:14px;"><div class="h" style="margin-bottom:6px;">AI 提取统计</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
+    '<div class="ex-card"><div class="h" style="color:var(--green);font-size:.55rem;">从邮件签名提取</div><div style="font-size:.5rem;color:var(--text2);">6 个联系人 · 3 个手机号 · 2 个 LinkedIn</div></div>'+
+    '<div class="ex-card"><div class="h" style="color:var(--yellow);font-size:.55rem;">从正文提取</div><div style="font-size:.5rem;color:var(--text2);">4 个会议意向 · 8 个话题标签</div></div>'+
+    '<div class="ex-card"><div class="h" style="color:var(--purple);font-size:.55rem;">跨账户匹配</div><div style="font-size:.5rem;color:var(--text2);">3 组合并 · 平均置信度 93%</div></div>'+
+    '<div class="ex-card"><div class="h" style="color:var(--accent);font-size:.55rem;">图谱构建</div><div style="font-size:.5rem;color:var(--text2);">23 条关系 · 4 个话题社区</div></div></div></div>';
+}
+// ============== GRAPH ==============
+function renderGraph(mode){gmode=mode||'all';
+  const canvas=$id('graphCanvas');const ctx=canvas.getContext('2d');
+  const W=canvas.parentElement.clientWidth||800;
+  const H=canvas.parentElement.clientHeight||500;
+  canvas.width=W;canvas.height=H;
+  ctx.clearRect(0,0,W,H);
+  let nodes=GRAPH.nodes.map(n=>({...n}));
+  if(mode==='active'){const activeIds=D.contacts.filter(c=>c.grp==='active').map(c=>'p_'+c.id);nodes=nodes.filter(n=>activeIds.includes(n.id)||n.type!=='person'||n.id.startsWith('c_'));}
+  else if(mode==='topic'){nodes=nodes.filter(n=>n.type==='topic'||n.type==='person');}
+  const edges=GRAPH.edges.filter(e=>nodes.find(n=>n.id===e.s)&&nodes.find(n=>n.id===e.t));
+  // Simple force layout
+  const ps={};nodes.forEach((n,i)=>{ps[n.id]={x:W/2+(Math.random()-0.5)*W*0.5,y:H/2+(Math.random()-0.5)*H*0.5,vx:0,vy:0};});
+  const center={x:W/2,y:H/2};
+  for(let iter=0;iter<120;iter++){
+    nodes.forEach(n=>{const p=ps[n.id];const dx=center.x-p.x;const dy=center.y-p.y;p.vx+=dx*0.001;p.vy+=dy*0.001;});
+    nodes.forEach(a=>{nodes.forEach(b=>{if(a.id===b.id)return;const pa=ps[a.id],pb=ps[b.id];const dx=pb.x-pa.x,dy=pb.y-pa.y;const dist=Math.max(1,Math.sqrt(dx*dx+dy*dy));const force=100/(dist*dist);pa.vx-=dx/dist*force;pa.vy-=dy/dist*force;pb.vx+=dx/dist*force;pb.vy+=dy/dist*force;});});
+    edges.forEach(e=>{const pa=ps[e.s],pb=ps[e.t];const dx=pb.x-pa.x,dy=pb.y-pa.y;const dist=Math.sqrt(dx*dx+dy*dy);const force=(dist-80)*0.01;pa.vx+=dx/dist*force;pa.vy+=dy/dist*force;pb.vx-=dx/dist*force;pb.vy-=dy/dist*force;});
+    nodes.forEach(n=>{const p=ps[n.id];p.x+=p.vx;p.y+=p.vy;p.vx*=0.85;p.vy*=0.85;p.x=Math.max(10,Math.min(W-10,p.x));p.y=Math.max(10,Math.min(H-10,p.y));});
+  }
+  ctx.clearRect(0,0,W,H);
+  edges.forEach(e=>{const pa=ps[e.s],pb=ps[e.t];ctx.beginPath();ctx.moveTo(pa.x,pa.y);ctx.lineTo(pb.x,pb.y);
+    ctx.strokeStyle='rgba(255,255,255,.06)';ctx.lineWidth=.5;ctx.stroke();});
+  nodes.forEach(n=>{const p=ps[n.id];
+    const color=n.type==='person'?'#5b8def':n.type==='company'?'#4ade80':n.type==='topic'?'#facc15':'#a78bfa';
+    const r=n.type==='person'?14:n.type==='company'?10:8;
+    ctx.beginPath();ctx.arc(p.x,p.y,r,0,Math.PI*2);ctx.fillStyle=color;ctx.globalAlpha=.7;ctx.fill();
+    ctx.globalAlpha=1;
+    ctx.fillStyle='#fff';ctx.font='6px Inter,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+    if(n.label.length<=2)ctx.fillText(n.label,p.x,p.y);else{ctx.font='5px Inter,sans-serif';ctx.fillText(n.label.substring(0,3),p.x,p.y);}
+  });
+  canvas.onmousemove=function(e){const r=canvas.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;let found=null;
+    nodes.forEach(n=>{const p=ps[n.id];const d=Math.sqrt((mx-p.x)**2+(my-p.y)**2);const maxR=n.type==='person'?16:n.type==='company'?12:10;if(d<maxR)found=n;});
+    const info=$id('graphInfo');if(found){info.textContent=found.label+(found.co?' · '+found.co:'')+(found.sc?' · 评分:'+found.sc:'');info.style.display='block';}else{info.textContent='悬停查看关系';info.style.display='block';}}
+}
+// ============== FILES ==============
+let fftype='all';
+function renderFiles(){const fg=$id('fg');const items=fftype==='all'?D._files:D._files.filter(f=>f.tp===fftype);
+  fg.innerHTML=items.map(f=>{const p=D.getP(f.pid);return '<div class="fc"><div class="fc-ic">'+(f.tp==='pdf'?'e':f.tp==='image'?'i':'d')+'</div><div class="fc-m"><div class="fc-n">'+f.name+'</div><div class="fc-meta">'+f.sz+' · '+f.dt+(p?' · '+p.name:'')+'</div></div></div>';}).join('');}
+// ============== CALENDAR ==============
+function renderCalendar(){const cal=$id('cal');const today=new Date();const days=['日','一','二','三','四','五','六'];
+  const firstDay=new Date(today.getFullYear(),today.getMonth(),1).getDay();
+  const dim=new Date(today.getFullYear(),today.getMonth()+1,0).getDate();
+  cal.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;padding:0 0 10px 0;"><div class="h">'+today.getFullYear()+'年'+(today.getMonth()+1)+'月</div></div>'+
+    '<div class="cal-grid"><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;">'+days.map(d=>'<div style="text-align:center;font-size:.45rem;color:var(--text3);padding:4px 0;">'+d+'</div>').join('')+
+    Array.from({length:firstDay},()=>'<div></div>').join('')+
+    Array.from({length:dim},(_,i)=>{const day=i+1;const dayLabels={};D._meetings.forEach(m=>{if(m.dt==='今天')dayLabels[today.getDate()]=1;else if(m.dt==='明天')dayLabels[today.getDate()+1]=1;else if(m.dt==='昨天')dayLabels[today.getDate()-1]=1;});const hasEv=!!dayLabels[day];return '<div class="cal-d'+(day===today.getDate()?' today':'')+(hasEv?' has':'')+'" onclick="st(\''+day+'日详情\')">'+day+'</div>';}).join('')+
+    '</div></div><div style="margin-top:10px;"><div class="h" style="margin-bottom:6px;">会议 ('+D._meetings.length+')</div>'+
+    D._meetings.map(m=>{return '<div class="me"><div style="display:flex;justify-content:space-between;align-items:center;"><div><div style="font-size:.55rem;font-weight:500;">'+m.title+'</div><div style="font-size:.48rem;color:var(--text2);margin-top:2px;">'+m.ppl+' · '+m.dt+' '+m.tm+(m.br?' · 线上':' · 线下')+'</div></div><span class="me-p" onclick="selectP(\''+m.pids[0]+'\')">'+m.ppl.split(' ')[0]+'</span></div></div>';}).join('')+'</div>';}
+// ============== SETTINGS ==============
+function renderSettings(){const ss=$id('ss');
+  ss.innerHTML='<div style="padding:0 0 14px 0;"><div class="h">设置</div><div class="s" style="margin-top:2px;">账户 · 隐私 · AI 偏好</div></div>'+
+    '<div style="margin-bottom:14px;"><div class="setting-label">已连接账户 ('+ACCOUNTS.length+')</div>'+
+    '<div style="font-size:.45rem;color:var(--text3);margin-bottom:6px;">每账户独立控制索引和隐私模式</div>'+
+    ACCOUNTS.map(a=>'<div class="ad-item"><div class="ad-dot" style="background:'+a.color+'"></div><div class="ad-m"><div class="ad-l">'+a.label+(a.status==='error'?' <span style="color:var(--red);">令牌过期</span>':'')+'</div><div class="ad-e">'+(a.email||a.provider)+(a.synced?' · '+a.synced+'条':'')+'</div></div>'+
+    '<div style="display:flex;align-items:center;gap:6px;"><span style="font-size:.4rem;padding:1px 5px;border-radius:3px;background:'+(a.privacy==='unified'?'rgba(74,222,128,.15);color:var(--green)':'rgba(248,113,113,.15);color:var(--red)')+';">'+(a.privacy==='unified'?'统一':'隔离')+'</span>'+
+    '<span style="font-size:.42rem;color:'+(a.status==='connected'?'var(--green)':a.status==='syncing'?'var(--yellow)':'var(--red)')+';">'+(a.status==='connected'?'已连接':a.status==='syncing'?'同步中...':'错误')+'</span></div></div>').join('')+
+    '<button class="btn-sm" style="margin-top:8px;" onclick="st(\'添加新账户...\')">+ 添加账户 (Gmail/Outlook/Slack/微信/IMAP)</button></div>'+
+    '<div style="margin-bottom:14px;"><div class="setting-label">AI 代理</div>'+
+    '<div class="sd"><div class="sd-l">自动提取联系人信息</div><div class="sd-t"><input type="checkbox" checked></div></div>'+
+    '<div class="sd"><div class="sd-l">跨账户实体解析</div><div class="sd-t"><input type="checkbox" checked></div></div>'+
+    '<div class="sd"><div class="sd-l">自动构建知识图谱</div><div class="sd-t"><input type="checkbox" checked></div></div>'+
+    '<div class="sd"><div class="sd-l">发送前审批</div><div class="sd-t"><input type="checkbox" checked></div></div></div>'+
+    '<div style="margin-bottom:14px;"><div class="setting-label">隐私模式</div><div style="font-size:.45rem;color:var(--text3);margin-bottom:4px;">控制数据在账户之间是否共享</div>'+
+    '<div class="sd"><div class="sd-l">统一索引 (推荐) — AI 可跨账户分析</div><div class="sd-t"><input type="radio" name="priv" checked></div></div>'+
+    '<div class="sd"><div class="sd-l">隔离索引 — 每个账户数据独立</div><div class="sd-t"><input type="radio" name="priv"></div></div>'+
+    '<div class="sd"><div class="sd-l">混合 — 按联系人控制</div><div class="sd-t"><input type="radio" name="priv"></div></div></div>'+
+    '<div><div class="setting-label">数据</div><div class="sd"><div class="sd-l">导出所有数据 (含AI提取字段)</div><div class="sd-t"><button class="btn-sm" onclick="st(\'数据已导出，包含AI提取结果\')">导出</button></div></div>'+
+    '<div class="sd"><div class="sd-l">重建知识图谱</div><div class="sd-t"><button class="btn-sm" onclick="st(\'知识图谱重建中...\')">重建</button></div></div></div>';
+}
+// ============== SEARCH + NOTIF ==============
+$id('gs').addEventListener('input',function(){const q=this.value.trim();if(!q)return;st('搜索: "'+q+'" — 跨账户搜索联系人/消息/文件/提取数据');});
+$id('gs').addEventListener('keydown',function(e){if(e.key!=='Enter')return;const q=this.value.trim();if(!q)return;
+  const lq=q.toLowerCase();let r=[];D.contacts.filter(c=>c.name.includes(lq)||c.co.includes(lq)||c.em.includes(lq)).forEach(c=>r.push(c.name+' · '+c.co));
+  D._msgs.filter(m=>m.subj.toLowerCase().includes(lq)||m.prev.toLowerCase().includes(lq)).slice(0,3).forEach(m=>{const p=D.getP(m.pid);if(p)r.push('消息: '+m.subj.substring(0,30)+' — '+p.name);});
+  D._files.filter(f=>f.name.toLowerCase().includes(lq)).slice(0,3).forEach(f=>r.push('文件: '+f.name));
+  st('跨账户搜索结果: '+(r.length?r.slice(0,5).join(' | '):'无结果'));});
+// ============== VIEW SWITCHER ==============
+function switchView(view){document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));document.querySelectorAll('.sb-item').forEach(b=>b.classList.remove('active'));
+  const vm={people:'vp',graph:'vg',agent:'va',inbox:'vi',extraction:'ve',analytics:'van',files:'vf',calendar:'vc',settings:'vs'};
+  const vId=vm[view];if(vId){$id(vId).classList.add('active');const btn=document.querySelector('.sb-item[data-v="'+view+'"]');if(btn)btn.classList.add('active');}
+  const t={people:'联系人',graph:'关系图谱',agent:'AI 助手',inbox:'统一收件箱',extraction:'AI 数据提取',analytics:'洞察',files:'文件管理',calendar:'日历',settings:'设置'};
+  $id('vt').textContent=t[view]||'Relay';$id('vBadge').textContent='v5 · AI 提取 · 图谱';
+  if(view==='people'){rpl(pfilt,$id('ps').value);if(cid)selectP(cid);else selectP('zl');}
+  else if(view==='graph')setTimeout(()=>renderGraph(gmode),50);
+  else if(view==='agent'){renderAgentSidebar(agentTab);}
+  else if(view==='inbox')renderInbox();
+  else if(view==='extraction')renderExtraction();
+  else if(view==='analytics')renderAnalytics();
+  else if(view==='files')renderFiles();
+  else if(view==='calendar')renderCalendar();
+  else if(view==='settings')renderSettings();}
+document.querySelectorAll('.sb-item').forEach(btn=>{btn.addEventListener('click',function(){switchView(this.dataset.v);});});
+// ============== INIT ==============
+function init(){renderPin();renderOb();
+  $id('ff').addEventListener('click',function(e){if(e.target.tagName==='BUTTON'){fftype=e.target.dataset.filter;document.querySelectorAll('#ff button').forEach(b=>b.classList.remove('active'));e.target.classList.add('active');renderFiles();}});
+  $id('notifPanel').innerHTML=D.notifications.map(n=>'<div class="ni"><div class="ni-dot"></div><div class="ni-t">'+n.txt+'</div><div class="ni-tm">'+n.tm+'</div></div>').join('');
+  $id('acctDropdown').innerHTML='<div style="padding:6px 10px;border-bottom:1px solid var(--border);font-size:.5rem;color:var(--text3);">账户管理器</div>'+
+    ACCOUNTS.map(a=>'<div class="ad-item"><div class="ad-dot" style="background:'+a.color+'"></div><div class="ad-m"><div class="ad-l">'+a.label+(a.status==='error'?' <span>!</span>':'')+'</div><div class="ad-e">'+(a.email||a.provider)+'</div></div>'+
+    (a.status==='syncing'?'<div class="ad-s" style="font-size:.42rem;">同步 '+a.syncProgress.done+'/'+a.syncProgress.total+'</div>':
+    '<div class="ad-s" style="font-size:.42rem;color:'+(a.status==='connected'?'var(--green)':'var(--red)')+';">'+(a.status==='connected'?'已连接':'错误')+'</div>')+
+    '</div>').join('');
+  $id('acctSummary').textContent=ACCOUNTS.length;
+  setTimeout(()=>renderGraph(),100);
+  switchView('people');
+  document.addEventListener('click',function(e){if(!e.target.closest('.titlebar-r')){acctOpen=false;$id('acctDropdown').classList.remove('show');}if(!e.target.closest('.topbar-notif')&&!e.target.closest('.notif-panel')){notifOpen=false;$id('notifPanel').classList.remove('show');}});}
+document.addEventListener('DOMContentLoaded',init);
+</script>
+</body>
+</html>

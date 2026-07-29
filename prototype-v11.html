@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SendPalm — Calm Email + Agent Context</title>
+  <link href="https://fonts.cdnfonts.com/css/geist-sans" rel="stylesheet">
+  <link href="https://fonts.cdnfonts.com/css/geist-mono" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+  <link rel="stylesheet" href="css/prototype-v11.css?v=11.8">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0A8F63">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="SendPalm">
+</head>
+<body>
+  <div id="app">
+    <header id="topbar"></header>
+    <nav id="sidebar"></nav>
+    <main id="main"></main>
+    <aside id="detail-panel" class="hidden"></aside>
+    <div id="agent-fab"></div>
+    <div id="agent-panel" class="hidden"></div>
+    <div id="notification-panel" class="hidden"></div>
+    <div id="compose-modal" class="hidden"></div>
+    <div id="command-palette" class="hidden"></div>
+    <div id="event-modal" class="hidden"></div>
+    <div id="context-menu" class="hidden"></div>
+    <div id="drop-bar" class="hidden">
+      <div class="drop-zone" data-bucket="imbox"><i class="ph ph-tray"></i><span>Inbox</span></div>
+      <div class="drop-zone" data-bucket="feed"><i class="ph ph-newspaper"></i><span>Stream</span></div>
+      <div class="drop-zone" data-bucket="paperTrail"><i class="ph ph-receipt"></i><span>Records</span></div>
+      <div class="drop-zone" data-workflow="pending"><i class="ph ph-clock"></i><span>Pending</span></div>
+      <div class="drop-zone" data-workflow="saved"><i class="ph ph-push-pin"></i><span>Saved</span></div>
+      <div class="drop-zone" data-workflow="remind"><i class="ph ph-arrow-fat-line-up"></i><span>Remind</span></div>
+      <div class="drop-zone" data-bucket="trash"><i class="ph ph-trash"></i><span>Trash</span></div>
+      <div class="drop-zone" data-bucket="spam"><i class="ph ph-warning-circle"></i><span>Spam</span></div>
+    </div>
+    <div id="toast"></div>
+  </div>
+  <script src="prototype-data.js?v=11.3"></script>
+  <script src="js/prototype-v11.js?v=11.7"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>

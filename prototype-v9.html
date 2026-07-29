@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Relay v9 — Agentic Email</title>
+  <link href="https://fonts.cdnfonts.com/css/geist-sans" rel="stylesheet">
+  <link href="https://fonts.cdnfonts.com/css/geist-mono" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+  <link rel="stylesheet" href="css/prototype-v9.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#007aff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Relay">
+</head>
+<body>
+  <div id="app">
+    <div id="titlebar">
+      <div class="titlebar-traffic">
+        <span class="traffic-close"></span>
+        <span class="traffic-minimize"></span>
+        <span class="traffic-zoom"></span>
+      </div>
+      <div class="titlebar-title">Relay</div>
+      <div class="titlebar-spacer"></div>
+    </div>
+    <header id="topbar"></header>
+    <nav id="sidebar"></nav>
+    <main id="main"></main>
+    <aside id="detail-panel" class="hidden"></aside>
+    <div id="agent-fab"></div>
+    <div id="agent-panel" class="hidden"></div>
+    <div id="notification-panel" class="hidden"></div>
+    <div id="compose-modal" class="hidden"></div>
+    <div id="command-palette" class="hidden"></div>
+    <div id="context-menu" class="hidden"></div>
+    <div id="drop-bar" class="hidden">
+      <div class="drop-zone" data-bucket="imbox"><i class="ph ph-tray"></i><span>Inbox</span></div>
+      <div class="drop-zone" data-bucket="feed"><i class="ph ph-newspaper"></i><span>Stream</span></div>
+      <div class="drop-zone" data-bucket="paperTrail"><i class="ph ph-receipt"></i><span>Records</span></div>
+      <div class="drop-zone" data-workflow="pending"><i class="ph ph-clock"></i><span>Pending</span></div>
+      <div class="drop-zone" data-workflow="saved"><i class="ph ph-push-pin"></i><span>Saved</span></div>
+    </div>
+    <div id="toast"></div>
+  </div>
+  <script src="prototype-data.js"></script>
+  <script src="js/prototype-v9.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>

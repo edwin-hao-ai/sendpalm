@@ -1,0 +1,1703 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SendPalm — AI Communication Copilot</title>
+<link href="https://fonts.cdnfonts.com/css/geist-sans" rel="stylesheet">
+<link href="https://fonts.cdnfonts.com/css/geist-mono" rel="stylesheet">
+<link href="https://fonts.cdnfonts.com/css/clash-display" rel="stylesheet">
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<style>
+:root {
+  --bg-deep: #08090d;
+  --bg-surface: rgba(255,255,255,0.04);
+  --bg-glass: rgba(255,255,255,0.03);
+  --bg-glass-hover: rgba(255,255,255,0.06);
+  --bg-glass-active: rgba(255,255,255,0.10);
+  --bg-elevated: rgba(255,255,255,0.06);
+  --border-subtle: rgba(255,255,255,0.06);
+  --border-glass: rgba(255,255,255,0.10);
+  --primary: #6C5CE7;
+  --primary-glow: rgba(108,92,231,0.25);
+  --primary-dim: rgba(108,92,231,0.12);
+  --accent: #d4a574;
+  --accent-dim: rgba(212,165,116,0.12);
+  --secondary: #4ECDC4;
+  --secondary-dim: rgba(78,205,196,0.12);
+  --red: #ef4444;
+  --red-dim: rgba(239,68,68,0.12);
+  --green: #4ade80;
+  --green-dim: rgba(74,222,128,0.12);
+  --yellow: #facc15;
+  --yellow-dim: rgba(250,204,21,0.12);
+  --text-primary: rgba(240,240,244,0.95);
+  --text-secondary: rgba(240,240,244,0.60);
+  --text-muted: rgba(240,240,244,0.35);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --font-sans: 'Geist Sans', -apple-system, system-ui, sans-serif;
+  --font-mono: 'Geist Mono', 'SF Mono', monospace;
+  --font-display: 'Clash Display', 'Geist Sans', sans-serif;
+  --spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --spring-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px; --space-12: 48px;
+  --text-xs: 0.55rem; --text-sm: 0.60rem; --text-base: 0.70rem; --text-md: 0.80rem;
+  --text-lg: 0.90rem; --text-xl: 1.10rem; --text-2xl: 1.40rem;
+  --icon-xs: 0.60rem; --icon-sm: 0.75rem; --icon-md: 0.90rem; --icon-lg: 1.20rem; --icon-xl: 1.60rem; --icon-2xl: 2.20rem;
+}
+
+/* Light Mode */
+body.light-mode {
+  --bg-deep: #f5f5f7;
+  --bg-surface: rgba(0,0,0,0.03);
+  --bg-glass: rgba(255,255,255,0.70);
+  --bg-glass-hover: rgba(255,255,255,0.85);
+  --bg-glass-active: #ffffff;
+  --bg-elevated: #ffffff;
+  --border-subtle: rgba(0,0,0,0.08);
+  --border-glass: rgba(0,0,0,0.12);
+  --primary: #5B4CDB;
+  --primary-glow: rgba(91,76,219,0.15);
+  --primary-dim: rgba(91,76,219,0.08);
+  --text-primary: rgba(0,0,0,0.85);
+  --text-secondary: rgba(0,0,0,0.55);
+  --text-muted: rgba(0,0,0,0.35);
+}
+body.light-mode ::-webkit-scrollbar-thumb{background:rgba(0,0,0,0.12);}
+body.light-mode ::-webkit-scrollbar-thumb:hover{background:rgba(0,0,0,0.20);}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg-deep);color:var(--text-primary);font-family:var(--font-sans);font-size:var(--text-base);line-height:1.6;overflow:hidden;height:100vh;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;}
+::selection{background:rgba(108,92,231,0.30);}
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:4px;}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.15);}
+
+/* Background Mesh */
+#bg-mesh{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden;}
+#bg-mesh .blob{position:absolute;border-radius:50%;filter:blur(80px);opacity:0.12;will-change:transform;transition:opacity 0.5s ease;}
+body.light-mode #bg-mesh .blob{opacity:0.04;}
+#bg-mesh .blob:nth-child(1){width:600px;height:600px;background:var(--primary);top:-15%;left:-10%;animation:floatA 20s ease-in-out infinite;}
+#bg-mesh .blob:nth-child(2){width:500px;height:500px;background:var(--secondary);bottom:-10%;right:-5%;animation:floatB 25s ease-in-out infinite;}
+#bg-mesh .blob:nth-child(3){width:400px;height:400px;background:var(--accent);top:50%;left:50%;animation:floatC 18s ease-in-out infinite;}
+@keyframes floatA{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(60px,-40px) scale(1.05)}66%{transform:translate(-30px,30px) scale(0.95)}}
+@keyframes floatB{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(-50px,30px) scale(1.03)}66%{transform:translate(40px,-20px) scale(0.97)}}
+@keyframes floatC{0%,100%{transform:translate(0,0) scale(1)}25%{transform:translate(30px,20px) scale(1.04)}75%{transform:translate(-20px,-30px) scale(0.96)}}
+
+/* App Shell */
+#app{position:relative;z-index:1;display:flex;height:100vh;}
+#nav{width:48px;background:var(--bg-deep);border-right:0.5px solid var(--border-subtle);display:flex;flex-direction:column;align-items:center;padding:var(--space-3) 0;gap:var(--space-1);flex-shrink:0;}
+.nav-logo{width:30px;height:30px;border-radius:var(--radius-sm);background:linear-gradient(135deg,var(--primary),rgba(108,92,231,0.6));display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:700;font-size:var(--text-lg);color:#fff;margin-bottom:var(--space-2);position:relative;}
+.nav-logo::after{content:'';position:absolute;inset:-2px;border-radius:10px;background:linear-gradient(135deg,var(--primary),transparent);opacity:0.3;z-index:-1;}
+.nav-item{width:34px;height:34px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-muted);position:relative;border:none;background:transparent;transition:all 0.35s var(--spring);}
+.nav-item i{font-size:var(--icon-lg);}
+.nav-item:hover{color:var(--text-secondary);background:var(--bg-surface);transform:scale(1.05);}
+.nav-item.active{color:var(--primary);background:var(--primary-dim);}
+.nav-item.active::before{content:'';position:absolute;left:-8px;top:50%;transform:translateY(-50%);width:2px;height:16px;background:var(--primary);border-radius:2px;}
+.nav-item .badge{position:absolute;top:4px;right:4px;width:14px;height:14px;border-radius:50%;background:var(--red);color:#fff;font-size:var(--text-xs);display:flex;align-items:center;justify-content:center;font-weight:600;}
+.nav-spacer{flex:1;}
+.nav-avatar{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--secondary));display:flex;align-items:center;justify-content:center;font-size:var(--text-sm);color:#fff;font-weight:600;cursor:pointer;position:relative;}
+.nav-avatar .status{position:absolute;bottom:-1px;right:-1px;width:8px;height:8px;border-radius:50%;background:var(--green);border:2px solid var(--bg-deep);}
+
+/* Main Content */
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;}
+#topbar{display:flex;align-items:center;height:44px;padding:0 var(--space-6);gap:var(--space-3);flex-shrink:0;border-bottom:0.5px solid var(--border-subtle);}
+.topbar-title{font-family:var(--font-display);font-size:var(--text-lg);font-weight:600;letter-spacing:-0.01em;}
+.topbar-badge{font-size:var(--text-sm);color:var(--text-muted);background:var(--bg-surface);padding:var(--space-1) var(--space-2);border-radius:var(--space-1);border:0.5px solid var(--border-subtle);}
+#topbar-search{flex:1;max-width:260px;position:relative;}
+#topbar-search i{position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:var(--icon-sm);color:var(--text-muted);pointer-events:none;}
+#topbar-search input{width:100%;height:30px;background:var(--bg-glass);border:0.5px solid var(--border-subtle);border-radius:var(--radius-sm);padding:0 10px 0 30px;font-size:var(--text-base);color:var(--text-primary);outline:none;font-family:var(--font-sans);transition:border-color 0.3s var(--spring);}
+#topbar-search input:focus{border-color:var(--primary);background:var(--bg-surface);}
+#topbar-search input::placeholder{color:var(--text-muted);}
+.topbar-actions{display:flex;align-items:center;gap:var(--space-2);margin-left:auto;}
+.topbar-btn{width:30px;height:30px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--text-muted);cursor:pointer;transition:all 0.3s var(--spring);position:relative;}
+.topbar-btn:hover{background:var(--bg-surface);color:var(--text-secondary);transform:scale(1.05);}
+.topbar-btn .notif-dot{position:absolute;top:6px;right:6px;width:6px;height:6px;border-radius:50%;background:var(--primary);}
+
+#content-wrap{flex:1;overflow:hidden;position:relative;}
+.view{display:none;height:100%;overflow-y:auto;padding:var(--space-5) var(--space-6);}
+.view.active{display:block;animation:viewIn 0.4s var(--spring);}
+@keyframes viewIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+
+/* Agent Panel — L2 Glass */
+#agent-panel{width:0;background:var(--bg-glass);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-left:0.5px solid var(--border-subtle);display:flex;flex-direction:column;overflow:hidden;transition:width 0.5s var(--spring);flex-shrink:0;}
+#agent-panel.open{width:340px;}
+#agent-panel.collapsed{width:0;min-width:0;}
+.agent-header{display:flex;align-items:center;padding:var(--space-3) var(--space-4);border-bottom:0.5px solid var(--border-subtle);gap:var(--space-3);flex-shrink:0;}
+.agent-avatar{width:32px;height:32px;border-radius:var(--radius-sm);background:linear-gradient(135deg,var(--primary),var(--secondary));display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:700;font-size:var(--text-md);color:#fff;position:relative;flex-shrink:0;}
+.agent-avatar .pulse{position:absolute;inset:-3px;border-radius:10px;border:1.5px solid var(--primary-glow);animation:pulse-ring 2s ease-out infinite;}
+@keyframes pulse-ring{0%{opacity:1;transform:scale(1)}70%{opacity:0;transform:scale(1.2)}100%{opacity:0;transform:scale(1.3)}}
+.agent-info{flex:1;min-width:0;}
+.agent-name{font-size:var(--text-md);font-weight:600;display:block;letter-spacing:-0.01em;}
+.agent-status{font-size:var(--text-sm);color:var(--text-muted);display:flex;align-items:center;gap:var(--space-1);}
+.agent-status .dot{width:5px;height:5px;border-radius:50%;background:var(--green);display:inline-block;}
+.agent-session-select{display:flex;align-items:center;gap:var(--space-1);}
+.agent-session-select select{background:var(--bg-surface);border:0.5px solid var(--border-subtle);border-radius:var(--radius-sm);color:var(--text-secondary);font-size:var(--text-sm);padding:3px 6px;outline:none;font-family:var(--font-sans);cursor:pointer;}
+.agent-session-select button{width:22px;height:22px;border-radius:var(--radius-sm);border:none;background:var(--bg-surface);color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s var(--spring);font-size:var(--text-base);}
+.agent-session-select button:hover{background:var(--bg-glass-hover);color:var(--text-primary);transform:scale(1.05);}
+.agent-toggle{width:24px;height:24px;border-radius:var(--radius-sm);border:none;background:transparent;color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s var(--spring);font-size:var(--icon-sm);}
+.agent-toggle:hover{color:var(--text-primary);transform:scale(1.05);}
+
+/* Agent Context Bar */
+.agent-context{padding:var(--space-3) var(--space-4);border-bottom:0.5px solid var(--border-subtle);flex-shrink:0;}
+.agent-context-label{font-size:var(--text-sm);color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:var(--space-2);}
+.agent-context-view{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-base);color:var(--text-secondary);margin-bottom:var(--space-2);}
+.agent-context-view i{font-size:var(--icon-sm);color:var(--primary);}
+.agent-context-chips{display:flex;gap:var(--space-1);flex-wrap:wrap;}
+.context-chip{padding:var(--space-1) var(--space-2);border-radius:var(--space-1);background:var(--bg-surface);border:0.5px solid var(--border-subtle);font-size:var(--text-sm);color:var(--text-secondary);cursor:pointer;transition:all 0.25s var(--spring);}
+.context-chip:hover{background:var(--primary-dim);border-color:var(--primary);color:var(--primary);transform:translateY(-1px);}
+
+/* Suggested Actions */
+.agent-actions{padding:var(--space-3) var(--space-4);border-bottom:0.5px solid var(--border-subtle);flex-shrink:0;max-height:240px;overflow-y:auto;}
+.agent-actions-label{font-size:var(--text-sm);color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:var(--space-2);display:flex;align-items:center;gap:var(--space-2);}
+.agent-actions-label .count{font-size:var(--text-xs);color:var(--text-muted);background:var(--bg-surface);padding:1px 5px;border-radius:3px;}
+.action-card{background:var(--bg-glass);border:0.5px solid var(--border-subtle);border-radius:var(--radius-md);padding:var(--space-2) var(--space-3);margin-bottom:var(--space-2);transition:all 0.35s var(--spring);}
+.action-card:last-child{margin-bottom:0;}
+.action-card:hover{border-color:var(--border-glass);background:var(--bg-surface);box-shadow:0 4px 16px rgba(0,0,0,0.2);}
+.action-card-header{display:flex;align-items:flex-start;gap:var(--space-2);}
+.action-card-icon{width:24px;height:24px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:var(--text-md);}
+.action-card-icon.action{background:var(--primary-dim);color:var(--primary);}
+.action-card-icon.event{background:var(--accent-dim);color:var(--accent);}
+.action-card-icon.data{background:var(--secondary-dim);color:var(--secondary);}
+.action-card-icon.alert{background:var(--red-dim);color:var(--red);}
+.action-card-body{flex:1;min-width:0;}
+.action-card-title{font-size:var(--text-base);font-weight:500;line-height:1.3;}
+.action-card-desc{font-size:var(--text-sm);color:var(--text-muted);margin-top:2px;}
+.action-card-meta{display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);font-size:var(--text-xs);color:var(--text-muted);}
+.action-card-meta .trigger{background:var(--bg-surface);padding:1px 5px;border-radius:3px;}
+.action-card-meta .confidence{color:var(--green);}
+.action-card-footer{display:flex;gap:var(--space-2);margin-top:var(--space-2);justify-content:flex-end;}
+.btn-agent{font-size:var(--text-sm);padding:4px 10px;border-radius:var(--radius-sm);border:none;cursor:pointer;font-family:var(--font-sans);transition:all 0.25s var(--spring);}
+.btn-agent-primary{background:var(--primary);color:#fff;}
+.btn-agent-primary:hover{background:rgba(108,92,231,0.85);transform:translateY(-1px);box-shadow:0 4px 12px var(--primary-glow);}
+.btn-agent-primary:active{transform:scale(0.97);}
+.btn-agent-secondary{background:var(--bg-surface);color:var(--text-secondary);border:0.5px solid var(--border-subtle);}
+.btn-agent-secondary:hover{background:var(--bg-glass-hover);color:var(--text-primary);}
+.btn-agent-secondary:active{transform:scale(0.97);}
+
+/* Event Feed */
+.agent-events{padding:var(--space-3) var(--space-4);border-bottom:0.5px solid var(--border-subtle);flex-shrink:0;max-height:200px;overflow-y:auto;}
+.agent-events-label{font-size:var(--text-sm);color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:var(--space-2);}
+.event-item{display:flex;align-items:flex-start;gap:var(--space-2);padding:var(--space-1) 0;font-size:var(--text-sm);color:var(--text-secondary);}
+.event-dot{width:6px;height:6px;border-radius:50%;margin-top:3px;flex-shrink:0;}
+.event-dot.new{background:var(--primary);box-shadow:0 0 6px var(--primary-glow);}
+.event-dot.processed{background:var(--green);}
+.event-dot.alert{background:var(--red);}
+.event-text{flex:1;min-width:0;line-height:1.4;}
+.event-time{font-size:var(--text-xs);color:var(--text-muted);white-space:nowrap;}
+
+/* Chat */
+.agent-chat{flex:1;overflow-y:auto;padding:var(--space-3) var(--space-4);display:flex;flex-direction:column;gap:var(--space-2);min-height:0;}
+.chat-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--space-2);color:var(--text-muted);text-align:center;}
+.chat-empty i{font-size:var(--icon-xl);color:var(--text-muted);opacity:0.3;}
+.chat-empty-text{font-size:var(--text-base);max-width:200px;}
+.chat-empty-hint{font-size:var(--text-sm);max-width:180px;}
+.msg{display:flex;gap:var(--space-2);max-width:100%;animation:msgIn 0.3s var(--spring);}
+@keyframes msgIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+.msg-agent{align-items:flex-start;}
+.msg-user{flex-direction:row-reverse;}
+.msg-avatar{width:22px;height:22px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;font-size:var(--text-xs);color:#fff;flex-shrink:0;}
+.msg-agent .msg-avatar{background:linear-gradient(135deg,var(--primary),var(--secondary));}
+.msg-user .msg-avatar{background:var(--bg-surface);border:0.5px solid var(--border-subtle);color:var(--text-secondary);}
+.msg-bubble{padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);font-size:var(--text-base);line-height:1.5;max-width:260px;}
+.msg-agent .msg-bubble{background:var(--bg-glass);border:0.5px solid var(--border-subtle);}
+.msg-user .msg-bubble{background:var(--primary-dim);border:0.5px solid rgba(108,92,231,0.2);}
+.msg-time{font-size:var(--text-xs);color:var(--text-muted);margin-top:var(--space-1);}
+
+/* Agent Input */
+.agent-input-wrap{border-top:0.5px solid var(--border-subtle);padding:var(--space-2) var(--space-4);flex-shrink:0;}
+.agent-suggestions{display:flex;gap:var(--space-1);margin-bottom:var(--space-2);flex-wrap:wrap;}
+.suggest-chip{padding:2px 8px;border-radius:4px;background:var(--bg-surface);border:0.5px solid var(--border-subtle);font-size:var(--text-sm);color:var(--text-muted);cursor:pointer;transition:all 0.2s var(--spring);}
+.suggest-chip:hover{background:var(--primary-dim);border-color:var(--primary);color:var(--primary);}
+.agent-input-row{display:flex;gap:var(--space-2);align-items:center;}
+.agent-input-row input{flex:1;height:32px;background:var(--bg-glass);border:0.5px solid var(--border-subtle);border-radius:var(--radius-sm);padding:0 10px;font-size:var(--text-base);color:var(--text-primary);outline:none;font-family:var(--font-sans);transition:border-color 0.3s var(--spring);}
+.agent-input-row input:focus{border-color:var(--primary);}
+.agent-input-row input::placeholder{color:var(--text-muted);}
+.agent-send-btn{width:32px;height:32px;border-radius:var(--radius-sm);border:none;background:var(--primary);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.25s var(--spring);font-size:var(--icon-sm);}
+.agent-send-btn:hover{background:rgba(108,92,231,0.85);transform:scale(1.05);box-shadow:0 4px 12px var(--primary-glow);}
+
+/* View Styles */
+.view-title{font-family:var(--font-display);font-size:var(--text-xl);font-weight:600;margin-bottom:var(--space-4);letter-spacing:-0.02em;}
+.view-subtitle{font-size:var(--text-base);color:var(--text-muted);margin-bottom:var(--space-5);}
+
+/* Cards — L2 Glass */
+.card{background:var(--bg-glass);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:0.5px solid var(--border-subtle);border-radius:var(--radius-lg);padding:var(--space-4);transition:all 0.35s var(--spring);}
+.card:hover{border-color:var(--border-glass);background:var(--bg-surface);}
+.card-title{font-size:var(--text-md);font-weight:600;margin-bottom:var(--space-3);display:flex;align-items:center;gap:var(--space-2);}
+.card-title i{color:var(--primary);font-size:var(--icon-sm);}
+
+/* Grid layouts */
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4);}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-4);}
+.grid-4{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:var(--space-4);}
+
+/* People */
+.people-layout{display:flex;gap:var(--space-4);height:calc(100% - 40px);}
+.people-list{width:280px;flex-shrink:0;display:flex;flex-direction:column;gap:var(--space-2);overflow-y:auto;}
+.people-search{position:relative;margin-bottom:var(--space-2);}
+.people-search i{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:var(--icon-sm);pointer-events:none;}
+.people-search input{width:100%;height:32px;background:var(--bg-glass);border:0.5px solid var(--border-subtle);border-radius:var(--radius-sm);padding:0 10px 0 30px;font-size:var(--text-base);color:var(--text-primary);outline:none;font-family:var(--font-sans);}
+.people-search input:focus{border-color:var(--primary);}
+.person-card{padding:var(--space-3) var(--space-3);border-radius:var(--radius-md);background:var(--bg-glass);border:0.5px solid var(--border-subtle);cursor:pointer;transition:all 0.25s var(--spring);display:flex;align-items:center;gap:var(--space-3);}
+.person-card:hover{background:var(--bg-surface);border-color:var(--border-glass);transform:translateX(2px);}
+.person-card.active{background:var(--primary-dim);border-color:var(--primary);}
+.person-avatar{width:32px;height:32px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:var(--text-base);color:#fff;flex-shrink:0;}
+.person-info{flex:1;min-width:0;}
+.person-name{font-size:var(--text-base);font-weight:500;}
+.person-title{font-size:var(--text-sm);color:var(--text-muted);}
+.person-meta{font-size:var(--text-xs);color:var(--text-muted);margin-top:2px;}
+.people-detail{flex:1;overflow-y:auto;}
+
+/* Inbox */
+.inbox-layout{display:flex;gap:var(--space-4);height:calc(100% - 40px);}
+.inbox-list{width:360px;flex-shrink:0;display:flex;flex-direction:column;gap:var(--space-2);overflow-y:auto;}
+.inbox-filters{display:flex;gap:var(--space-1);margin-bottom:var(--space-2);flex-wrap:wrap;}
+.inbox-filter{padding:var(--space-1) var(--space-3);border-radius:var(--space-1);background:var(--bg-glass);border:0.5px solid var(--border-subtle);font-size:var(--text-sm);color:var(--text-muted);cursor:pointer;transition:all 0.2s var(--spring);font-family:var(--font-sans);}
+.inbox-filter:hover{background:var(--bg-surface);color:var(--text-secondary);}
+.inbox-filter.active{background:var(--primary-dim);border-color:var(--primary);color:var(--primary);}
+.email-card{padding:var(--space-3) var(--space-3);border-radius:var(--radius-md);background:var(--bg-glass);border:0.5px solid var(--border-subtle);cursor:pointer;transition:all 0.25s var(--spring);}
+.email-card:hover{background:var(--bg-surface);border-color:var(--border-glass);}
+.email-card.unread{border-left:2px solid var(--primary);}
+.email-from{font-size:var(--text-base);font-weight:500;display:flex;align-items:center;gap:var(--space-2);}
+.email-from .acct-tag{font-size:var(--text-xs);padding:1px 5px;border-radius:3px;font-weight:400;}
+.email-subject{font-size:var(--text-sm);color:var(--text-secondary);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.email-preview{font-size:var(--text-xs);color:var(--text-muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.email-time{font-size:var(--text-xs);color:var(--text-muted);margin-top:var(--space-1);}
+.inbox-detail{flex:1;overflow-y:auto;background:var(--bg-glass);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-radius:var(--radius-lg);border:0.5px solid var(--border-subtle);padding:var(--space-4);}
+
+/* Graph */
+.graph-layout{display:flex;gap:var(--space-4);height:calc(100% - 40px);}
+.graph-canvas-wrap{flex:1;background:var(--bg-glass);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-radius:var(--radius-lg);border:0.5px solid var(--border-subtle);position:relative;overflow:hidden;}
+.graph-canvas-wrap canvas{width:100%;height:100%;}
+.graph-sidebar{width:260px;flex-shrink:0;display:flex;flex-direction:column;gap:var(--space-3);overflow-y:auto;}
+.graph-info{padding:var(--space-3);background:var(--bg-glass);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-radius:var(--radius-md);border:0.5px solid var(--border-subtle);}
+.graph-info-label{font-size:var(--text-sm);color:var(--text-muted);margin-bottom:var(--space-1);}
+.graph-info-value{font-size:var(--text-base);font-weight:500;}
+/* Graph sidebar */
+
+/* Calendar */
+.calendar-header{display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-4);}
+.calendar-nav{display:flex;gap:var(--space-1);}
+.calendar-nav button{width:30px;height:30px;border-radius:var(--radius-sm);border:none;background:var(--bg-glass);color:var(--text-secondary);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s var(--spring);font-size:var(--icon-sm);}
+.calendar-nav button:hover{background:var(--bg-surface);color:var(--text-primary);}
+.calendar-month{font-family:var(--font-display);font-size:var(--text-xl);font-weight:600;flex:1;}
+.calendar-today-btn{padding:var(--space-1) var(--space-3);border-radius:var(--radius-sm);border:0.5px solid var(--border-subtle);background:var(--bg-glass);color:var(--text-secondary);font-size:var(--text-sm);cursor:pointer;font-family:var(--font-sans);transition:all 0.2s var(--spring);}
+.calendar-today-btn:hover{background:var(--bg-surface);color:var(--text-primary);}
+.calendar-wrap{display:flex;gap:var(--space-4);}
+.calendar-grid-wrap{flex:1;}
+.calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;}
+.calendar-day-header{font-size:var(--text-xs);color:var(--text-muted);text-align:center;padding:var(--space-2) 0 var(--space-1);text-transform:uppercase;letter-spacing:0.06em;font-weight:500;}
+.calendar-day{aspect-ratio:1;display:flex;align-items:center;justify-content:center;font-size:var(--text-sm);border-radius:var(--radius-sm);cursor:pointer;transition:all 0.2s var(--spring);position:relative;flex-direction:column;gap:2px;}
+.calendar-day:hover{background:var(--bg-surface);}
+.calendar-day.today{background:var(--primary-dim);color:var(--primary);font-weight:600;}
+.calendar-day.today:hover{background:var(--primary-dim);}
+.calendar-day.selected{background:var(--primary);color:#fff;font-weight:600;}
+.calendar-day.selected:hover{background:var(--primary);}
+.calendar-day.other{color:var(--text-muted);opacity:0.3;pointer-events:none;}
+.calendar-day-dots{display:flex;gap:2px;position:absolute;bottom:4px;}
+.calendar-day-dot{width:4px;height:4px;border-radius:50%;}
+.calendar-day-dot.meeting{background:var(--primary);}
+.calendar-day-dot.email{background:var(--secondary);}
+.calendar-day-dot.deadline{background:var(--red);}
+.calendar-day-dot.extracted{background:var(--yellow);}
+.calendar-day-num{font-size:var(--text-sm);line-height:1;}
+.calendar-sidebar{width:300px;flex-shrink:0;display:flex;flex-direction:column;gap:var(--space-2);overflow-y:auto;max-height:500px;}
+.calendar-sidebar-header{font-size:var(--text-md);font-weight:600;color:var(--text-secondary);padding-bottom:var(--space-2);border-bottom:0.5px solid var(--border-subtle);}
+.calendar-sidebar-empty{padding:var(--space-8) 0;text-align:center;color:var(--text-muted);font-size:var(--text-sm);}
+.agenda-item{padding:var(--space-3);background:var(--bg-glass);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-radius:var(--radius-md);border:0.5px solid var(--border-subtle);cursor:pointer;transition:all 0.25s var(--spring);}
+.agenda-item:hover{background:var(--bg-surface);border-color:var(--border-glass);}
+.agenda-item-header{display:flex;align-items:center;gap:var(--space-2);margin-bottom:var(--space-1);}
+.agenda-item-type{width:20px;height:20px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:.5rem;color:#fff;flex-shrink:0;}
+.agenda-item-type.meeting{background:var(--primary);}
+.agenda-item-type.email{background:var(--secondary);}
+.agenda-item-type.deadline{background:var(--red);}
+.agenda-item-type.extracted{background:var(--yellow);color:#000;}
+.agenda-item-time{font-size:var(--text-xs);color:var(--primary);font-weight:500;}
+.agenda-item-title{font-size:var(--text-base);font-weight:500;margin-top:2px;}
+.agenda-item-meta{font-size:var(--text-xs);color:var(--text-muted);margin-top:2px;display:flex;align-items:center;gap:var(--space-2);}
+.agenda-item-meta .src-link{color:var(--primary);cursor:pointer;text-decoration:none;font-size:var(--text-xs);}
+.agenda-item-meta .src-link:hover{text-decoration:underline;}
+
+/* Settings */
+.settings-group{margin-bottom:var(--space-4);}
+.settings-group-title{font-size:var(--text-md);font-weight:600;margin-bottom:var(--space-3);color:var(--text-secondary);}
+.settings-row{display:flex;align-items:center;justify-content:space-between;padding:var(--space-2) 0;border-bottom:0.5px solid var(--border-subtle);}
+.settings-row:last-child{border:none;}
+.settings-label{font-size:var(--text-base);}
+.settings-desc{font-size:var(--text-sm);color:var(--text-muted);}
+.toggle{width:34px;height:20px;border-radius:10px;background:var(--bg-surface);border:0.5px solid var(--border-subtle);cursor:pointer;position:relative;transition:all 0.3s var(--spring);}
+.toggle.on{background:var(--primary);border-color:var(--primary);}
+.toggle::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;transition:all 0.3s var(--spring);}
+.toggle.on::after{left:16px;}
+
+/* Files */
+.files-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:var(--space-3);}
+.file-card{padding:var(--space-3);background:var(--bg-glass);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border-radius:var(--radius-md);border:0.5px solid var(--border-subtle);cursor:pointer;transition:all 0.25s var(--spring);}
+.file-card:hover{border-color:var(--border-glass);transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,0.2);}
+.file-icon{width:36px;height:36px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;font-size:var(--icon-md);margin-bottom:var(--space-2);}
+.file-icon.doc{background:var(--primary-dim);color:var(--primary);}
+.file-icon.pdf{background:var(--red-dim);color:var(--red);}
+.file-icon.img{background:var(--secondary-dim);color:var(--secondary);}
+.file-icon.code{background:var(--accent-dim);color:var(--accent);}
+.file-name{font-size:var(--text-base);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.file-size{font-size:var(--text-xs);color:var(--text-muted);margin-top:2px;}
+.file-tags{display:flex;gap:var(--space-1);margin-top:var(--space-1);flex-wrap:wrap;}
+.file-tag{font-size:var(--text-xs);padding:1px 5px;border-radius:3px;background:var(--bg-surface);color:var(--text-muted);}
+
+/* Full Agent View */
+.agent-full{padding:0;display:flex;flex-direction:column;height:100%;}
+.agent-full-header{padding:var(--space-4) var(--space-5);border-bottom:0.5px solid var(--border-subtle);}
+.agent-full-title{font-family:var(--font-display);font-size:var(--text-lg);font-weight:600;}
+.agent-full-sub{font-size:var(--text-sm);color:var(--text-muted);margin-top:2px;}
+.agent-full-body{flex:1;display:flex;overflow:hidden;}
+.agent-full-chat{flex:1;overflow-y:auto;padding:var(--space-4) var(--space-5);display:flex;flex-direction:column;gap:var(--space-3);}
+.agent-full-memory{width:260px;border-left:0.5px solid var(--border-subtle);padding:var(--space-4);overflow-y:auto;flex-shrink:0;}
+.agent-full-input{padding:var(--space-3) var(--space-5);border-top:0.5px solid var(--border-subtle);display:flex;gap:var(--space-2);}
+.agent-full-input input{flex:1;height:36px;background:var(--bg-glass);border:0.5px solid var(--border-subtle);border-radius:var(--radius-sm);padding:0 12px;font-size:var(--text-base);color:var(--text-primary);outline:none;font-family:var(--font-sans);}
+.agent-full-input input:focus{border-color:var(--primary);}
+
+/* Memory section */
+.memory-section{margin-bottom:var(--space-4);}
+.memory-title{font-size:var(--text-sm);font-weight:600;color:var(--text-secondary);margin-bottom:var(--space-2);display:flex;align-items:center;gap:var(--space-2);}
+.memory-title i{font-size:var(--icon-sm);color:var(--primary);}
+.memory-entity{display:flex;align-items:center;gap:var(--space-2);padding:var(--space-1) var(--space-2);font-size:var(--text-sm);color:var(--text-secondary);border-radius:var(--space-1);cursor:pointer;transition:all 0.2s var(--spring);}
+.memory-entity:hover{background:var(--bg-surface);}
+.memory-entity .dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
+.memory-entity .dot.person{background:var(--primary);}
+.memory-entity .dot.org{background:var(--accent);}
+.memory-entity .dot.project{background:var(--secondary);}
+.memory-entity .dot.concept{background:var(--yellow);}
+
+/* Background Learning */
+.dream-cycle{padding:var(--space-3) var(--space-4);background:var(--bg-glass);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:0.5px solid var(--border-subtle);border-radius:var(--radius-md);margin-top:var(--space-2);}
+.dream-cycle-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-2);}
+.dream-cycle-label{font-size:var(--text-sm);color:var(--text-muted);}
+.dream-cycle-status{font-size:var(--text-xs);color:var(--primary);}
+.dream-bar{height:3px;background:var(--bg-surface);border-radius:2px;overflow:hidden;}
+.dream-bar-fill{height:100%;background:linear-gradient(90deg,var(--primary),var(--secondary));border-radius:2px;transition:width 0.5s var(--spring);width:0%;}
+.dream-cycle.active .dream-bar-fill{animation:dreamProgress 8s linear infinite;}
+@keyframes dreamProgress{0%{width:0%}50%{width:70%}100%{width:100%}}
+.dream-cycle-meta{display:flex;justify-content:space-between;margin-top:var(--space-1);font-size:var(--text-xs);color:var(--text-muted);}
+
+/* Toast — L3 Elevated Glass */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(100px);background:var(--bg-elevated);backdrop-filter:blur(32px);-webkit-backdrop-filter:blur(32px);border:0.5px solid var(--border-glass);border-radius:var(--radius-md);padding:var(--space-3) var(--space-4);font-size:var(--text-base);color:var(--text-primary);display:flex;align-items:center;gap:var(--space-3);z-index:999;opacity:0;transition:all 0.5s var(--spring);pointer-events:none;white-space:nowrap;box-shadow:0 16px 48px rgba(0,0,0,0.5);}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);pointer-events:auto;}
+.toast .t-undo{color:var(--primary);cursor:pointer;font-size:var(--text-sm);}
+.toast .t-close{cursor:pointer;color:var(--text-muted);font-size:var(--text-sm);}
+
+/* Onboarding */
+.onboarding-overlay{position:fixed;inset:0;z-index:998;background:var(--bg-deep);display:none;flex-direction:column;align-items:center;justify-content:center;gap:var(--space-5);}
+.onboarding-overlay.show{display:flex;}
+.onboarding-step{text-align:center;max-width:340px;animation:viewIn 0.5s var(--spring);}
+.onboarding-step .icon{width:56px;height:56px;border-radius:var(--radius-lg);display:flex;align-items:center;justify-content:center;margin:0 auto var(--space-4);font-size:var(--text-2xl);}
+.onboarding-step .icon.step1{background:var(--primary-dim);color:var(--primary);}
+.onboarding-step .icon.step2{background:var(--accent-dim);color:var(--accent);}
+.onboarding-step .icon.step3{background:var(--secondary-dim);color:var(--secondary);}
+.onboarding-step h2{font-family:var(--font-display);font-size:var(--text-lg);font-weight:600;margin-bottom:var(--space-2);letter-spacing:-0.02em;}
+.onboarding-step p{font-size:var(--text-base);color:var(--text-secondary);line-height:1.6;}
+.onboarding-dots{display:flex;gap:var(--space-2);}
+.onboarding-dot{width:8px;height:8px;border-radius:50%;background:var(--bg-surface);cursor:pointer;transition:all 0.3s var(--spring);border:none;}
+.onboarding-dot.active{background:var(--primary);width:24px;border-radius:4px;}
+.onboarding-btn{padding:var(--space-3) var(--space-6);border-radius:var(--radius-sm);border:none;background:var(--primary);color:#fff;font-size:var(--text-base);cursor:pointer;font-family:var(--font-sans);transition:all 0.25s var(--spring);}
+.onboarding-btn:hover{background:rgba(108,92,231,0.85);transform:translateY(-1px);box-shadow:0 4px 16px var(--primary-glow);}
+.onboarding-btn:active{transform:scale(0.97);}
+.onboarding-skip{background:transparent;border:none;color:var(--text-muted);font-size:var(--text-sm);cursor:pointer;font-family:var(--font-sans);}
+.onboarding-skip:hover{color:var(--text-secondary);}
+
+/* Empty state */
+.empty-state{padding:var(--space-10);text-align:center;color:var(--text-muted);}
+.empty-state i{font-size:var(--icon-2xl);opacity:0.2;margin-bottom:var(--space-3);}
+.empty-state-title{font-size:var(--icon-sm);color:var(--text-secondary);margin-bottom:var(--space-1);}
+.empty-state-desc{font-size:var(--text-sm);}
+
+/* Splash */
+.splash{position:fixed;inset:0;z-index:9999;background:var(--bg-deep);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:var(--space-3);transition:opacity 0.6s ease-out;}
+.splash.hidden{opacity:0;pointer-events:none;}
+.splash-logo{width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,var(--primary),var(--secondary));display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:700;font-size:var(--text-2xl);color:#fff;box-shadow:0 8px 32px var(--primary-glow);}
+.splash-name{font-family:var(--font-display);font-size:var(--text-xl);font-weight:600;letter-spacing:-0.02em;}
+.splash-sub{font-size:var(--text-sm);color:var(--text-muted);}
+/* ===== END CSS ===== */
+</style>
+</head>
+<body>
+
+<div id="splash" class="splash">
+  <div class="splash-logo">R</div>
+  <div class="splash-name">SendPalm</div>
+  <div class="splash-sub">AI Communication Copilot</div>
+</div>
+
+<div id="bg-mesh"><div class="blob"></div><div class="blob"></div><div class="blob"></div></div>
+
+<div id="app">
+  <nav id="nav">
+    <div class="nav-logo">R</div>
+    <button class="nav-item active" data-view="inbox" title="Inbox"><i class="ph ph-tray"></i><span class="badge">3</span></button>
+    <button class="nav-item" data-view="people" title="People"><i class="ph ph-users"></i></button>
+    <button class="nav-item" data-view="calendar" title="Calendar"><i class="ph ph-calendar-blank"></i></button>
+    <button class="nav-item" data-view="agent" title="Agent"><i class="ph ph-robot"></i></button>
+    <button class="nav-item" data-view="graph" title="Network"><i class="ph ph-share-network"></i></button>
+    <button class="nav-item" data-view="files" title="Files"><i class="ph ph-folder"></i></button>
+    <button class="nav-item" data-view="settings" title="Settings"><i class="ph ph-gear"></i></button>
+    <div class="nav-spacer"></div>
+    <div class="nav-avatar" title="Account"><span>EH</span><span class="status"></span></div>
+  </nav>
+
+  <div id="main">
+    <div id="topbar">
+      <span class="topbar-title" id="topbar-title">Inbox</span>
+      <span class="topbar-badge" id="topbar-badge">6 accounts</span>
+      <div id="topbar-search"><i class="ph ph-magnifying-glass"></i><input type="text" placeholder="Search people, messages, entities..."></div>
+      <div class="topbar-actions">
+        <button class="topbar-btn" id="theme-toggle" title="Toggle Theme"><i class="ph ph-sun"></i></button>
+        <button class="topbar-btn" id="notif-btn" title="Notifications" style="position:relative"><i class="ph ph-bell"></i><span class="notif-dot"></span></button>
+        <button class="topbar-btn" id="agent-toggle-btn" title="Toggle Agent"><i class="ph ph-chat-circle-dots"></i></button>
+      </div>
+    </div>
+    <div id="content-wrap">
+      <!-- INBOX VIEW -->
+      <div class="view active" data-view="inbox">
+        <div class="inbox-layout">
+          <div class="inbox-list" id="inbox-list"></div>
+          <div class="inbox-detail" id="inbox-detail"><div class="empty-state"><i class="ph ph-envelope-open"></i><div class="empty-state-title">Select a message</div><div class="empty-state-desc">Choose an email to view its contents</div></div></div>
+        </div>
+      </div>
+
+      <!-- PEOPLE VIEW -->
+      <div class="view" data-view="people">
+        <div class="people-layout">
+          <div class="people-list" id="people-list"></div>
+          <div class="people-detail" id="people-detail"><div class="empty-state"><i class="ph ph-user-circle"></i><div class="empty-state-title">Select a contact</div><div class="empty-state-desc">Choose a person to view details</div></div></div>
+        </div>
+      </div>
+
+      <!-- NETWORK VIEW -->
+      <div class="view" data-view="graph">
+        <div class="graph-layout">
+          <div class="graph-canvas-wrap"><canvas id="graph-canvas"></canvas></div>
+          <div class="graph-sidebar">
+            <div class="graph-info">
+              <div class="graph-info-label">Your Network</div>
+              <div class="graph-info-value" id="graph-stats" style="font-size:var(--text-sm);color:var(--text-muted);font-weight:400;">${state.contacts.length} contacts · ${state.gbrain.relationships.length} connections</div>
+            </div>
+            <div class="graph-info" id="graph-org-list">
+              <div class="card-title" style="margin-bottom:var(--space-2);font-size:var(--text-md);"><i class="ph ph-buildings"></i>Organizations</div>
+              <div id="graph-orgs"></div>
+            </div>
+            <div class="graph-info">
+              <div class="card-title" style="margin-bottom:var(--space-2);font-size:var(--text-md);"><i class="ph ph-user-switch"></i>Recent Connections</div>
+              <div id="graph-recent"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- FULL AGENT VIEW -->
+      <div class="view" data-view="agent">
+        <div class="agent-full">
+          <div class="agent-full-header">
+            <div class="agent-full-title">SendPalm Agent</div>
+            <div class="agent-full-sub">Gbrain v0.3 · 8-layer memory · 12 entities in knowledge graph</div>
+          </div>
+          <div class="agent-full-body">
+            <div class="agent-full-chat" id="agent-full-chat">
+              <div class="msg msg-agent"><div class="msg-avatar">R</div><div class="msg-bubble">I'm monitoring your inbox and contacts. Ask me to draft emails, schedule meetings, or find information across your accounts.</div></div>
+            </div>
+            <div class="agent-full-memory" id="agent-full-memory">
+              <div class="memory-section"><div class="memory-title"><i class="ph ph-user-list"></i>Your Contacts</div><div id="memory-people"></div></div>
+              <div class="memory-section"><div class="memory-title"><i class="ph ph-buildings"></i>Organizations</div><div id="memory-orgs"></div></div>
+              <div class="memory-section"><div class="memory-title"><i class="ph ph-chats"></i>Recent Activity</div><div id="memory-recent"></div></div>
+              <div class="memory-section"><div class="memory-title"><i class="ph ph-lightbulb"></i>Suggestions</div>
+                <div class="memory-entity" onclick="switchView('inbox')" style="cursor:pointer;"><i class="ph ph-envelope" style="font-size:.55rem;color:var(--primary)"></i> 3 unread messages to review</div>
+                <div class="memory-entity" onclick="switchView('calendar')" style="cursor:pointer;"><i class="ph ph-calendar" style="font-size:.55rem;color:var(--secondary)"></i> Q2 Strategy meeting tomorrow</div>
+                <div class="memory-entity" onclick="switchView('people')" style="cursor:pointer;"><i class="ph ph-user-plus" style="font-size:.55rem;color:var(--accent)"></i> New contact: James Wilson (Apex)</div>
+              </div>
+            </div>
+          </div>
+          <div class="agent-full-input">
+            <input type="text" id="agent-full-input" placeholder="Ask SendPalm to do something..." autocomplete="off">
+            <button class="agent-send-btn" id="agent-full-send"><i class="ph ph-arrow-up"></i></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- FILES VIEW -->
+      <div class="view" data-view="files">
+        <div class="view-title">Files</div>
+        <div class="view-subtitle">Documents with extracted metadata</div>
+        <div class="files-grid" id="files-grid"></div>
+      </div>
+
+      <!-- CALENDAR VIEW -->
+      <div class="view" data-view="calendar">
+        <div class="calendar-header">
+          <div class="calendar-nav">
+            <button id="cal-prev"><i class="ph ph-caret-left"></i></button>
+            <button id="cal-next"><i class="ph ph-caret-right"></i></button>
+          </div>
+          <div class="calendar-month" id="cal-month"></div>
+          <button class="calendar-today-btn" id="cal-today">Today</button>
+        </div>
+        <div class="calendar-wrap">
+          <div class="calendar-grid-wrap">
+            <div class="calendar-grid" id="cal-grid"></div>
+          </div>
+          <div class="calendar-sidebar" id="cal-sidebar">
+            <div class="calendar-sidebar-header">Select a day</div>
+            <div class="calendar-sidebar-empty">Click a date to see all events, emails, and deadlines</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SETTINGS VIEW -->
+      <div class="view" data-view="settings">
+        <div class="view-title">Settings</div>
+        <div class="view-subtitle">Configure accounts, agent behavior, and knowledge graph</div>
+        <div class="settings-group">
+          <div class="settings-group-title">Accounts</div>
+          <div id="settings-accounts"></div>
+        </div>
+        <div class="settings-group">
+          <div class="settings-group-title">Agent & Memory</div>
+          <div class="settings-row"><div><div class="settings-label">Smart Contact Detection</div><div class="settings-desc">Automatically identify contacts, orgs, and projects from messages</div></div><div class="toggle on" data-setting="auto-extract"></div></div>
+          <div class="settings-row"><div><div class="settings-label">Background Learning</div><div class="settings-desc">Idle-time relationship discovery and contact enrichment</div></div><div class="toggle on" data-setting="dream-cycle"></div></div>
+          <div class="settings-row"><div><div class="settings-label">Agentic actions</div><div class="settings-desc">Proactive action suggestions on data events</div></div><div class="toggle on" data-setting="agentic-actions"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AGENT PANEL -->
+  <aside id="agent-panel" class="open">
+    <div class="agent-header">
+      <div class="agent-avatar">R<span class="pulse"></span></div>
+      <div class="agent-info">
+        <span class="agent-name">SendPalm</span>
+        <span class="agent-status"><span class="dot"></span> Active · Gbrain v0.3</span>
+      </div>
+      <div class="agent-session-select">
+        <select id="session-select"></select>
+        <button id="new-session-btn" title="New Session"><i class="ph ph-plus"></i></button>
+      </div>
+      <button class="agent-toggle" id="agent-collapse-btn" title="Collapse"><i class="ph ph-caret-right"></i></button>
+    </div>
+
+    <div class="agent-context" id="agent-context">
+      <div class="agent-context-label">Context</div>
+      <div class="agent-context-view" id="agent-context-view"><i class="ph ph-tray"></i> Viewing: Inbox</div>
+      <div class="agent-context-chips" id="agent-context-chips"></div>
+    </div>
+
+    <div class="agent-actions" id="agent-actions">
+      <div class="agent-actions-label">Suggested Actions <span class="count" id="action-count">0</span></div>
+      <div id="action-list"></div>
+    </div>
+
+    <div class="agent-events" id="agent-events">
+      <div class="agent-events-label">Event Stream</div>
+      <div id="event-list"></div>
+    </div>
+
+    <div class="agent-chat" id="agent-chat">
+      <div class="chat-empty">
+        <i class="ph ph-chat-circle"></i>
+        <div class="chat-empty-text">Start a conversation with SendPalm</div>
+        <div class="chat-empty-hint">Ask me to draft emails, extract entities, or analyze your communications</div>
+      </div>
+    </div>
+
+    <div class="agent-input-wrap">
+      <div class="agent-suggestions" id="agent-chips">
+        <span class="suggest-chip" data-prompt="Draft an email to Sarah about Q2 review">Draft email</span>
+        <span class="suggest-chip" data-prompt="Extract all entities from my recent messages">Extract entities</span>
+        <span class="suggest-chip" data-prompt="Show me my knowledge graph insights">Graph insights</span>
+        <span class="suggest-chip" data-prompt="Analyze my recent messages and contacts">Analyze contacts</span>
+      </div>
+      <div class="agent-input-row">
+        <input type="text" id="agent-input" placeholder="Ask SendPalm..." autocomplete="off">
+        <button class="agent-send-btn" id="agent-send"><i class="ph ph-arrow-up"></i></button>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"><span id="toast-text"></span><span class="t-undo" id="toast-undo"></span><span class="t-close" id="toast-close">✕</span></div>
+
+<script>
+// =============================================================================
+// STATE — Ontology + Gbrain + AIP Actions + Sessions
+// =============================================================================
+const state = {
+  view: 'inbox',
+  agentOpen: true,
+  calMonth: new Date().getMonth(),
+  calYear: new Date().getFullYear(),
+  selectedPerson: null,
+  selectedEmail: null,
+  selectedEmailIndex: 0,
+  selectedDay: null,
+
+  sessions: [
+    { id: 's1', name: 'Main', messages: [] },
+    { id: 's2', name: 'Entity Review', messages: [] },
+    { id: 's3', name: 'Q2 Planning', messages: [] }
+  ],
+  activeSession: 's1',
+
+  events: [
+    { id: 'e1', text: 'New email from Sarah Chen: "Q2 Strategy Review"', type: 'new', time: '2m ago' },
+    { id: 'e2', text: 'Sarah Chen available for meeting tomorrow 2pm', type: 'processed', time: '5m ago' },
+    { id: 'e3', text: 'James Wilson (Apex Solutions) sent partnership proposal', type: 'new', time: '12m ago' },
+    { id: 'e4', text: 'Data Migration project 85% complete - Alice Wang', type: 'processed', time: '18m ago' },
+    { id: 'e5', text: 'Market Expansion budget approved - board signoff', type: 'processed', time: '25m ago' }
+  ],
+
+  actions: [
+    { id: 'a1', title: 'Reply to Sarah about Q2 strategy', desc: 'She proposed a meeting tomorrow at 2pm to review slides', icon: 'action', trigger: 'New email', confidence: 0.92, workflow: ['Review email', 'Draft reply', 'Suggest time', 'Send'] },
+    { id: 'a2', title: 'Schedule Q2 strategy call', desc: 'Sarah Chen, Alice Wang, and Marcus Johnson', icon: 'event', trigger: 'Email thread', confidence: 0.88, workflow: ['Check calendar', 'Find avail time', 'Create invite', 'Notify'] },
+    { id: 'a3', title: 'Add James Wilson to contacts', desc: 'VP Partnerships at Apex Solutions — sent partnership proposal', icon: 'data', trigger: 'New email from unknown', confidence: 0.95, workflow: ['Extract contact info', 'Create contact', 'Link to Apex org', 'Suggest follow-up'] }
+  ],
+
+  gbrain: {
+    entities: [
+      { name: 'Sarah Chen', type: 'person', org: 'Acme Corp', mentions: 12, confidence: 0.94 },
+      { name: 'Marcus Johnson', type: 'person', org: 'TechVentures', mentions: 8, confidence: 0.91 },
+      { name: 'Acme Corp', type: 'org', domain: 'acmecorp.com', mentions: 15, confidence: 0.96 },
+      { name: 'TechVentures', type: 'org', domain: 'techventures.io', mentions: 6, confidence: 0.89 },
+      { name: 'Q2 Strategy', type: 'project', status: 'active', mentions: 9, confidence: 0.93 },
+      { name: 'Market Expansion', type: 'project', status: 'planning', mentions: 5, confidence: 0.87 },
+      { name: 'Alice Wang', type: 'person', org: 'Acme Corp', mentions: 7, confidence: 0.90 },
+      { name: 'Bob Kim', type: 'person', org: 'TechVentures', mentions: 4, confidence: 0.85 },
+      { name: 'Data Migration', type: 'project', status: 'completed', mentions: 6, confidence: 0.88 },
+      { name: 'Apex Solutions', type: 'org', domain: 'apex.io', mentions: 4, confidence: 0.82 },
+      { name: 'Dr. Lisa Park', type: 'person', org: 'Stanford', mentions: 3, confidence: 0.79 },
+      { name: 'Fundraising Q3', type: 'project', status: 'active', mentions: 7, confidence: 0.91 }
+    ],
+    relationships: [
+      { from: 'Sarah Chen', to: 'Acme Corp', type: 'works_at' },
+      { from: 'Marcus Johnson', to: 'TechVentures', type: 'works_at' },
+      { from: 'Alice Wang', to: 'Acme Corp', type: 'works_at' },
+      { from: 'Bob Kim', to: 'TechVentures', type: 'works_at' },
+      { from: 'Sarah Chen', to: 'Q2 Strategy', type: 'leads' },
+      { from: 'Marcus Johnson', to: 'Market Expansion', type: 'leads' },
+      { from: 'Sarah Chen', to: 'Alice Wang', type: 'reports_to' },
+      { from: 'Alice Wang', to: 'Data Migration', type: 'involved_in' },
+      { from: 'Acme Corp', to: 'Apex Solutions', type: 'partner' },
+      { from: 'Dr. Lisa Park', to: 'Fundraising Q3', type: 'advisor' }
+    ],
+    dreaming: false,
+    dreamProgress: 0,
+    notes: `Sarah Chen works at Acme Corp as VP of Engineering.
+She leads the Q2 Strategy initiative.
+Alice Wang also works at Acme Corp and reports to Sarah.
+Marcus Johnson founded TechVentures, leading Market Expansion.
+Bob Kim is CTO at TechVentures.
+Acme Corp has a partnership with Apex Solutions.
+Dr. Lisa Park from Stanford advises on Fundraising Q3.
+Data Migration project completed last quarter.`
+  },
+
+  accounts: [
+    { id: 'ac1', email: 'edwin@sendpalm.com', provider: 'SendPalm', color: '#6C5CE7', unread: 2 },
+    { id: 'ac2', email: 'edwin.h@acmecorp.com', provider: 'Acme Corp', color: '#4ECDC4', unread: 1 },
+    { id: 'ac3', email: 'edwin@gmail.com', provider: 'Gmail', color: '#ef4444', unread: 3 },
+    { id: 'ac4', email: 'edwin@outlook.com', provider: 'Outlook', color: '#3b82f6', unread: 0 },
+    { id: 'ac5', email: 'edwin@slack.com', provider: 'Slack', color: '#d4a574', unread: 5 },
+    { id: 'ac6', email: 'edwin@techventures.io', provider: 'TechVentures', color: '#facc15', unread: 1 }
+  ],
+
+  contacts: [
+    { id: 'c1', name: 'Sarah Chen', email: 'sarah@acmecorp.com', org: 'Acme Corp', role: 'VP Engineering', avatar: '#6C5CE7', initials: 'SC', accounts: ['ac2','ac6'], lastContact: '2h ago', threadCount: 24 },
+    { id: 'c2', name: 'Marcus Johnson', email: 'marcus@techventures.io', org: 'TechVentures', role: 'CEO', avatar: '#4ECDC4', initials: 'MJ', accounts: ['ac5','ac6'], lastContact: '1d ago', threadCount: 18 },
+    { id: 'c3', name: 'Alice Wang', email: 'alice@acmecorp.com', org: 'Acme Corp', role: 'Product Manager', avatar: '#d4a574', initials: 'AW', accounts: ['ac2'], lastContact: '3d ago', threadCount: 12 },
+    { id: 'c4', name: 'Bob Kim', email: 'bob@techventures.io', org: 'TechVentures', role: 'CTO', avatar: '#facc15', initials: 'BK', accounts: ['ac5','ac6'], lastContact: '5d ago', threadCount: 9 },
+    { id: 'c5', name: 'Dr. Lisa Park', email: 'lpark@stanford.edu', org: 'Stanford', role: 'Research Director', avatar: '#ef4444', initials: 'LP', accounts: ['ac3'], lastContact: '1w ago', threadCount: 6 },
+    { id: 'c6', name: 'James Wilson', email: 'james@apex.io', org: 'Apex Solutions', role: 'VP Partnerships', avatar: '#3b82f6', initials: 'JW', accounts: ['ac2','ac4'], lastContact: '2w ago', threadCount: 4 }
+  ],
+
+  emails: [
+    { id: 'em1', from: 'Sarah Chen', email: 'sarah@acmecorp.com', subject: 'Q2 Strategy Review — Meeting Tomorrow?', preview: 'Hi Edwin, wanted to sync on the Q2 strategy before our board presentation...', body: 'Hi Edwin,\n\nI wanted to sync on the Q2 strategy before our board presentation next week. The numbers from the Data Migration project look great, but I want to make sure we align on the Market Expansion timeline.\n\nAre you free tomorrow at 2pm? We can go over the slides together.\n\nBest,\nSarah', time: '2h ago', provider: 'ac2', unread: true, tags: ['meeting','strategy'], attachments: [{name:'Q2_Strategy.pptx',size:'4.2 MB',type:'presentation'},{name:'Metrics_Q1.xlsx',size:'1.8 MB',type:'spreadsheet'}] },
+    { id: 'em2', from: 'Marcus Johnson', email: 'marcus@techventures.io', subject: 'Market Expansion — Budget Approval', preview: 'Edwin, the board approved the expansion budget. Let us coordinate with Sarah...', body: 'Edwin,\n\nGreat news — the board approved the expansion budget for Q3. We need to coordinate with Sarah\'s team on the rollout plan.\n\nI suggest we set up a joint call next week. Bob has some initial findings from the market analysis.\n\nCheers,\nMarcus', time: '1d ago', provider: 'ac6', unread: false, tags: ['budget','expansion'], attachments: [{name:'Budget_Q3_Approval.pdf',size:'0.6 MB',type:'document'}] },
+    { id: 'em3', from: 'Alice Wang', email: 'alice@acmecorp.com', subject: 'Data Migration — Status Update', preview: 'The migration is 85% complete. Remaining items are the legacy database...', body: 'Hi Edwin,\n\nQuick update on the Data Migration project — we\'re at 85% completion. The legacy database migration is the remaining piece, estimated 2 more weeks.\n\nSarah asked me to keep you posted.\n\nBest,\nAlice', time: '2d ago', provider: 'ac2', unread: false, tags: ['project','update'], attachments: [] },
+    { id: 'em4', from: 'Dr. Lisa Park', email: 'lpark@stanford.edu', subject: 'Research Collaboration — AI Communication Patterns', preview: 'I came across your work on communication analytics and would love to...', body: 'Dear Edwin,\n\nI came across your recent work on communication analytics and I\'m very impressed. My research group at Stanford is studying AI-mediated communication patterns.\n\nWould you be open to a collaboration? I think your knowledge graph approach aligns well with our research on organizational cognition.\n\nBest,\nDr. Lisa Park', time: '5d ago', provider: 'ac3', unread: false, tags: ['research','collaboration'], attachments: [{name:'Research_Proposal.pdf',size:'2.3 MB',type:'document'},{name:'Team_Overview.pptx',size:'1.1 MB',type:'presentation'}] },
+    { id: 'em5', from: 'James Wilson', email: 'james@apex.io', subject: 'Partnership Proposal — Apex x SendPalm', preview: 'I believe there is strong synergy between Apex\'s data platform and...', body: 'Hi Edwin,\n\nI\'ve been following SendPalm\'s growth and I believe there\'s strong synergy between Apex\'s data platform and your communication tools.\n\nWould you be open to a call next week to explore a partnership?\n\nBest,\nJames Wilson\nVP Partnerships, Apex Solutions', time: '1w ago', provider: 'ac4', unread: false, tags: ['partnership','proposal'], attachments: [{name:'Apex_Partnership_Deck.pdf',size:'5.4 MB',type:'document'}] },
+    { id: 'em6', from: 'Bob Kim', email: 'bob@techventures.io', subject: 'Re: Market Analysis — Initial Findings', preview: 'Attached is the market analysis. Key insight: the APAC region shows...', body: 'Edwin,\n\nAs promised, here are the initial findings from the market analysis. Key insight: the APAC region shows 40% growth potential.\n\nI\'ll present the full data at the joint call with Sarah next week.\n\nBob', time: '3d ago', provider: 'ac5', unread: false, tags: ['analysis','apac'], attachments: [{name:'APAC_Market_Analysis.pdf',size:'2.8 MB',type:'report'},{name:'Data_Appendix.xlsx',size:'0.9 MB',type:'spreadsheet'}] }
+  ],
+
+  files: [
+    { name: 'Q2_Strategy.pptx', size: '4.2 MB', type: 'doc', tags: ['presentation','strategy'] },
+    { name: 'Market_Analysis_APAC.pdf', size: '2.8 MB', type: 'pdf', tags: ['report','apac'] },
+    { name: 'Data_Migration_Report.pdf', size: '1.5 MB', type: 'pdf', tags: ['report','project'] },
+    { name: 'Team_Photo_Offsite.jpg', size: '3.1 MB', type: 'img', tags: ['team','event'] },
+    { name: 'Budget_Q3.xlsx', size: '0.8 MB', type: 'doc', tags: ['budget','finance'] },
+    { name: 'Architecture_Overview.md', size: '12 KB', type: 'code', tags: ['technical','docs'] },
+    { name: 'Research_Paper_Draft.pdf', size: '0.6 MB', type: 'pdf', tags: ['research','draft'] },
+    { name: 'Product_Roadmap.pdf', size: '2.1 MB', type: 'pdf', tags: ['roadmap','product'] }
+  ],
+
+  calendarEvents: [
+    { date: 15, title: 'Q2 Strategy Review', time: '2:00 PM', attendees: 'Sarah Chen, Alice Wang' },
+    { date: 17, title: 'Board Presentation Prep', time: '10:00 AM', attendees: 'Executive Team' },
+    { date: 18, title: 'Market Expansion Call', time: '3:30 PM', attendees: 'Marcus Johnson, Bob Kim' },
+    { date: 20, title: 'Stanford Research Sync', time: '11:00 AM', attendees: 'Dr. Lisa Park' },
+    { date: 22, title: 'Partnership Review — Apex', time: '1:00 PM', attendees: 'James Wilson' },
+    { date: 25, title: 'Data Migration Deadline', time: 'All day', attendees: 'Alice Wang' },
+    { date: 28, title: 'Monthly Board Review', time: '9:00 AM', attendees: 'All' }
+  ]
+};
+
+// =============================================================================
+// NAVIGATION
+// =============================================================================
+function switchView(view) {
+  state.view = view;
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelector(`.view[data-view="${view}"]`).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelector(`.nav-item[data-view="${view}"]`).classList.add('active');
+  const titles = { inbox:'Inbox', people:'People', graph:'Network', agent:'Agent', files:'Files', calendar:'Calendar', settings:'Settings' };
+  document.getElementById('topbar-title').textContent = titles[view] || 'SendPalm';
+  updateAgentContext();
+  renderActions();
+  if (view === 'graph') initGraph();
+  if (view === 'agent') renderFullAgentMemory();
+}
+
+// =============================================================================
+// AGENT PANEL
+// =============================================================================
+function updateAgentContext() {
+  const icons = { inbox:'ph-tray', people:'ph-users', graph:'ph-share-network', agent:'ph-robot', files:'ph-folder', calendar:'ph-calendar-blank', settings:'ph-gear' };
+  const names = { inbox:'Inbox', people:'People', graph:'Network', agent:'Agent', files:'Files', calendar:'Calendar', settings:'Settings' };
+  document.getElementById('agent-context-view').innerHTML = `<i class="ph ${icons[state.view]}"></i> Viewing: ${names[state.view]}`;
+  const chips = {
+    inbox: ['Draft reply', 'Summarize thread', 'Schedule meeting', 'Archive'],
+    people: ['Send email', 'Schedule meeting', 'Add note', 'View network'],
+    graph: ['Show connections', 'Find contacts', 'View timeline', 'Export network'],
+    agent: ['Clear session', 'Export chat', 'Draft email', 'Analyze thread'],
+    files: ['Search files', 'Recent docs', 'Share', 'Download all'],
+    calendar: ['Create event', 'Check availability', 'Set reminder', 'Share schedule'],
+    settings: ['Sync accounts', 'Manage storage', 'Privacy', 'Help']
+  };
+  const chipContainer = document.getElementById('agent-context-chips');
+  chipContainer.innerHTML = (chips[state.view] || []).map(c => `<span class="context-chip">${c}</span>`).join('');
+  chipContainer.querySelectorAll('.context-chip').forEach(el => {
+    el.addEventListener('click', () => {
+      document.getElementById('agent-input').value = el.textContent;
+      sendAgentMessage(el.textContent);
+    });
+  });
+}
+
+function renderActions() {
+  const list = document.getElementById('action-list');
+  if (!state.actions.length) {
+    list.innerHTML = '<div style="font-size:.48rem;color:var(--text-muted);padding:4px 0;">No pending actions</div>';
+    document.getElementById('action-count').textContent = '0';
+    return;
+  }
+  document.getElementById('action-count').textContent = state.actions.length;
+  list.innerHTML = state.actions.map(a => `
+    <div class="action-card">
+      <div class="action-card-header">
+        <div class="action-card-icon ${a.icon}"><i class="ph ${a.icon === 'action' ? 'ph-lightning' : a.icon === 'data' ? 'ph-database' : a.icon === 'alert' ? 'ph-warning' : 'ph-calendar'}"></i></div>
+        <div class="action-card-body">
+          <div class="action-card-title">${a.title}</div>
+          <div class="action-card-desc">${a.desc}</div>
+          <div class="action-card-meta"><span class="trigger">${a.trigger}</span><span class="confidence">${Math.round(a.confidence*100)}% confidence</span><span>${a.workflow.length} steps</span></div>
+        </div>
+      </div>
+      <div class="action-card-footer">
+        <button class="btn-agent btn-agent-secondary" onclick="executeAction('${a.id}','review')">Review</button>
+        <button class="btn-agent btn-agent-primary" onclick="executeAction('${a.id}','execute')">Execute <i class="ph ph-arrow-right" style="font-size:.42rem"></i></button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function executeAction(id, mode) {
+  const action = state.actions.find(a => a.id === id);
+  if (!action) return;
+  const steps = action.workflow.map(s => `✓ ${s}`).join('\n');
+  const msg = mode === 'execute'
+    ? `**Executing**: ${action.title}\n${steps}\n\n✅ Action completed successfully.`
+    : `**Review**: ${action.title}\n\n${steps}\n\nApprove execution from the action card above.`;
+  addAgentMessage(msg);
+  if (mode === 'execute') {
+    state.actions = state.actions.filter(a => a.id !== id);
+    renderActions();
+    addEvent(`Executed: ${action.title}`, 'processed');
+    showToast(`Executed "${action.title}"`);
+  }
+}
+
+// =============================================================================
+// SESSION MANAGEMENT
+// =============================================================================
+function renderSessions() {
+  const sel = document.getElementById('session-select');
+  sel.innerHTML = state.sessions.map(s =>
+    `<option value="${s.id}" ${s.id === state.activeSession ? 'selected' : ''}>${s.name}</option>`
+  ).join('');
+}
+
+function switchSession(id) {
+  state.activeSession = id;
+  renderSessions();
+  renderMessages();
+  updateAgentContext();
+}
+
+function newSession() {
+  const count = state.sessions.length + 1;
+  const id = 's' + count;
+  state.sessions.push({ id, name: `Session ${count}`, messages: [] });
+  state.activeSession = id;
+  renderSessions();
+  renderMessages();
+  addAgentMessage('New session started. How can I help you?');
+}
+
+// =============================================================================
+// AGENT CHAT
+// =============================================================================
+function getSession() {
+  return state.sessions.find(s => s.id === state.activeSession) || state.sessions[0];
+}
+
+function renderMessages() {
+  const chat = document.getElementById('agent-chat');
+  const session = getSession();
+  if (!session.messages.length) {
+    chat.innerHTML = `<div class="chat-empty"><i class="ph ph-chat-circle"></i><div class="chat-empty-text">Start a conversation with SendPalm</div><div class="chat-empty-hint">Ask me to draft emails, extract entities, or analyze your communications</div></div>`;
+    return;
+  }
+  chat.innerHTML = session.messages.map(m =>
+    `<div class="msg msg-${m.role}"><div class="msg-avatar">${m.role === 'agent' ? 'R' : 'U'}</div><div><div class="msg-bubble">${m.text}</div><div class="msg-time">${m.time}</div></div></div>`
+  ).join('');
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function addAgentMessage(text) {
+  const session = getSession();
+  const now = new Date();
+  session.messages.push({ role: 'agent', text, time: now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) });
+  renderMessages();
+}
+
+function addUserMessage(text) {
+  const session = getSession();
+  const now = new Date();
+  session.messages.push({ role: 'user', text, time: now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) });
+  renderMessages();
+}
+
+function sendAgentMessage(text) {
+  if (!text.trim()) return;
+  addUserMessage(text);
+  document.getElementById('agent-input').value = '';
+  document.getElementById('agent-full-input').value = '';
+
+  // Simulate agent response
+  setTimeout(() => {
+    const t = text.toLowerCase();
+    if (t.includes('draft') && t.includes('email')) {
+      addAgentMessage('I can draft that email for Sarah. Here\'s a draft:\n\n---\nSubject: Q2 Strategy Review\n\nHi Sarah,\n\nThanks for your note. I\'m available tomorrow at 2pm to review the Q2 strategy slides. I\'ll prepare the updated numbers.\n\nBest,\nEdwin\n---\n\nWould you like me to send this?');
+      addAction('Send email to Sarah Chen', 'Draft ready for review', 'action', 'Draft complete', 0.95, ['Review draft', 'Send', 'Log to timeline']);
+    } else if (t.includes('extract') || t.includes('entity')) {
+      addAgentMessage('From your conversations, I\'ve identified:\n\n• Sarah Chen — VP Engineering at Acme Corp (colleague, 24 threads)\n• James Wilson — VP Partnerships at Apex Solutions (new contact, proposal)\n• Marcus Johnson — CEO of TechVentures (20 threads, expansion project)\n• Alice Wang — PM at Acme Corp (data migration 85% done)\n\nAll contacts are in your directory. Want to send any of them a message?');
+    } else if (t.includes('graph') || t.includes('network') || t.includes('insight')) {
+      addAgentMessage(`Your network:\n\n• ${state.contacts.length} contacts across ${state.contacts.filter((v,i,a)=>a.findIndex(c=>c.org===v.org)===i).length} organizations\n• ${state.gbrain.relationships.length} connections mapped\n• Most connected: Sarah Chen\n• Recent connection: James Wilson → Apex Solutions\n• Acme Corp and Apex Solutions have common contacts`);
+    } else if (t.includes('background') || t.includes('learning')) {
+      addAgentMessage('Background learning is analyzing your communications for new contacts, relationships, and patterns. This runs during idle time and helps me suggest better actions.');
+    } else if (t.includes('schedule') || t.includes('meeting')) {
+      addAgentMessage('I can help schedule that. Based on your calendar:\n\nAvailable slots for a Q2 strategy meeting:\n• Tomorrow 2:00 PM — Free\n• Thursday 10:00 AM — Free\n• Friday 3:00 PM — Free\n\nSuggested: Tomorrow 2:00 PM with Sarah Chen. Create invite?');
+    } else {
+      addAgentMessage('I understand. Let me process that and get back to you with actionable insights. Is there something specific you\'d like me to help with — drafting messages, extracting information, or analyzing your communication patterns?');
+    }
+  }, 600);
+}
+
+function addAction(title, desc, icon, trigger, confidence, workflow) {
+  const id = 'a' + Date.now();
+  state.actions.push({ id, title, desc, icon, trigger, confidence, workflow });
+  renderActions();
+}
+
+// =============================================================================
+// EVENT STREAM
+// =============================================================================
+function renderEvents() {
+  const el = document.getElementById('event-list');
+  el.innerHTML = state.events.map(e =>
+    `<div class="event-item"><span class="event-dot ${e.type}"></span><span class="event-text">${e.text}</span><span class="event-time">${e.time}</span></div>`
+  ).join('');
+}
+
+function addEvent(text, type) {
+  const id = 'e' + Date.now();
+  state.events.unshift({ id, text, type, time: 'just now' });
+  renderEvents();
+  // Simulated event aging
+  setTimeout(() => {
+    const ev = state.events.find(e => e.id === id);
+    if (ev) ev.time = '30s ago';
+    renderEvents();
+  }, 30000);
+}
+
+// =============================================================================
+// GBRAIN — ENTITY EXTRACTION + KNOWLEDGE GRAPH
+// =============================================================================
+// BACKGROUND LEARNING
+let dreamInterval = null;
+function startDreamCycle() {
+  if (state.gbrain.dreaming) return;
+  state.gbrain.dreaming = true;
+  state.gbrain.dreamProgress = 0;
+  addEvent('Background learning started', 'new');
+  showToast('Learning from your contacts...');
+
+  // Create dream cycle UI
+  const chat = document.getElementById('agent-chat');
+  const dreamEl = document.createElement('div');
+  dreamEl.className = 'dream-cycle active';
+  dreamEl.id = 'dream-cycle-ui';
+  dreamEl.innerHTML = `
+    <div class="dream-cycle-header">
+      <span class="dream-cycle-label"><i class="ph ph-moon-stars" style="font-size:.55rem"></i> Learning Active</span>
+      <span class="dream-cycle-status" id="dream-status">Processing...</span>
+    </div>
+    <div class="dream-bar"><div class="dream-bar-fill" id="dream-fill"></div></div>
+    <div class="dream-cycle-meta">
+      <span id="dream-phase">Phase: Entity Resolution</span>
+      <span id="dream-progress">0%</span>
+    </div>
+  `;
+  const existing = document.getElementById('dream-cycle-ui');
+  if (existing) existing.remove();
+  const eventSection = document.getElementById('agent-events');
+  eventSection.parentNode.insertBefore(dreamEl, eventSection.nextSibling);
+
+  const phases = ['Entity Resolution', 'Relationship Discovery', 'Gap Analysis', 'Graph Enrichment', 'Consolidation'];
+  let phaseIdx = 0;
+  let progress = 0;
+
+  dreamInterval = setInterval(() => {
+    progress += 2;
+    state.gbrain.dreamProgress = progress;
+    if (progress >= 100) {
+      clearInterval(dreamInterval);
+      dreamInterval = null;
+      state.gbrain.dreaming = false;
+      document.getElementById('dream-status').textContent = 'Complete ✓';
+      document.getElementById('dream-phase').textContent = 'Phase: Consolidation Complete';
+      document.getElementById('dream-progress').textContent = '100%';
+      document.getElementById('dream-fill').style.width = '100%';
+      dreamEl.classList.remove('active');
+
+      // Generate new relationships
+      const newRels = [
+        { from: 'Dr. Lisa Park', to: 'Fundraising Q3', type: 'advisor' },
+        { from: 'Acme Corp', to: 'Apex Solutions', type: 'partner' }
+      ];
+      newRels.forEach(r => {
+        if (!state.gbrain.relationships.find(ex => ex.from === r.from && ex.to === r.to)) {
+          state.gbrain.relationships.push(r);
+        }
+      });
+
+      addEvent('Learning complete: 2 new connections discovered', 'processed');
+      addAgentMessage('Background learning complete!\n\nNew discoveries:\n• Dr. Lisa Park connected to Fundraising Q3\n• Acme Corp and Apex Solutions share contacts\n• 2 existing connections strengthened\n• Contact network updated');
+      showToast('Learning complete');
+      initGraph();
+      return;
+    }
+
+    const newPhaseIdx = Math.min(Math.floor(progress / 20), phases.length - 1);
+    if (newPhaseIdx !== phaseIdx) {
+      phaseIdx = newPhaseIdx;
+      addEvent(`Learning: ${phases[phaseIdx]}`, 'processed');
+    }
+    document.getElementById('dream-status').textContent = 'Processing...';
+    document.getElementById('dream-phase').textContent = `Phase: ${phases[phaseIdx]}`;
+    document.getElementById('dream-progress').textContent = `${progress}%`;
+    document.getElementById('dream-fill').style.width = `${progress}%`;
+  }, 200);
+}
+
+// =============================================================================
+// GRAPH VISUALIZATION (Canvas Force-Directed)
+// =============================================================================
+let graphNodes = [];
+let graphEdges = [];
+let graphAnim = null;
+
+function initGraph() {
+  const canvas = document.getElementById('graph-canvas');
+  if (!canvas || canvas.offsetWidth === 0) return;
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width;
+  canvas.height = rect.height;
+  const ctx = canvas.getContext('2d');
+
+  // Build graph from Gbrain data
+  graphNodes = state.gbrain.entities.map(e => ({
+    id: e.name,
+    label: e.name,
+    type: e.type,
+    x: Math.random() * canvas.width,
+    y: Math.random() * canvas.height,
+    vx: 0, vy: 0,
+    radius: e.type === 'person' ? 22 : e.type === 'org' ? 26 : 18,
+    color: e.type === 'person' ? '#6C5CE7' : e.type === 'org' ? '#d4a574' : '#4ECDC4'
+  }));
+
+  graphEdges = state.gbrain.relationships.map(r => ({
+    source: r.from,
+    target: r.to,
+    label: r.type
+  }));
+
+  document.getElementById('graph-stats').textContent = `${state.contacts.length} contacts · ${graphEdges.length} connections`;
+
+  // Populate org list
+  const orgsEl = document.getElementById('graph-orgs');
+  const orgs = [...new Set(state.contacts.map(c => c.org).filter(Boolean))];
+  orgsEl.innerHTML = orgs.map(o => {
+    const members = state.contacts.filter(c => c.org === o);
+    return `<div class="memory-entity" style="cursor:default;"><span class="dot org"></span>${o} <span style="color:var(--text-muted);font-size:var(--text-xs);">· ${members.length} contacts</span></div>`;
+  }).join('');
+
+  // Populate recent connections
+  const recentEl = document.getElementById('graph-recent');
+  recentEl.innerHTML = state.contacts.slice(0, 5).map(c =>
+    `<div class="memory-entity" onclick="switchView('people')" style="cursor:pointer;"><span class="dot person"></span>${c.name} <span style="color:var(--text-muted);font-size:var(--text-xs);">· ${c.org} · last ${c.lastContact}</span></div>`
+  ).join('');
+
+  if (graphAnim) cancelAnimationFrame(graphAnim);
+
+  function draw() {
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Physics
+    const repulsion = 8000;
+    const attraction = 0.005;
+    const damping = 0.85;
+    const centerForce = 0.01;
+
+    for (let i = 0; i < graphNodes.length; i++) {
+      const n = graphNodes[i];
+      // Center gravity
+      n.vx += (w/2 - n.x) * centerForce;
+      n.vy += (h/2 - n.y) * centerForce;
+
+      // Repulsion
+      for (let j = i+1; j < graphNodes.length; j++) {
+        const o = graphNodes[j];
+        const dx = n.x - o.x, dy = n.y - o.y;
+        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+        const force = repulsion / (dist * dist);
+        n.vx += (dx/dist) * force;
+        n.vy += (dy/dist) * force;
+        o.vx -= (dx/dist) * force;
+        o.vy -= (dy/dist) * force;
+      }
+    }
+
+    // Attraction along edges
+    for (const e of graphEdges) {
+      const s = graphNodes.find(n => n.id === e.source);
+      const t = graphNodes.find(n => n.id === e.target);
+      if (!s || !t) continue;
+      const dx = t.x - s.x, dy = t.y - s.y;
+      const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+      const force = (dist - 100) * attraction;
+      const fx = (dx/dist) * force, fy = (dy/dist) * force;
+      s.vx += fx; s.vy += fy;
+      t.vx -= fx; t.vy -= fy;
+    }
+
+    // Apply velocity + damping
+    for (const n of graphNodes) {
+      n.vx *= damping; n.vy *= damping;
+      n.x += n.vx; n.y += n.vy;
+      n.x = Math.max(20, Math.min(w-20, n.x));
+      n.y = Math.max(20, Math.min(h-20, n.y));
+    }
+
+    // Draw edges
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 1;
+    for (const e of graphEdges) {
+      const s = graphNodes.find(n => n.id === e.source);
+      const t = graphNodes.find(n => n.id === e.target);
+      if (!s || !t) continue;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(t.x, t.y);
+      ctx.stroke();
+    }
+
+    // Draw nodes
+    for (const n of graphNodes) {
+      const grad = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.radius + 8);
+      grad.addColorStop(0, n.color + '40');
+      grad.addColorStop(1, 'transparent');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.radius + 8, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = n.color + '20';
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = n.color;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.radius * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#fff';
+      ctx.font = '8px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(n.label.length > 12 ? n.label.substring(0,10)+'..' : n.label, n.x, n.y + n.radius + 4);
+    }
+
+    graphAnim = requestAnimationFrame(draw);
+  }
+
+  if (graphAnim) cancelAnimationFrame(graphAnim);
+  draw();
+}
+
+// =============================================================================
+// VIEW RENDERERS
+// =============================================================================
+function renderInbox() {
+  const list = document.getElementById('inbox-list');
+  const filters = ['All', 'Unread', 'SendPalm', 'Acme Corp', 'Gmail', 'Slack'];
+  list.innerHTML = `<div class="inbox-filters">${filters.map(f =>
+    `<button class="inbox-filter ${f === 'All' ? 'active' : ''}" data-filter="${f}">${f}</button>`
+  ).join('')}</div>`;
+
+  state.emails.forEach((em, i) => {
+    const acct = state.accounts.find(a => a.id === em.provider);
+    const el = document.createElement('div');
+    el.className = `email-card ${em.unread ? 'unread' : ''}`;
+    el.innerHTML = `
+      <div class="email-from">${em.from} <span class="acct-tag" style="background:${acct?.color}22;color:${acct?.color}">${acct?.provider||''}</span></div>
+      <div class="email-subject">${em.subject}</div>
+      <div class="email-preview">${em.preview}</div>
+      <div class="email-time">${em.time}</div>
+    `;
+    el.onclick = () => selectEmail(i);
+    list.appendChild(el);
+  });
+}
+
+function emailToMarkdown(em, acct) {
+  const date = new Date().toISOString().split('T')[0];
+  return `---
+from: "${em.from}"
+email: "${em.email}"
+subject: "${em.subject}"
+date: "${date}"
+provider: "${acct?.provider || 'unknown'}"
+tags: [${em.tags.map(t => `"${t}"`).join(', ')}]
+attachments: ${em.attachments.length ? '\n' + em.attachments.map(a => `  - name: "${a.name}"\n    size: "${a.size}"\n    type: "${a.type}"`).join('\n') : '[]'}
+---
+
+${em.body}
+`;
+}
+
+function selectEmail(idx) {
+  state.selectedEmailIndex = idx;
+  state.selectedEmail = state.emails[idx];
+  const detail = document.getElementById('inbox-detail');
+  const em = state.selectedEmail;
+  const acct = state.accounts.find(a => a.id === em.provider);
+  let showMarkdown = false;
+  function renderEmailView() {
+    const md = emailToMarkdown(em, acct);
+    const contact = state.contacts.find(c => c.name === em.from);
+    detail.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;">
+        <div><div style="font-size:var(--text-lg);font-weight:600;">${em.subject}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+          ${contact ? `<div class="person-avatar" style="width:28px;height:28px;border-radius:6px;background:${contact.avatar};font-size:var(--text-sm);">${contact.initials}</div>` : ''}
+          <div><div style="font-size:var(--text-base);">${em.from}</div>
+          <div style="font-size:var(--text-sm);color:var(--text-secondary);">${em.email} · ${em.time} · <span style="color:${acct?.color}">${acct?.provider}</span></div></div>
+        </div></div>
+        <div style="display:flex;gap:6px;flex-shrink:0;">
+          <button class="btn-agent btn-agent-secondary" onclick="showMarkdown=!showMarkdown;renderEmailView()" style="font-size:var(--text-sm);padding:4px 10px;"><i class="ph ph-markdown-logo" style="font-size:.5rem"></i> ${showMarkdown ? 'Body' : 'Markdown'}</button>
+          <button class="btn-agent btn-agent-primary" onclick="sendAgentMessage('Draft a reply to ${em.from} about ${em.subject}')" style="font-size:var(--text-sm);padding:4px 10px;"><i class="ph ph-arrow-bend-up-left" style="font-size:.5rem"></i> Reply</button>
+        </div>
+      </div>
+      ${showMarkdown ? `<div style="background:var(--bg-surface);border:0.5px solid var(--border-subtle);border-radius:var(--radius-sm);padding:var(--space-3);font-family:var(--font-mono);font-size:var(--text-sm);color:var(--text-secondary);line-height:1.6;white-space:pre-wrap;max-height:60vh;overflow-y:auto;">${md.replace(/</g,'&lt;')}</div>`
+      : `<div style="font-size:var(--text-base);color:var(--text-secondary);line-height:1.7;white-space:pre-wrap;">${em.body}</div>`}
+      ${em.attachments.length ? `<div style="margin-top:12px;"><div style="font-size:var(--text-sm);font-weight:600;color:var(--text-secondary);margin-bottom:6px;"><i class="ph ph-paperclip" style="font-size:.55rem"></i> Attachments (${em.attachments.length})</div><div style="display:flex;gap:6px;flex-wrap:wrap;">${em.attachments.map(a =>
+        `<div class="file-card" style="padding:var(--space-2) var(--space-3);width:auto;cursor:default;"><div style="display:flex;align-items:center;gap:8px;"><i class="ph ${a.type === 'presentation' ? 'ph-presentation' : a.type === 'spreadsheet' ? 'ph-table' : 'ph-file-pdf'}" style="font-size:1rem;color:var(--primary);"></i><div><div class="file-name" style="font-size:var(--text-sm);">${a.name}</div><div class="file-size" style="font-size:var(--text-xs);">${a.size}</div></div></div></div>`
+      ).join('')}</div></div>` : ''}
+      <div style="margin-top:12px;display:flex;gap:4px;flex-wrap:wrap;">
+        ${em.tags.map(t => `<span class="file-tag">${t}</span>`).join('')}
+      </div>
+    `;
+  }
+  renderEmailView();
+}
+
+function renderPeople() {
+  const list = document.getElementById('people-list');
+  list.innerHTML = `<div class="people-search"><i class="ph ph-magnifying-glass"></i><input type="text" placeholder="Search contacts..."></div>`;
+  state.contacts.forEach(c => {
+    const el = document.createElement('div');
+    el.className = `person-card ${state.selectedPerson === c.id ? 'active' : ''}`;
+    el.innerHTML = `
+      <div class="person-avatar" style="background:${c.avatar}">${c.initials}</div>
+      <div class="person-info">
+        <div class="person-name">${c.name}</div>
+        <div class="person-title">${c.role} at ${c.org}</div>
+        <div class="person-meta">${c.threadCount} threads · last ${c.lastContact}</div>
+      </div>
+    `;
+    el.onclick = () => selectPerson(c.id);
+    list.appendChild(el);
+  });
+}
+
+function selectPerson(id) {
+  state.selectedPerson = id;
+  renderPeople();
+  const c = state.contacts.find(p => p.id === id);
+  if (!c) return;
+  const detail = document.getElementById('people-detail');
+  const entityLinks = state.gbrain.entities.filter(e => e.name === c.name || e.org === c.org);
+  const linkedAccounts = c.accounts.map(aid => state.accounts.find(a => a.id === aid)).filter(Boolean);
+  const gbrainRel = state.gbrain.relationships.filter(r => r.from === c.name || r.to === c.name);
+  const totalMessages = state.emails.filter(e => e.from === c.name || e.email === c.email);
+  detail.innerHTML = `
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">
+      <div class="person-avatar" style="width:48px;height:48px;border-radius:10px;background:${c.avatar};font-size:var(--text-lg);">${c.initials}</div>
+      <div><div style="font-size:var(--text-lg);font-weight:600;">${c.name}</div>
+      <div style="font-size:var(--text-base);color:var(--text-secondary);">${c.role} · ${c.org}</div>
+      <div style="font-size:var(--text-sm);color:var(--text-muted);">${c.email} · Last contact: ${c.lastContact} · ${c.threadCount} threads</div></div>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;">
+      <button class="btn-agent btn-agent-primary" onclick="sendAgentMessage('Send an email to ${c.name}')"><i class="ph ph-envelope" style="font-size:var(--icon-xs)"></i> Send Email</button>
+      <button class="btn-agent btn-agent-secondary" onclick="sendAgentMessage('Schedule a meeting with ${c.name}')"><i class="ph ph-calendar" style="font-size:var(--icon-xs)"></i> Schedule</button>
+      <button class="btn-agent btn-agent-secondary" onclick="switchView('graph')"><i class="ph ph-share-network" style="font-size:var(--icon-xs)"></i> View Graph</button>
+      <button class="btn-agent btn-agent-secondary" onclick="switchView('calendar')"><i class="ph ph-clock" style="font-size:var(--icon-xs)"></i> Timeline</button>
+    </div>
+    <div class="grid-2" style="margin-bottom:14px;">
+      <div class="card"><div class="card-title"><i class="ph ph-address-book"></i>Contact Info</div>
+        <div style="font-size:var(--text-sm);color:var(--text-secondary);line-height:1.8;">
+          <div><span style="color:var(--text-muted)">Email:</span> ${c.email}</div>
+          <div><span style="color:var(--text-muted)">Organization:</span> ${c.org}</div>
+          <div><span style="color:var(--text-muted)">Role:</span> ${c.role}</div>
+          <div><span style="color:var(--text-muted)">First contact:</span> ${c.lastContact}</div>
+          <div><span style="color:var(--text-muted)">Total conversations:</span> ${totalMessages.length}</div>
+        </div>
+      </div>
+      <div class="card"><div class="card-title"><i class="ph ph-link"></i>Linked Accounts</div>
+        ${linkedAccounts.length ? linkedAccounts.map(a => `
+          <div class="memory-entity"><span style="width:6px;height:6px;border-radius:50%;background:${a.color};display:inline-block;"></span>${a.email} <span style="color:var(--text-muted);font-size:var(--text-xs);">· ${a.provider}</span></div>
+        `).join('') : '<div style="font-size:var(--text-sm);color:var(--text-muted);">No linked accounts</div>'}
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:14px;"><div class="card-title"><i class="ph ph-share-network"></i>Connections</div>
+      ${gbrainRel.length ? gbrainRel.map(r => `
+        <div class="memory-entity"><span class="dot ${r.type === 'works_at' ? 'org' : r.type === 'leads' ? 'project' : 'concept'}"></span>${r.from} → ${r.to} <span style="color:var(--text-muted);font-size:var(--text-xs);">· ${r.type.replace(/_/g,' ')}</span></div>
+      `).join('') : '<div style="font-size:var(--text-sm);color:var(--text-muted);">No graph connections yet</div>'}
+    </div>
+    <div class="card"><div class="card-title"><i class="ph ph-chats"></i>Recent Conversations (${totalMessages.length})</div>
+      ${totalMessages.length ? totalMessages.map(e => `
+        <div class="email-card" style="margin-bottom:4px;cursor:pointer;" onclick="switchView('inbox')">
+          <div class="email-subject">${e.subject}</div>
+          <div class="email-preview">${e.preview}</div>
+          <div class="email-time">${e.time} ${e.unread ? '· <span style="color:var(--primary)">Unread</span>' : ''}</div>
+        </div>
+      `).join('') : '<div style="font-size:var(--text-sm);color:var(--text-muted);">No conversations yet</div>'}
+    </div>
+  `;
+}
+
+function renderFiles() {
+  const grid = document.getElementById('files-grid');
+  grid.innerHTML = state.files.map(f =>
+    `<div class="file-card"><div class="file-icon ${f.type}"><i class="ph ${f.type === 'doc' ? 'ph-file-doc' : f.type === 'pdf' ? 'ph-file-pdf' : f.type === 'img' ? 'ph-file-image' : 'ph-file-code'}"></i></div><div class="file-name">${f.name}</div><div class="file-size">${f.size}</div><div class="file-tags">${f.tags.map(t => `<span class="file-tag">${t}</span>`).join('')}</div></div>`
+  ).join('');
+}
+
+// Calendar data aggregation — merges events, emails, deadlines, extractions
+function getAggregatedEvents() {
+  const month = state.calMonth;
+  const year = state.calYear;
+  const today = new Date();
+  const items = [];
+
+  // 1. Explicit calendar events
+  for (const ev of state.calendarEvents) {
+    const d = new Date(year, month, ev.date);
+    if (d.getMonth() !== month) continue;
+    items.push({
+      date: ev.date,
+      title: ev.title,
+      time: ev.time,
+      meta: ev.attendees,
+      type: 'meeting',
+      source: 'Calendar',
+      sourceView: null,
+      linkText: null
+    });
+  }
+
+  // 2. Emails with date references — map by day of month
+  const dateRefs = {
+    19: [{ title: 'Q2 Strategy Sync', from: 'Sarah Chen', subj: 'Re: Q2 Strategy Review' }],
+    22: [{ title: 'Market Expansion Call', from: 'Marcus Johnson', subj: 'Market Expansion — Budget Approval' }],
+    25: [{ title: 'Data Migration Update', from: 'Alice Wang', subj: 'Data Migration — Status Update' }]
+  };
+  for (const [day, refs] of Object.entries(dateRefs)) {
+    const d = parseInt(day);
+    const dt = new Date(year, month, d);
+    if (dt.getMonth() !== month) continue;
+    for (const r of refs) {
+      items.push({
+        date: d,
+        title: r.title,
+        time: 'Extracted',
+        meta: `From: ${r.from} · ${r.subj}`,
+        type: 'email',
+        source: 'Email',
+        sourceView: 'inbox',
+        linkText: 'View email'
+      });
+    }
+  }
+
+  // 3. Project deadlines from Gbrain entities
+  const deadlines = {
+    20: { project: 'Q2 Strategy', desc: 'Board presentation prep deadline' },
+    25: { project: 'Data Migration', desc: 'Legacy DB migration target' },
+    28: { project: 'Market Expansion', desc: 'Joint call with Acme Corp' },
+    31: { project: 'Fundraising Q3', desc: 'Initial pitch deck due' }
+  };
+  for (const [day, info] of Object.entries(deadlines)) {
+    const d = parseInt(day);
+    const dt = new Date(year, month, d);
+    if (dt.getMonth() !== month) continue;
+    items.push({
+      date: d,
+      title: `${info.project} — ${info.desc}`,
+      time: 'All day',
+      meta: 'Project deadline',
+      type: 'deadline',
+      source: 'Knowledge Graph',
+      sourceView: 'graph',
+      linkText: 'View graph'
+    });
+  }
+
+  // 4. Detected events from message analysis
+  items.push({
+    date: 15, title: 'Q2 Review Meeting', time: '2:00 PM',
+    meta: 'From Sarah Chen email · 92% confidence', type: 'extracted',
+    source: 'Agent', sourceView: 'agent', linkText: 'Ask agent'
+  });
+  items.push({
+    date: 17, title: 'Board Presentation', time: '10:00 AM',
+    meta: 'From Sarah Chen thread · 88% confidence', type: 'extracted',
+    source: 'Agent', sourceView: 'agent', linkText: 'Ask agent'
+  });
+
+  return items;
+}
+
+function renderCalendar() {
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  document.getElementById('cal-month').textContent = `${monthNames[state.calMonth]} ${state.calYear}`;
+
+  const firstDay = new Date(state.calYear, state.calMonth, 1).getDay();
+  const daysInMonth = new Date(state.calYear, state.calMonth + 1, 0).getDate();
+  const grid = document.getElementById('cal-grid');
+  const dayHeaders = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+  const aggregated = getAggregatedEvents();
+  const today = new Date().getDate();
+  const isCurrentMonth = new Date().getMonth() === state.calMonth && new Date().getFullYear() === state.calYear;
+  const todayDay = isCurrentMonth ? today : -1;
+
+  let html = dayHeaders.map(d => `<div class="calendar-day-header">${d}</div>`).join('');
+
+  for (let i = 0; i < firstDay; i++) {
+    html += `<div class="calendar-day other"><span class="calendar-day-num"></span></div>`;
+  }
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dayEvents = aggregated.filter(e => e.date === d);
+    const isToday = d === todayDay;
+    const isSelected = d === state.selectedDay && isCurrentMonth;
+    const dots = dayEvents.slice(0, 4).map(e => `<span class="calendar-day-dot ${e.type}"></span>`).join('');
+    html += `<div class="calendar-day ${isToday ? 'today' : ''} ${isSelected ? 'selected' : ''}" data-day="${d}">
+      <span class="calendar-day-num">${d}</span>
+      ${dayEvents.length ? `<div class="calendar-day-dots">${dots}${dayEvents.length > 4 ? '<span style="font-size:.35rem;color:var(--text-muted)">+</span>' : ''}</div>` : ''}
+    </div>`;
+  }
+
+  grid.innerHTML = html;
+
+  // Click handler for day cells
+  grid.querySelectorAll('.calendar-day:not(.other)').forEach(el => {
+    el.addEventListener('click', () => {
+      const day = parseInt(el.dataset.day);
+      state.selectedDay = day;
+      renderCalendar();
+      renderCalendarSidebar(day, aggregated);
+    });
+  });
+
+  // Show today's events by default
+  if (isCurrentMonth) {
+    state.selectedDay = todayDay;
+    renderCalendarSidebar(todayDay, aggregated);
+  } else {
+    state.selectedDay = null;
+    document.getElementById('cal-sidebar').innerHTML = `
+      <div class="calendar-sidebar-header">${monthNames[state.calMonth]} ${state.calYear}</div>
+      <div class="calendar-sidebar-empty">Click a date to see all events, emails, and deadlines</div>`;
+  }
+}
+
+function renderCalendarSidebar(day, aggregated) {
+  const sidebar = document.getElementById('cal-sidebar');
+  if (!day) {
+    sidebar.innerHTML = `<div class="calendar-sidebar-header">Select a day</div><div class="calendar-sidebar-empty">Click a date to see all events</div>`;
+    return;
+  }
+  const dayEvents = aggregated.filter(e => e.date === day);
+  const dateObj = new Date(state.calYear, state.calMonth, day);
+  const dateStr = dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  const typeLabels = { meeting: 'Meeting', email: 'From Email', deadline: 'Deadline', extracted: 'Extracted' };
+  const typeIcons = { meeting: 'ph-calendar', email: 'ph-envelope', deadline: 'ph-warning', extracted: 'ph-magnifying-glass' };
+
+  sidebar.innerHTML = `
+    <div class="calendar-sidebar-header" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>${dateStr}</span>
+      <span style="font-size:var(--text-xs);color:var(--text-muted);font-weight:400;">${dayEvents.length} items</span>
+    </div>
+    ${dayEvents.length ? dayEvents.map(e => `
+      <div class="agenda-item">
+        <div class="agenda-item-header">
+          <div class="agenda-item-type ${e.type}"><i class="ph ${typeIcons[e.type] || 'ph-calendar'}"></i></div>
+          <div class="agenda-item-time">${e.time}</div>
+          <span style="font-size:var(--text-xs);color:var(--text-muted);margin-left:auto;">${typeLabels[e.type] || e.type}</span>
+        </div>
+        <div class="agenda-item-title">${e.title}</div>
+        <div class="agenda-item-meta">
+          <span>${e.meta}</span>
+          ${e.linkText ? `<span class="src-link" data-view="${e.sourceView || ''}">${e.linkText} →</span>` : ''}
+        </div>
+      </div>
+    `).join('') : `<div class="calendar-sidebar-empty" style="padding:var(--space-6) 0;">No events on this day</div>`}
+  `;
+
+  // Click handlers for source links
+  sidebar.querySelectorAll('.src-link').forEach(el => {
+    el.addEventListener('click', () => {
+      const view = el.dataset.view;
+      if (view) switchView(view);
+    });
+  });
+}
+
+function renderSettings() {
+  const container = document.getElementById('settings-accounts');
+  container.innerHTML = state.accounts.map(a =>
+    `<div class="settings-row"><div><div class="settings-label" style="display:flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:${a.color};display:inline-block;"></span>${a.email}</div><div class="settings-desc">${a.provider} · ${a.unread} unread</div></div><span style="font-size:.45rem;color:var(--green);">Connected</span></div>`
+  ).join('');
+}
+
+function renderFullAgentMemory() {
+  const orgs = [...new Set(state.contacts.map(c => c.org).filter(Boolean))];
+  document.getElementById('memory-people').innerHTML = state.contacts.slice(0, 6).map(c =>
+    `<div class="memory-entity" onclick="selectPerson('${c.id}');switchView('people')" style="cursor:pointer;"><span class="dot person"></span>${c.name} <span style="color:var(--text-muted);font-size:var(--text-xs);">· ${c.org}</span></div>`
+  ).join('') || '<div style="font-size:var(--text-sm);color:var(--text-muted);">No contacts yet</div>';
+  document.getElementById('memory-orgs').innerHTML = orgs.map(o =>
+    `<div class="memory-entity" style="cursor:default;"><span class="dot org"></span>${o} <span style="color:var(--text-muted);font-size:var(--text-xs);">· ${state.contacts.filter(c=>c.org===o).length} contacts</span></div>`
+  ).join('') || '<div style="font-size:var(--text-sm);color:var(--text-muted);">No organizations</div>';
+  document.getElementById('memory-recent').innerHTML = state.emails.slice(0, 4).map(e =>
+    `<div class="memory-entity" onclick="switchView('inbox')" style="cursor:pointer;"><i class="ph ph-envelope" style="font-size:.5rem;color:var(--text-muted)"></i> ${e.from}: ${e.subject.substring(0, 30)}</div>`
+  ).join('') || '<div style="font-size:var(--text-sm);color:var(--text-muted);">No recent activity</div>';
+}
+
+// =============================================================================
+// TOAST
+// =============================================================================
+let toastTimeout = null;
+function showToast(text, undoText, undoFn) {
+  clearTimeout(toastTimeout);
+  const toast = document.getElementById('toast');
+  document.getElementById('toast-text').textContent = text;
+  const undoEl = document.getElementById('toast-undo');
+  if (undoText && undoFn) {
+    undoEl.textContent = undoText;
+    undoEl.style.display = 'inline';
+    undoEl.onclick = () => { undoFn(); hideToast(); };
+  } else {
+    undoEl.style.display = 'none';
+  }
+  toast.classList.add('show');
+  toastTimeout = setTimeout(hideToast, 3000);
+}
+
+function hideToast() {
+  document.getElementById('toast').classList.remove('show');
+}
+
+// =============================================================================
+// INIT
+// =============================================================================
+document.addEventListener('DOMContentLoaded', () => {
+  // Splash
+  setTimeout(() => document.getElementById('splash').classList.add('hidden'), 800);
+  setTimeout(() => document.getElementById('splash').style.display = 'none', 1400);
+
+  // Nav
+  document.querySelectorAll('.nav-item').forEach(item => {
+    item.addEventListener('click', () => switchView(item.dataset.view));
+  });
+
+  // Agent toggle
+  document.getElementById('agent-toggle-btn').addEventListener('click', () => {
+    const panel = document.getElementById('agent-panel');
+    state.agentOpen = !state.agentOpen;
+    panel.classList.toggle('open', state.agentOpen);
+    document.getElementById('agent-collapse-btn').innerHTML = state.agentOpen ? '<i class="ph ph-caret-right"></i>' : '<i class="ph ph-caret-left"></i>';
+  });
+
+  document.getElementById('agent-collapse-btn').addEventListener('click', () => {
+    const panel = document.getElementById('agent-panel');
+    state.agentOpen = !state.agentOpen;
+    panel.classList.toggle('open', state.agentOpen);
+    document.getElementById('agent-collapse-btn').innerHTML = state.agentOpen ? '<i class="ph ph-caret-right"></i>' : '<i class="ph ph-caret-left"></i>';
+  });
+
+  // Sessions
+  document.getElementById('session-select').addEventListener('change', e => switchSession(e.target.value));
+  document.getElementById('new-session-btn').addEventListener('click', newSession);
+
+  // Chat input
+  document.getElementById('agent-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') sendAgentMessage(e.target.value);
+  });
+  document.getElementById('agent-send').addEventListener('click', () => {
+    sendAgentMessage(document.getElementById('agent-input').value);
+  });
+
+  // Full agent view
+  document.getElementById('agent-full-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') sendAgentMessage(e.target.value);
+  });
+  document.getElementById('agent-full-send').addEventListener('click', () => {
+    sendAgentMessage(document.getElementById('agent-full-input').value);
+  });
+
+  // Suggestion chips
+  document.querySelectorAll('.suggest-chip').forEach(chip => {
+    chip.addEventListener('click', () => sendAgentMessage(chip.dataset.prompt));
+  });
+
+  // Dream Cycle — available via agent chat
+  document.getElementById('dream-cycle-btn')?.addEventListener('click', () => {
+    sendAgentMessage('Run Dream Cycle to consolidate memory');
+  });
+
+  // Calendar nav
+  document.getElementById('cal-prev').addEventListener('click', () => { state.calMonth--; if (state.calMonth < 0) { state.calMonth = 11; state.calYear--; } state.selectedDay = null; renderCalendar(); });
+  document.getElementById('cal-next').addEventListener('click', () => { state.calMonth++; if (state.calMonth > 11) { state.calMonth = 0; state.calYear++; } state.selectedDay = null; renderCalendar(); });
+  document.getElementById('cal-today').addEventListener('click', () => {
+    const now = new Date();
+    state.calMonth = now.getMonth();
+    state.calYear = now.getFullYear();
+    renderCalendar();
+  });
+
+  // Toast close
+  document.getElementById('toast-close').addEventListener('click', hideToast);
+
+  // Toggles
+  document.querySelectorAll('.toggle').forEach(t => {
+    t.addEventListener('click', () => {
+      t.classList.toggle('on');
+      showToast(`${t.dataset.setting} ${t.classList.contains('on') ? 'enabled' : 'disabled'}`);
+    });
+  });
+
+  // Theme toggle
+  function setTheme(light) {
+    document.body.classList.toggle('light-mode', light);
+    document.getElementById('theme-toggle').innerHTML = light ? '<i class="ph ph-moon"></i>' : '<i class="ph ph-sun"></i>';
+    localStorage.setItem('relay-theme', light ? 'light' : 'dark');
+  }
+  const savedTheme = localStorage.getItem('relay-theme');
+  if (savedTheme === 'light') setTheme(true);
+  document.getElementById('theme-toggle').addEventListener('click', () => {
+    setTheme(!document.body.classList.contains('light-mode'));
+    showToast(document.body.classList.contains('light-mode') ? 'Light mode enabled' : 'Dark mode enabled');
+  });
+
+  // Notification button
+  document.getElementById('notif-btn').addEventListener('click', () => {
+    showToast('3 unread notifications');
+  });
+
+  // Render everything
+  renderSessions();
+  renderMessages();
+  renderEvents();
+  renderActions();
+  updateAgentContext();
+  renderInbox();
+  renderPeople();
+  renderCalendar();
+  renderFiles();
+  renderSettings();
+
+  // Initial welcome
+  setTimeout(() => {
+    addAgentMessage('👋 Welcome back! You have <strong>3 unread messages</strong> — Sarah Chen about Q2 strategy, and James Wilson from Apex Solutions sent a partnership proposal. What would you like to tackle first?');
+  }, 2000);
+
+  // Simulate periodic events
+  setInterval(() => {
+    const events = [
+      'Checking for new messages...',
+      'Running entity resolution...',
+      'Updating knowledge graph...',
+      'Analyzing communication patterns...'
+    ];
+    const idx = Math.floor(Math.random() * state.events.length);
+    if (state.events.length > 3) {
+      addEvent('Background: ' + events[Math.floor(Math.random() * events.length)], 'processed');
+    }
+  }, 15000);
+
+  // Resize handler for graph
+  window.addEventListener('resize', () => {
+    if (state.view === 'graph') initGraph();
+  });
+});
+</script>
+</body>
+</html>

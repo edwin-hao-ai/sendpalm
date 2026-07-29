@@ -1,0 +1,4 @@
+# MDDock local metadata (do not commit)
+.mddock/*
+# …but keep the workspace manifest tracked
+!.mddock/mddock.md
