@@ -3856,16 +3856,20 @@
     if (inProgress.length) {
       body.appendChild(el('div', 'agent-right-section-title', 'In Progress'));
       inProgress.forEach(t => {
+        const doneSteps = t.steps.filter(s => s.d).length;
+        const totalSteps = t.steps.length;
         const card = el('div', 'agent-task-card');
-        card.appendChild(el('div', 'agent-task-card-name', t.name));
-        const steps = el('div', 'agent-task-card-steps');
-        t.steps.forEach(s => {
-          const dot = el('span', 'agent-task-step-dot' + (s.d ? ' done' : ''), s.d ? '✓' : '○');
-          dot.title = s.l;
-          steps.appendChild(dot);
-        });
-        card.appendChild(steps);
-        if (t.eta) card.appendChild(el('div', 'agent-task-card-eta', 'ETA: ' + t.eta));
+        const info = el('div', 'agent-task-card-info');
+        info.appendChild(el('div', 'agent-task-card-name', t.name));
+        const progress = el('div', 'agent-task-card-progress', doneSteps + '/' + totalSteps + ' done');
+        progress.title = t.steps.map(s => (s.d ? '✓ ' : '○ ') + s.l).join('\n');
+        info.appendChild(progress);
+        card.appendChild(info);
+        const right = el('div', 'agent-task-card-right');
+        if (t.eta) right.appendChild(el('div', 'agent-task-card-eta', t.eta));
+        const status = el('span', 'agent-task-card-status agent-task-card-status--' + (t.status === 'go' ? 'go' : 'wt'), t.status === 'go' ? 'Running' : 'Waiting');
+        right.appendChild(status);
+        card.appendChild(right);
         card.addEventListener('click', () => {
           if (t.sessionId) { switchAgentSession(t.sessionId); renderMain(); }
         });
@@ -6405,14 +6409,18 @@ ${D.stageSuggest[c.stage] || ''}
       tasks.appendChild(el('div', 'agent-section-title', 'In progress'));
       (D.agentTasks || []).forEach(t => {
         const row = el('div', 'agent-task');
+        const doneSteps = t.steps.filter(s => s.d).length;
+        const totalSteps = t.steps.length;
         row.appendChild(el('div', 'agent-task-name', t.name));
-        const steps = el('div', 'agent-task-steps');
-        t.steps.forEach(s => {
-          const step = el('span', 'agent-step' + (s.d ? ' done' : ''), s.d ? '✓' : '○');
-          step.title = s.l;
-          steps.appendChild(step);
+        const meta = el('div', 'agent-task-meta');
+        const progress = el('span', 'agent-task-progress', doneSteps + '/' + totalSteps);
+        progress.title = t.steps.map(s => (s.d ? '✓ ' : '○ ') + s.l).join('\n');
+        meta.appendChild(progress);
+        if (t.eta) meta.appendChild(el('span', 'agent-task-eta', t.eta));
+        row.appendChild(meta);
+        row.addEventListener('click', () => {
+          if (t.sessionId) { switchAgentSession(t.sessionId); renderMain(); }
         });
-        row.appendChild(steps);
         tasks.appendChild(row);
       });
     }
