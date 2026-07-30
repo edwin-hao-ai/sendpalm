@@ -101,6 +101,112 @@
     return i;
   }
 
+  function elAttr(tag, className, attrs, text) {
+    const e = document.createElement(tag);
+    if (className) e.className = className;
+    if (attrs) Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v));
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  function openModalCard(opts) {
+    const modal = document.getElementById('compose-modal');
+    modal.innerHTML = '';
+    modal.classList.remove('hidden', 'minimized');
+    const overlay = el('div', 'modal-card-overlay');
+    overlay.addEventListener('click', () => closeCompose());
+    const card = el('div', 'modal-card' + (window.innerWidth < 640 ? ' modal-card-fullscreen' : ''));
+    const header = el('div', 'modal-card-header');
+    header.appendChild(el('h2', 'modal-card-title', opts.title || ''));
+    const closeBtn = el('button', 'modal-card-close', '×');
+    closeBtn.addEventListener('click', () => closeCompose());
+    header.appendChild(closeBtn);
+    card.appendChild(header);
+    const body = el('div', 'modal-card-body');
+    if (opts.renderBody) opts.renderBody(body);
+    card.appendChild(body);
+    if (opts.renderActions) {
+      const actions = el('div', 'modal-card-actions');
+      opts.renderActions(actions);
+      card.appendChild(actions);
+    }
+    modal.appendChild(overlay);
+    modal.appendChild(card);
+    requestAnimationFrame(() => modal.classList.add('open'));
+  }
+
+  function renderFormGroup(label, input, hint) {
+    const group = el('div', 'form-group');
+    group.appendChild(el('label', 'form-label', label));
+    group.appendChild(input);
+    if (hint) group.appendChild(el('div', 'form-hint', hint));
+    return group;
+  }
+
+  function renderToggle(label, checked, onChange) {
+    const row = el('label', 'form-toggle-row');
+    const text = el('span', 'form-toggle-label', label);
+    const track = el('span', 'form-toggle' + (checked ? ' on' : ''));
+    const thumb = el('span', 'form-toggle-thumb');
+    track.appendChild(thumb);
+    row.appendChild(text);
+    row.appendChild(track);
+    row.addEventListener('click', () => {
+      const next = !track.classList.contains('on');
+      track.classList.toggle('on', next);
+      onChange(next);
+    });
+    return row;
+  }
+
+  function renderPillInput(values, options, onChange) {
+    const wrap = el('div', 'pill-input');
+    const selected = new Set(values || []);
+    const list = el('div', 'pill-input-list');
+    function refresh() {
+      list.innerHTML = '';
+      options.forEach(opt => {
+        const pill = el('button', 'pill' + (selected.has(opt.id) ? ' active' : ''), opt.name);
+        pill.type = 'button';
+        pill.addEventListener('click', () => {
+          if (selected.has(opt.id)) selected.delete(opt.id);
+          else selected.add(opt.id);
+          refresh();
+          onChange(Array.from(selected));
+        });
+        list.appendChild(pill);
+      });
+    }
+    refresh();
+    wrap.appendChild(list);
+    return wrap;
+  }
+
+  function confirmDestructive(message, onConfirm) {
+    openModalCard({
+      title: 'Are you sure?',
+      renderBody: (body) => body.appendChild(el('p', '', message)),
+      renderActions: (actions) => {
+        const cancel = el('button', 'btn-secondary', 'Cancel');
+        cancel.addEventListener('click', () => closeCompose());
+        const del = el('button', 'btn-danger', 'Delete');
+        del.addEventListener('click', () => { closeCompose(); onConfirm(); });
+        actions.appendChild(cancel);
+        actions.appendChild(del);
+      }
+    });
+  }
+
+  // Expose shared helpers for console-based prototyping and later tasks.
+  window.el = el;
+  window.elAttr = elAttr;
+  window.icon = icon;
+  window.openModalCard = openModalCard;
+  window.renderFormGroup = renderFormGroup;
+  window.renderToggle = renderToggle;
+  window.renderPillInput = renderPillInput;
+  window.confirmDestructive = confirmDestructive;
+
   function addLongPressListener(element, callback, duration = 500) {
     let timer = null;
     let startX = 0;
