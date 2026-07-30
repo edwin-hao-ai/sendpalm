@@ -7389,7 +7389,7 @@ button:focus-visible, input:focus-visible {
   }
 
   /* Calendar mobile layout */
-  .calendar-view { padding: 14px 16px; }
+  .calendar-view { padding: 14px 16px calc(64px + env(safe-area-inset-bottom)); }
 
   .day-view,
   .week-view,
@@ -7418,7 +7418,7 @@ button:focus-visible, input:focus-visible {
   /* Settings mobile layout */
   .settings-view {
     max-width: none;
-    padding: 0;
+    padding: 0 0 calc(64px + env(safe-area-inset-bottom));
   }
 
   .settings-card {
@@ -7488,7 +7488,8 @@ button:focus-visible, input:focus-visible {
   .panel-bottom-actions .icon-btn {
     flex: 1;
     height: 44px;
-    max-width: 72px;
+    min-width: 0;
+    max-width: 64px;
     display: flex;
     flex-direction: column;
     gap: 2px;
