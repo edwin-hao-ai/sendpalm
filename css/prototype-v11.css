@@ -7355,7 +7355,56 @@ button:focus-visible, input:focus-visible {
   .files-table td {
     padding: 10px 12px;
     font-size: 12px;
+    white-space: nowrap;
   }
+
+  .files-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Calendar mobile layout */
+  .calendar-view { padding: 14px 16px; }
+
+  .day-view,
+  .week-view,
+  .year-view {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .week-cols,
+  .year-months {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .week-col,
+  .year-month {
+    width: 100%;
+    min-width: auto;
+  }
+
+  .week-col { min-height: auto; }
+  .week-col-timeline { min-height: 140px; }
+
+  /* Settings mobile layout */
+  .settings-view {
+    max-width: none;
+    padding: 0;
+  }
+
+  .settings-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    margin-bottom: 16px;
+    padding: 0 16px;
+  }
+
+  .settings-row { padding: 14px 0; }
 
   #app.detail-open {
     grid-template-columns: 1fr;
