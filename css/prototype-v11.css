@@ -7444,13 +7444,13 @@ button:focus-visible, input:focus-visible {
 
   #detail-panel {
     position: fixed;
-    top: 0;
-    right: 0;
-    left: 0;
+    inset: 0;
     width: 100%;
     height: 100dvh;
-    z-index: 50;
+    z-index: 100;
     border-left: none;
+    grid-area: auto;
+    background: var(--bg);
     transform: translateX(100%);
     transition: transform 0.3s var(--spring);
   }
