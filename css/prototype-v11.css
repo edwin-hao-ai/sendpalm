@@ -4394,6 +4394,7 @@ img.file-cell-avatar {
 .filmstrip-event-peach { background: linear-gradient(135deg, #ffe5da 0%, #f5a888 100%); color: #6b3818; }
 .filmstrip-event-canary { background: linear-gradient(135deg, #fff5ca 0%, #f5d652 100%); color: #6b5418; }
 .filmstrip-event-lavender { background: linear-gradient(135deg, #d5d2ff 0%, #8c7eff 100%); color: #2d1f6b; }
+.filmstrip-event-rose { background: linear-gradient(135deg, #ffcdcd 0%, #ff9a9a 100%); color: #6b1f1f; }
 
 .filmstrip-event-time {
   font-family: var(--font-mono);
@@ -4514,6 +4515,7 @@ img.file-cell-avatar {
 .stripe-peach { background: linear-gradient(180deg, #f5a888, #ffe5da); }
 .stripe-canary { background: linear-gradient(180deg, #f5d652, #fff5ca); }
 .stripe-lavender { background: linear-gradient(180deg, #8c7eff, #d5d2ff); }
+.stripe-rose { background: linear-gradient(180deg, #ff9a9a, #ffcdcd); }
 
 .day-agenda-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .day-agenda-time {
@@ -4736,6 +4738,7 @@ img.file-cell-avatar {
 .stripe-bg-peach { background: linear-gradient(90deg, rgba(255,229,218,0.5), rgba(255,229,218,0.2)); border-color: rgba(245,168,136,0.4); }
 .stripe-bg-canary { background: linear-gradient(90deg, rgba(255,245,202,0.5), rgba(255,245,202,0.2)); border-color: rgba(245,214,82,0.4); }
 .stripe-bg-lavender { background: linear-gradient(90deg, rgba(213,210,255,0.5), rgba(213,210,255,0.2)); border-color: rgba(140,126,255,0.4); }
+.stripe-bg-rose { background: linear-gradient(90deg, rgba(255,205,205,0.5), rgba(255,205,205,0.2)); border-color: rgba(255,154,154,0.4); }
 .multi-day-title { font-size: 13px; font-weight: 700; color: var(--cal-ink); }
 .multi-day-date { font-family: var(--font-mono); font-size: 11px; color: var(--cal-ink-soft); }
 
@@ -5329,6 +5332,7 @@ img.file-cell-avatar {
 .event-modal-color-peach { background: var(--cal-peach); }
 .event-modal-color-canary { background: var(--cal-canary); }
 .event-modal-color-lavender { background: var(--cal-lavender); }
+.event-modal-color-rose { background: #ff9a9a; }
 
 .event-modal-footer {
   display: flex;

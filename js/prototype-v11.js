@@ -51,6 +51,10 @@
     agentMemory: JSON.parse(JSON.stringify(D.agentMemory || { global: {}, contacts: {} })),
   };
 
+  // Task 2 data upgrade: canonical event/task arrays (alias legacy _meetings so existing views keep working).
+  D.events = D.events || D._meetings || [];
+  D.tasks = D.tasks || [];
+
   function isMobile() { return window.innerWidth < 768; }
   function isTablet() { return window.innerWidth >= 768 && window.innerWidth < 1024; }
   function isDesktop() { return window.innerWidth >= 1024; }
@@ -387,6 +391,7 @@
   window.renderPillInput = renderPillInput;
   window.confirmDestructive = confirmDestructive;
   window.openContactModal = openContactModal;
+  window.openEventModal = openEventModal;
 
   function addLongPressListener(element, callback, duration = 500) {
     let timer = null;
@@ -2975,6 +2980,7 @@
   }
 
   function eventColor(m) {
+    if (m.color) return m.color;
     if (m.br) return 'mint';
     return 'sky';
   }
@@ -3334,7 +3340,7 @@
         lbl.textContent = formatTimeCompact(s.duration) + ' 空闲';
         block.appendChild(lbl);
       }
-      block.addEventListener('click', () => openSometimeModal(s));
+      block.addEventListener('click', () => openEventModal({ slot: s }));
       strip.appendChild(block);
     });
 
@@ -4537,157 +4543,250 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
   }
 
   function openEventModal(opts) {
-    const modal = document.getElementById('event-modal');
-    modal.innerHTML = '';
-    modal.classList.remove('hidden');
-    modal.appendChild(renderEventModal(opts || {}));
+    opts = opts || {};
+    const existing = opts.eventId ? D.events.find(e => e.id === opts.eventId) : null;
+    const isNew = !existing;
+    const eventId = existing ? existing.id : 'e' + Date.now();
+    const slot = opts.slot || null;
 
-    requestAnimationFrame(() => modal.classList.add('open'));
+    const colors = ['mint', 'sky', 'peach', 'canary', 'lavender', 'rose'];
+    const contacts = (D.contacts || []).map(c => ({ id: c.id, name: c.name || `${c.firstName || ''} ${c.lastName || ''}`.trim() || 'Unnamed' }));
+    const tasks = D.tasks || [];
+
+    // Mutable form state (no DOM mutation until save).
+    const values = {
+      title: '',
+      location: '',
+      video: '',
+      allDay: false,
+      date: dateKey(state.calendarSelected),
+      start: '10:00',
+      end: '11:00',
+      people: [],
+      color: 'mint',
+      reminder: 'none',
+      description: '',
+      linkedTask: null,
+    };
+
+    if (existing) {
+      values.title = existing.title || '';
+      values.location = existing.location || '';
+      values.video = existing.video || '';
+      values.allDay = !!existing.allDay;
+      values.date = existing.date || (existing.dt ? dateKey(parseMeetingDate(existing.dt)) : dateKey(state.calendarSelected));
+      const t = parseMeetingTime(existing);
+      if (t) {
+        values.start = formatMinutes(t.start);
+        values.end = formatMinutes(t.end);
+      }
+      values.people = Array.isArray(existing.pids) ? existing.pids.slice() : [];
+      values.color = existing.color || 'mint';
+      values.reminder = existing.reminder || 'none';
+      values.description = existing.description || existing.notes || '';
+      values.linkedTask = existing.linkedTask || null;
+    } else if (slot) {
+      values.date = dateKey(state.calendarSelected);
+      values.start = formatMinutes(slot.start);
+      values.end = formatMinutes(slot.end);
+    }
+
+    let bodyEl;
+
+    function renderBody(body) {
+      bodyEl = body;
+      body.innerHTML = '';
+      const stack = el('div', 'form-stack');
+
+      const titleInput = elAttr('input', '', { type: 'text', value: values.title, placeholder: '和谁、做什么…' });
+      titleInput.addEventListener('input', () => values.title = titleInput.value);
+      stack.appendChild(renderFormGroup('Title', titleInput));
+
+      const locInput = elAttr('input', '', { type: 'text', value: values.location, placeholder: '会议室或地址' });
+      locInput.addEventListener('input', () => values.location = locInput.value);
+      stack.appendChild(renderFormGroup('Location', locInput));
+
+      const vidInput = elAttr('input', '', { type: 'url', value: values.video, placeholder: 'https://meet.example.com/…' });
+      vidInput.addEventListener('input', () => values.video = vidInput.value);
+      stack.appendChild(renderFormGroup('Video link', vidInput));
+
+      const allDayToggle = renderToggle('All day', values.allDay, (checked) => {
+        values.allDay = checked;
+        timeRow.style.display = checked ? 'none' : 'flex';
+      });
+      stack.appendChild(renderFormGroup('', allDayToggle));
+
+      const dateInput = elAttr('input', '', { type: 'date', value: values.date });
+      dateInput.addEventListener('input', () => values.date = dateInput.value);
+      stack.appendChild(renderFormGroup('Date', dateInput));
+
+      const timeRow = el('div', 'form-row');
+      const startInput = elAttr('input', '', { type: 'time', value: values.start });
+      startInput.addEventListener('input', () => values.start = startInput.value);
+      const endInput = elAttr('input', '', { type: 'time', value: values.end });
+      endInput.addEventListener('input', () => values.end = endInput.value);
+      timeRow.appendChild(renderFormGroup('Start', startInput));
+      timeRow.appendChild(renderFormGroup('End', endInput));
+      timeRow.style.display = values.allDay ? 'none' : 'flex';
+      stack.appendChild(timeRow);
+
+      const peoplePills = renderPillInput(values.people, contacts, (vals) => values.people = vals);
+      stack.appendChild(renderFormGroup('People', peoplePills));
+
+      const colorWrap = el('div', 'event-modal-colors');
+      colors.forEach(c => {
+        const dot = el('button', 'event-modal-color event-modal-color-' + c + (values.color === c ? ' active' : ''));
+        dot.type = 'button';
+        dot.addEventListener('click', () => {
+          values.color = c;
+          colorWrap.querySelectorAll('.event-modal-color').forEach(d => d.classList.remove('active'));
+          dot.classList.add('active');
+        });
+        colorWrap.appendChild(dot);
+      });
+      stack.appendChild(renderFormGroup('Color', colorWrap));
+
+      const reminderSel = el('select', '');
+      [
+        { id: 'none', name: 'None' },
+        { id: '5min', name: '5 minutes before' },
+        { id: '15min', name: '15 minutes before' },
+        { id: '30min', name: '30 minutes before' },
+        { id: '1h', name: '1 hour before' },
+        { id: '1d', name: '1 day before' },
+      ].forEach(r => {
+        const opt = document.createElement('option');
+        opt.value = r.id;
+        opt.textContent = r.name;
+        if (values.reminder === r.id) opt.selected = true;
+        reminderSel.appendChild(opt);
+      });
+      reminderSel.addEventListener('change', () => values.reminder = reminderSel.value);
+      stack.appendChild(renderFormGroup('Reminder', reminderSel));
+
+      const descInput = el('textarea', '');
+      descInput.value = values.description;
+      descInput.placeholder = '议题、链接、上下文…';
+      descInput.addEventListener('input', () => values.description = descInput.value);
+      stack.appendChild(renderFormGroup('Description', descInput));
+
+      const taskSel = el('select', '');
+      const noneOpt = document.createElement('option');
+      noneOpt.value = '';
+      noneOpt.textContent = 'None';
+      taskSel.appendChild(noneOpt);
+      tasks.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = t.title || 'Untitled task';
+        if (values.linkedTask === t.id) opt.selected = true;
+        taskSel.appendChild(opt);
+      });
+      const newOpt = document.createElement('option');
+      newOpt.value = '__new__';
+      newOpt.textContent = '+ Create new task';
+      taskSel.appendChild(newOpt);
+      taskSel.addEventListener('change', () => {
+        if (taskSel.value === '__new__') {
+          const title = window.prompt('New task title');
+          if (title && title.trim()) {
+            const task = { id: 't' + Date.now(), title: title.trim(), linkedEvent: eventId };
+            D.tasks.push(task);
+            values.linkedTask = task.id;
+            renderBody(body);
+          } else {
+            taskSel.value = values.linkedTask || '';
+          }
+        } else {
+          values.linkedTask = taskSel.value || null;
+        }
+      });
+      stack.appendChild(renderFormGroup('Linked task', taskSel));
+
+      body.appendChild(stack);
+      setTimeout(() => titleInput.focus(), 50);
+    }
+
+    openModalCard({
+      title: isNew ? 'New event' : 'Edit event',
+      renderBody,
+      renderActions: (actions) => {
+        if (!isNew) {
+          const del = el('button', 'btn btn-danger', 'Delete');
+          del.addEventListener('click', () => confirmDestructive(
+            `Delete “${values.title || 'this event'}”? This cannot be undone.`,
+            () => {
+              const idx = D.events.indexOf(existing);
+              if (idx > -1) D.events.splice(idx, 1);
+              (D.tasks || []).forEach(t => { if (t.linkedEvent === existing.id) t.linkedEvent = null; });
+              if (state.selectedMeetingId === existing.id) state.selectedMeetingId = null;
+              closeCompose();
+              renderMain();
+              showToast('Event deleted');
+            }
+          ));
+          actions.appendChild(del);
+        } else {
+          actions.appendChild(el('span', ''));
+        }
+
+        const cancel = el('button', 'btn btn-secondary', 'Cancel');
+        cancel.addEventListener('click', closeCompose);
+        actions.appendChild(cancel);
+
+        const save = el('button', 'btn btn-primary', 'Save');
+        save.addEventListener('click', () => {
+          if (!values.title.trim()) {
+            showToast('给事件起个名字吧');
+            return;
+          }
+
+          const [y, m, d] = values.date.split('-').map(n => parseInt(n, 10));
+          const dtLabel = `${m}/${d}`;
+          const timeLabel = values.allDay ? '00:00-23:59' : `${values.start}-${values.end}`;
+          const selectedPeople = contacts.filter(c => values.people.includes(c.id));
+          const pplLabel = selectedPeople.map(c => c.name).join('、') || '—';
+
+          const payload = {
+            id: eventId,
+            title: values.title.trim(),
+            location: values.location.trim(),
+            video: values.video.trim(),
+            allDay: values.allDay,
+            date: values.date,
+            dt: dtLabel,
+            start: values.allDay ? '00:00' : values.start,
+            end: values.allDay ? '23:59' : values.end,
+            tm: timeLabel,
+            pids: values.people.slice(),
+            ppl: pplLabel,
+            color: values.color,
+            reminder: values.reminder,
+            description: values.description,
+            notes: values.description,
+            linkedTask: values.linkedTask,
+            br: isNew ? false : (existing.br || false),
+            prep: isNew ? [] : (existing.prep || []),
+            post: isNew ? '' : (existing.post || ''),
+          };
+
+          if (isNew) {
+            D.events.push(payload);
+          } else {
+            Object.assign(existing, payload);
+          }
+
+          closeCompose();
+          renderMain();
+          showToast(isNew ? 'Event created' : 'Event saved');
+        });
+        actions.appendChild(save);
+      }
+    });
   }
 
   function closeEventModal() {
-    const modal = document.getElementById('event-modal');
-    modal.classList.remove('open');
-    setTimeout(() => modal.classList.add('hidden'), 220);
-  }
-
-  function renderEventModal(opts) {
-    const wrap = el('div', 'event-modal-backdrop');
-    wrap.addEventListener('click', (e) => { if (e.target === wrap) closeEventModal(); });
-
-    const card = el('div', 'event-modal-card');
-    const head = el('div', 'event-modal-head');
-    const headTitle = el('div', 'event-modal-head-title');
-    headTitle.textContent = opts.id ? '编辑事件' : '新建事件';
-    const closeBtn = el('button', 'icon-btn');
-    closeBtn.appendChild(icon('ph-x'));
-    closeBtn.addEventListener('click', closeEventModal);
-    head.appendChild(headTitle);
-    head.appendChild(closeBtn);
-    card.appendChild(head);
-
-    const body = el('div', 'event-modal-body');
-
-    const titleRow = el('div', 'event-modal-field');
-    titleRow.appendChild(el('label', '', '标题'));
-    const titleInput = el('input', 'event-modal-input');
-    titleInput.type = 'text';
-    titleInput.placeholder = '和谁、做什么…';
-    titleInput.value = opts.title || '';
-    titleRow.appendChild(titleInput);
-    body.appendChild(titleRow);
-
-    const dateRow = el('div', 'event-modal-field event-modal-row');
-    const dateField = el('div', 'event-modal-col');
-    dateField.appendChild(el('label', '', '日期'));
-    const dateInput = el('input', 'event-modal-input');
-    dateInput.type = 'date';
-    dateInput.value = opts.date || dateKey(state.calendarSelected);
-    dateField.appendChild(dateInput);
-    dateRow.appendChild(dateField);
-
-    const startField = el('div', 'event-modal-col');
-    startField.appendChild(el('label', '', '开始'));
-    const startInput = el('input', 'event-modal-input');
-    startInput.type = 'time';
-    startInput.value = opts.start || '10:00';
-    startField.appendChild(startInput);
-    dateRow.appendChild(startField);
-
-    const endField = el('div', 'event-modal-col');
-    endField.appendChild(el('label', '', '结束'));
-    const endInput = el('input', 'event-modal-input');
-    endInput.type = 'time';
-    endInput.value = opts.end || '11:00';
-    endField.appendChild(endInput);
-    dateRow.appendChild(endField);
-
-    body.appendChild(dateRow);
-
-    const peopleRow = el('div', 'event-modal-field');
-    peopleRow.appendChild(el('label', '', '参与人'));
-    const peopleInput = el('input', 'event-modal-input');
-    peopleInput.type = 'text';
-    peopleInput.placeholder = '谁会来 (姓名或邮箱，逗号分隔)';
-    peopleInput.value = opts.people || '';
-    peopleRow.appendChild(peopleInput);
-    body.appendChild(peopleRow);
-
-    const notesRow = el('div', 'event-modal-field');
-    notesRow.appendChild(el('label', '', '备注'));
-    const notesInput = el('textarea', 'event-modal-textarea');
-    notesInput.placeholder = '议题、链接、上下文…';
-    notesInput.value = opts.notes || '';
-    notesRow.appendChild(notesInput);
-    body.appendChild(notesRow);
-
-    const colorRow = el('div', 'event-modal-field');
-    colorRow.appendChild(el('label', '', '配色'));
-    const colorChoices = el('div', 'event-modal-colors');
-    ['mint', 'sky', 'peach', 'canary', 'lavender'].forEach(c => {
-      const dot = el('button', 'event-modal-color event-modal-color-' + c);
-      if ((opts.color || 'mint') === c) dot.classList.add('active');
-      dot.addEventListener('click', () => {
-        colorChoices.querySelectorAll('.event-modal-color').forEach(d => d.classList.remove('active'));
-        dot.classList.add('active');
-      });
-      colorChoices.appendChild(dot);
-    });
-    colorRow.appendChild(colorChoices);
-    body.appendChild(colorRow);
-
-    card.appendChild(body);
-
-    const footer = el('div', 'event-modal-footer');
-    const aiBtn = el('button', 'btn btn-ghost btn-sm');
-    aiBtn.appendChild(icon('ph-sparkle'));
-    aiBtn.appendChild(el('span', '', '用 AI 起草议程'));
-    aiBtn.addEventListener('click', () => {
-      notesInput.value = notesInput.value || '1. 上次会议回顾\n2. 当前阻塞\n3. 下一步行动';
-      showToast('已自动起草议程');
-    });
-    footer.appendChild(aiBtn);
-
-    const cancelBtn = el('button', 'btn btn-ghost btn-sm');
-    cancelBtn.appendChild(el('span', '', '取消'));
-    cancelBtn.addEventListener('click', closeEventModal);
-    footer.appendChild(cancelBtn);
-
-    const saveBtn = el('button', 'btn btn-primary btn-sm');
-    saveBtn.appendChild(icon('ph-check'));
-    saveBtn.appendChild(el('span', '', '保存事件'));
-    saveBtn.addEventListener('click', () => {
-      if (!titleInput.value.trim()) {
-        showToast('给事件起个名字吧');
-        return;
-      }
-      const month = parseInt(dateInput.value.split('-')[1], 10);
-      const day = parseInt(dateInput.value.split('-')[2], 10);
-      const dateLabel = (month) + '/' + day;
-      const timeLabel = startInput.value + '-' + endInput.value;
-      const ids = (peopleInput.value || '').split(/[,，]/).map(s => s.trim()).filter(Boolean);
-      const newMeeting = {
-        id: 'm' + Date.now(),
-        title: titleInput.value.trim(),
-        pids: ids,
-        ppl: peopleInput.value || '—',
-        dt: dateLabel,
-        tm: timeLabel,
-        br: false,
-        notes: notesInput.value || '',
-        prep: []
-      };
-      D._meetings.push(newMeeting);
-      showToast('事件已保存');
-      closeEventModal();
-      renderMain();
-    });
-    footer.appendChild(saveBtn);
-    card.appendChild(footer);
-
-    wrap.appendChild(card);
-    setTimeout(() => titleInput.focus(), 50);
-    return wrap;
+    closeCompose();
   }
 
   function closeCompose() {
@@ -5669,6 +5768,11 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     closeBtn.appendChild(icon('ph-x'));
     closeBtn.addEventListener('click', closePanel);
 
+    const editBtn = el('button', 'btn btn-primary btn-sm');
+    editBtn.appendChild(icon('ph-pencil-simple'));
+    editBtn.appendChild(el('span', '', 'Edit'));
+    editBtn.addEventListener('click', () => openEventModal({ eventId: m.id }));
+
     const copyBtn = el('button', 'btn btn-secondary btn-sm');
     copyBtn.appendChild(icon('ph-copy'));
     copyBtn.appendChild(el('span', '', 'Copy'));
@@ -5680,6 +5784,7 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     downloadBtn.addEventListener('click', () => downloadMeetingMarkdown(m));
 
     const headerActions = el('div', 'panel-actions');
+    headerActions.appendChild(editBtn);
     headerActions.appendChild(copyBtn);
     headerActions.appendChild(downloadBtn);
 
