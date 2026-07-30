@@ -4935,7 +4935,7 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
 
     const header = el('div', 'panel-header');
     const closeBtn = el('button', 'icon-btn panel-close');
-    closeBtn.appendChild(icon('ph-x'));
+    closeBtn.appendChild(icon(isMobile() ? 'ph-arrow-left' : 'ph-x'));
     closeBtn.addEventListener('click', closePanel);
 
     const copyBtn = el('button', 'btn btn-secondary btn-sm');
@@ -5179,6 +5179,46 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     actions.appendChild(unreadBtn);
     actions.appendChild(moreBtn);
     wrapper.appendChild(actions);
+
+    if (isMobile()) {
+      const c = getContact(m.pid);
+      const bottomActions = el('div', 'panel-bottom-actions');
+      const actions = [
+        {
+          icon: 'ph-arrow-u-up-left',
+          label: 'Reply',
+          action: () => {
+            const subject = baseSubject(m.subj);
+            const quoteHeader = 'On ' + m.tm + ', ' + (c ? c.name : m.fm) + ' <' + (c ? c.em : '') + '> wrote:';
+            openComposeWithContext(c ? c.name : m.fm, 'Re: ' + subject, '', 'reply', m, quoteHeader);
+          }
+        },
+        { icon: 'ph-clock', label: 'Pending', action: () => { replyLaterMessage(m); closePanel(); } },
+        { icon: 'ph-push-pin', label: 'Saved', action: () => { setAsideMessage(m); closePanel(); } },
+        {
+          icon: 'ph-arrow-fat-line-up',
+          label: 'Remind',
+          action: () => {
+            const bubbleUpBtn = bottomActions.lastChild.previousSibling;
+            const choices = [
+              { label: 'Now', sub: '马上提醒', action: () => bubbleUpMessage(m, 'now') },
+              { label: 'Tomorrow', sub: '明天 8:00', action: () => bubbleUpMessage(m, 'tomorrow') },
+              { label: 'Next week', sub: '下周一 8:00', action: () => bubbleUpMessage(m, 'week') },
+            ];
+            openContextMenuFromElement(bubbleUpBtn, choices);
+          }
+        },
+        { icon: 'ph-dots-three', label: 'More', action: (e) => showContextMenuForMessage(e, m) },
+      ];
+      actions.forEach(a => {
+        const btn = el('button', 'icon-btn');
+        btn.appendChild(icon(a.icon));
+        btn.appendChild(el('span', '', a.label));
+        btn.addEventListener('click', (e) => { e.stopPropagation(); a.action(e); });
+        bottomActions.appendChild(btn);
+      });
+      wrapper.appendChild(bottomActions);
+    }
 
     return wrapper;
   }

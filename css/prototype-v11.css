@@ -7341,10 +7341,47 @@ button:focus-visible, input:focus-visible {
   #detail-panel.open { transform: translateX(0); }
 
   .panel-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
     padding: 12px 14px;
+    background: rgba(249,247,245,0.92);
+    backdrop-filter: blur(20px) saturate(180%);
   }
 
-  .panel-content { padding: 14px 16px; }
+  .panel-content {
+    padding: 14px 16px calc(14px + 72px + env(safe-area-inset-bottom));
+    height: 100%;
+    overflow-y: auto;
+  }
+
+  .panel-bottom-actions {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    justify-content: space-around;
+    gap: 4px;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    background: rgba(255,255,255,0.96);
+    border-top: 1px solid var(--border);
+    backdrop-filter: blur(20px) saturate(180%);
+    z-index: 3;
+  }
+
+  .panel-bottom-actions .icon-btn {
+    flex: 1;
+    height: 44px;
+    max-width: 72px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 10px;
+    color: var(--text-secondary);
+  }
+
+  .panel-bottom-actions .icon-btn i { font-size: 20px; }
 
   .msg-thread-subject {
     font-size: 17px;
@@ -7414,8 +7451,6 @@ button:focus-visible, input:focus-visible {
     padding-top: env(safe-area-inset-top);
     height: calc(52px + env(safe-area-inset-top));
   }
-
-  #detail-panel { top: env(safe-area-inset-top); }
 }
 
 /* Agent Workspace */
