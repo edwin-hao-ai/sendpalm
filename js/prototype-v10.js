@@ -1802,7 +1802,8 @@
     autofileBtn.appendChild(el('span', '', autoLabelText));
     autofileBtn.title = 'Auto-label emails';
     autofileBtn.addEventListener('click', () => {
-      openContextMenuFromElement(autofileBtn, D.labels.map(label => ({
+      const labelNames = D.labels.map(l => typeof l === 'object' ? l.name : l);
+      openContextMenuFromElement(autofileBtn, labelNames.map(label => ({
         label: (c.autoLabel && c.autoLabel.includes(label) ? '✓ ' : '') + label,
         action: () => {
           if (!c.autoLabel) c.autoLabel = [];
@@ -4959,9 +4960,9 @@ ${D.stageSuggest[c.stage] || ''}
       renderMain();
     }, 450);
 
-    document.querySelector('.traffic-close').addEventListener('click', () => showToast('Close window'));
-    document.querySelector('.traffic-minimize').addEventListener('click', () => showToast('Minimize window'));
-    document.querySelector('.traffic-zoom').addEventListener('click', () => showToast('Maximize window'));
+    document.querySelector('.traffic-close')?.addEventListener('click', () => showToast('Close window'));
+    document.querySelector('.traffic-minimize')?.addEventListener('click', () => showToast('Minimize window'));
+    document.querySelector('.traffic-zoom')?.addEventListener('click', () => showToast('Maximize window'));
 
     document.addEventListener('keydown', (e) => {
       const tag = e.target && e.target.tagName ? e.target.tagName.toLowerCase() : '';

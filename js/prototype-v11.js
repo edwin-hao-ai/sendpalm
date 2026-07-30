@@ -49,7 +49,7 @@
     loading: true,
     agentSessions: JSON.parse(JSON.stringify(D.agentSessions || [])),
     currentAgentSessionId: (D.agentSessions && D.agentSessions[0] && D.agentSessions[0].id) || null,
-    agentMemory: JSON.parse(JSON.stringify(D.agentMemory || { global: {}, contacts: {} })),
+    agentMemory: D.agentMemory || { global: {}, contacts: {} },
   };
 
   // Task 2 data upgrade: canonical event/task arrays (alias legacy _meetings so existing views keep working).
@@ -221,6 +221,7 @@
     let title = contact.title || '';
     let topicsStr = (contact.topics || []).join(', ');
     let notesStr = contact.notes || '';
+    let avatar = contact.avatar || contact.photo || '';
 
     let emails = (contact.emails || []).map(e => ({ ...e }));
     let phones = (contact.phones || []).map(p => ({ ...p }));
@@ -285,6 +286,24 @@
       const nick = elAttr('input', '', { type: 'text', value: nickname });
       nick.addEventListener('input', () => nickname = nick.value);
       stack.appendChild(renderFormGroup('Nickname', nick));
+
+      const previewName = `${firstName} ${lastName}`.trim() || nickname || 'Unnamed';
+      const avatarGroup = el('div', 'form-group');
+      avatarGroup.appendChild(el('label', 'form-label', 'Avatar'));
+      const avatarRow = el('div', 'form-row');
+      const previewContact = { photo: avatar, name: previewName };
+      let avatarPreview = renderAvatar(previewContact, 'person-avatar', previewName[0]);
+      const avatarInput = elAttr('input', '', { type: 'url', value: avatar, placeholder: 'https://example.com/avatar.png' });
+      avatarInput.addEventListener('input', () => {
+        avatar = avatarInput.value;
+        const nextPreview = renderAvatar({ photo: avatar, name: previewName }, 'person-avatar', previewName[0]);
+        avatarRow.replaceChild(nextPreview, avatarPreview);
+        avatarPreview = nextPreview;
+      });
+      avatarRow.appendChild(avatarPreview);
+      avatarRow.appendChild(renderFormGroup('Avatar URL', avatarInput));
+      avatarGroup.appendChild(avatarRow);
+      stack.appendChild(avatarGroup);
 
       const comp = elAttr('input', '', { type: 'text', value: company, list: 'company-list' });
       comp.addEventListener('input', () => company = comp.value);
@@ -374,6 +393,7 @@
           contact.tl = contact.title;
           contact.em = contact.emails[0] ? contact.emails[0].value : '';
           contact.ph = contact.phones[0] ? contact.phones[0].value : '';
+          contact.avatar = avatar;
           contact.photo = contact.avatar;
           if (isNew) D.contacts.unshift(contact);
           closeCompose(); renderMain(); showToast(isNew ? 'Contact created' : 'Contact saved');
@@ -4994,10 +5014,16 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
       metaRow.appendChild(renderFormGroup('Priority', prioritySel));
 
       const statusSel = el('select', '');
-      ['todo', 'in-progress', 'done'].forEach(s => {
+      const statusLabels = {
+        todo: 'To do',
+        'in-progress': 'In progress',
+        waiting: 'Waiting',
+        done: 'Done'
+      };
+      ['todo', 'in-progress', 'waiting', 'done'].forEach(s => {
         const opt = document.createElement('option');
         opt.value = s;
-        opt.textContent = s === 'todo' ? 'To do' : s === 'in-progress' ? 'In progress' : 'Done';
+        opt.textContent = statusLabels[s];
         if (values.status === s) opt.selected = true;
         statusSel.appendChild(opt);
       });
@@ -5139,7 +5165,7 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
       linkedTask: draft.linkedTask || null
     };
 
-    let bodyEl, toField, ccInput, bccInput, subjInput, bodyInput;
+    let bodyEl, toField, ccField, bccField, subjInput, bodyInput;
 
     function renderAttachmentRow(name, idx, list, container) {
       const row = el('div', 'dynamic-field-row');
@@ -5170,12 +5196,12 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
       stack.appendChild(renderFormGroup('To', toField.wrap));
 
       const metaRow = el('div', 'form-row');
-      ccInput = elAttr('input', '', { type: 'text', value: values.cc, placeholder: 'Cc' });
-      ccInput.addEventListener('input', () => values.cc = ccInput.value);
-      metaRow.appendChild(renderFormGroup('Cc', ccInput));
-      bccInput = elAttr('input', '', { type: 'text', value: values.bcc, placeholder: 'Bcc' });
-      bccInput.addEventListener('input', () => values.bcc = bccInput.value);
-      metaRow.appendChild(renderFormGroup('Bcc', bccInput));
+      ccField = createRecipientField(values.cc, 'Cc');
+      ccField.hidden.addEventListener('input', () => values.cc = ccField.hidden.value);
+      metaRow.appendChild(renderFormGroup('Cc', ccField.wrap));
+      bccField = createRecipientField(values.bcc, 'Bcc');
+      bccField.hidden.addEventListener('input', () => values.bcc = bccField.hidden.value);
+      metaRow.appendChild(renderFormGroup('Bcc', bccField.wrap));
       stack.appendChild(metaRow);
 
       subjInput = elAttr('input', '', { type: 'text', value: values.subj, placeholder: 'Subject' });
@@ -6084,9 +6110,16 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     const modal = el('div', 'modal-overlay');
     const content = el('div', 'modal agent-memory-modal');
 
+    D.agentMemory = D.agentMemory || { global: {}, contacts: {} };
+
+    function onMemoryChange() {
+      renderMain();
+    }
+
     function closeModal() {
       modal.remove();
       document.removeEventListener('keydown', onKeyDown);
+      renderMain();
     }
 
     function onKeyDown(e) {
@@ -6118,17 +6151,18 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
       const row = el('div', 'settings-row');
       row.appendChild(el('span', 'settings-label', f.label));
       const input = el('input', 'settings-input');
-      input.value = state.agentMemory.global[f.key] || '';
+      input.value = D.agentMemory.global[f.key] || '';
       input.placeholder = f.placeholder;
       input.addEventListener('change', () => {
-        state.agentMemory.global[f.key] = input.value;
+        D.agentMemory.global[f.key] = input.value;
+        onMemoryChange();
       });
       row.appendChild(input);
       body.appendChild(row);
     });
 
     body.appendChild(el('div', 'agent-memory-section-title', 'Contact memory'));
-    Object.entries(state.agentMemory.contacts).forEach(([pid, mem]) => {
+    Object.entries(D.agentMemory.contacts).forEach(([pid, mem]) => {
       const c = D.getP(pid);
       const card = el('div', 'agent-memory-contact-card');
       card.appendChild(el('div', 'agent-memory-contact-name', c ? c.name : pid));
@@ -6137,6 +6171,7 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
       topics.placeholder = 'Topics';
       topics.addEventListener('change', () => {
         mem.topics = topics.value.split(',').map(s => s.trim()).filter(Boolean);
+        onMemoryChange();
       });
       card.appendChild(topics);
       body.appendChild(card);
@@ -7997,9 +8032,9 @@ ${D.stageSuggest[c.stage] || ''}
       renderMain();
     }, 450);
 
-    document.querySelector('.traffic-close').addEventListener('click', () => showToast('Close window'));
-    document.querySelector('.traffic-minimize').addEventListener('click', () => showToast('Minimize window'));
-    document.querySelector('.traffic-zoom').addEventListener('click', () => showToast('Maximize window'));
+    document.querySelector('.traffic-close')?.addEventListener('click', () => showToast('Close window'));
+    document.querySelector('.traffic-minimize')?.addEventListener('click', () => showToast('Minimize window'));
+    document.querySelector('.traffic-zoom')?.addEventListener('click', () => showToast('Maximize window'));
 
     document.addEventListener('keydown', (e) => {
       const tag = e.target && e.target.tagName ? e.target.tagName.toLowerCase() : '';
