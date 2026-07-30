@@ -343,7 +343,7 @@
           const del = el('button', 'btn-danger', 'Delete');
           del.addEventListener('click', () => confirmDestructive(`Delete ${firstName} ${lastName}? This cannot be undone.`, () => {
             D.contacts = D.contacts.filter(c => c.id !== contact.id);
-            D.tasks = (D.tasks || []).filter(t => t.linkedContact !== contact.id);
+            D.tasks = (D.tasks || []).filter(t => !(t.relatedType === 'contact' && t.relatedId === contact.id) && t.linkedContact !== contact.id);
             if (state.selectedContactId === contact.id) state.selectedContactId = null;
             renderMain(); showToast('Contact deleted');
           }));
@@ -392,6 +392,7 @@
   window.confirmDestructive = confirmDestructive;
   window.openContactModal = openContactModal;
   window.openEventModal = openEventModal;
+  window.openTaskModal = openTaskModal;
 
   function addLongPressListener(element, callback, duration = 500) {
     let timer = null;
@@ -2255,9 +2256,14 @@
     editBtn.appendChild(icon('ph-pencil-simple'));
     editBtn.appendChild(el('span', '', 'Edit'));
     editBtn.addEventListener('click', () => openContactModal(c.id));
+    const followUpBtn = el('button', 'btn btn-secondary btn-sm contact-followup-btn');
+    followUpBtn.appendChild(icon('ph-check-circle'));
+    followUpBtn.appendChild(el('span', '', 'Add follow-up'));
+    followUpBtn.addEventListener('click', () => openTaskModal(null, { relatedType: 'contact', relatedId: c.id }));
     hero.appendChild(avatar);
     hero.appendChild(info);
     hero.appendChild(editBtn);
+    hero.appendChild(followUpBtn);
     hero.appendChild(writeBtn);
 
     header.appendChild(closeBtn);
@@ -3285,7 +3291,11 @@
     const reminder = el('button', 'btn btn-ghost btn-sm');
     reminder.appendChild(icon('ph-arrow-fat-line-up'));
     reminder.appendChild(el('span', '', 'Bubble Up'));
-    reminder.addEventListener('click', () => showToast('Bubble Up 已设置'));
+    reminder.addEventListener('click', () => openTaskModal(null, {
+      relatedType: 'none',
+      dueDate: dateKey(state.calendarSelected),
+      description: 'Bubble Up reminder'
+    }));
 
     const sometime = el('button', 'btn btn-ghost btn-sm');
     sometime.appendChild(icon('ph-list-checks'));
@@ -3856,23 +3866,31 @@
   }
 
   function openSometimeModal(slot) {
-    const title = slot ? '规划空闲' + formatTimeCompact(slot.duration) : '本周随手做';
     const minutes = slot ? slot.duration : 30;
-    const v = prompt(title + ' — 输入任务名（' + formatTimeCompact(minutes) + '）', '');
-    if (!v) return;
-    D.calendarExtras.sometime = D.calendarExtras.sometime || [];
-    D.calendarExtras.sometime.push({ id: 'st' + Date.now(), title: v, estMin: minutes, added: dateKey(new Date()) });
-    showToast('已加入 Sometime');
-    renderMain();
+    openTaskModal(null, {
+      relatedType: 'none',
+      dueDate: dateKey(state.calendarSelected),
+      description: slot ? `Estimated: ${formatTimeCompact(minutes)}` : '',
+      onSave: (task) => {
+        // Keep the legacy Sometime panel working while storing the canonical task in D.tasks.
+        D.calendarExtras.sometime = D.calendarExtras.sometime || [];
+        D.calendarExtras.sometime.push({ id: 'st' + Date.now(), title: task.title, estMin: minutes, added: dateKey(new Date()) });
+      }
+    });
   }
 
   function startTimeTracking(date) {
-    const category = prompt('分类（例如：深度工作 / 会议 / 阅读）', '深度工作');
-    if (!category) return;
-    D.calendarExtras.timeTracking = D.calendarExtras.timeTracking || [];
-    D.calendarExtras.timeTracking.push({ date: dateKey(date), minutes: 25, category: category, icon: 'ph-laptop', note: '' });
-    showToast('计时开始');
-    renderMain();
+    openTaskModal(null, {
+      relatedType: 'none',
+      dueDate: dateKey(date),
+      status: 'in-progress',
+      description: 'Time tracking',
+      onSave: (task) => {
+        // Keep the legacy time-tracking panel working while storing the canonical task in D.tasks.
+        D.calendarExtras.timeTracking = D.calendarExtras.timeTracking || [];
+        D.calendarExtras.timeTracking.push({ date: dateKey(date), minutes: 25, category: task.title || 'Deep work', icon: 'ph-laptop', note: task.description || '' });
+      }
+    });
   }
 
   function filterMeetings(meetings) {
@@ -4162,7 +4180,15 @@
 
   function renderAgentRightPanel() {
     const col = el('div', 'agent-workspace-col agent-right-col');
-    col.appendChild(el('div', 'agent-col-header', 'Tasks & Memory'));
+
+    const header = el('div', 'agent-col-header');
+    header.appendChild(el('div', '', 'Tasks & Memory'));
+    const newTaskBtn = el('button', 'btn btn-primary btn-xs');
+    newTaskBtn.appendChild(icon('ph-plus'));
+    newTaskBtn.appendChild(el('span', '', 'New task'));
+    newTaskBtn.addEventListener('click', () => openTaskModal());
+    header.appendChild(newTaskBtn);
+    col.appendChild(header);
 
     const body = el('div', 'agent-right-body');
 
@@ -4688,15 +4714,12 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
       taskSel.appendChild(newOpt);
       taskSel.addEventListener('change', () => {
         if (taskSel.value === '__new__') {
-          const title = window.prompt('New task title');
-          if (title && title.trim()) {
-            const task = { id: 't' + Date.now(), title: title.trim(), linkedEvent: eventId };
-            D.tasks.push(task);
-            values.linkedTask = task.id;
+          openTaskModal(null, { relatedType: 'event', relatedId: eventId, onSave: (newTask) => {
+            values.linkedTask = newTask.id;
             renderBody(body);
-          } else {
-            taskSel.value = values.linkedTask || '';
-          }
+          }});
+          // Reset the selector until a task is actually saved.
+          taskSel.value = values.linkedTask || '';
         } else {
           values.linkedTask = taskSel.value || null;
         }
@@ -4718,7 +4741,7 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
             () => {
               const idx = D.events.indexOf(existing);
               if (idx > -1) D.events.splice(idx, 1);
-              (D.tasks || []).forEach(t => { if (t.linkedEvent === existing.id) t.linkedEvent = null; });
+              (D.tasks || []).forEach(t => { if (t.relatedType === 'event' && t.relatedId === existing.id) { t.relatedType = 'none'; t.relatedId = null; t.linkedEvent = null; } });
               if (state.selectedMeetingId === existing.id) state.selectedMeetingId = null;
               closeCompose();
               renderMain();
@@ -4787,6 +4810,224 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
 
   function closeEventModal() {
     closeCompose();
+  }
+
+  function openTaskModal(taskId, defaults) {
+    defaults = defaults || {};
+    const isNew = !taskId;
+    const existing = isNew ? null : D.tasks.find(t => t.id === taskId);
+    const task = isNew ? {
+      id: 't' + Date.now(),
+      title: '',
+      relatedType: defaults.relatedType || 'none',
+      relatedId: defaults.relatedId || null,
+      dueDate: defaults.dueDate || '',
+      dueTime: defaults.dueTime || '',
+      priority: 'medium',
+      status: 'todo',
+      recurrence: 'none',
+      description: ''
+    } : existing;
+    if (!task) return;
+
+    // Backward-compatible migration: mirror legacy link fields into the new relatedType/relatedId shape.
+    if (!task.relatedType && task.linkedEvent) { task.relatedType = 'event'; task.relatedId = task.linkedEvent; }
+    if (!task.relatedType && task.linkedContact) { task.relatedType = 'contact'; task.relatedId = task.linkedContact; }
+
+    const values = {
+      title: task.title || '',
+      relatedType: task.relatedType || 'none',
+      relatedId: task.relatedId || null,
+      dueDate: task.dueDate || '',
+      dueTime: task.dueTime || '',
+      priority: task.priority || 'medium',
+      status: task.status || 'todo',
+      recurrence: task.recurrence || 'none',
+      description: task.description || ''
+    };
+
+    let typeSel, entitySel;
+
+    function entityOptionsFor(type) {
+      if (type === 'contact') {
+        return (D.contacts || []).map(c => ({ id: c.id, name: c.name || `${c.firstName || ''} ${c.lastName || ''}`.trim() || 'Unnamed' }));
+      }
+      if (type === 'event') {
+        return (D.events || []).map(e => ({ id: e.id, name: (e.title || 'Untitled') + (e.dt ? ' · ' + e.dt : '') }));
+      }
+      if (type === 'message') {
+        return (D._msgs || []).map((m, idx) => {
+          const c = getContact(m.pid);
+          return { id: m.id || ('msg-' + idx), name: (c ? c.name : 'Unknown') + ' · ' + (m.subj || 'No subject') };
+        });
+      }
+      return [];
+    }
+
+    function renderEntitySelect() {
+      entitySel.innerHTML = '';
+      const opts = entityOptionsFor(values.relatedType);
+      const noneOpt = document.createElement('option');
+      noneOpt.value = '';
+      noneOpt.textContent = values.relatedType === 'none' ? '—' : 'Select…';
+      entitySel.appendChild(noneOpt);
+      opts.forEach(o => {
+        const opt = document.createElement('option');
+        opt.value = o.id;
+        opt.textContent = o.name;
+        if (values.relatedId === o.id) opt.selected = true;
+        entitySel.appendChild(opt);
+      });
+      entitySel.disabled = values.relatedType === 'none';
+      entitySel.value = values.relatedId || '';
+    }
+
+    function renderBody(body) {
+      body.innerHTML = '';
+      const stack = el('div', 'form-stack');
+
+      const titleInput = elAttr('input', '', { type: 'text', value: values.title, placeholder: 'Task title' });
+      titleInput.addEventListener('input', () => values.title = titleInput.value);
+      stack.appendChild(renderFormGroup('Title', titleInput));
+
+      const relationRow = el('div', 'form-row');
+      typeSel = el('select', '');
+      [
+        { id: 'none', name: 'None' },
+        { id: 'contact', name: 'Contact' },
+        { id: 'event', name: 'Meeting' },
+        { id: 'message', name: 'Message' },
+      ].forEach(o => {
+        const opt = document.createElement('option');
+        opt.value = o.id;
+        opt.textContent = o.name;
+        if (values.relatedType === o.id) opt.selected = true;
+        typeSel.appendChild(opt);
+      });
+      typeSel.addEventListener('change', () => {
+        values.relatedType = typeSel.value;
+        values.relatedId = null;
+        renderEntitySelect();
+      });
+      relationRow.appendChild(renderFormGroup('Related to', typeSel));
+
+      entitySel = el('select', '');
+      entitySel.addEventListener('change', () => values.relatedId = entitySel.value || null);
+      relationRow.appendChild(renderFormGroup('Entity', entitySel));
+      renderEntitySelect();
+      stack.appendChild(relationRow);
+
+      const dateRow = el('div', 'form-row');
+      const dateInput = elAttr('input', '', { type: 'date', value: values.dueDate });
+      dateInput.addEventListener('input', () => values.dueDate = dateInput.value);
+      dateRow.appendChild(renderFormGroup('Due date', dateInput));
+
+      const timeInput = elAttr('input', '', { type: 'time', value: values.dueTime });
+      timeInput.addEventListener('input', () => values.dueTime = timeInput.value);
+      dateRow.appendChild(renderFormGroup('Due time', timeInput));
+      stack.appendChild(dateRow);
+
+      const metaRow = el('div', 'form-row');
+      const prioritySel = el('select', '');
+      ['low', 'medium', 'high'].forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p;
+        opt.textContent = p.charAt(0).toUpperCase() + p.slice(1);
+        if (values.priority === p) opt.selected = true;
+        prioritySel.appendChild(opt);
+      });
+      prioritySel.addEventListener('change', () => values.priority = prioritySel.value);
+      metaRow.appendChild(renderFormGroup('Priority', prioritySel));
+
+      const statusSel = el('select', '');
+      ['todo', 'in-progress', 'done'].forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s;
+        opt.textContent = s === 'todo' ? 'To do' : s === 'in-progress' ? 'In progress' : 'Done';
+        if (values.status === s) opt.selected = true;
+        statusSel.appendChild(opt);
+      });
+      statusSel.addEventListener('change', () => values.status = statusSel.value);
+      metaRow.appendChild(renderFormGroup('Status', statusSel));
+
+      const recurrenceSel = el('select', '');
+      ['none', 'daily', 'weekly', 'monthly'].forEach(r => {
+        const opt = document.createElement('option');
+        opt.value = r;
+        opt.textContent = r === 'none' ? 'None' : r.charAt(0).toUpperCase() + r.slice(1);
+        if (values.recurrence === r) opt.selected = true;
+        recurrenceSel.appendChild(opt);
+      });
+      recurrenceSel.addEventListener('change', () => values.recurrence = recurrenceSel.value);
+      metaRow.appendChild(renderFormGroup('Recurrence', recurrenceSel));
+      stack.appendChild(metaRow);
+
+      const descInput = el('textarea', '');
+      descInput.value = values.description;
+      descInput.placeholder = 'Notes, links, context…';
+      descInput.addEventListener('input', () => values.description = descInput.value);
+      stack.appendChild(renderFormGroup('Description', descInput));
+
+      body.appendChild(stack);
+      setTimeout(() => titleInput.focus(), 50);
+    }
+
+    openModalCard({
+      title: isNew ? 'New task' : 'Edit task',
+      renderBody,
+      renderActions: (actions) => {
+        if (!isNew) {
+          const del = el('button', 'btn btn-danger', 'Delete');
+          del.addEventListener('click', () => confirmDestructive(
+            `Delete "${values.title || 'this task'}"? This cannot be undone.`,
+            () => {
+              const idx = D.tasks.indexOf(task);
+              if (idx > -1) D.tasks.splice(idx, 1);
+              D.events.forEach(e => { if (e.linkedTask === task.id) e.linkedTask = null; });
+              closeCompose();
+              renderMain();
+              showToast('Task deleted');
+            }
+          ));
+          actions.appendChild(del);
+        } else {
+          actions.appendChild(el('span', ''));
+        }
+
+        const cancel = el('button', 'btn btn-secondary', 'Cancel');
+        cancel.addEventListener('click', closeCompose);
+        actions.appendChild(cancel);
+
+        const save = el('button', 'btn-primary', 'Save');
+        save.addEventListener('click', () => {
+          if (!values.title.trim()) {
+            showToast('给任务起个名字吧');
+            return;
+          }
+
+          task.title = values.title.trim();
+          task.relatedType = values.relatedType;
+          task.relatedId = values.relatedId;
+          task.dueDate = values.dueDate;
+          task.dueTime = values.dueTime;
+          task.priority = values.priority;
+          task.status = values.status;
+          task.recurrence = values.recurrence;
+          task.description = values.description;
+
+          // Keep legacy link fields in sync so older views keep working.
+          task.linkedEvent = task.relatedType === 'event' ? task.relatedId : null;
+          task.linkedContact = task.relatedType === 'contact' ? task.relatedId : null;
+
+          if (isNew) D.tasks.unshift(task);
+          closeCompose();
+          renderMain();
+          showToast(isNew ? 'Task created' : 'Task saved');
+          if (defaults.onSave) defaults.onSave(task);
+        });
+        actions.appendChild(save);
+      }
+    });
   }
 
   function closeCompose() {
@@ -5773,6 +6014,11 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     editBtn.appendChild(el('span', '', 'Edit'));
     editBtn.addEventListener('click', () => openEventModal({ eventId: m.id }));
 
+    const followUpBtn = el('button', 'btn btn-secondary btn-sm');
+    followUpBtn.appendChild(icon('ph-check-circle'));
+    followUpBtn.appendChild(el('span', '', 'Add follow-up'));
+    followUpBtn.addEventListener('click', () => openTaskModal(null, { relatedType: 'event', relatedId: m.id }));
+
     const copyBtn = el('button', 'btn btn-secondary btn-sm');
     copyBtn.appendChild(icon('ph-copy'));
     copyBtn.appendChild(el('span', '', 'Copy'));
@@ -5785,6 +6031,7 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
 
     const headerActions = el('div', 'panel-actions');
     headerActions.appendChild(editBtn);
+    headerActions.appendChild(followUpBtn);
     headerActions.appendChild(copyBtn);
     headerActions.appendChild(downloadBtn);
 
