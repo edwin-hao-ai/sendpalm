@@ -206,6 +206,15 @@
     } : D.contacts.find(c => c.id === contactId);
     if (!contact) return;
 
+    // Text fields are held in local vars so Cancel does not mutate the contact.
+    let firstName = contact.firstName || '';
+    let lastName = contact.lastName || '';
+    let nickname = contact.nickname || '';
+    let company = contact.company || '';
+    let title = contact.title || '';
+    let topicsStr = (contact.topics || []).join(', ');
+    let notesStr = contact.notes || '';
+
     let emails = (contact.emails || []).map(e => ({ ...e }));
     let phones = (contact.phones || []).map(p => ({ ...p }));
     let labels = new Set(contact.labels || []);
@@ -258,25 +267,25 @@
       body.innerHTML = '';
       const stack = el('div', 'form-stack');
       const nameRow = el('div', 'form-row');
-      const first = elAttr('input', '', { type: 'text', value: contact.firstName || '', placeholder: 'First name' });
-      first.addEventListener('input', () => contact.firstName = first.value);
-      const last = elAttr('input', '', { type: 'text', value: contact.lastName || '', placeholder: 'Last name' });
-      last.addEventListener('input', () => contact.lastName = last.value);
+      const first = elAttr('input', '', { type: 'text', value: firstName, placeholder: 'First name' });
+      first.addEventListener('input', () => firstName = first.value);
+      const last = elAttr('input', '', { type: 'text', value: lastName, placeholder: 'Last name' });
+      last.addEventListener('input', () => lastName = last.value);
       nameRow.appendChild(renderFormGroup('First name', first));
       nameRow.appendChild(renderFormGroup('Last name', last));
       stack.appendChild(nameRow);
 
-      const nick = elAttr('input', '', { type: 'text', value: contact.nickname || '' });
-      nick.addEventListener('input', () => contact.nickname = nick.value);
+      const nick = elAttr('input', '', { type: 'text', value: nickname });
+      nick.addEventListener('input', () => nickname = nick.value);
       stack.appendChild(renderFormGroup('Nickname', nick));
 
-      const comp = elAttr('input', '', { type: 'text', value: contact.company || '', list: 'company-list' });
-      comp.addEventListener('input', () => contact.company = comp.value);
+      const comp = elAttr('input', '', { type: 'text', value: company, list: 'company-list' });
+      comp.addEventListener('input', () => company = comp.value);
       stack.appendChild(renderFormGroup('Company', comp));
 
-      const title = elAttr('input', '', { type: 'text', value: contact.title || '' });
-      title.addEventListener('input', () => contact.title = title.value);
-      stack.appendChild(renderFormGroup('Title', title));
+      const titleInput = elAttr('input', '', { type: 'text', value: title });
+      titleInput.addEventListener('input', () => title = titleInput.value);
+      stack.appendChild(renderFormGroup('Title', titleInput));
 
       const emailsGroup = el('div', 'form-group');
       emailsGroup.appendChild(el('label', 'form-label', 'Emails'));
@@ -309,13 +318,13 @@
       const labelPills = renderPillInput(Array.from(labels), D.labels || [], (vals) => { labels = new Set(vals); });
       stack.appendChild(renderFormGroup('Labels', labelPills));
 
-      const topics = elAttr('input', '', { type: 'text', value: (contact.topics || []).join(', ') });
-      topics.addEventListener('input', () => contact.topics = topics.value.split(',').map(t => t.trim()).filter(Boolean));
-      stack.appendChild(renderFormGroup('Topics', topics, 'Comma separated'));
+      const topicsInput = elAttr('input', '', { type: 'text', value: topicsStr });
+      topicsInput.addEventListener('input', () => topicsStr = topicsInput.value);
+      stack.appendChild(renderFormGroup('Topics', topicsInput, 'Comma separated'));
 
-      const notes = el('textarea', ''); notes.value = contact.notes || '';
-      notes.addEventListener('input', () => contact.notes = notes.value);
-      stack.appendChild(renderFormGroup('Notes', notes));
+      const notesInput = el('textarea', ''); notesInput.value = notesStr;
+      notesInput.addEventListener('input', () => notesStr = notesInput.value);
+      stack.appendChild(renderFormGroup('Notes', notesInput));
 
       body.appendChild(stack);
       body.appendChild(renderCompanyDatalist());
@@ -328,7 +337,7 @@
       renderActions: (actions) => {
         if (!isNew) {
           const del = el('button', 'btn-danger', 'Delete');
-          del.addEventListener('click', () => confirmDestructive(`Delete ${contact.firstName} ${contact.lastName}? This cannot be undone.`, () => {
+          del.addEventListener('click', () => confirmDestructive(`Delete ${firstName} ${lastName}? This cannot be undone.`, () => {
             D.contacts = D.contacts.filter(c => c.id !== contact.id);
             D.tasks = (D.tasks || []).filter(t => t.linkedContact !== contact.id);
             if (state.selectedContactId === contact.id) state.selectedContactId = null;
@@ -342,6 +351,13 @@
         cancel.addEventListener('click', () => closeCompose());
         const save = el('button', 'btn-primary', 'Save');
         save.addEventListener('click', () => {
+          contact.firstName = firstName;
+          contact.lastName = lastName;
+          contact.nickname = nickname;
+          contact.company = company;
+          contact.title = title;
+          contact.topics = topicsStr.split(',').map(t => t.trim()).filter(Boolean);
+          contact.notes = notesStr;
           contact.emails = emails.filter(e => e.value.trim());
           contact.phones = phones.filter(p => p.value.trim());
           contact.labels = Array.from(labels);
