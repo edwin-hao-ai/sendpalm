@@ -393,6 +393,9 @@
   window.openContactModal = openContactModal;
   window.openEventModal = openEventModal;
   window.openTaskModal = openTaskModal;
+  window.openDraftModal = openDraftModal;
+  window.setView = setView;
+  window.renderMain = renderMain;
 
   function addLongPressListener(element, callback, duration = 500) {
     let timer = null;
@@ -797,7 +800,7 @@
     avatarBtn.title = 'Edwin Hao';
     avatarBtn.style.backgroundImage = 'url(https://picsum.photos/seed/edwinhao/64/64)';
     avatarBtn.addEventListener('click', () => {
-      const draftCount = D.agentDrafts.length;
+      const draftCount = (D.drafts || []).length + (D.agentDrafts || []).length;
       const menuItems = [
         { label: 'Contacts', icon: 'ph-users', action: () => setView('contacts') },
         { label: 'Calendar', icon: 'ph-calendar', action: () => setView('calendar') },
@@ -1228,6 +1231,19 @@
           }
         });
         header.appendChild(action);
+
+        const newDraftBtn = el('button', 'view-header-action');
+        newDraftBtn.appendChild(icon('ph-pencil-simple'));
+        newDraftBtn.appendChild(el('span', '', 'New draft'));
+        newDraftBtn.addEventListener('click', () => openDraftModal(null));
+        header.appendChild(newDraftBtn);
+      }
+      if (state.view === 'drafts') {
+        const newDraftBtn = el('button', 'view-header-action');
+        newDraftBtn.appendChild(icon('ph-plus'));
+        newDraftBtn.appendChild(el('span', '', 'New draft'));
+        newDraftBtn.addEventListener('click', () => openDraftModal(null));
+        header.appendChild(newDraftBtn);
       }
       if (state.view === 'contacts') {
         const newContactBtn = el('button', 'view-header-action');
@@ -4229,7 +4245,10 @@
         const actions = el('div', 'agent-draft-card-actions');
         const edit = el('button', 'agent-draft-card-action', 'Edit');
         edit.addEventListener('click', (e) => { e.stopPropagation(); editAgentDraft(d); });
+        const manual = el('button', 'agent-draft-card-action', 'Edit manually');
+        manual.addEventListener('click', (e) => { e.stopPropagation(); editAgentDraftManually(d); });
         actions.appendChild(edit);
+        actions.appendChild(manual);
         card.appendChild(actions);
         body.appendChild(card);
       });
@@ -4470,23 +4489,54 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
   function renderDrafts() {
     const container = el('div', 'view drafts-view');
     const list = el('div', 'drafts-list');
-    const drafts = filterDrafts(D.agentDrafts);
-    drafts.forEach(d => {
-      const card = el('div', 'draft-card');
-      card.appendChild(el('div', 'draft-header-title', d.to));
-      card.appendChild(el('div', 'draft-subject', d.subj));
-      card.appendChild(el('div', 'draft-preview', d.preview));
-      const actions = el('div', 'draft-actions');
-      const sendBtn = el('button', 'btn btn-primary btn-sm', 'Send');
-      const editBtn = el('button', 'btn btn-secondary btn-sm', 'Edit');
-      sendBtn.addEventListener('click', () => sendAgentDraft(d.id));
-      editBtn.addEventListener('click', () => editAgentDraft(d));
-      actions.appendChild(sendBtn);
-      actions.appendChild(editBtn);
-      card.appendChild(actions);
-      list.appendChild(card);
-    });
-    if (drafts.length === 0) {
+    const manual = filterDrafts(D.drafts || []);
+    const agent = filterDrafts((D.agentDrafts || []).map(d => ({ ...d, source: d.source || 'agent' })));
+
+    function renderGroup(title, drafts, isManual) {
+      if (!drafts.length) return;
+      list.appendChild(el('div', 'drafts-group-title', title));
+      drafts.forEach(d => {
+        const card = el('div', 'draft-card');
+        card.appendChild(el('div', 'draft-header-title', d.to));
+        card.appendChild(el('div', 'draft-subject', d.subj));
+        const preview = isManual ? (d.body || '').slice(0, 140) : d.preview;
+        card.appendChild(el('div', 'draft-preview', preview));
+        const actions = el('div', 'draft-actions');
+        if (isManual) {
+          const editBtn = el('button', 'btn btn-secondary btn-sm', 'Edit');
+          const delBtn = el('button', 'btn btn-danger btn-sm', 'Delete');
+          editBtn.addEventListener('click', () => openDraftModal(d.id));
+          delBtn.addEventListener('click', () => confirmDestructive(
+            `Delete draft to "${d.to || 'unsaved'}"? This cannot be undone.`,
+            () => {
+              const idx = D.drafts.indexOf(d);
+              if (idx > -1) D.drafts.splice(idx, 1);
+              renderMain();
+              showToast('Draft deleted');
+            }
+          ));
+          actions.appendChild(editBtn);
+          actions.appendChild(delBtn);
+        } else {
+          const sendBtn = el('button', 'btn btn-primary btn-sm', 'Send');
+          const editBtn = el('button', 'btn btn-secondary btn-sm', 'Edit');
+          const manualBtn = el('button', 'btn btn-text btn-sm', 'Edit manually');
+          sendBtn.addEventListener('click', () => sendAgentDraft(d.id));
+          editBtn.addEventListener('click', () => editAgentDraft(d));
+          manualBtn.addEventListener('click', () => editAgentDraftManually(d));
+          actions.appendChild(sendBtn);
+          actions.appendChild(editBtn);
+          actions.appendChild(manualBtn);
+        }
+        card.appendChild(actions);
+        list.appendChild(card);
+      });
+    }
+
+    renderGroup('Manual drafts', manual, true);
+    renderGroup('Agent drafts', agent, false);
+
+    if (manual.length === 0 && agent.length === 0) {
       list.appendChild(renderEmpty('No drafts match your search.', 'ph-pencil-simple'));
     }
     container.appendChild(list);
@@ -4494,13 +4544,14 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
   }
 
   function filterDrafts(drafts) {
-    if (!state.searchQuery) return drafts;
+    if (!state.searchQuery) return drafts || [];
     const q = state.searchQuery.toLowerCase();
-    return drafts.filter(d =>
-      (d.to && d.to.toLowerCase().includes(q)) ||
-      (d.subj && d.subj.toLowerCase().includes(q)) ||
-      (d.preview && d.preview.toLowerCase().includes(q))
-    );
+    return (drafts || []).filter(d => {
+      const bodyText = ((d.body || '') + ' ' + (d.preview || '')).toLowerCase();
+      return (d.to && d.to.toLowerCase().includes(q)) ||
+        (d.subj && d.subj.toLowerCase().includes(q)) ||
+        bodyText.includes(q);
+    });
   }
 
   function toggleNotifications() {
@@ -5053,6 +5104,203 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     modal.classList.add('open');
   }
 
+  function openDraftModal(draftId) {
+    const isNew = !draftId;
+    const existing = isNew ? null : D.drafts.find(d => d.id === draftId);
+    const draft = isNew ? {
+      id: 'md-' + Date.now(),
+      from: 'gmail-w',
+      to: '',
+      cc: '',
+      bcc: '',
+      subj: '',
+      body: '',
+      at: [],
+      source: 'manual',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      linkedSession: null,
+      linkedTask: null
+    } : existing;
+    if (!draft) return;
+
+    const values = {
+      from: draft.from || 'gmail-w',
+      to: draft.to || '',
+      cc: draft.cc || '',
+      bcc: draft.bcc || '',
+      subj: draft.subj || '',
+      body: draft.body || '',
+      at: (draft.at || []).slice(),
+      linkedSession: draft.linkedSession || null,
+      linkedTask: draft.linkedTask || null
+    };
+
+    let bodyEl, toField, ccInput, bccInput, subjInput, bodyInput;
+
+    function renderAttachmentRow(name, idx, list, container) {
+      const row = el('div', 'dynamic-field-row');
+      const span = el('span', '', name);
+      const remove = el('button', 'btn-icon', '×');
+      remove.addEventListener('click', () => { list.splice(idx, 1); renderBody(); });
+      row.appendChild(span); row.appendChild(remove);
+      container.appendChild(row);
+    }
+
+    function renderBody() {
+      bodyEl.innerHTML = '';
+      const stack = el('div', 'form-stack');
+
+      const fromSelect = el('select', '');
+      accounts.filter(a => a.type === 'email').forEach(a => {
+        const opt = document.createElement('option');
+        opt.value = a.id;
+        opt.textContent = a.email + ' (' + a.label + ')';
+        if (values.from === a.id) opt.selected = true;
+        fromSelect.appendChild(opt);
+      });
+      fromSelect.addEventListener('change', () => values.from = fromSelect.value);
+      stack.appendChild(renderFormGroup('From', fromSelect));
+
+      toField = createRecipientField(values.to, 'Recipient');
+      toField.hidden.addEventListener('input', () => values.to = toField.hidden.value);
+      stack.appendChild(renderFormGroup('To', toField.wrap));
+
+      const metaRow = el('div', 'form-row');
+      ccInput = elAttr('input', '', { type: 'text', value: values.cc, placeholder: 'Cc' });
+      ccInput.addEventListener('input', () => values.cc = ccInput.value);
+      metaRow.appendChild(renderFormGroup('Cc', ccInput));
+      bccInput = elAttr('input', '', { type: 'text', value: values.bcc, placeholder: 'Bcc' });
+      bccInput.addEventListener('input', () => values.bcc = bccInput.value);
+      metaRow.appendChild(renderFormGroup('Bcc', bccInput));
+      stack.appendChild(metaRow);
+
+      subjInput = elAttr('input', '', { type: 'text', value: values.subj, placeholder: 'Subject' });
+      subjInput.addEventListener('input', () => values.subj = subjInput.value);
+      stack.appendChild(renderFormGroup('Subject', subjInput));
+
+      const toolbar = el('div', 'compose-toolbar');
+      const groups = [
+        ['ph-text-b', 'ph-text-italic', 'ph-text-underline'],
+        ['ph-list-bullets', 'ph-list-numbers'],
+        ['ph-link', 'ph-image'],
+        ['ph-text-align-left']
+      ];
+      groups.forEach(g => {
+        const gEl = el('div', 'compose-toolbar-group');
+        g.forEach(ic => {
+          const btn = el('button', 'icon-btn');
+          btn.appendChild(icon(ic));
+          btn.addEventListener('click', () => showToast(ic.replace('ph-', '') + ' clicked'));
+          gEl.appendChild(btn);
+        });
+        toolbar.appendChild(gEl);
+      });
+      stack.appendChild(toolbar);
+
+      bodyInput = el('textarea', '');
+      bodyInput.placeholder = 'Write your draft...';
+      bodyInput.value = values.body;
+      bodyInput.addEventListener('input', () => values.body = bodyInput.value);
+      stack.appendChild(renderFormGroup('Body', bodyInput));
+
+      const atGroup = el('div', 'form-group');
+      atGroup.appendChild(el('label', 'form-label', 'Attachments'));
+      const atList = el('div', 'dynamic-list');
+      values.at.forEach((name, i) => renderAttachmentRow(name, i, values.at, atList));
+      const addAt = el('button', 'btn-text', '+ Add attachment');
+      addAt.addEventListener('click', () => {
+        const name = prompt('Attachment name');
+        if (name && name.trim()) { values.at.push(name.trim()); renderBody(); }
+      });
+      atGroup.appendChild(atList); atGroup.appendChild(addAt);
+      stack.appendChild(atGroup);
+
+      const sessions = state.agentSessions || [];
+      const tasks = D.tasks || [];
+      const linkRow = el('div', 'form-row');
+      const sessionSel = el('select', '');
+      const noneSession = document.createElement('option');
+      noneSession.value = ''; noneSession.textContent = 'None';
+      sessionSel.appendChild(noneSession);
+      sessions.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.title || 'Untitled session';
+        if (values.linkedSession === s.id) opt.selected = true;
+        sessionSel.appendChild(opt);
+      });
+      sessionSel.addEventListener('change', () => values.linkedSession = sessionSel.value || null);
+      linkRow.appendChild(renderFormGroup('Linked session', sessionSel));
+
+      const taskSel = el('select', '');
+      const noneTask = document.createElement('option');
+      noneTask.value = ''; noneTask.textContent = 'None';
+      taskSel.appendChild(noneTask);
+      tasks.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = t.title || 'Untitled task';
+        if (values.linkedTask === t.id) opt.selected = true;
+        taskSel.appendChild(opt);
+      });
+      taskSel.addEventListener('change', () => values.linkedTask = taskSel.value || null);
+      linkRow.appendChild(renderFormGroup('Linked task', taskSel));
+      stack.appendChild(linkRow);
+
+      bodyEl.appendChild(stack);
+      setTimeout(() => (values.subj ? bodyInput : subjInput).focus(), 50);
+    }
+
+    openModalCard({
+      title: isNew ? 'New draft' : 'Edit draft',
+      renderBody: (b) => { bodyEl = b; renderBody(); },
+      renderActions: (actions) => {
+        if (!isNew) {
+          const del = el('button', 'btn btn-danger', 'Delete');
+          del.addEventListener('click', () => confirmDestructive(
+            `Delete draft to "${values.to || 'unsaved'}"? This cannot be undone.`,
+            () => {
+              const idx = D.drafts.indexOf(draft);
+              if (idx > -1) D.drafts.splice(idx, 1);
+              closeCompose();
+              renderMain();
+              showToast('Draft deleted');
+            }
+          ));
+          actions.appendChild(del);
+        } else {
+          actions.appendChild(el('span', ''));
+        }
+        const cancel = el('button', 'btn btn-secondary', 'Cancel');
+        cancel.addEventListener('click', closeCompose);
+        actions.appendChild(cancel);
+        const save = el('button', 'btn btn-primary', 'Save');
+        save.addEventListener('click', () => {
+          draft.from = values.from;
+          draft.to = values.to;
+          draft.cc = values.cc;
+          draft.bcc = values.bcc;
+          draft.subj = values.subj;
+          draft.body = values.body;
+          draft.at = values.at;
+          draft.linkedSession = values.linkedSession;
+          draft.linkedTask = values.linkedTask;
+          draft.updatedAt = Date.now();
+          if (isNew) {
+            draft.createdAt = Date.now();
+            draft.source = 'manual';
+            D.drafts.unshift(draft);
+          }
+          closeCompose();
+          renderMain();
+          showToast(isNew ? 'Draft created' : 'Draft saved');
+        });
+        actions.appendChild(save);
+      }
+    });
+  }
+
   function findContactByNameOrEmail(query) {
     if (!query) return null;
     const q = query.toLowerCase();
@@ -5173,12 +5421,13 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
       }
     });
 
+    wrap.appendChild(input);
+    wrap.appendChild(hidden);
+
     if (initialValue) {
       initialValue.split(/[,;]/).map(s => s.trim()).filter(Boolean).forEach(addRecipient);
     }
 
-    wrap.appendChild(input);
-    wrap.appendChild(hidden);
     return { wrap, hidden, addRecipient };
   }
 
@@ -5670,6 +5919,26 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     }
   }
 
+  function editAgentDraftManually(d) {
+    const manualDraft = {
+      id: 'md-' + Date.now(),
+      from: 'gmail-w',
+      to: d.to || '',
+      cc: '',
+      bcc: '',
+      subj: d.subj || '',
+      body: d.preview || '',
+      at: [],
+      source: 'manual',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      linkedSession: d.sessionId || null,
+      linkedTask: null
+    };
+    D.drafts.unshift(manualDraft);
+    openDraftModal(manualDraft.id);
+  }
+
   function openMessage(m) {
     state.selectedMessageId = m.pid + '-' + m.subj;
     state.selectedContactId = m.pid;
@@ -5911,6 +6180,26 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
       const items = [
         { label: 'Reply All', icon: 'ph-users', action: () => { const subject = baseSubject(m.subj); const quoteHeader = 'On ' + m.tm + ', ' + (c ? c.name : m.fm) + ' wrote:'; openComposeWithContext(c ? c.name : m.fm, 'Re: ' + subject, '', 'reply', m, quoteHeader); showToast('Reply All: other recipients added in Cc'); } },
         { label: 'Forward', icon: 'ph-share', action: () => { const quoteHeader = '---------- Forwarded message ----------\nFrom: ' + (c ? c.name : m.fm) + '\nSubject: ' + m.subj + '\nDate: ' + m.tm; openComposeWithContext('', 'Fwd: ' + baseSubject(m.subj), '', 'forward', m, quoteHeader); } },
+        { label: 'Save as draft', icon: 'ph-pencil-simple', action: () => {
+          const manualDraft = {
+            id: 'md-' + Date.now(),
+            from: 'gmail-w',
+            to: c ? c.name : m.fm,
+            cc: '',
+            bcc: '',
+            subj: m.subj || '',
+            body: (m.body || m.prev || ''),
+            at: (m.at || []).slice(),
+            source: 'manual',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            linkedSession: null,
+            linkedTask: null
+          };
+          D.drafts.unshift(manualDraft);
+          showToast('Saved as draft');
+          renderMain();
+        } },
         { type: 'divider' },
         { label: 'Move to Inbox', icon: 'ph-tray', action: () => moveMessageToBucket(m, 'imbox') },
         { label: 'Move to Stream', icon: 'ph-newspaper', action: () => moveMessageToBucket(m, 'feed') },

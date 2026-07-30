@@ -192,8 +192,11 @@ const D = {
     {id:'at-3',name:'激活李晨关系',sessionId:'as-task-3',status:'wt',steps:[{l:'分析冷淡原因',d:true},{l:'建议联系策略',d:true},{l:'等待你批准',d:false}],eta:'1 min',createdAt:Date.now()-1800000},
   ],
   agentDrafts:[
-    {id:'d1',to:'王洋',subj:'Re: Q4 合作提案',preview:'Hi 王洋，希望一切顺利。之前发您的Q4提案，想了解一下内部对齐的进展。不知下周是否有空通个电话？',v:1},
-    {id:'d2',to:'陈欣',subj:'Re: 合作 - Q3回顾 & Q4规划',preview:'Hi 陈欣，好的，我安排技术负责人周四下午同步API变更方案。关于整合阶段提前两周，我周三前给您答复。',v:1},
+    {id:'d1',to:'王洋',subj:'Re: Q4 合作提案',preview:'Hi 王洋，希望一切顺利。之前发您的Q4提案，想了解一下内部对齐的进展。不知下周是否有空通个电话？',v:1,source:'agent'},
+    {id:'d2',to:'陈欣',subj:'Re: 合作 - Q3回顾 & Q4规划',preview:'Hi 陈欣，好的，我安排技术负责人周四下午同步API变更方案。关于整合阶段提前两周，我周三前给您答复。',v:1,source:'agent'},
+  ],
+  drafts:[
+    {id:'md1',from:'gmail-w',to:'张磊',cc:'',bcc:'',subj:'Q4 合同补充说明',body:'张磊，\n\n关于昨天讨论的验收标准，我补充几点：\n\n1. 性能指标以附件 v3 为准\n2. 违约金上限保持 10%，但增加不可抗力免责\n3. 尾款支付周期从 15 个工作日延长至 20 个\n\n请确认是否可接受。',at:[],source:'manual',createdAt:Date.now()-86400000,updatedAt:Date.now()-3600000,linkedSession:null,linkedTask:null}
   ],
   agentCompleted:[
     {name:'张磊会议简报',saved:'8 min'},{name:'孙静测试总结',saved:'5 min'},
@@ -471,6 +474,8 @@ if (D.agentDrafts && D.agentDrafts.length) {
   D.agentDrafts.forEach((d, i) => {
     if (!d.sessionId) d.sessionId = 'as-draft-' + (i + 1);
     if (!d.sourceContext) d.sourceContext = { kind: 'message', id: 'msg-' + i, preview: d.to + ' - ' + d.subj };
+    if (!d.source) d.source = 'agent';
   });
 }
+D.drafts = D.drafts || [];
 
