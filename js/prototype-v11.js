@@ -307,6 +307,68 @@
     const sidebar = document.getElementById('sidebar');
     sidebar.innerHTML = '';
 
+    // On mobile the sidebar becomes a bottom tab bar with 5 slots.
+    if (isMobile()) {
+      const primary = [
+        { id: 'screener', label: 'Gate', icon: 'ph-funnel' },
+        { id: 'imbox', label: 'Inbox', icon: 'ph-tray' },
+        { id: 'feed', label: 'Stream', icon: 'ph-newspaper' },
+        { id: 'paperTrail', label: 'Records', icon: 'ph-receipt' },
+      ];
+      const moreItems = [
+        { id: 'contacts', label: 'Contacts', icon: 'ph-users' },
+        { id: 'calendar', label: 'Calendar', icon: 'ph-calendar' },
+        { id: 'files', label: 'Files', icon: 'ph-files' },
+        { id: 'agent', label: 'Agent', icon: 'ph-sparkle' },
+        { type: 'divider' },
+        { id: 'trash', label: 'Trash', icon: 'ph-trash' },
+        { id: 'spam', label: 'Spam', icon: 'ph-warning-circle' },
+        { type: 'divider' },
+        { id: 'settings', label: 'Settings', icon: 'ph-gear' },
+      ];
+
+      primary.forEach(item => {
+        const btn = el('button', 'nav-item' + (state.view === item.id ? ' active' : ''));
+        btn.appendChild(icon(item.icon));
+        const labelWrap = el('div', 'nav-label-wrap');
+        labelWrap.appendChild(el('span', 'nav-label', item.label));
+        const count = navBadgeCount(item.id);
+        if (count > 0) {
+          const badge = el('span', 'nav-badge', count);
+          labelWrap.appendChild(badge);
+        }
+        btn.appendChild(labelWrap);
+        btn.addEventListener('click', () => setView(item.id));
+        sidebar.appendChild(btn);
+      });
+
+      const moreBtn = el('button', 'nav-item' + (moreItems.some(i => i.id === state.view) ? ' active' : ''));
+      moreBtn.appendChild(icon('ph-dots-three'));
+      const moreLabelWrap = el('div', 'nav-label-wrap');
+      moreLabelWrap.appendChild(el('span', 'nav-label', 'More'));
+      moreBtn.appendChild(moreLabelWrap);
+      moreBtn.addEventListener('click', () => {
+        const rect = moreBtn.getBoundingClientRect();
+        const menuItems = moreItems.map(i => {
+          if (i.type === 'divider') return i;
+          return {
+            label: i.label,
+            icon: i.icon,
+            action: () => {
+              if (i.id === 'agent') {
+                toggleAgent();
+              } else {
+                setView(i.id);
+              }
+            }
+          };
+        });
+        openContextMenu(rect.left + rect.width / 2, rect.top, menuItems);
+      });
+      sidebar.appendChild(moreBtn);
+      return;
+    }
+
     const composeBtn = el('button', 'sidebar-compose-btn');
     composeBtn.title = 'New message (⌘N)';
     composeBtn.appendChild(icon('ph-pencil-simple'));
