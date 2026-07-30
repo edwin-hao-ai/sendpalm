@@ -157,7 +157,7 @@
     let currentX = 0;
     let isDragging = false;
     let moved = false;
-    const threshold = 80;
+    const threshold = options.threshold || 80;
     const maxDrag = 160;
     const rotateFactor = 0.04;
 
@@ -5488,7 +5488,8 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
           leftColor: 'red',
           rightLabel: 'Inbox',
           rightIcon: 'ph-check',
-          rightColor: 'blue'
+          rightColor: 'blue',
+          threshold: isMobile() ? 60 : 80
         });
       }
 
@@ -5498,7 +5499,8 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
         leftColor: 'green',
         rightLabel: 'Pending',
         rightIcon: 'ph-clock',
-        rightColor: 'yellow'
+        rightColor: 'yellow',
+        threshold: isMobile() ? 60 : 80
       });
       wrapped.setAttribute('draggable', 'true');
       wrapped.addEventListener('dragstart', (e) => {
@@ -5553,7 +5555,8 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
         leftColor: 'yellow',
         rightLabel: 'Archive',
         rightIcon: 'ph-archive',
-        rightColor: 'red'
+        rightColor: 'red',
+        threshold: isMobile() ? 60 : 80
       });
     }
 
@@ -6621,6 +6624,8 @@ ${D.stageSuggest[c.stage] || ''}
       let top = y;
       if (left + rect.width > window.innerWidth) left = window.innerWidth - rect.width - 8;
       if (top + rect.height > window.innerHeight) top = window.innerHeight - rect.height - 8;
+      if (left < 8) left = 8;
+      if (top < 8) top = 8;
       menu.style.left = left + 'px';
       menu.style.top = top + 'px';
       menu.classList.add('open');
