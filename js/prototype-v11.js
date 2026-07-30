@@ -197,6 +197,170 @@
     });
   }
 
+  function openContactModal(contactId) {
+    const isNew = !contactId;
+    const contact = isNew ? {
+      id: 'c' + Date.now(), firstName: '', lastName: '', nickname: '',
+      company: '', title: '', emails: [], phones: [], stage: 'explore',
+      labels: [], topics: [], notes: '', avatar: '', health: 50
+    } : D.contacts.find(c => c.id === contactId);
+    if (!contact) return;
+
+    let emails = (contact.emails || []).map(e => ({ ...e }));
+    let phones = (contact.phones || []).map(p => ({ ...p }));
+    let labels = new Set(contact.labels || []);
+    let stage = contact.stage || 'explore';
+
+    function renderCompanyDatalist() {
+      const list = elAttr('datalist', '', { id: 'company-list' });
+      const seen = new Set();
+      D.contacts.forEach(c => {
+        if (c.company && !seen.has(c.company)) {
+          seen.add(c.company);
+          list.appendChild(elAttr('option', '', { value: c.company }));
+        }
+      });
+      return list;
+    }
+
+    function renderEmailRow(e, idx, list, container) {
+      const row = el('div', 'dynamic-field-row');
+      const val = elAttr('input', '', { type: 'email', value: e.value, placeholder: 'email@example.com' });
+      val.addEventListener('input', () => { e.value = val.value; });
+      const tag = el('select', '');
+      ['work', 'personal', 'other'].forEach(t => {
+        const opt = document.createElement('option'); opt.value = t; opt.text = t; if (e.label === t) opt.selected = true; tag.appendChild(opt);
+      });
+      tag.addEventListener('change', () => { e.label = tag.value; });
+      const remove = el('button', 'btn-icon', '×');
+      remove.addEventListener('click', () => { list.splice(idx, 1); renderBody(); });
+      row.appendChild(val); row.appendChild(tag); row.appendChild(remove);
+      container.appendChild(row);
+    }
+
+    function renderPhoneRow(p, idx, list, container) {
+      const row = el('div', 'dynamic-field-row');
+      const val = elAttr('input', '', { type: 'tel', value: p.value, placeholder: '+1 555 000 0000' });
+      val.addEventListener('input', () => { p.value = val.value; });
+      const tag = el('select', '');
+      ['work', 'mobile', 'home', 'other'].forEach(t => {
+        const opt = document.createElement('option'); opt.value = t; opt.text = t; if (p.label === t) opt.selected = true; tag.appendChild(opt);
+      });
+      tag.addEventListener('change', () => { p.label = tag.value; });
+      const remove = el('button', 'btn-icon', '×');
+      remove.addEventListener('click', () => { list.splice(idx, 1); renderBody(); });
+      row.appendChild(val); row.appendChild(tag); row.appendChild(remove);
+      container.appendChild(row);
+    }
+
+    // Rebuild body on dynamic list change
+    function renderBody() {
+      body.innerHTML = '';
+      const stack = el('div', 'form-stack');
+      const nameRow = el('div', 'form-row');
+      const first = elAttr('input', '', { type: 'text', value: contact.firstName || '', placeholder: 'First name' });
+      first.addEventListener('input', () => contact.firstName = first.value);
+      const last = elAttr('input', '', { type: 'text', value: contact.lastName || '', placeholder: 'Last name' });
+      last.addEventListener('input', () => contact.lastName = last.value);
+      nameRow.appendChild(renderFormGroup('First name', first));
+      nameRow.appendChild(renderFormGroup('Last name', last));
+      stack.appendChild(nameRow);
+
+      const nick = elAttr('input', '', { type: 'text', value: contact.nickname || '' });
+      nick.addEventListener('input', () => contact.nickname = nick.value);
+      stack.appendChild(renderFormGroup('Nickname', nick));
+
+      const comp = elAttr('input', '', { type: 'text', value: contact.company || '', list: 'company-list' });
+      comp.addEventListener('input', () => contact.company = comp.value);
+      stack.appendChild(renderFormGroup('Company', comp));
+
+      const title = elAttr('input', '', { type: 'text', value: contact.title || '' });
+      title.addEventListener('input', () => contact.title = title.value);
+      stack.appendChild(renderFormGroup('Title', title));
+
+      const emailsGroup = el('div', 'form-group');
+      emailsGroup.appendChild(el('label', 'form-label', 'Emails'));
+      const emailsList = el('div', 'dynamic-list');
+      emails.forEach((e, i) => renderEmailRow(e, i, emails, emailsList));
+      const addEmail = el('button', 'btn-text', '+ Add email');
+      addEmail.addEventListener('click', () => { emails.push({ value: '', label: 'work' }); renderBody(); });
+      emailsGroup.appendChild(emailsList); emailsGroup.appendChild(addEmail);
+      stack.appendChild(emailsGroup);
+
+      const phonesGroup = el('div', 'form-group');
+      phonesGroup.appendChild(el('label', 'form-label', 'Phones'));
+      const phonesList = el('div', 'dynamic-list');
+      phones.forEach((p, i) => renderPhoneRow(p, i, phones, phonesList));
+      const addPhone = el('button', 'btn-text', '+ Add phone');
+      addPhone.addEventListener('click', () => { phones.push({ value: '', label: 'work' }); renderBody(); });
+      phonesGroup.appendChild(phonesList); phonesGroup.appendChild(addPhone);
+      stack.appendChild(phonesGroup);
+
+      const stageSelect = el('select', '');
+      const stages = [
+        { id: 'explore', name: '探索' }, { id: 'build', name: '建立' },
+        { id: 'active', name: '活跃' }, { id: 'maintain', name: '维护' },
+        { id: 'cold', name: '冷淡' }, { id: 'rekindle', name: '重新激活' }
+      ];
+      stages.forEach(s => { const opt = document.createElement('option'); opt.value = s.id; opt.text = s.name; if (s.id === stage) opt.selected = true; stageSelect.appendChild(opt); });
+      stageSelect.addEventListener('change', () => stage = stageSelect.value);
+      stack.appendChild(renderFormGroup('Relationship stage', stageSelect));
+
+      const labelPills = renderPillInput(Array.from(labels), D.labels || [], (vals) => { labels = new Set(vals); });
+      stack.appendChild(renderFormGroup('Labels', labelPills));
+
+      const topics = elAttr('input', '', { type: 'text', value: (contact.topics || []).join(', ') });
+      topics.addEventListener('input', () => contact.topics = topics.value.split(',').map(t => t.trim()).filter(Boolean));
+      stack.appendChild(renderFormGroup('Topics', topics, 'Comma separated'));
+
+      const notes = el('textarea', ''); notes.value = contact.notes || '';
+      notes.addEventListener('input', () => contact.notes = notes.value);
+      stack.appendChild(renderFormGroup('Notes', notes));
+
+      body.appendChild(stack);
+      body.appendChild(renderCompanyDatalist());
+    }
+
+    let body;
+    openModalCard({
+      title: isNew ? 'New contact' : 'Edit contact',
+      renderBody: (b) => { body = b; renderBody(); },
+      renderActions: (actions) => {
+        if (!isNew) {
+          const del = el('button', 'btn-danger', 'Delete');
+          del.addEventListener('click', () => confirmDestructive(`Delete ${contact.firstName} ${contact.lastName}? This cannot be undone.`, () => {
+            D.contacts = D.contacts.filter(c => c.id !== contact.id);
+            D.tasks = (D.tasks || []).filter(t => t.linkedContact !== contact.id);
+            if (state.selectedContactId === contact.id) state.selectedContactId = null;
+            renderMain(); showToast('Contact deleted');
+          }));
+          actions.appendChild(del);
+        } else {
+          actions.appendChild(el('span', ''));
+        }
+        const cancel = el('button', 'btn-secondary', 'Cancel');
+        cancel.addEventListener('click', () => closeCompose());
+        const save = el('button', 'btn-primary', 'Save');
+        save.addEventListener('click', () => {
+          contact.emails = emails.filter(e => e.value.trim());
+          contact.phones = phones.filter(p => p.value.trim());
+          contact.labels = Array.from(labels);
+          contact.stage = stage;
+          contact.name = `${contact.firstName || ''} ${contact.lastName || ''}`.trim() || contact.nickname || 'Unnamed';
+          contact.co = contact.company;
+          contact.tl = contact.title;
+          contact.em = contact.emails[0] ? contact.emails[0].value : '';
+          contact.ph = contact.phones[0] ? contact.phones[0].value : '';
+          contact.photo = contact.avatar;
+          if (isNew) D.contacts.unshift(contact);
+          closeCompose(); renderMain(); showToast(isNew ? 'Contact created' : 'Contact saved');
+        });
+        actions.appendChild(cancel);
+        actions.appendChild(save);
+      }
+    });
+  }
+
   // Expose shared helpers for console-based prototyping and later tasks.
   window.el = el;
   window.elAttr = elAttr;
@@ -206,6 +370,7 @@
   window.renderToggle = renderToggle;
   window.renderPillInput = renderPillInput;
   window.confirmDestructive = confirmDestructive;
+  window.openContactModal = openContactModal;
 
   function addLongPressListener(element, callback, duration = 500) {
     let timer = null;
@@ -1041,6 +1206,13 @@
           }
         });
         header.appendChild(action);
+      }
+      if (state.view === 'contacts') {
+        const newContactBtn = el('button', 'view-header-action');
+        newContactBtn.appendChild(icon('ph-plus'));
+        newContactBtn.appendChild(el('span', '', 'New contact'));
+        newContactBtn.addEventListener('click', () => openContactModal(null));
+        header.appendChild(newContactBtn);
       }
       viewEl.insertBefore(header, viewEl.firstChild);
     }
@@ -1935,6 +2107,14 @@
   function renderPersonCard(c) {
     const card = el('div', 'person-card');
     card.addEventListener('click', () => openContact(c.id));
+    card.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openContextMenu(e.clientX, e.clientY, [
+        { label: 'Edit', icon: 'ph-pencil-simple', action: () => openContactModal(c.id) },
+        { type: 'divider' },
+        { label: 'Write to ' + c.name, icon: 'ph-pencil-simple', action: () => openCompose({ to: c.name, subject: '' }) },
+      ]);
+    });
 
     const avatar = renderAvatar(c, 'person-avatar', c.name[0]);
 
@@ -2050,8 +2230,13 @@
     writeBtn.appendChild(icon('ph-pencil-simple'));
     writeBtn.appendChild(el('span', '', '+ Write'));
     writeBtn.addEventListener('click', () => openCompose({ to: c.name, subject: '' }));
+    const editBtn = el('button', 'btn btn-secondary btn-sm contact-edit-btn');
+    editBtn.appendChild(icon('ph-pencil-simple'));
+    editBtn.appendChild(el('span', '', 'Edit'));
+    editBtn.addEventListener('click', () => openContactModal(c.id));
     hero.appendChild(avatar);
     hero.appendChild(info);
+    hero.appendChild(editBtn);
     hero.appendChild(writeBtn);
 
     header.appendChild(closeBtn);
@@ -2084,17 +2269,19 @@
 
     const autofileBtn = el('button', 'contact-action-btn');
     autofileBtn.appendChild(icon('ph-tag'));
-    const autoLabelText = c.autoLabel && c.autoLabel.length ? c.autoLabel.join(', ') : 'Autofile';
-    autofileBtn.appendChild(el('span', '', autoLabelText));
+    const autoLabelNames = c.autoLabel && c.autoLabel.length
+      ? c.autoLabel.map(id => (D.labels || []).find(l => l.id === id)?.name || id).join(', ')
+      : '';
+    autofileBtn.appendChild(el('span', '', autoLabelNames || 'Autofile'));
     autofileBtn.title = 'Auto-label emails';
     autofileBtn.addEventListener('click', () => {
       openContextMenuFromElement(autofileBtn, D.labels.map(label => ({
-        label: (c.autoLabel && c.autoLabel.includes(label) ? '✓ ' : '') + label,
+        label: (c.autoLabel && c.autoLabel.includes(label.id) ? '✓ ' : '') + label.name,
         action: () => {
           if (!c.autoLabel) c.autoLabel = [];
-          const idx = c.autoLabel.indexOf(label);
+          const idx = c.autoLabel.indexOf(label.id);
           if (idx >= 0) c.autoLabel.splice(idx, 1);
-          else c.autoLabel.push(label);
+          else c.autoLabel.push(label.id);
           renderMain();
           showToast('Autofile labels updated');
         }
