@@ -8023,12 +8023,12 @@ button:focus-visible, input:focus-visible {
 .pill { padding: 6px 12px; border-radius: 999px; border: 1px solid #d1d5db; background: #fff; font-size: 13px; color: #374151; cursor: pointer; }
 .pill.active { background: #3B8058; color: #fff; border-color: #3B8058; }
 
-/* Buttons */
-.btn-primary { padding: 10px 18px; border-radius: 10px; border: none; background: #3B8058; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
-.btn-secondary { padding: 10px 18px; border-radius: 10px; border: 1px solid #d1d5db; background: #fff; color: #374151; font-size: 15px; font-weight: 600; cursor: pointer; }
-.btn-danger { padding: 10px 18px; border-radius: 10px; border: none; background: #DC2626; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
-.btn-text { background: none; border: none; color: #3B8058; font-size: 14px; font-weight: 600; cursor: pointer; padding: 0; }
-.btn-icon { background: none; border: none; font-size: 20px; color: #6b7280; cursor: pointer; }
+/* Buttons — scoped to modal cards so they do not override app-wide button styles */
+.modal-card .btn-primary { padding: 10px 18px; border-radius: 10px; border: none; background: #3B8058; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
+.modal-card .btn-secondary { padding: 10px 18px; border-radius: 10px; border: 1px solid #d1d5db; background: #fff; color: #374151; font-size: 15px; font-weight: 600; cursor: pointer; }
+.modal-card .btn-danger { padding: 10px 18px; border-radius: 10px; border: none; background: #DC2626; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
+.modal-card .btn-text { background: none; border: none; color: #3B8058; font-size: 14px; font-weight: 600; cursor: pointer; padding: 0; }
+.modal-card .btn-icon { background: none; border: none; font-size: 20px; color: #6b7280; cursor: pointer; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .dynamic-list { display: flex; flex-direction: column; gap: 4px; }
 .dynamic-field-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
