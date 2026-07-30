@@ -7270,13 +7270,33 @@ button:focus-visible, input:focus-visible {
 
   .nav-item.active::before { display: none; }
 
-  .nav-item i { font-size: 22px; }
+  .nav-item i { font-size: 20px; }
+
+  .nav-icon-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .nav-badge--mobile {
+    position: absolute;
+    top: -5px;
+    right: -9px;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    font-size: 8.5px;
+    border-radius: 999px;
+    box-shadow: 0 0 0 2px rgba(255,255,255,0.9);
+    pointer-events: none;
+  }
 
   .nav-label { font-size: 10px; }
 
   .nav-label-wrap {
     flex-direction: column;
-    gap: 2px;
+    gap: 0;
   }
 
   .nav-bottom {

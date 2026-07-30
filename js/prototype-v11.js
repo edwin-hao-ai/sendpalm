@@ -308,21 +308,23 @@
     sidebar.innerHTML = '';
 
     // On mobile the sidebar becomes a bottom tab bar with 5 slots.
+    // Keep the most-used buckets pinned: Gate, Inbox, Pending, Saved, plus More.
     if (isMobile()) {
       const primary = [
         { id: 'screener', label: 'Gate', icon: 'ph-funnel' },
         { id: 'imbox', label: 'Inbox', icon: 'ph-tray' },
-        { id: 'feed', label: 'Stream', icon: 'ph-newspaper' },
-        { id: 'paperTrail', label: 'Records', icon: 'ph-receipt' },
+        { id: 'replyLater', label: 'Pending', icon: 'ph-clock' },
+        { id: 'setAside', label: 'Saved', icon: 'ph-push-pin' },
       ];
       const moreItems = [
+        { id: 'feed', label: 'Stream', icon: 'ph-newspaper' },
+        { id: 'paperTrail', label: 'Records', icon: 'ph-receipt' },
+        { type: 'divider' },
         { id: 'contacts', label: 'Contacts', icon: 'ph-users' },
         { id: 'calendar', label: 'Calendar', icon: 'ph-calendar' },
         { id: 'files', label: 'Files', icon: 'ph-files' },
         { id: 'agent', label: 'Agent', icon: 'ph-sparkle' },
         { type: 'divider' },
-        { id: 'replyLater', label: 'Pending', icon: 'ph-clock' },
-        { id: 'setAside', label: 'Saved', icon: 'ph-push-pin' },
         { id: 'bubbleUp', label: 'Remind', icon: 'ph-arrow-fat-line-up' },
         { type: 'divider' },
         { id: 'trash', label: 'Trash', icon: 'ph-trash' },
@@ -333,14 +335,16 @@
 
       primary.forEach(item => {
         const btn = el('button', 'nav-item' + (state.view === item.id ? ' active' : ''));
-        btn.appendChild(icon(item.icon));
-        const labelWrap = el('div', 'nav-label-wrap');
-        labelWrap.appendChild(el('span', 'nav-label', item.label));
+        const iconWrap = el('span', 'nav-icon-wrap');
+        iconWrap.appendChild(icon(item.icon));
         const count = navBadgeCount(item.id);
         if (count > 0) {
-          const badge = el('span', 'nav-badge', count);
-          labelWrap.appendChild(badge);
+          const badge = el('span', 'nav-badge nav-badge--mobile', count > 99 ? '99+' : count);
+          iconWrap.appendChild(badge);
         }
+        btn.appendChild(iconWrap);
+        const labelWrap = el('div', 'nav-label-wrap');
+        labelWrap.appendChild(el('span', 'nav-label', item.label));
         btn.appendChild(labelWrap);
         btn.addEventListener('click', () => setView(item.id));
         sidebar.appendChild(btn);
@@ -414,6 +418,12 @@
     }
     if (view === 'imbox') {
       return allEvents.filter(e => e.type === 'message' && e.data.bucket === 'imbox' && !e.data.replyLater && !e.data.setAside && !e.data.bubbleUpUntil && e.data.screened && !e.data.seen).length;
+    }
+    if (view === 'replyLater') {
+      return allEvents.filter(e => e.type === 'message' && e.data.replyLater && !e.data.trashed && !e.data.spam).length;
+    }
+    if (view === 'setAside') {
+      return allEvents.filter(e => e.type === 'message' && e.data.setAside && !e.data.trashed && !e.data.spam).length;
     }
     return 0;
   }
