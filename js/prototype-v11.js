@@ -1175,7 +1175,31 @@
     card.appendChild(actions);
     card.appendChild(bucketBar);
 
-    cardWrap.appendChild(card);
+    if (isMobile()) {
+      const swipeWrap = wrapSwipeActions(card,
+        () => blockSender(current.id), // swiped left
+        () => {
+          // swiped right: reveal bucket chooser inline
+          const actions = card.querySelector('.gate-actions');
+          const bucketBar = card.querySelector('.gate-bucket-bar');
+          if (actions && bucketBar) {
+            actions.classList.add('hidden');
+            bucketBar.classList.remove('hidden');
+          }
+        },
+        {
+          leftLabel: 'Block',
+          leftIcon: 'ph-prohibit',
+          leftColor: 'red',
+          rightLabel: 'Allow',
+          rightIcon: 'ph-check',
+          rightColor: 'green',
+        }
+      );
+      cardWrap.appendChild(swipeWrap);
+    } else {
+      cardWrap.appendChild(card);
+    }
     container.appendChild(cardWrap);
 
     const historyLink = el('button', 'gate-history-link', '查看 Gate 历史');
