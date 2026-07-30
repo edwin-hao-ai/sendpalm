@@ -27,7 +27,7 @@
     filesFilter: 'all',
     selectedFileId: null,
     prepChecked: {},
-    settings: JSON.parse(JSON.stringify(D.appSettings)),
+    settings: D.appSettings,
     settingsTab: 'profile',
     feedOffset: 0,
     feedPageSize: 20,
