@@ -5,3 +5,13 @@
 
 # Node dependencies installed for local verification only
 node_modules/
+
+# macOS metadata
+.DS_Store
+
+# Temporary verification screenshots and scratch files
+qa-tmp/*
+!.gitkeep
+
+# Subagent-driven development scratch files
+.superpowers/sdd/
