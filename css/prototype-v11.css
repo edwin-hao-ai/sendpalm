@@ -7517,8 +7517,7 @@ button:focus-visible, input:focus-visible {
   .msg-summary-card { margin: 12px 0; }
 
   #agent-fab {
-    right: 16px;
-    bottom: 80px;
+    display: none;
   }
 
   #agent-panel {
