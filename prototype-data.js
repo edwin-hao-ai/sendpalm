@@ -1,16 +1,22 @@
 // ===================================================================
 // SendPalm shared data model (prototype-data.js)
 // ===================================================================
-const accounts = [
-  { id:'gmail-w', type:'email', provider:'gmail', email:'edwin@sendpalm.com', label:'SendPalm 工作', status:'connected', synced:1247, total:1247, privacy:'unified', color:'#ea4335', avatar:'S', lastSync:'刚刚' },
-  { id:'gmail-p', type:'email', provider:'gmail', email:'edwin.hao@gmail.com', label:'个人 Gmail', status:'connected', synced:892, total:892, privacy:'unified', color:'#ea4335', avatar:'G', lastSync:'5分钟前' },
-  { id:'outlook', type:'email', provider:'outlook', email:'edwin@sendpalm.com', label:'Outlook', status:'error', error:'令牌过期，请重新认证', synced:503, total:503, privacy:'isolated', color:'#0078d4', avatar:'O', lastSync:'3天前' },
-  { id:'slack', type:'im', provider:'slack', workspace:'sendpalm', label:'Slack · sendpalm', status:'syncing', syncProgress:{done:128,total:340}, privacy:'unified', color:'#4a154b', avatar:'S', lastSync:'同步中' },
-  { id:'wechat', type:'im', provider:'wechat', label:'微信', status:'connected', synced:156, total:156, privacy:'isolated', color:'#22c55e', avatar:'微', lastSync:'1小时前' },
-  { id:'calendar', type:'calendar', provider:'google', label:'Google 日历', status:'connected', synced:24, total:24, privacy:'unified', color:'#a78bfa', avatar:'日', lastSync:'2小时前' },
-];
-
 const D = {
+  user:{
+    displayName:'Edwin Hao',
+    avatar:'https://picsum.photos/seed/edwinhao/128/128',
+    timezone:'Asia/Shanghai',
+    language:'zh-CN',
+    signature:'Best,\nEdwin'
+  },
+  accounts:[
+    { id:'gmail-w', type:'email', provider:'gmail', email:'edwin@sendpalm.com', label:'SendPalm 工作', status:'connected', synced:1247, total:1247, privacy:'unified', color:'#ea4335', avatar:'S', lastSync:'刚刚' },
+    { id:'gmail-p', type:'email', provider:'gmail', email:'edwin.hao@gmail.com', label:'个人 Gmail', status:'connected', synced:892, total:892, privacy:'unified', color:'#ea4335', avatar:'G', lastSync:'5分钟前' },
+    { id:'outlook', type:'email', provider:'outlook', email:'edwin@sendpalm.com', label:'Outlook', status:'error', error:'令牌过期，请重新认证', synced:503, total:503, privacy:'isolated', color:'#0078d4', avatar:'O', lastSync:'3天前' },
+    { id:'slack', type:'im', provider:'slack', workspace:'sendpalm', label:'Slack · sendpalm', status:'syncing', syncProgress:{done:128,total:340}, privacy:'unified', color:'#4a154b', avatar:'S', lastSync:'同步中' },
+    { id:'wechat', type:'im', provider:'wechat', label:'微信', status:'connected', synced:156, total:156, privacy:'isolated', color:'#22c55e', avatar:'微', lastSync:'1小时前' },
+    { id:'calendar', type:'calendar', provider:'google', label:'Google 日历', status:'connected', synced:24, total:24, privacy:'unified', color:'#a78bfa', avatar:'日', lastSync:'2小时前' },
+  ],
   contacts:[
     {id:"zl",firstName:"磊",lastName:"张",nickname:"",name:"张磊",company:"华为",title:"战略合作总监",emails:[{value:"zhanglei@huawei.com",label:"work"}],phones:[{value:"+86 138****1234",label:"work"}],stage:"active",labels:[],topics:["Q4合同","付款条款","交付物定义"],notes:"Q4 合同推进中，付款条款已调整到 30-40-30。张磊对交付物验收标准比较关注，需提前准备 3 份附件。",avatar:"https://picsum.photos/seed/zhanglei/128/128",photo:"https://picsum.photos/seed/zhanglei/128/128",health:94,sc:94,scC:"#34c759",scL:"活跃",lc:"2天前",grp:"active",trd:"up",pattern:"通常周二上午发邮件，平均回复 4.2h",accounts:["gmail-w","wechat"],stageHistory:[{stage:"build",date:"2026-01-15"},{stage:"active",date:"2026-03-01"}],firstContact:"2026-01-10",milestones:["合同签署 2026-03-15","Q2评审 2026-06-20"],merged:true,blocked:false,notify:true,firstSeen:false,screened:true,defaultBucket:"imbox",autoLabel:[],recycling:false,ch:["Gmail","Calendar","WeChat"]},
     {id:"cx",firstName:"欣",lastName:"陈",nickname:"",name:"陈欣",company:"字节跳动",title:"战略合作经理",emails:[{value:"chen.xin@bytedance.com",label:"work"}],phones:[{value:"+86 139****5678",label:"work"}],stage:"build",labels:[],topics:["Q3回顾","Q4规划","API升级"],notes:"Q4 规划基本对齐，整合阶段提前两周需要技术评估。陈欣 Slack 响应很快，紧急事项优先走 Slack。",avatar:"https://picsum.photos/seed/chenxin/128/128",photo:"https://picsum.photos/seed/chenxin/128/128",health:87,sc:87,scC:"#34c759",scL:"活跃",lc:"今天",grp:"active",trd:"up",pattern:"通常下午回复，平均回复 2.1h",accounts:["gmail-w","slack"],stageHistory:[{stage:"explore",date:"2026-04-01"},{stage:"build",date:"2026-05-15"}],firstContact:"2026-04-01",milestones:["Q3合作启动 2026-05"],merged:true,blocked:false,notify:true,firstSeen:false,screened:true,defaultBucket:"imbox",autoLabel:[],recycling:false,ch:["Gmail","Slack"]},
@@ -42,7 +48,7 @@ const D = {
   getFiles(pid){return this._files.filter(f=>f.pid===pid)},
   getMeetings(pid){return this._meetings.filter(m=>m.pids.includes(pid))},
   getConnections(pid){const p=this.getP(pid);if(!p)return[];return this.contacts.filter(c=>c.id!==pid&&(c.company===p.company||Math.abs(c.sc-p.sc)<30));},
-  getAcct(id){return accounts.find(a=>a.id===id)},
+  getAcct(id){return this.accounts.find(a=>a.id===id)},
   stageLabel:{explore:'探索期',build:'建立期',active:'活跃期',maintain:'维护期',cold:'冷淡期',rekindle:'重新激活'},
   stageColor:{explore:'#af52de',build:'#0A8F63',active:'#34c759',maintain:'#5ac8fa',cold:'#ff3b30',rekindle:'#ff9500'},
   stageSuggest:{cold:'建议发送问候重新激活',active:'关系健康，保持当前频率',build:'建议安排一次深度交流',maintain:'维持定期沟通节奏',explore:'建议介绍公司和合作方向',rekindle:'建议提供新的价值点'},
@@ -463,6 +469,9 @@ D.agentMemory = {
     }
   }
 };
+
+// Backwards-compatible top-level alias for older prototype versions.
+const accounts = D.accounts;
 
 // 扩展现有任务和草稿，增加 sessionId 字段
 if (D.agentTasks && D.agentTasks.length) {

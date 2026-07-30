@@ -28,6 +28,7 @@
     selectedFileId: null,
     prepChecked: {},
     settings: JSON.parse(JSON.stringify(D.appSettings)),
+    settingsTab: 'profile',
     feedOffset: 0,
     feedPageSize: 20,
     messageViewMode: 'rendered',
@@ -147,13 +148,15 @@
     return group;
   }
 
-  function renderToggle(label, checked, onChange) {
+  function renderToggle(label, checked, onChange, desc) {
     const row = el('label', 'form-toggle-row');
-    const text = el('span', 'form-toggle-label', label);
+    const textWrap = el('span', 'form-toggle-text-wrap');
+    textWrap.appendChild(el('span', 'form-toggle-label', label));
+    if (desc) textWrap.appendChild(el('span', 'form-toggle-desc', desc));
     const track = el('span', 'form-toggle' + (checked ? ' on' : ''));
     const thumb = el('span', 'form-toggle-thumb');
     track.appendChild(thumb);
-    row.appendChild(text);
+    row.appendChild(textWrap);
     row.appendChild(track);
     row.addEventListener('click', () => {
       const next = !track.classList.contains('on');
@@ -5699,26 +5702,275 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
 
   function renderSettings() {
     const container = el('div', 'view settings-view');
+    container.appendChild(el('div', 'settings-section-title', 'Settings'));
 
-    const header = el('div', 'settings-section');
-    header.appendChild(el('div', 'settings-section-title', 'General'));
+    const tabs = ['profile', 'accounts', 'preferences', 'agent', 'labels', 'data', 'shortcuts'];
+    const tabLabels = { profile: 'Profile', accounts: 'Accounts', preferences: 'Preferences', agent: 'Agent', labels: 'Labels', data: 'Data', shortcuts: 'Shortcuts' };
+    const tabBar = el('div', 'settings-tabs');
+    tabs.forEach(tab => {
+      const isP2 = ['labels', 'data', 'shortcuts'].includes(tab);
+      const btn = el('button', 'settings-tab' + (state.settingsTab === tab ? ' active' : '') + (isP2 ? ' disabled' : ''), tabLabels[tab]);
+      btn.addEventListener('click', () => {
+        if (isP2) {
+          showToast(tabLabels[tab] + ' settings coming soon');
+          return;
+        }
+        state.settingsTab = tab;
+        renderMain();
+      });
+      tabBar.appendChild(btn);
+    });
+    container.appendChild(tabBar);
+
+    const content = el('div', 'settings-tab-content');
+    switch (state.settingsTab) {
+      case 'accounts': content.appendChild(renderAccountsSection()); break;
+      case 'preferences': content.appendChild(renderPreferencesSection()); break;
+      case 'agent': content.appendChild(renderAgentSection()); break;
+      case 'profile':
+      default: content.appendChild(renderProfileSection()); break;
+    }
+    container.appendChild(content);
+
+    return container;
+  }
+
+  function renderProfileSection() {
+    const section = el('div', 'settings-section');
+    section.appendChild(el('div', 'settings-section-title', 'Profile'));
     const card = el('div', 'settings-card');
 
-    card.appendChild(renderToggleRow('Desktop notifications', 'Show alerts for important messages', state.settings.notifications.desktop, v => {
-      state.settings.notifications.desktop = v;
-      renderMain();
-    }));
-    card.appendChild(renderToggleRow('Weekly digest', 'Send a summary every Monday', state.settings.notifications.weeklyDigest, v => {
-      state.settings.notifications.weeklyDigest = v;
-      renderMain();
-    }));
-    card.appendChild(renderToggleRow('Quiet hours', 'Pause notifications 22:00 - 08:00', state.settings.notifications.quietHours.enabled || false, v => {
-      state.settings.notifications.quietHours.enabled = v;
-      renderMain();
-    }));
+    D.user = D.user || {};
 
-    container.appendChild(header);
-    header.appendChild(card);
+    const nameInput = elAttr('input', '', { type: 'text', value: D.user.displayName || '' });
+    nameInput.addEventListener('change', () => { D.user.displayName = nameInput.value; showToast('Display name saved'); });
+    card.appendChild(renderFormGroup('Display name', nameInput));
+
+    const avatarInput = elAttr('input', '', { type: 'text', value: D.user.avatar || '' });
+    avatarInput.addEventListener('change', () => { D.user.avatar = avatarInput.value; renderTopBar(); showToast('Avatar updated'); });
+    card.appendChild(renderFormGroup('Avatar URL', avatarInput));
+
+    const tzSelect = el('select', '');
+    ['Asia/Shanghai', 'UTC', 'America/Los_Angeles', 'America/New_York', 'Europe/London'].forEach(tz => {
+      const opt = document.createElement('option'); opt.value = tz; opt.text = tz;
+      if ((D.user.timezone || 'Asia/Shanghai') === tz) opt.selected = true;
+      tzSelect.appendChild(opt);
+    });
+    tzSelect.addEventListener('change', () => { D.user.timezone = tzSelect.value; showToast('Timezone saved'); });
+    card.appendChild(renderFormGroup('Timezone', tzSelect));
+
+    const langSelect = el('select', '');
+    [{ value: 'zh-CN', label: '简体中文' }, { value: 'en-US', label: 'English' }].forEach(l => {
+      const opt = document.createElement('option'); opt.value = l.value; opt.text = l.label;
+      if ((D.user.language || 'zh-CN') === l.value) opt.selected = true;
+      langSelect.appendChild(opt);
+    });
+    langSelect.addEventListener('change', () => { D.user.language = langSelect.value; showToast('Language saved'); });
+    card.appendChild(renderFormGroup('Language', langSelect));
+
+    const sigInput = el('textarea', '');
+    sigInput.value = D.user.signature || '';
+    sigInput.addEventListener('change', () => { D.user.signature = sigInput.value; showToast('Signature saved'); });
+    card.appendChild(renderFormGroup('Signature', sigInput));
+
+    section.appendChild(card);
+    return section;
+  }
+
+  function renderAccountsSection() {
+    const section = el('div', 'settings-section');
+    const header = el('div', 'settings-section-header');
+    header.appendChild(el('div', 'settings-section-title', 'Connected accounts'));
+    const addBtn = el('button', 'btn btn-primary btn-sm', '+ Add account');
+    addBtn.addEventListener('click', openAddAccountModal);
+    header.appendChild(addBtn);
+    section.appendChild(header);
+
+    const grid = el('div', 'account-cards');
+    (D.accounts || []).forEach(a => {
+      const card = el('div', 'account-card');
+
+      const top = el('div', 'account-card-top');
+      const avatar = el('div', 'account-avatar', a.avatar || '?');
+      avatar.style.background = a.color || '#999';
+      top.appendChild(avatar);
+
+      const info = el('div', 'account-info');
+      info.appendChild(el('div', 'account-label', a.label));
+      info.appendChild(el('div', 'account-detail', a.email || a.workspace || a.provider));
+      info.appendChild(el('div', 'account-meta', 'Last sync: ' + (a.lastSync || '-')));
+      top.appendChild(info);
+
+      const status = el('span', 'account-status account-status-' + a.status, a.status);
+      top.appendChild(status);
+      card.appendChild(top);
+
+      const actions = el('div', 'account-card-actions');
+      if (a.status === 'error') {
+        const reconnect = el('button', 'btn btn-secondary btn-sm', 'Reconnect');
+        reconnect.addEventListener('click', () => { a.status = 'connected'; a.lastSync = '刚刚'; showToast(a.label + ' reconnected'); renderMain(); });
+        actions.appendChild(reconnect);
+      }
+      if (a.status === 'connected' || a.status === 'syncing') {
+        const sync = el('button', 'btn btn-secondary btn-sm', a.status === 'syncing' ? 'Syncing…' : 'Sync now');
+        sync.addEventListener('click', () => { a.status = 'syncing'; a.lastSync = '同步中'; showToast('Syncing ' + a.label); renderMain(); });
+        actions.appendChild(sync);
+      }
+      const disconnect = el('button', 'btn btn-danger btn-sm', 'Disconnect');
+      disconnect.addEventListener('click', () => confirmDestructive('Disconnect ' + a.label + '?', () => { D.accounts = D.accounts.filter(x => x.id !== a.id); renderMain(); showToast(a.label + ' disconnected'); }));
+      actions.appendChild(disconnect);
+      card.appendChild(actions);
+
+      grid.appendChild(card);
+    });
+    section.appendChild(grid);
+    return section;
+  }
+
+  function openAddAccountModal() {
+    const modal = el('div', 'modal-overlay');
+    const content = el('div', 'modal agent-memory-modal');
+    let step = 1;
+    let selectedProvider = null;
+
+    const providers = [
+      { id: 'gmail', name: 'Gmail', color: '#ea4335', icon: 'ph-envelope-simple' },
+      { id: 'outlook', name: 'Outlook', color: '#0078d4', icon: 'ph-envelope-simple' },
+      { id: 'slack', name: 'Slack', color: '#4a154b', icon: 'ph-slack-logo' },
+      { id: 'wechat', name: 'WeChat', color: '#22c55e', icon: 'ph-chat-circle' },
+      { id: 'google-calendar', name: 'Google Calendar', color: '#a78bfa', icon: 'ph-calendar' },
+    ];
+
+    function closeModal() { modal.remove(); document.removeEventListener('keydown', onKeyDown); }
+    function onKeyDown(e) { if (e.key === 'Escape') closeModal(); }
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+    document.addEventListener('keydown', onKeyDown);
+
+    const header = el('div', 'modal-header');
+    const title = el('h3', 'modal-title', 'Add account');
+    const closeBtn = el('button', 'icon-btn');
+    closeBtn.appendChild(icon('ph-x'));
+    closeBtn.addEventListener('click', closeModal);
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+    content.appendChild(header);
+
+    const body = el('div', 'modal-body');
+    const actions = el('div', 'modal-card-actions');
+    content.appendChild(body);
+    content.appendChild(actions);
+
+    function renderBody() {
+      body.innerHTML = '';
+      actions.innerHTML = '';
+      if (step === 1) {
+        body.appendChild(el('p', '', 'Select a service to connect:'));
+        const grid = el('div', 'oauth-provider-grid');
+        providers.forEach(p => {
+          const btn = el('button', 'oauth-provider-btn');
+          const av = el('span', 'oauth-provider-icon');
+          av.style.background = p.color;
+          av.appendChild(icon(p.icon));
+          btn.appendChild(av);
+          btn.appendChild(el('span', '', p.name));
+          btn.addEventListener('click', () => { selectedProvider = p; step = 2; renderBody(); });
+          grid.appendChild(btn);
+        });
+        body.appendChild(grid);
+        const cancel = el('button', 'btn-secondary', 'Cancel');
+        cancel.addEventListener('click', closeModal);
+        actions.appendChild(cancel);
+      } else if (step === 2) {
+        body.appendChild(el('p', '', 'Authorize SendPalm to access your ' + selectedProvider.name + ' account.'));
+        const spinner = el('div', 'oauth-spinner');
+        spinner.appendChild(icon('ph-spinner'));
+        spinner.appendChild(el('span', '', 'Waiting for authorization…'));
+        body.appendChild(spinner);
+        setTimeout(() => { step = 3; renderBody(); }, 1200);
+        const cancel = el('button', 'btn-secondary', 'Cancel');
+        cancel.addEventListener('click', closeModal);
+        actions.appendChild(cancel);
+      } else {
+        body.appendChild(el('div', 'oauth-success', '✓ ' + selectedProvider.name + ' connected successfully'));
+        body.appendChild(el('p', '', 'Your messages and events will start syncing shortly.'));
+        const done = el('button', 'btn-primary', 'Done');
+        done.addEventListener('click', () => {
+          const p = selectedProvider;
+          const newAccount = {
+            id: p.id + '-' + Date.now(),
+            type: p.id === 'google-calendar' ? 'calendar' : (p.id === 'slack' || p.id === 'wechat') ? 'im' : 'email',
+            provider: p.id,
+            label: p.name,
+            status: 'connected',
+            synced: 0,
+            total: 0,
+            privacy: 'unified',
+            color: p.color,
+            avatar: p.name.charAt(0),
+            lastSync: '刚刚'
+          };
+          if (p.id === 'gmail') newAccount.email = 'user@gmail.com';
+          if (p.id === 'outlook') newAccount.email = 'user@outlook.com';
+          if (p.id === 'slack') newAccount.workspace = 'new-workspace';
+          D.accounts.unshift(newAccount);
+          closeModal(); renderMain(); showToast(p.name + ' account added');
+        });
+        actions.appendChild(done);
+      }
+    }
+
+    renderBody();
+    modal.appendChild(content);
+    document.body.appendChild(modal);
+  }
+
+  function renderPreferencesSection() {
+    const wrapper = el('div', '');
+
+    const notifSection = el('div', 'settings-section');
+    notifSection.appendChild(el('div', 'settings-section-title', 'Notifications'));
+    const notifCard = el('div', 'settings-card');
+    notifCard.appendChild(renderToggle('Desktop notifications', state.settings.notifications.desktop, v => { state.settings.notifications.desktop = v; showToast('Desktop notifications ' + (v ? 'enabled' : 'disabled')); }, 'Show alerts for important messages'));
+    notifCard.appendChild(renderToggle('Weekly digest', state.settings.notifications.weeklyDigest, v => { state.settings.notifications.weeklyDigest = v; showToast('Weekly digest ' + (v ? 'enabled' : 'disabled')); }, 'Send a summary every Monday'));
+    notifCard.appendChild(renderToggle('Quiet hours', state.settings.notifications.quietHours.enabled || false, v => { state.settings.notifications.quietHours.enabled = v; renderMain(); }, 'Pause notifications during selected hours'));
+    notifSection.appendChild(notifCard);
+    wrapper.appendChild(notifSection);
+
+    const quietSection = el('div', 'settings-section');
+    quietSection.appendChild(el('div', 'settings-section-title', 'Quiet hours'));
+    const quietCard = el('div', 'settings-card');
+    const quietRow = el('div', 'settings-row');
+    quietRow.appendChild(el('span', 'settings-label', 'From'));
+    const startSelect = el('select', 'settings-select');
+    const endSelect = el('select', 'settings-select');
+    const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0') + ':00');
+    hours.forEach(h => {
+      const o = document.createElement('option'); o.value = h; o.text = h;
+      if (h === (state.settings.notifications.quietHours.start || '22:00')) o.selected = true;
+      startSelect.appendChild(o);
+    });
+    hours.forEach(h => {
+      const o = document.createElement('option'); o.value = h; o.text = h;
+      if (h === (state.settings.notifications.quietHours.end || '08:00')) o.selected = true;
+      endSelect.appendChild(o);
+    });
+    startSelect.addEventListener('change', () => { state.settings.notifications.quietHours.start = startSelect.value; });
+    endSelect.addEventListener('change', () => { state.settings.notifications.quietHours.end = endSelect.value; });
+    quietRow.appendChild(startSelect);
+    quietRow.appendChild(el('span', 'settings-label', 'To'));
+    quietRow.appendChild(endSelect);
+    quietCard.appendChild(quietRow);
+    quietSection.appendChild(quietCard);
+    wrapper.appendChild(quietSection);
+
+    const securitySection = el('div', 'settings-section');
+    securitySection.appendChild(el('div', 'settings-section-title', 'Security & Privacy'));
+    const securityCard = el('div', 'settings-card');
+    securityCard.appendChild(renderToggle('App lock', state.settings.security.lockEnabled, v => { state.settings.security.lockEnabled = v; renderMain(); }, 'Require PIN to open SendPalm'));
+    securityCard.appendChild(renderToggle('Screenshot protection', state.settings.security.screenshot, v => { state.settings.security.screenshot = v; renderMain(); }, 'Blur sensitive content in app switcher'));
+    securityCard.appendChild(renderToggle('Clear clipboard', state.settings.security.clipboardClear, v => { state.settings.security.clipboardClear = v; renderMain(); }, 'Auto-clear copied content after 30s'));
+    securitySection.appendChild(securityCard);
+    wrapper.appendChild(securitySection);
 
     const syncSection = el('div', 'settings-section');
     syncSection.appendChild(el('div', 'settings-section-title', 'Sync & Storage'));
@@ -5729,94 +5981,103 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     syncLeft.appendChild(el('div', 'settings-desc', 'Store incoming emails as Markdown for agent context'));
     syncRow.appendChild(syncLeft);
     const syncSelect = el('select', 'settings-select');
-    [
-      { value: 'markdown', label: 'Markdown' },
-      { value: 'original', label: 'Original' },
-      { value: 'both', label: 'Both (Markdown + HTML backup)' },
-    ].forEach(opt => {
+    [{ value: 'markdown', label: 'Markdown' }, { value: 'original', label: 'Original' }, { value: 'both', label: 'Both (Markdown + HTML backup)' }].forEach(opt => {
       const o = el('option', '', opt.label);
       o.value = opt.value;
       if (state.settings.syncFormat === opt.value) o.selected = true;
       syncSelect.appendChild(o);
     });
-    syncSelect.addEventListener('change', () => {
-      state.settings.syncFormat = syncSelect.value;
-      showToast('Sync format updated to ' + syncSelect.value);
-    });
+    syncSelect.addEventListener('change', () => { state.settings.syncFormat = syncSelect.value; showToast('Sync format updated to ' + syncSelect.value); });
     syncRow.appendChild(syncSelect);
     syncCard.appendChild(syncRow);
     syncSection.appendChild(syncCard);
-    container.appendChild(syncSection);
+    wrapper.appendChild(syncSection);
 
-    const securitySection = el('div', 'settings-section');
-    securitySection.appendChild(el('div', 'settings-section-title', 'Security & Privacy'));
-    const securityCard = el('div', 'settings-card');
-    securityCard.appendChild(renderToggleRow('App lock', 'Require PIN to open SendPalm', state.settings.security.lockEnabled, v => {
-      state.settings.security.lockEnabled = v;
-      renderMain();
-    }));
-    securityCard.appendChild(renderToggleRow('Screenshot protection', 'Blur sensitive content in app switcher', state.settings.security.screenshot, v => {
-      state.settings.security.screenshot = v;
-      renderMain();
-    }));
-    securityCard.appendChild(renderToggleRow('Clear clipboard', 'Auto-clear copied content after 30s', state.settings.security.clipboardClear, v => {
-      state.settings.security.clipboardClear = v;
-      renderMain();
-    }));
-    securitySection.appendChild(securityCard);
-    container.appendChild(securitySection);
+    return wrapper;
+  }
 
-    const agentSection = el('div', 'settings-section');
-    agentSection.appendChild(el('div', 'settings-section-title', 'Agent'));
-    const agentCard = el('div', 'settings-card');
-    const approvalRow = el('div', 'settings-row');
-    const approvalLeft = el('div', '');
-    approvalLeft.appendChild(el('div', 'settings-label', 'Auto-approval'));
-    approvalLeft.appendChild(el('div', 'settings-desc', 'Allow SendPalm to act without asking'));
-    approvalRow.appendChild(approvalLeft);
-    const approvalSelect = el('select', 'settings-select');
-    ['low-risk', 'none', 'all'].forEach(opt => {
-      const o = el('option', '', opt);
-      o.value = opt;
-      if (state.settings.agent.autoApproval === opt) o.selected = true;
-      approvalSelect.appendChild(o);
+  function renderAgentSection() {
+    const wrapper = el('div', '');
+
+    const behaviorSection = el('div', 'settings-section');
+    behaviorSection.appendChild(el('div', 'settings-section-title', 'Agent behavior'));
+    const card = el('div', 'settings-card');
+
+    D.agentMemory = D.agentMemory || { global: {}, contacts: {} };
+    const mem = D.agentMemory.global;
+
+    const toneRow = el('div', 'settings-row');
+    const toneLeft = el('div', '');
+    toneLeft.appendChild(el('div', 'settings-label', 'Default tone'));
+    toneLeft.appendChild(el('div', 'settings-desc', 'How the agent writes by default'));
+    toneRow.appendChild(toneLeft);
+    const toneSelect = el('select', 'settings-select');
+    [{ value: 'formal', label: 'Formal' }, { value: 'casual', label: 'Casual' }, { value: 'friendly', label: 'Friendly' }, { value: 'direct', label: 'Direct' }].forEach(o => {
+      const opt = document.createElement('option'); opt.value = o.value; opt.text = o.label;
+      if ((mem.tone || 'formal') === o.value) opt.selected = true;
+      toneSelect.appendChild(opt);
     });
-    approvalSelect.addEventListener('change', () => {
-      state.settings.agent.autoApproval = approvalSelect.value;
-    });
-    approvalRow.appendChild(approvalSelect);
-    agentCard.appendChild(approvalRow);
+    toneSelect.addEventListener('change', () => { mem.tone = toneSelect.value; showToast('Default tone saved'); });
+    toneRow.appendChild(toneSelect);
+    card.appendChild(toneRow);
 
+    const lengthRow = el('div', 'settings-row');
+    const lengthLeft = el('div', '');
+    lengthLeft.appendChild(el('div', 'settings-label', 'Default length'));
+    lengthLeft.appendChild(el('div', 'settings-desc', 'Preferred reply length'));
+    lengthRow.appendChild(lengthLeft);
+    const lengthSelect = el('select', 'settings-select');
+    [{ value: 'short', label: 'Short' }, { value: 'medium', label: 'Medium' }, { value: 'long', label: 'Long' }].forEach(o => {
+      const opt = document.createElement('option'); opt.value = o.value; opt.text = o.label;
+      if ((mem.defaultLength || 'medium') === o.value) opt.selected = true;
+      lengthSelect.appendChild(opt);
+    });
+    lengthSelect.addEventListener('change', () => { mem.defaultLength = lengthSelect.value; showToast('Default length saved'); });
+    lengthRow.appendChild(lengthSelect);
+    card.appendChild(lengthRow);
+
+    const taskRow = el('div', 'settings-row');
+    const taskLeft = el('div', '');
+    taskLeft.appendChild(el('div', 'settings-label', 'Auto-task level'));
+    taskLeft.appendChild(el('div', 'settings-desc', 'How much the agent can do without approval'));
+    taskRow.appendChild(taskLeft);
+    const taskSelect = el('select', 'settings-select');
+    const taskOptions = [
+      { value: 'none', label: 'None — always ask' },
+      { value: 'low', label: 'Low — safe actions only' },
+      { value: 'medium', label: 'Medium — include drafts' },
+      { value: 'high', label: 'High — run automatically' }
+    ];
+    const currentTask = mem.autoTask || (state.settings.agent.autoApproval === 'all' ? 'high' : state.settings.agent.autoApproval === 'none' ? 'none' : 'low');
+    taskOptions.forEach(o => {
+      const opt = document.createElement('option'); opt.value = o.value; opt.text = o.label;
+      if (currentTask === o.value) opt.selected = true;
+      taskSelect.appendChild(opt);
+    });
+    taskSelect.addEventListener('change', () => {
+      mem.autoTask = taskSelect.value;
+      state.settings.agent.autoApproval = taskSelect.value === 'none' ? 'none' : taskSelect.value === 'high' ? 'all' : 'low-risk';
+      showToast('Auto-task level saved');
+    });
+    taskRow.appendChild(taskSelect);
+    card.appendChild(taskRow);
+
+    behaviorSection.appendChild(card);
+    wrapper.appendChild(behaviorSection);
+
+    const memorySection = el('div', 'settings-section');
+    memorySection.appendChild(el('div', 'settings-section-title', 'Memory'));
+    const memoryCard = el('div', 'settings-card');
     const memoryRow = el('div', 'settings-row');
-    memoryRow.appendChild(el('span', 'settings-label', 'Memory'));
+    memoryRow.appendChild(el('span', 'settings-label', 'Manage agent memory'));
     const manageMemoryBtn = el('button', 'btn btn-secondary btn-sm', 'Manage');
     manageMemoryBtn.addEventListener('click', renderAgentMemoryModal);
     memoryRow.appendChild(manageMemoryBtn);
-    agentCard.appendChild(memoryRow);
+    memoryCard.appendChild(memoryRow);
+    memorySection.appendChild(memoryCard);
+    wrapper.appendChild(memorySection);
 
-    agentSection.appendChild(agentCard);
-    container.appendChild(agentSection);
-
-    const accountsSection = el('div', 'settings-section');
-    accountsSection.appendChild(el('div', 'settings-section-title', 'Connected accounts'));
-    const accountsCard = el('div', 'settings-card');
-    accounts.forEach(a => {
-      const row = el('div', 'settings-row');
-      const left = el('div', '');
-      left.appendChild(el('div', 'settings-label', a.label));
-      left.appendChild(el('div', 'settings-desc', a.email || a.workspace || a.provider));
-      row.appendChild(left);
-      const status = el('span', '', a.status);
-      status.style.fontSize = '12px';
-      status.style.color = a.status === 'connected' ? 'var(--green)' : a.status === 'error' ? 'var(--red)' : 'var(--yellow)';
-      status.style.fontFamily = 'var(--font-mono)';
-      row.appendChild(status);
-      accountsCard.appendChild(row);
-    });
-    accountsSection.appendChild(accountsCard);
-    container.appendChild(accountsSection);
-
-    return container;
+    return wrapper;
   }
 
   function renderAgentMemoryModal() {
@@ -5884,21 +6145,6 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     content.appendChild(body);
     modal.appendChild(content);
     document.body.appendChild(modal);
-  }
-
-  function renderToggleRow(label, desc, value, onChange) {
-    const row = el('div', 'settings-row');
-    const left = el('div', '');
-    left.appendChild(el('div', 'settings-label', label));
-    left.appendChild(el('div', 'settings-desc', desc));
-    row.appendChild(left);
-    const toggle = el('div', 'settings-toggle' + (value ? ' on' : ''));
-    toggle.addEventListener('click', () => {
-      const newValue = !value;
-      onChange(newValue);
-    });
-    row.appendChild(toggle);
-    return row;
   }
 
   function sendAgentDraft(id) {
