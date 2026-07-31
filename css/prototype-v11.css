@@ -9645,50 +9645,49 @@ button:focus-visible, input:focus-visible {
 
 .insights-line-chart {
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  flex: 1;
-  min-height: 120px;
-  padding-top: 20px;
-}
-
-.insights-line-col {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-
-.insights-line-bar-wrap {
-  width: 100%;
-  height: 120px;
-  display: flex;
-  align-items: flex-end;
+  align-items: stretch;
   justify-content: center;
-  background: linear-gradient(to top, var(--surface-2) 0%, transparent 100%);
-  border-radius: var(--radius-md);
-  overflow: hidden;
+  flex: 1;
+  min-height: 150px;
+  padding-top: 10px;
 }
 
-.insights-line-bar {
-  width: 32px;
-  background: var(--accent);
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  transition: height 0.4s var(--ease-out);
+.insights-line-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
 }
 
-.insights-line-label {
+.insights-line-polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.insights-line-area {
+  fill: var(--accent-soft);
+}
+
+.insights-line-dot {
+  fill: var(--accent);
+  stroke: var(--bg-elevated);
+  stroke-width: 2;
+}
+
+.insights-line-label-text {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-secondary);
+  fill: var(--text-secondary);
+  text-anchor: middle;
 }
 
-.insights-line-value {
+.insights-line-value-text {
   font-size: 12px;
   font-weight: 700;
-  color: var(--text-primary);
+  fill: var(--text-primary);
+  text-anchor: middle;
 }
 
 .insights-channel-list {

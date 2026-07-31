@@ -5553,22 +5553,32 @@
       months.push({ d, label: (d.getMonth() + 1) + '月', hours: 0, count: 0 });
     }
 
-    const sorted = [...D._msgs].sort((a, b) => new Date(a.st) - new Date(b.st));
-    for (let i = 0; i < sorted.length - 1; i++) {
-      const cur = sorted[i];
-      const next = sorted[i + 1];
-      if (cur.fm !== '你' && next.fm === '你') {
-        const a = new Date(cur.st).getTime();
-        const b = new Date(next.st).getTime();
-        if (!a || !b || b <= a) continue;
-        const d = new Date(next.st);
-        const month = months.find(mo => d.getFullYear() === mo.d.getFullYear() && d.getMonth() === mo.d.getMonth());
-        if (month) {
-          month.hours += (b - a) / (1000 * 60 * 60);
-          month.count++;
+    // Group by pid so reply pairs are only counted within the same conversation/thread.
+    const byPid = {};
+    D._msgs.forEach(m => {
+      if (!m.pid) return;
+      if (!byPid[m.pid]) byPid[m.pid] = [];
+      byPid[m.pid].push(m);
+    });
+
+    Object.values(byPid).forEach(thread => {
+      thread.sort((a, b) => new Date(a.st) - new Date(b.st));
+      for (let i = 0; i < thread.length - 1; i++) {
+        const cur = thread[i];
+        const next = thread[i + 1];
+        if (cur.fm !== '你' && next.fm === '你') {
+          const a = new Date(cur.st).getTime();
+          const b = new Date(next.st).getTime();
+          if (!a || !b || b <= a) continue;
+          const d = new Date(next.st);
+          const month = months.find(mo => d.getFullYear() === mo.d.getFullYear() && d.getMonth() === mo.d.getMonth());
+          if (month) {
+            month.hours += (b - a) / (1000 * 60 * 60);
+            month.count++;
+          }
         }
       }
-    }
+    });
 
     return months.map(mo => ({
       label: mo.label,
@@ -5584,9 +5594,14 @@
       if (counts[ch] !== undefined) counts[ch]++;
     });
     const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
-    return Object.entries(counts)
+    const items = Object.entries(counts)
       .map(([name, count]) => ({ name, count, pct: Math.round((count / total) * 100) }))
       .sort((a, b) => b.count - a.count);
+    const sumPct = items.reduce((a, b) => a + b.pct, 0);
+    if (items.length && sumPct !== 100) {
+      items[0].pct += 100 - sumPct;
+    }
+    return items;
   }
 
   function computeFollowUpCount() {
@@ -5650,7 +5665,7 @@
       row.appendChild(renderAvatar(contact, 'insights-avatar', contact.name ? contact.name[0] : '?', () => openContact(contact.id)));
       const info = el('div', 'insights-person-info');
       info.appendChild(el('div', 'insights-person-name', contact.name));
-      info.appendChild(el('div', 'insights-person-meta', contact.co + (contact.tl ? ' · ' + contact.tl : '')));
+      info.appendChild(el('div', 'insights-person-meta', (contact.co || '') + (contact.tl ? ' · ' + contact.tl : '')));
       row.appendChild(info);
       const health = typeof contact.health === 'number' ? contact.health : 0;
       const healthColor = health >= 70 ? 'var(--green)' : health >= 40 ? 'var(--yellow)' : 'var(--red)';
@@ -5674,17 +5689,67 @@
     replyCard.appendChild(el('div', 'insights-card-label', 'Avg. reply time'));
     const chartWrap = el('div', 'insights-line-chart');
     const maxHours = Math.max(1, ...replyTrend.map(p => p.hours));
-    replyTrend.forEach((point, idx) => {
-      const col = el('div', 'insights-line-col');
-      const barWrap = el('div', 'insights-line-bar-wrap');
-      const bar = el('div', 'insights-line-bar');
-      bar.style.height = Math.round((point.hours / maxHours) * 100) + '%';
-      barWrap.appendChild(bar);
-      col.appendChild(barWrap);
-      col.appendChild(el('div', 'insights-line-label', point.label));
-      col.appendChild(el('div', 'insights-line-value', point.hours + 'h'));
-      chartWrap.appendChild(col);
+    const plotHeight = 100;
+    const plotWidth = 280;
+    const padX = 30;
+    const padY = 20;
+    const graphH = plotHeight - padY * 2;
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'insights-line-svg');
+    svg.setAttribute('viewBox', `0 0 ${plotWidth} ${plotHeight}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+
+    const points = replyTrend.map((p, idx) => {
+      const x = replyTrend.length === 1 ? plotWidth / 2 : padX + (idx / (replyTrend.length - 1)) * (plotWidth - padX * 2);
+      const y = plotHeight - padY - (p.hours / maxHours) * graphH;
+      return { x, y, label: p.label, hours: p.hours };
     });
+
+    // Subtle area fill under the line.
+    if (points.length > 1) {
+      const area = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      const areaPoints = [
+        `${points[0].x},${plotHeight - padY}`,
+        ...points.map(p => `${p.x},${p.y}`),
+        `${points[points.length - 1].x},${plotHeight - padY}`,
+      ].join(' ');
+      area.setAttribute('points', areaPoints);
+      area.setAttribute('class', 'insights-line-area');
+      svg.appendChild(area);
+    }
+
+    // Connecting line.
+    const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+    polyline.setAttribute('points', points.map(p => `${p.x},${p.y}`).join(' '));
+    polyline.setAttribute('class', 'insights-line-polyline');
+    svg.appendChild(polyline);
+
+    // Month points, labels and values.
+    points.forEach(p => {
+      const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dot.setAttribute('cx', p.x);
+      dot.setAttribute('cy', p.y);
+      dot.setAttribute('r', 5);
+      dot.setAttribute('class', 'insights-line-dot');
+      svg.appendChild(dot);
+
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('x', p.x);
+      label.setAttribute('y', plotHeight - 4);
+      label.setAttribute('class', 'insights-line-label-text');
+      label.textContent = p.label;
+      svg.appendChild(label);
+
+      const value = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      value.setAttribute('x', p.x);
+      value.setAttribute('y', p.y - 12);
+      value.setAttribute('class', 'insights-line-value-text');
+      value.textContent = p.hours + 'h';
+      svg.appendChild(value);
+    });
+
+    chartWrap.appendChild(svg);
     replyCard.appendChild(chartWrap);
     grid.appendChild(replyCard);
 
