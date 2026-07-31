@@ -1555,6 +1555,75 @@
     renderMain();
   }
 
+  function openRemindDatePicker(m) {
+    const now = new Date();
+    // Default: tomorrow 9:00 local time.
+    const defaultDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 9, 0, 0, 0);
+    let pickedDate = defaultDate;
+    openModalCard({
+      title: 'Remind me…',
+      renderBody: (body) => {
+        const stack = el('div', 'form-stack');
+        const dateInput = elAttr('input', '', { type: 'date', value: formatDateInput(defaultDate) });
+        const timeInput = elAttr('input', '', { type: 'time', value: formatTimeInput(defaultDate) });
+        dateInput.addEventListener('change', () => {
+          const next = parseDateTimeInputs(dateInput.value, timeInput.value);
+          if (next) pickedDate = next;
+        });
+        timeInput.addEventListener('change', () => {
+          const next = parseDateTimeInputs(dateInput.value, timeInput.value);
+          if (next) pickedDate = next;
+        });
+        const row = el('div', 'form-row');
+        row.appendChild(el('div', '', ''));
+        row.firstChild.appendChild(renderFormGroup('Date', dateInput));
+        row.appendChild(el('div', '', ''));
+        row.lastChild.appendChild(renderFormGroup('Time', timeInput));
+        stack.appendChild(row);
+        stack.appendChild(el('p', 'form-hint', 'The message will float back to the top of your Inbox at this time.'));
+        body.appendChild(stack);
+      },
+      renderActions: (actions) => {
+        const cancel = el('button', 'btn-secondary', 'Cancel');
+        cancel.addEventListener('click', () => closeCompose());
+        const set = el('button', 'btn-primary', 'Set reminder');
+        set.addEventListener('click', () => {
+          if (pickedDate.getTime() <= Date.now()) {
+            showToast('Pick a time in the future');
+            return;
+          }
+          const prev = { replyLater: m.replyLater, setAside: m.setAside, bubbleUpUntil: m.bubbleUpUntil, archived: m.archived };
+          clearWorkflowFlags(m);
+          m.bubbleUpUntil = pickedDate.toISOString();
+          m.archived = false;
+          closeCompose();
+          renderMain();
+          showToast('Reminded for ' + pickedDate.toLocaleString(), { undo: () => restoreMessageState(m, prev) });
+        });
+        actions.appendChild(cancel);
+        actions.appendChild(set);
+      }
+    });
+  }
+
+  function formatDateInput(d) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+
+  function formatTimeInput(d) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  function parseDateTimeInputs(dateStr, timeStr) {
+    if (!dateStr) return null;
+    const [y, mo, da] = dateStr.split('-').map(Number);
+    const [h = 9, mi = 0] = (timeStr || '09:00').split(':').map(Number);
+    if (!y || !mo || !da) return null;
+    return new Date(y, mo - 1, da, h, mi, 0, 0);
+  }
+
   function renderMain() {
     const main = document.getElementById('main');
     main.innerHTML = '';
@@ -9522,7 +9591,7 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
         { label: 'Tomorrow', sub: fmt(tomorrow), action: () => bubbleUpMessage(m, 'tomorrow') },
         { label: 'This weekend', sub: fmt(weekend), action: () => bubbleUpMessage(m, 'weekend') },
         { label: 'Next week', sub: fmt(nextWeek), action: () => bubbleUpMessage(m, 'week') },
-        { label: 'Pick a date…', action: () => showToast('Date picker') },
+        { label: 'Pick a date…', action: () => openRemindDatePicker(m) },
       ];
       openContextMenuFromElement(bubbleUpBtn, choices);
     });
@@ -9601,6 +9670,7 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
               { label: 'Now', sub: '马上提醒', action: () => bubbleUpMessage(m, 'now') },
               { label: 'Tomorrow', sub: '明天 8:00', action: () => bubbleUpMessage(m, 'tomorrow') },
               { label: 'Next week', sub: '下周一 8:00', action: () => bubbleUpMessage(m, 'week') },
+              { label: 'Pick a date…', action: () => openRemindDatePicker(m) },
             ];
             openContextMenuFromElement(bubbleUpBtn, choices);
           }
