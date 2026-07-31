@@ -802,6 +802,7 @@
   window.openDraftModal = openDraftModal;
   window.setView = setView;
   window.renderMain = renderMain;
+  window.renderTopBar = renderTopBar;
   window.openCompanyView = openCompanyView;
   window.renderCompanyView = renderCompanyView;
   window.renderLabelsSection = renderLabelsSection;
@@ -1218,7 +1219,12 @@
     notifyBtn.title = 'Notifications';
     notifyBtn.appendChild(icon('ph-bell'));
     notifyBtn.addEventListener('click', toggleNotifications);
-    if (D.notifications.some(n => !n.read)) notifyBtn.classList.add('has-badge');
+    const unread = unreadNotificationCount();
+    if (unread > 0) {
+      notifyBtn.classList.add('has-badge');
+      const badge = el('span', 'topbar-notify-badge', unread > 9 ? '9+' : String(unread));
+      notifyBtn.appendChild(badge);
+    }
     right.appendChild(notifyBtn);
 
     const avatarBtn = el('button', 'topbar-avatar');
@@ -6533,6 +6539,59 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     }
   }
 
+  const NOTIF_ICON = {
+    remind: 'ph-arrow-fat-line-up',
+    followup: 'ph-bell-ringing',
+    draft: 'ph-pencil-simple',
+    agent: 'ph-sparkle',
+    replylater: 'ph-clock',
+    mention: 'ph-at',
+    system: 'ph-info',
+  };
+  const NOTIF_TINT = {
+    remind: '#3B82F6',
+    followup: '#F59E0B',
+    draft: '#8B5CF6',
+    agent: '#0A8F63',
+    replylater: '#FB923C',
+    mention: '#EC4899',
+    system: '#6B7280',
+  };
+
+  function notificationBucket(iso) {
+    const t = new Date(iso).getTime();
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
+    if (t >= startOfToday) return 'Today';
+    if (t >= startOfYesterday) return 'Yesterday';
+    return 'Earlier';
+  }
+
+  function relativeTime(iso) {
+    const diff = Date.now() - new Date(iso).getTime();
+    const min = Math.floor(diff / 60000);
+    if (min < 1) return '刚刚';
+    if (min < 60) return min + ' 分钟前';
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return hr + ' 小时前';
+    const day = Math.floor(hr / 24);
+    if (day < 7) return day + ' 天前';
+    return new Date(iso).toLocaleDateString();
+  }
+
+  function unreadNotificationCount() {
+    return (D.notifications || []).filter(n => !n.read).length;
+  }
+
+  function markAllNotificationsRead() {
+    D.notifications.forEach(n => { n.read = true; });
+    D.notificationLastSeenAt = new Date().toISOString();
+    try { localStorage.setItem('sendpalm-notif-last-seen', D.notificationLastSeenAt); } catch (e) { /* ignore */ }
+    renderTopBar();
+    renderNotifications();
+  }
+
   function renderNotifications() {
     const panel = document.getElementById('notification-panel');
     panel.innerHTML = '';
@@ -6545,29 +6604,76 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     header.appendChild(close);
     panel.appendChild(header);
 
+    const sub = el('div', 'notification-subheader');
+    sub.appendChild(el('span', '', unreadNotificationCount() + ' unread'));
+    const markAll = el('button', 'notification-mark-all', 'Mark all as read');
+    markAll.addEventListener('click', markAllNotificationsRead);
+    sub.appendChild(markAll);
+    panel.appendChild(sub);
+
     const list = el('div', 'notification-list');
-    if (D.notifications.length === 0) {
-      list.appendChild(renderEmpty('No notifications', 'ph-bell-slash'));
+    const all = (D.notifications || []).slice().sort((a, b) => new Date(b.at) - new Date(a.at));
+    if (all.length === 0) {
+      list.appendChild(renderEmpty('还没有任何通知', 'ph-bell-slash'));
     } else {
-      D.notifications.forEach((n, idx) => {
-        const row = el('div', 'notification-row' + (n.read ? '' : ' unread'));
-        const dot = el('div', 'notification-dot' + (n.read ? ' read' : ''));
-        row.appendChild(dot);
-        const body = el('div', 'notification-body');
-        const text = el('div', 'notification-text');
-        text.innerHTML = n.txt;
-        body.appendChild(text);
-        body.appendChild(el('div', 'notification-time', n.tm));
-        row.appendChild(body);
-        row.addEventListener('click', () => {
-          n.read = true;
-          renderTopBar();
-          renderNotifications();
-        });
-        list.appendChild(row);
+      // Group by Today / Yesterday / Earlier
+      const groups = { Today: [], Yesterday: [], Earlier: [] };
+      all.forEach(n => groups[notificationBucket(n.at)].push(n));
+      ['Today', 'Yesterday', 'Earlier'].forEach(groupName => {
+        const items = groups[groupName];
+        if (!items.length) return;
+        list.appendChild(el('div', 'notification-group-label', groupName));
+        items.forEach(n => list.appendChild(renderNotificationRow(n)));
       });
     }
     panel.appendChild(list);
+
+    // Click outside closes
+    requestAnimationFrame(() => {
+      const onDocClick = (e) => {
+        if (!panel.contains(e.target) && !e.target.closest('.topbar-notify-btn')) {
+          panel.classList.remove('open');
+          state.notificationsOpen = false;
+          document.removeEventListener('click', onDocClick);
+        }
+      };
+      setTimeout(() => document.addEventListener('click', onDocClick), 0);
+    });
+  }
+
+  function renderNotificationRow(n) {
+    const row = el('div', 'notification-row' + (n.read ? '' : ' unread'));
+    const iconWrap = el('div', 'notification-icon');
+    iconWrap.style.background = (NOTIF_TINT[n.type] || '#6B7280') + '22';
+    iconWrap.style.color = NOTIF_TINT[n.type] || '#6B7280';
+    iconWrap.appendChild(icon(NOTIF_ICON[n.type] || 'ph-bell'));
+    row.appendChild(iconWrap);
+
+    const body = el('div', 'notification-body');
+    body.appendChild(el('div', 'notification-title-row', n.title || ''));
+    if (n.body) body.appendChild(el('div', 'notification-snippet', n.body));
+    body.appendChild(el('div', 'notification-time', relativeTime(n.at)));
+    row.appendChild(body);
+
+    row.addEventListener('click', () => {
+      n.read = true;
+      toggleNotifications();
+      if (n.ref) {
+        if (n.ref.view) state.view = n.ref.view;
+        if (n.ref.contactId) state.selectedContactId = n.ref.contactId;
+        if (n.ref.fileId) state.selectedFileId = n.ref.fileId;
+      }
+      renderNav();
+      renderTopBar();
+      renderMain();
+      // closePanel clears selectedContactId via a 340ms setTimeout; restore ours.
+      if (n.ref && n.ref.contactId) {
+        setTimeout(() => {
+          if (state.view === n.ref.view) state.selectedContactId = n.ref.contactId;
+        }, 360);
+      }
+    });
+    return row;
   }
 
   function openCompose(context) {

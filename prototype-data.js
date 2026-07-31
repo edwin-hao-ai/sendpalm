@@ -567,6 +567,17 @@ D.shortcuts = [
 // Backwards-compatible top-level alias for older prototype versions.
 const accounts = D.accounts;
 
+// Notification center (P4 Task B). Seed entries so the bell shows real-looking content.
+D.notifications = [
+  { id: 'n1', type: 'remind', title: '3 messages bubbled up', body: '张磊 · Re: Q4 合同提案 +2 more', at: new Date(Date.now() - 1000 * 60 * 30).toISOString(), read: false, ref: { view: 'bubbleUp' } },
+  { id: 'n2', type: 'followup', title: '王洋 已 45 天未联系', body: '建议下周电话跟进', at: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), read: false, ref: { view: 'contacts', contactId: 'wy' } },
+  { id: 'n3', type: 'draft', title: '2 份草稿等待审批', body: 'Agent 起草：给张磊的 Q4 合同回复', at: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(), read: false, ref: { view: 'drafts' } },
+  { id: 'n4', type: 'agent', title: '会议简报已生成', body: '明天 14:00 Q4 合同评审会议', at: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), read: true, ref: { view: 'calendar' } },
+  { id: 'n5', type: 'replylater', title: 'Pending 里有 1 封待回复', body: '陈欣 · Re: 合作 - Q3回顾', at: new Date(Date.now() - 1000 * 60 * 60 * 28).toISOString(), read: true, ref: { view: 'replyLater' } },
+  { id: 'n6', type: 'mention', title: 'Lisa Park @ 你', body: 'Figma 设计系统更新 ready for review', at: new Date(Date.now() - 1000 * 60 * 60 * 48).toISOString(), read: true, ref: { view: 'contacts', contactId: 'lp' } },
+];
+D.notificationLastSeenAt = localStorage.getItem('sendpalm-notif-last-seen') || null;
+
 // 扩展现有任务和草稿，增加 sessionId 字段
 if (D.agentTasks && D.agentTasks.length) {
   D.agentTasks.forEach((t, i) => {
