@@ -90,7 +90,8 @@
         { id: 'contacts', label: 'Contacts', icon: 'ph-users', hint: '⌘5' },
         { id: 'calendar', label: 'Calendar', icon: 'ph-calendar', hint: '⌘6' },
         { id: 'files', label: 'Files', icon: 'ph-files', hint: '⌘7' },
-        { id: 'agent', label: 'Agent', icon: 'ph-sparkle', hint: '⌘8' },
+        { id: 'insights', label: 'Insights', icon: 'ph-chart-bar', hint: '⌘8' },
+        { id: 'agent', label: 'Agent', icon: 'ph-sparkle', hint: '⌘9' },
       ]
     },
     {
@@ -964,6 +965,7 @@
         { id: 'contacts', label: 'Contacts', icon: 'ph-users' },
         { id: 'calendar', label: 'Calendar', icon: 'ph-calendar' },
         { id: 'files', label: 'Files', icon: 'ph-files' },
+        { id: 'insights', label: 'Insights', icon: 'ph-chart-bar' },
         { id: 'agent', label: 'Agent', icon: 'ph-sparkle' },
         { type: 'divider' },
         { id: 'bubbleUp', label: 'Remind', icon: 'ph-arrow-fat-line-up' },
@@ -1237,6 +1239,7 @@
       contacts: 'Contacts',
       calendar: 'Calendar',
       files: 'Files',
+      insights: 'Insights',
       drafts: 'Drafts',
       agent: 'Agent',
       settings: 'Settings',
@@ -1550,6 +1553,8 @@
       viewEl = renderCalendar();
     } else if (state.view === 'files') {
       viewEl = renderFiles();
+    } else if (state.view === 'insights') {
+      viewEl = renderInsightsView();
     } else if (state.view === 'agent') {
       viewEl = renderAgentView();
     } else if (state.view === 'drafts') {
@@ -1574,6 +1579,7 @@
         screenerHistory: 'Your past screening decisions.',
         contacts: 'People and companies you talk to.',
         files: 'Attachments and files from your email.',
+        insights: 'Analytics and trends across your relationships.',
         agent: 'Your AI workspace: sessions, tasks, drafts, and memory.',
         drafts: 'Messages you are working on.',
         settings: 'Preferences and account options.',
@@ -5481,6 +5487,277 @@
     });
 
     container.appendChild(list);
+    return container;
+  }
+
+  // ===================================================================
+  // Insights dashboard (Task 12)
+  // ===================================================================
+
+  const INSIGHTS_NOW = new Date('2026-07-20T12:00:00');
+
+  function startOfWeek(d) {
+    const date = new Date(d);
+    const day = date.getDay();
+    const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+    date.setDate(diff);
+    date.setHours(0, 0, 0, 0);
+    return date;
+  }
+
+  function isSameWeek(a, b) {
+    const sa = startOfWeek(a);
+    const sb = startOfWeek(b);
+    return sa.getFullYear() === sb.getFullYear() && sa.getMonth() === sb.getMonth() && sa.getDate() === sb.getDate();
+  }
+
+  function messagesInWeek(anchor, offset) {
+    const weekStart = startOfWeek(anchor);
+    weekStart.setDate(weekStart.getDate() + offset * 7);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 7);
+    return D._msgs.filter(m => {
+      const t = new Date(m.st).getTime();
+      return !isNaN(t) && t >= weekStart.getTime() && t < weekEnd.getTime();
+    });
+  }
+
+  function computeWeeklyVolume() {
+    const current = messagesInWeek(INSIGHTS_NOW, 0).length;
+    const previous = messagesInWeek(INSIGHTS_NOW, -1).length;
+    const trend = previous === 0 ? 0 : Math.round(((current - previous) / previous) * 100);
+    return { current, previous, trend };
+  }
+
+  function computeTopPeople(limit = 5) {
+    const counts = {};
+    D._msgs.forEach(m => {
+      if (!m.pid) return;
+      counts[m.pid] = (counts[m.pid] || 0) + 1;
+    });
+    return Object.entries(counts)
+      .map(([pid, count]) => ({ contact: D.getP(pid), count }))
+      .filter(({ contact }) => contact && (contact.health || 0) > 0)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, limit);
+  }
+
+  function computeReplyTimeTrend() {
+    const months = [];
+    for (let i = 2; i >= 0; i--) {
+      const d = new Date(INSIGHTS_NOW.getFullYear(), INSIGHTS_NOW.getMonth() - i, 1);
+      months.push({ d, label: (d.getMonth() + 1) + '月', hours: 0, count: 0 });
+    }
+
+    const sorted = [...D._msgs].sort((a, b) => new Date(a.st) - new Date(b.st));
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const cur = sorted[i];
+      const next = sorted[i + 1];
+      if (cur.fm !== '你' && next.fm === '你') {
+        const a = new Date(cur.st).getTime();
+        const b = new Date(next.st).getTime();
+        if (!a || !b || b <= a) continue;
+        const d = new Date(next.st);
+        const month = months.find(mo => d.getFullYear() === mo.d.getFullYear() && d.getMonth() === mo.d.getMonth());
+        if (month) {
+          month.hours += (b - a) / (1000 * 60 * 60);
+          month.count++;
+        }
+      }
+    }
+
+    return months.map(mo => ({
+      label: mo.label,
+      hours: mo.count ? Math.round(mo.hours / mo.count) : 0,
+    }));
+  }
+
+  function computeChannelShare() {
+    const map = { 'Gmail': 'Email', 'Outlook': 'Email', 'Slack': 'Slack', 'WeChat': 'WeChat', 'Calendar': 'Calendar' };
+    const counts = { Email: 0, Slack: 0, WeChat: 0, Calendar: 0 };
+    D._msgs.forEach(m => {
+      const ch = map[m.ch] || m.ch;
+      if (counts[ch] !== undefined) counts[ch]++;
+    });
+    const total = Object.values(counts).reduce((a, b) => a + b, 0) || 1;
+    return Object.entries(counts)
+      .map(([name, count]) => ({ name, count, pct: Math.round((count / total) * 100) }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  function computeFollowUpCount() {
+    const agent = (D.agentTasks || []).filter(t => t.status !== 'done').length;
+    const general = (D.tasks || []).filter(t => t.status !== 'done' && t.status !== 'completed').length;
+    return agent + general;
+  }
+
+  function computeAgentActionsThisWeek() {
+    const actions = (D.agentAuditLog || []).filter(a => a.status === 'completed' || a.status === 'sent');
+    const recent = [...actions].reverse().slice(0, 3);
+    return { count: actions.length, recent };
+  }
+
+  function computeHealthDistribution() {
+    const dist = { Healthy: 0, 'At risk': 0, Cold: 0 };
+    D.contacts.forEach(c => {
+      if (!c.health) return;
+      if (c.health >= 70) dist.Healthy++;
+      else if (c.health >= 40) dist['At risk']++;
+      else dist.Cold++;
+    });
+    return dist;
+  }
+
+  function renderInsightsView() {
+    const container = el('div', 'view insights-view');
+
+    const grid = el('div', 'insights-grid');
+
+    // Card 1: Weekly volume
+    const volume = computeWeeklyVolume();
+    const volCard = el('div', 'insights-card insights-card--hero');
+    volCard.appendChild(el('div', 'insights-card-label', 'Messages this week'));
+    const volValue = el('div', 'insights-hero-value', String(volume.current));
+    const volMeta = el('div', 'insights-hero-meta');
+    const volTrend = el('span', 'insights-trend' + (volume.trend >= 0 ? ' up' : ' down'));
+    volTrend.appendChild(icon(volume.trend >= 0 ? 'ph-trend-up' : 'ph-trend-down'));
+    volTrend.appendChild(el('span', '', Math.abs(volume.trend) + '% vs last week'));
+    volMeta.appendChild(volTrend);
+    volMeta.appendChild(el('span', 'insights-muted', volume.previous + ' last week'));
+    volCard.appendChild(volValue);
+    volCard.appendChild(volMeta);
+    grid.appendChild(volCard);
+
+    // Card 2: Top People
+    const topPeople = computeTopPeople(5);
+    const peopleCard = el('div', 'insights-card insights-card--list');
+    peopleCard.appendChild(el('div', 'insights-card-label', 'Top People'));
+    const peopleList = el('div', 'insights-list');
+    if (!topPeople.length) {
+      peopleList.appendChild(el('div', 'insights-empty', 'No recent conversations'));
+    }
+    topPeople.forEach(({ contact, count }) => {
+      const row = el('div', 'insights-person-row');
+      row.appendChild(renderAvatar(contact, 'insights-avatar', contact.name ? contact.name[0] : '?', () => openContact(contact.id)));
+      const info = el('div', 'insights-person-info');
+      info.appendChild(el('div', 'insights-person-name', contact.name));
+      info.appendChild(el('div', 'insights-person-meta', contact.co + (contact.tl ? ' · ' + contact.tl : '')));
+      row.appendChild(info);
+      const scoreWrap = el('div', 'insights-person-score');
+      scoreWrap.appendChild(icon(statusIconFor(contact.grp)));
+      scoreWrap.appendChild(el('span', '', contact.sc || 0));
+      scoreWrap.style.color = statusColorFor(contact.grp);
+      row.appendChild(scoreWrap);
+      const countWrap = el('div', 'insights-person-count', count + '');
+      row.appendChild(countWrap);
+      row.addEventListener('click', () => openContact(contact.id));
+      peopleList.appendChild(row);
+    });
+    peopleCard.appendChild(peopleList);
+    grid.appendChild(peopleCard);
+
+    // Card 3: Reply time trend
+    const replyTrend = computeReplyTimeTrend();
+    const replyCard = el('div', 'insights-card insights-card--chart');
+    replyCard.appendChild(el('div', 'insights-card-label', 'Avg. reply time'));
+    const chartWrap = el('div', 'insights-line-chart');
+    const maxHours = Math.max(1, ...replyTrend.map(p => p.hours));
+    replyTrend.forEach((point, idx) => {
+      const col = el('div', 'insights-line-col');
+      const barWrap = el('div', 'insights-line-bar-wrap');
+      const bar = el('div', 'insights-line-bar');
+      bar.style.height = Math.round((point.hours / maxHours) * 100) + '%';
+      barWrap.appendChild(bar);
+      col.appendChild(barWrap);
+      col.appendChild(el('div', 'insights-line-label', point.label));
+      col.appendChild(el('div', 'insights-line-value', point.hours + 'h'));
+      chartWrap.appendChild(col);
+    });
+    replyCard.appendChild(chartWrap);
+    grid.appendChild(replyCard);
+
+    // Card 4: Channel share
+    const channels = computeChannelShare();
+    const channelCard = el('div', 'insights-card');
+    channelCard.appendChild(el('div', 'insights-card-label', 'Channel share'));
+    const channelList = el('div', 'insights-channel-list');
+    const channelColors = { Email: '#0A8F63', Slack: '#4a154b', WeChat: '#22c55e', Calendar: '#a78bfa' };
+    channels.forEach(ch => {
+      const row = el('div', 'insights-channel-row');
+      const labelWrap = el('div', 'insights-channel-label-wrap');
+      labelWrap.appendChild(el('span', 'insights-channel-name', ch.name));
+      labelWrap.appendChild(el('span', 'insights-channel-count', ch.count + ''));
+      row.appendChild(labelWrap);
+      const barTrack = el('div', 'insights-channel-track');
+      const barFill = el('div', 'insights-channel-fill');
+      barFill.style.width = ch.pct + '%';
+      barFill.style.background = channelColors[ch.name] || 'var(--accent)';
+      barTrack.appendChild(barFill);
+      row.appendChild(barTrack);
+      row.appendChild(el('div', 'insights-channel-pct', ch.pct + '%'));
+      channelList.appendChild(row);
+    });
+    channelCard.appendChild(channelList);
+    grid.appendChild(channelCard);
+
+    // Card 5: Follow-ups
+    const followUpCount = computeFollowUpCount();
+    const followCard = el('div', 'insights-card insights-card--hero insights-card--clickable');
+    followCard.appendChild(el('div', 'insights-card-label', 'Follow-ups'));
+    followCard.appendChild(el('div', 'insights-hero-value', String(followUpCount)));
+    followCard.appendChild(el('div', 'insights-hero-meta', 'Open tasks waiting on you'));
+    followCard.addEventListener('click', () => setView('agent'));
+    grid.appendChild(followCard);
+
+    // Card 6: Agent actions this week
+    const agentActions = computeAgentActionsThisWeek();
+    const agentCard = el('div', 'insights-card insights-card--list');
+    agentCard.appendChild(el('div', 'insights-card-label', 'Agent actions this week'));
+    agentCard.appendChild(el('div', 'insights-agent-count', agentActions.count + ' completed'));
+    const actionList = el('div', 'insights-list');
+    if (!agentActions.recent.length) {
+      actionList.appendChild(el('div', 'insights-empty', 'No recent agent actions'));
+    }
+    agentActions.recent.forEach(a => {
+      const row = el('div', 'insights-action-row');
+      const iconWrap = el('div', 'insights-action-icon');
+      iconWrap.appendChild(icon(a.action === 'draft' ? 'ph-pencil-simple' : a.action === 'send' ? 'ph-paper-plane' : 'ph-sparkle'));
+      row.appendChild(iconWrap);
+      const body = el('div', 'insights-action-body');
+      body.appendChild(el('div', 'insights-action-title', a.detail));
+      body.appendChild(el('div', 'insights-action-meta', a.target + ' · ' + a.time));
+      row.appendChild(body);
+      actionList.appendChild(row);
+    });
+    agentCard.appendChild(actionList);
+    grid.appendChild(agentCard);
+
+    // Card 7: Health distribution
+    const healthDist = computeHealthDistribution();
+    const healthCard = el('div', 'insights-card');
+    healthCard.appendChild(el('div', 'insights-card-label', 'Relationship health'));
+    const healthGrid = el('div', 'insights-health-grid');
+    const healthMeta = [
+      { key: 'Healthy', color: 'var(--green)', icon: 'ph-check-circle' },
+      { key: 'At risk', color: 'var(--yellow)', icon: 'ph-warning' },
+      { key: 'Cold', color: 'var(--red)', icon: 'ph-snowflake' },
+    ];
+    healthMeta.forEach(({ key, color, icon: iconName }) => {
+      const item = el('div', 'insights-health-item');
+      const count = healthDist[key] || 0;
+      item.appendChild(el('div', 'insights-health-count', String(count)));
+      const labelWrap = el('div', 'insights-health-label-wrap');
+      const labelIcon = icon(iconName);
+      labelIcon.style.color = color;
+      labelWrap.appendChild(labelIcon);
+      labelWrap.appendChild(el('span', '', key));
+      item.appendChild(labelWrap);
+      healthGrid.appendChild(item);
+    });
+    healthCard.appendChild(healthGrid);
+    grid.appendChild(healthCard);
+
+    container.appendChild(grid);
     return container;
   }
 
@@ -9747,7 +10024,7 @@ ${D.stageSuggest[c.stage] || ''}
       {
         title: 'Navigation',
         items: [
-          { key: 'Cmd + 1 – 7', label: 'Gate / Inbox / Stream / Records / Contacts / Calendar / Files' },
+          { key: 'Cmd + 1 – 9', label: 'Gate / Inbox / Stream / Records / Contacts / Calendar / Files / Insights / Agent' },
           { key: 'j / k', label: 'Next / previous email' },
           { key: 'Enter', label: 'Open selected email' },
           { key: 'Esc', label: 'Close panel or overlay' },
@@ -10040,6 +10317,8 @@ ${D.stageSuggest[c.stage] || ''}
           '5': 'contacts',
           '6': 'calendar',
           '7': 'files',
+          '8': 'insights',
+          '9': 'agent',
         };
         if (viewShortcuts[e.key]) {
           e.preventDefault();
