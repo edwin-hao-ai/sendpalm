@@ -19,12 +19,15 @@ import {
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { Empty } from "../components/Empty";
+import { Modal } from "../components/Modal";
 
 interface Bundle {
   contactId: string;
   contact: Contact;
   messages: Message[];
 }
+
+type PileKey = "replyLater" | "setAside" | "remind";
 
 export function Imbox() {
   const [contacts] = createResource(listContacts);
@@ -92,6 +95,22 @@ export function Imbox() {
   const replyLater = createMemo<Message[]>(() => (messages() ?? []).filter((m) => m.replyLater));
   const setAside = createMemo<Message[]>(() => (messages() ?? []).filter((m) => m.setAside));
   const reminded = createMemo<Message[]>(() => (messages() ?? []).filter((m) => m.bubbleUpAt));
+
+  const [pileOpen, setPileOpen] = createSignal<PileKey | null>(null);
+  const pileItems = createMemo<Message[]>(() => {
+    const which = pileOpen();
+    if (which === "replyLater") return replyLater();
+    if (which === "setAside") return setAside();
+    if (which === "remind") return reminded();
+    return [];
+  });
+  const pileTitle = createMemo(() => {
+    const which = pileOpen();
+    if (which === "replyLater") return "Reply Later";
+    if (which === "setAside") return "Set Aside";
+    if (which === "remind") return "Remind";
+    return "";
+  });
 
   /* ── UI ── */
 
@@ -333,11 +352,40 @@ export function Imbox() {
           replyLater={replyLater().length}
           setAside={setAside().length}
           reminded={reminded().length}
-          onOpenPile={(pile) => {
-            showToast({ message: `打开 ${pile}（M3 实装 Pile 详情视图）`, kind: "info" });
-          }}
+          onOpenPile={(pile) => setPileOpen(pile as PileKey)}
         />
       </Show>
+
+      <Modal
+        open={pileOpen() !== null}
+        onClose={() => setPileOpen(null)}
+        title={pileTitle()}
+        width="560px"
+      >
+        <Show when={pileItems().length > 0} fallback={
+          <Empty icon="ph-tray" title={`${pileTitle()} 是空的`} description="还没有放进来。" />
+        }>
+          <For each={pileItems()}>
+            {(m) => (
+              <PileRow
+                m={m}
+                contactName={contactById(m.pid)?.name ?? "?"}
+                contactAvatar={contactById(m.pid)?.avatar}
+                onOpen={(id) => { setPileOpen(null); open(id); }}
+                onClear={async (which) => {
+                  await upsertMessage({
+                    ...m,
+                    replyLater: which === "replyLater" ? false : m.replyLater,
+                    setAside: which === "setAside" ? false : m.setAside,
+                    bubbleUpAt: which === "remind" ? null : m.bubbleUpAt,
+                  });
+                }}
+                pileKey={pileOpen() ?? "replyLater"}
+              />
+            )}
+          </For>
+        </Show>
+      </Modal>
 
       <FocusAndReplyButton onClick={() => setView("imbox")} />
     </div>
@@ -490,6 +538,55 @@ function Pile(props: { icon: string; label: string; count: number; onClick: () =
         {props.count}
       </span>
     </button>
+  );
+}
+
+function PileRow(props: {
+  m: Message;
+  contactName: string;
+  contactAvatar?: string;
+  onOpen: (id: string) => void;
+  onClear: (which: PileKey) => Promise<void>;
+  pileKey: PileKey;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: "var(--space-3)",
+        padding: "var(--space-3) 0",
+        "border-bottom": "0.5px solid var(--border)",
+        "align-items": "center",
+      }}
+    >
+      <Avatar name={props.contactName} src={props.contactAvatar} size={32} />
+      <div style={{ flex: 1, "min-width": 0, cursor: "pointer" }} onClick={() => props.onOpen(props.m.id)}>
+        <strong style={{ "font-size": "var(--text-body-sm)" }}>{props.m.subj}</strong>
+        <p style={{ margin: "2px 0 0", color: "var(--text-secondary)", "font-size": "var(--text-caption)" }}>
+          {props.contactName} · {props.m.tm}
+        </p>
+        <Show when={props.m.bubbleUpAt && props.pileKey === "remind"}>
+          <p style={{ margin: "2px 0 0", "font-size": "var(--text-micro)", color: "var(--blurple)" }}>
+            回浮于 {new Date(props.m.bubbleUpAt!).toLocaleString()}
+          </p>
+        </Show>
+      </div>
+      <button
+        onClick={() => props.onClear(props.pileKey)}
+        title="从 pile 移除"
+        aria-label="Remove from pile"
+        style={{
+          padding: "6px 10px",
+          background: "var(--paper-mid)",
+          "border-radius": "var(--radius-pill)",
+          "font-size": "var(--text-micro)",
+          "font-weight": "600",
+          color: "var(--text-secondary)",
+        }}
+      >
+        Unmark
+      </button>
+    </div>
   );
 }
 

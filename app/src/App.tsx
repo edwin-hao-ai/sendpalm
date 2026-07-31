@@ -16,6 +16,7 @@ import { LiveSearch } from "./search/LiveSearch";
 import { NotificationPanel } from "./notifications/NotificationPanel";
 import { DropBar } from "./components/DropBar";
 import { Compose } from "./compose/Compose";
+import { ResurfaceLoop } from "./services/reminder";
 import { initApp } from "./bootstrap";
 import {
   detailOpen,
@@ -74,6 +75,7 @@ export default function App() {
         </Show>
         <ToastStack />
         <Compose />
+        <ResurfaceLoop />
         <Show
           when={!onboardingCompleted() && onboardingStep() !== null}
         >

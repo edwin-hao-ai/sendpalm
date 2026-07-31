@@ -19,6 +19,7 @@ import { setDetailOpen, setSelectedMessageId, setComposeOpen, showToast } from "
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { FollowUpPicker } from "../components/FollowUpPicker";
+import { RemindPicker } from "../components/RemindPicker";
 import { uid } from "../utils/id";
 import { addDays, isoNow, relativeTime } from "../utils/date";
 import type { Clip, FollowUp, Sticky } from "../types";
@@ -56,13 +57,8 @@ export function MessagePanel(props: { messageId: string }) {
     showToast({ message: m.setAside ? "已取消 Set Aside" : "已 Set Aside", kind: "success" });
   };
 
-  const bubbleUp = async () => {
-    const m = message();
-    if (!m) return;
-    const when = addDays(new Date(), 1);
-    await upsertMessage({ ...m, bubbleUpAt: when.toISOString() });
-    await refetchMessage();
-    showToast({ message: `已 Bubble Up → ${when.toLocaleString()}`, kind: "success" });
+  const bubbleUp = () => {
+    setRemindPickerOpen(true);
   };
 
   const trackCount = () => (message()?.trackers?.length ?? 0);
@@ -108,6 +104,7 @@ export function MessagePanel(props: { messageId: string }) {
   );
 
   const [fuPickerOpen, setFuPickerOpen] = createSignal(false);
+  const [remindPickerOpen, setRemindPickerOpen] = createSignal(false);
 
   const addFollowUp = async (days: number) => {
     const fu: FollowUp = {
@@ -316,6 +313,7 @@ export function MessagePanel(props: { messageId: string }) {
       </Show>
 
       <FollowUpPicker open={fuPickerOpen()} onClose={() => setFuPickerOpen(false)} msgId={props.messageId} />
+      <RemindPicker open={remindPickerOpen()} onClose={() => setRemindPickerOpen(false)} msgId={props.messageId} />
     </div>
   );
 }
