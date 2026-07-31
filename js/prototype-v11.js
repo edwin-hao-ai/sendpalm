@@ -5592,7 +5592,12 @@
   }
 
   function computeAgentActionsThisWeek() {
-    const actions = (D.agentAuditLog || []).filter(a => a.status === 'completed' || a.status === 'sent');
+    const actions = (D.agentAuditLog || []).filter(a => {
+      if (a.status !== 'completed' && a.status !== 'sent') return false;
+      const t = a.st ? new Date(a.st).getTime() : NaN;
+      if (!t) return false;
+      return isSameWeek(new Date(t), INSIGHTS_NOW);
+    });
     const recent = [...actions].reverse().slice(0, 3);
     return { count: actions.length, recent };
   }
@@ -5600,7 +5605,7 @@
   function computeHealthDistribution() {
     const dist = { Healthy: 0, 'At risk': 0, Cold: 0 };
     D.contacts.forEach(c => {
-      if (!c.health) return;
+      if (c.health == null || typeof c.health !== 'number') return;
       if (c.health >= 70) dist.Healthy++;
       else if (c.health >= 40) dist['At risk']++;
       else dist.Cold++;

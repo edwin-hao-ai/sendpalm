@@ -209,12 +209,12 @@ const D = {
     {name:'归档周报',saved:'3 min'},{name:'提醒李晨风险',saved:'-'},
   ],
   agentAuditLog:[
-    {id:'a1',action:'draft',target:'王洋',detail:'起草了 Q4 跟进邮件',ref:'d1',status:'pending_approval',time:'10:32',undoable:true,risk:'high'},
-    {id:'a2',action:'summarize',target:'张磊',detail:'生成了会议简报（Q4合同评审）',ref:'m1',status:'completed',time:'09:15',undoable:true,risk:'low'},
-    {id:'a3',action:'analyze',target:'李晨',detail:'分析了关系冷淡原因 - 62天未联系',ref:'lc',status:'completed',time:'昨天',undoable:false,risk:'low'},
-    {id:'a4',action:'remind',target:'王洋',detail:'发送了跟进提醒（45天未联系）',ref:'wy',status:'completed',time:'2小时前',undoable:false,risk:'low'},
-    {id:'a5',action:'draft',target:'陈欣',detail:'起草了 Q4 规划回复',ref:'d2',status:'pending_approval',time:'09:15',undoable:true,risk:'high'},
-    {id:'a6',action:'send',target:'孙静',detail:'回复了测试计划确认',ref:'sj',status:'sent',time:'昨天 16:20',undoable:false,risk:'high'},
+    {id:'a1',action:'draft',target:'王洋',detail:'起草了 Q4 跟进邮件',ref:'d1',status:'pending_approval',time:'10:32',st:'2026-07-20T10:32',undoable:true,risk:'high'},
+    {id:'a2',action:'summarize',target:'张磊',detail:'生成了会议简报（Q4合同评审）',ref:'m1',status:'completed',time:'09:15',st:'2026-07-20T09:15',undoable:true,risk:'low'},
+    {id:'a3',action:'analyze',target:'李晨',detail:'分析了关系冷淡原因 - 62天未联系',ref:'lc',status:'completed',time:'昨天',st:'2026-07-19T12:00',undoable:false,risk:'low'},
+    {id:'a4',action:'remind',target:'王洋',detail:'发送了跟进提醒（45天未联系）',ref:'wy',status:'completed',time:'2小时前',st:'2026-07-20T10:00',undoable:false,risk:'low'},
+    {id:'a5',action:'draft',target:'陈欣',detail:'起草了 Q4 规划回复',ref:'d2',status:'pending_approval',time:'09:15',st:'2026-07-20T09:15',undoable:true,risk:'high'},
+    {id:'a6',action:'send',target:'孙静',detail:'回复了测试计划确认',ref:'sj',status:'sent',time:'昨天 16:20',st:'2026-07-19T16:20',undoable:false,risk:'high'},
   ],
   notifications:[
     {txt:'<strong>王洋</strong> 已45天未联系，建议跟进',tm:'2小时前',read:false},
