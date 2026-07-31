@@ -12,6 +12,9 @@
     notificationsOpen: false,
     composeOpen: false,
     searchQuery: '',
+    peopleGroupBy: 'all',
+    selectedCompanyName: null,
+    companyTab: 'People',
     calendarView: 'day',
     calendarSelected: new Date(2026, 6, 20),
     calendarWeekStart: new Date(2026, 6, 13),
@@ -419,6 +422,8 @@
   window.openDraftModal = openDraftModal;
   window.setView = setView;
   window.renderMain = renderMain;
+  window.openCompanyView = openCompanyView;
+  window.renderCompanyView = renderCompanyView;
 
   function addLongPressListener(element, callback, duration = 500) {
     let timer = null;
@@ -892,6 +897,7 @@
   }
 
   function viewTitle(view) {
+    if (view === 'company') return state.selectedCompanyName || 'Account';
     const map = {
       imbox: 'Inbox',
       feed: 'Stream',
@@ -1155,7 +1161,7 @@
     main.innerHTML = '';
 
     try {
-      return _renderMainImpl();
+      return _renderMainImpl(main);
     } catch (e) {
       console.error('[renderMain]', e);
       main.appendChild(renderErrorBoundary(e));
@@ -1174,7 +1180,7 @@
     return wrap;
   }
 
-  function _renderMainImpl() {
+  function _renderMainImpl(main) {
 
     if (state.loading) {
       main.appendChild(renderSkeletonList(8));
@@ -1205,6 +1211,8 @@
       viewEl = renderScreenerHistory();
     } else if (state.view === 'contacts') {
       viewEl = renderPeople();
+    } else if (state.view === 'company') {
+      viewEl = renderCompanyView(state.selectedCompanyName);
     } else if (state.view === 'calendar') {
       viewEl = renderCalendar();
     } else if (state.view === 'files') {
@@ -1219,7 +1227,7 @@
       viewEl = el('div', 'view view-placeholder', viewTitle(state.view));
     }
 
-    if (state.view !== 'calendar') {
+    if (state.view !== 'calendar' && state.view !== 'company') {
       const header = el('div', 'view-header');
       const headerLeft = el('div', 'view-header-left');
       headerLeft.appendChild(el('h1', 'view-title', viewTitle(state.view)));
@@ -2082,6 +2090,15 @@
       btn.addEventListener('click', () => { state.peopleFilter = f.id; renderMain(); });
       filterBar.appendChild(btn);
     });
+
+    const groupToggle = el('div', 'filter-group-toggle');
+    const allBtn = el('button', 'filter-group-btn' + (state.peopleGroupBy === 'all' ? ' active' : ''), 'All contacts');
+    allBtn.addEventListener('click', () => { state.peopleGroupBy = 'all'; renderMain(); });
+    const byBtn = el('button', 'filter-group-btn' + (state.peopleGroupBy === 'company' ? ' active' : ''), 'By company');
+    byBtn.addEventListener('click', () => { state.peopleGroupBy = 'company'; renderMain(); });
+    groupToggle.appendChild(allBtn);
+    groupToggle.appendChild(byBtn);
+    filterBar.appendChild(groupToggle);
     container.appendChild(filterBar);
 
     const grid = el('div', 'people-grid');
@@ -2089,12 +2106,74 @@
 
     if (contacts.length === 0) {
       grid.appendChild(renderEmpty('No contacts match this filter.', 'ph-users'));
+    } else if (state.peopleGroupBy === 'company') {
+      const groups = {};
+      contacts.forEach(c => {
+        const key = (c.company || '').toLowerCase();
+        if (!groups[key]) groups[key] = { company: c.company || '', contacts: [] };
+        groups[key].contacts.push(c);
+      });
+      const sortedKeys = Object.keys(groups).sort((a, b) => {
+        if (!a) return 1;
+        if (!b) return -1;
+        return groups[a].company.localeCompare(groups[b].company, undefined, { sensitivity: 'base' });
+      });
+      sortedKeys.forEach(key => {
+        const g = groups[key];
+        if (g.company) {
+          grid.appendChild(renderCompanyRow(g.company, g.contacts));
+        } else {
+          g.contacts.forEach(c => grid.appendChild(renderPersonCard(c)));
+        }
+      });
     } else {
       contacts.forEach(c => grid.appendChild(renderPersonCard(c)));
     }
 
     container.appendChild(grid);
     return container;
+  }
+
+  function renderCompanyRow(company, contacts) {
+    const row = el('div', 'company-row');
+    const health = computeCompanyHealth(contacts);
+    const domain = getCompanyDomain(company);
+    const initials = company.split(/\s+/).filter(Boolean).slice(0, 2).map(s => s[0].toUpperCase()).join('') || company[0].toUpperCase();
+
+    const avatar = el('div', 'company-avatar', initials);
+    avatar.style.background = avatarGradientFor(company);
+
+    const body = el('div', 'company-body');
+    const top = el('div', 'company-top');
+    const nameWrap = el('div', 'company-name-wrap');
+    nameWrap.appendChild(el('span', 'company-name', company));
+    if (domain) nameWrap.appendChild(el('span', 'company-domain', domain));
+    top.appendChild(nameWrap);
+
+    const count = el('span', 'company-count', contacts.length + ' people');
+    top.appendChild(count);
+    body.appendChild(top);
+
+    const bottom = el('div', 'company-bottom');
+    const healthWrap = el('span', 'company-health');
+    healthWrap.style.color = health.score >= 70 ? 'var(--green)' : health.score >= 40 ? 'var(--yellow)' : 'var(--red)';
+    healthWrap.appendChild(icon(statusIconFor(health.score >= 70 ? 'active' : health.score >= 40 ? 'risk' : 'cold')));
+    healthWrap.appendChild(el('span', '', health.label + ' · ' + health.score + '%'));
+    bottom.appendChild(healthWrap);
+    const topicText = contacts.map(c => c.title).filter(Boolean).slice(0, 3).join(' · ');
+    if (topicText) bottom.appendChild(el('span', 'company-roles', topicText));
+    body.appendChild(bottom);
+
+    row.appendChild(avatar);
+    row.appendChild(body);
+    row.addEventListener('click', () => openCompanyView(company));
+    row.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openContextMenu(e.clientX, e.clientY, [
+        { label: 'View account', icon: 'ph-buildings', action: () => openCompanyView(company) },
+      ]);
+    });
+    return row;
   }
 
   function filterContacts(contacts) {
@@ -2111,6 +2190,26 @@
       );
     }
     return result;
+  }
+
+  function getCompanyContacts(company) {
+    const target = (company || '').toLowerCase();
+    return D.contacts.filter(c => (c.company || '').toLowerCase() === target);
+  }
+
+  function getCompanyDomain(company) {
+    const contacts = getCompanyContacts(company);
+    const email = contacts.map(c => c.emails && c.emails[0] && c.emails[0].value).find(Boolean);
+    if (!email) return '';
+    const match = email.match(/@([^@]+)$/);
+    return match ? match[1] : '';
+  }
+
+  function computeCompanyHealth(contacts) {
+    const active = contacts.filter(c => c.grp === 'active');
+    if (contacts.length === 0) return { score: 0, label: '—' };
+    const score = Math.round(active.length / contacts.length * 100);
+    return { score, label: score >= 70 ? 'Healthy' : score >= 40 ? 'At risk' : 'Cold' };
   }
 
   const avatarGradients = [
@@ -2258,6 +2357,20 @@
     renderAgentPanel();
   }
 
+  function openCompanyView(company) {
+    state.view = 'company';
+    state.selectedCompanyName = company;
+    state.selectedContactId = null;
+    state.selectedMessageId = null;
+    state.selectedMeetingId = null;
+    state.selectedFileId = null;
+    closePanel();
+    renderNav();
+    renderTopBar();
+    renderMain();
+    renderAgentPanel();
+  }
+
   function openDetailPanel(content) {
     const app = document.getElementById('app');
     const panel = document.getElementById('detail-panel');
@@ -2309,9 +2422,20 @@
     const avatar = renderAvatar(c, 'panel-avatar contact-header-avatar', c.name[0]);
     const info = el('div', 'contact-header-info');
     info.appendChild(el('div', 'panel-name', c.name));
-    const subtitle = el('div', 'panel-role', c.em || '');
-    if (c.co) subtitle.textContent += (subtitle.textContent ? ' · ' : '') + c.co;
-    if (c.tl) subtitle.textContent += (subtitle.textContent ? ' · ' : '') + c.tl;
+    const subtitle = el('div', 'panel-role');
+    const parts = [];
+    if (c.em) parts.push(el('span', '', c.em));
+    if (c.co) {
+      const co = el('button', 'panel-role-company', c.co);
+      co.type = 'button';
+      co.addEventListener('click', (e) => { e.stopPropagation(); openCompanyView(c.co); });
+      parts.push(co);
+    }
+    if (c.tl) parts.push(el('span', '', c.tl));
+    parts.forEach((part, idx) => {
+      if (idx > 0) subtitle.appendChild(el('span', 'panel-role-separator', ' · '));
+      subtitle.appendChild(part);
+    });
     info.appendChild(subtitle);
     const writeBtn = el('button', 'btn btn-primary btn-sm contact-write-btn');
     writeBtn.appendChild(icon('ph-pencil-simple'));
@@ -2814,6 +2938,282 @@
       list.appendChild(row);
     });
     section.appendChild(list);
+    return section;
+  }
+
+  function getCompanyMessages(company) {
+    const contacts = getCompanyContacts(company);
+    const ids = new Set(contacts.map(c => c.id));
+    return D._msgs.filter(m => ids.has(m.pid)).sort((a, b) => new Date(b.st) - new Date(a.st));
+  }
+
+  function getCompanyFiles(company) {
+    const contacts = getCompanyContacts(company);
+    const ids = new Set(contacts.map(c => c.id));
+    return D._files.filter(f => ids.has(f.pid));
+  }
+
+  function getCompanyMeetings(company) {
+    const contacts = getCompanyContacts(company);
+    const ids = new Set(contacts.map(c => c.id));
+    return D._meetings.filter(m => m.pids && m.pids.some(id => ids.has(id)));
+  }
+
+  function renderCompanyView(companyName) {
+    const container = el('div', 'view company-view');
+    const contacts = getCompanyContacts(companyName);
+    const health = computeCompanyHealth(contacts);
+    const domain = getCompanyDomain(companyName);
+    const initials = companyName.split(/\s+/).filter(Boolean).slice(0, 2).map(s => s[0].toUpperCase()).join('') || companyName[0].toUpperCase();
+
+    const header = el('div', 'company-header');
+    const avatar = el('div', 'company-header-avatar', initials);
+    avatar.style.background = avatarGradientFor(companyName);
+    const info = el('div', 'company-header-info');
+    const nameRow = el('div', 'company-header-name-row');
+    nameRow.appendChild(el('h1', 'company-header-name', companyName));
+    if (domain) {
+      const domainLink = el('a', 'company-header-domain', domain);
+      domainLink.href = 'https://' + domain;
+      domainLink.target = '_blank';
+      domainLink.rel = 'noopener noreferrer';
+      nameRow.appendChild(domainLink);
+    }
+    info.appendChild(nameRow);
+    const meta = el('div', 'company-header-meta');
+    const activeCount = contacts.filter(c => c.grp === 'active').length;
+    meta.appendChild(el('span', '', contacts.length + ' people · ' + activeCount + ' active'));
+    info.appendChild(meta);
+
+    const healthWrap = el('div', 'company-header-health');
+    healthWrap.style.color = health.score >= 70 ? 'var(--green)' : health.score >= 40 ? 'var(--yellow)' : 'var(--red)';
+    healthWrap.appendChild(el('div', 'company-header-score', health.score + '%'));
+    healthWrap.appendChild(el('div', 'company-header-health-label', health.label));
+    header.appendChild(avatar);
+    header.appendChild(info);
+    header.appendChild(healthWrap);
+    container.appendChild(header);
+
+    container.appendChild(renderCompanyTabs(companyName));
+    container.appendChild(renderCompanyTabContent(companyName));
+    return container;
+  }
+
+  function renderCompanyTabs(companyName) {
+    const tabs = ['People', 'Communications', 'Files', 'Meetings', 'Insights'];
+    const activeTab = state.companyTab || 'People';
+    const wrap = el('div', 'company-tabs');
+    tabs.forEach(tab => {
+      const btn = el('button', 'company-tab' + (tab === activeTab ? ' active' : ''), tab);
+      btn.addEventListener('click', () => { state.companyTab = tab; renderMain(); });
+      wrap.appendChild(btn);
+    });
+    return wrap;
+  }
+
+  function renderCompanyTabContent(companyName) {
+    const activeTab = state.companyTab || 'People';
+    if (activeTab === 'Communications') return renderCompanyCommunicationsTab(companyName);
+    if (activeTab === 'Files') return renderCompanyFilesTab(companyName);
+    if (activeTab === 'Meetings') return renderCompanyMeetingsTab(companyName);
+    if (activeTab === 'Insights') return renderCompanyInsightsTab(companyName);
+    return renderCompanyPeopleTab(companyName);
+  }
+
+  function renderCompanyPeopleTab(companyName) {
+    const section = el('div', 'contact-section');
+    const contacts = getCompanyContacts(companyName);
+    if (contacts.length === 0) {
+      section.appendChild(renderEmpty('No contacts at this company.', 'ph-users'));
+      return section;
+    }
+    const list = el('div', 'company-people-list');
+    contacts.sort((a, b) => (b.health || 0) - (a.health || 0)).forEach(c => {
+      const row = el('div', 'company-person-row');
+      const avatar = renderAvatar(c, 'company-person-avatar', c.name ? c.name[0] : '?', () => openContact(c.id));
+      const body = el('div', 'company-person-body');
+      body.appendChild(el('div', 'company-person-name', c.name));
+      body.appendChild(el('div', 'company-person-role', c.title || c.tl || ''));
+      const health = el('span', 'company-person-health');
+      health.style.color = c.scC || 'var(--text-muted)';
+      health.appendChild(icon(trendIcon(c.trd)));
+      health.appendChild(el('span', '', c.sc || '—'));
+      body.appendChild(health);
+      row.appendChild(avatar);
+      row.appendChild(body);
+      row.addEventListener('click', () => openContact(c.id));
+      list.appendChild(row);
+    });
+    section.appendChild(list);
+    return section;
+  }
+
+  function renderCompanyCommunicationsTab(companyName) {
+    const section = el('div', 'contact-section');
+    const msgs = getCompanyMessages(companyName);
+    if (msgs.length === 0) {
+      section.appendChild(renderEmpty('No communications yet.', 'ph-chat-circle'));
+      return section;
+    }
+    const list = el('div', 'contact-timeline-list');
+    msgs.forEach(m => {
+      const contact = D.getP(m.pid);
+      const row = el('div', 'contact-timeline-row');
+      const direction = el('span', 'contact-timeline-direction', m.fm === '你' ? 'To' : 'From');
+      const body = el('div', 'contact-timeline-body');
+      const subj = el('div', 'contact-timeline-subj', m.subj);
+      if (contact) {
+        subj.appendChild(el('span', 'company-timeline-contact', contact.name));
+      }
+      body.appendChild(subj);
+      body.appendChild(el('div', 'contact-timeline-preview', m.prev));
+      const meta = el('div', 'contact-timeline-meta');
+      meta.appendChild(el('span', '', m.tag));
+      meta.appendChild(el('span', '', m.tm));
+      body.appendChild(meta);
+      row.appendChild(direction);
+      row.appendChild(body);
+      row.appendChild(renderFollowUpMarker(m));
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('.contact-followup-marker')) return;
+        openMessage(m);
+      });
+      list.appendChild(row);
+    });
+    section.appendChild(list);
+    return section;
+  }
+
+  function renderCompanyFilesTab(companyName) {
+    const section = el('div', 'contact-section');
+    const files = getCompanyFiles(companyName);
+    if (files.length === 0) {
+      section.appendChild(renderEmpty('No files yet.', 'ph-files'));
+      return section;
+    }
+    const grid = el('div', 'mini-grid');
+    files.forEach(f => {
+      const card = el('div', 'mini-file');
+      const name = el('div', 'mini-file-name');
+      name.appendChild(icon(fileIconName(f.tp)));
+      name.appendChild(el('span', '', f.name));
+      card.appendChild(name);
+      const contact = D.getP(f.pid);
+      card.appendChild(el('div', 'mini-file-meta', f.sz + ' · ' + f.dt + (contact ? ' · ' + contact.name : '')));
+      card.addEventListener('click', () => openFile(f));
+      grid.appendChild(card);
+    });
+    section.appendChild(grid);
+    return section;
+  }
+
+  function renderCompanyMeetingsTab(companyName) {
+    const section = el('div', 'contact-section');
+    const meetings = getCompanyMeetings(companyName).slice().sort((a, b) => {
+      const da = parseMeetingDate(a.dt);
+      const db = parseMeetingDate(b.dt);
+      if (!da && !db) return 0;
+      if (!da) return 1;
+      if (!db) return -1;
+      return db.getTime() - da.getTime();
+    });
+    if (meetings.length === 0) {
+      section.appendChild(renderEmpty('No meetings with this company.', 'ph-calendar-blank'));
+      return section;
+    }
+    const list = el('div', 'contact-calendar-list');
+    meetings.forEach(m => {
+      const row = el('div', 'contact-calendar-row');
+      const iconBox = el('div', 'contact-calendar-icon');
+      iconBox.appendChild(icon('ph-calendar-blank'));
+      const body = el('div', 'contact-calendar-body');
+      body.appendChild(el('div', 'contact-calendar-title', m.title));
+      body.appendChild(el('div', 'contact-calendar-meta', m.dt + ' · ' + m.tm + ' · ' + m.ppl));
+      row.appendChild(iconBox);
+      row.appendChild(body);
+      row.addEventListener('click', () => openMeeting(m));
+      list.appendChild(row);
+    });
+    section.appendChild(list);
+    return section;
+  }
+
+  function renderCompanyInsightsTab(companyName) {
+    const section = el('div', 'contact-section');
+    const wrap = el('div', 'contact-insights');
+    const contacts = getCompanyContacts(companyName);
+    const msgs = getCompanyMessages(companyName);
+
+    // Reply time
+    const replyStat = computeReplyTimeStats({}, msgs);
+    const replyRow = el('div', 'contact-insight-row');
+    replyRow.appendChild(icon('ph-clock'));
+    const replyBody = el('div', 'contact-insight-body');
+    replyBody.appendChild(el('div', 'contact-insight-label', 'Avg reply time'));
+    replyBody.appendChild(el('div', 'contact-insight-value', replyStat.text));
+    replyRow.appendChild(replyBody);
+    wrap.appendChild(replyRow);
+
+    // Top topics
+    const topicCounts = {};
+    contacts.forEach(c => (c.topics || []).forEach(t => { topicCounts[t] = (topicCounts[t] || 0) + 2; }));
+    msgs.forEach(m => { const t = m.ctx && m.ctx.topic; if (t) topicCounts[t] = (topicCounts[t] || 0) + 1; });
+    const topics = Object.entries(topicCounts).sort((a, b) => b[1] - a[1]).map(([k]) => k).slice(0, 6);
+    const topicRow = el('div', 'contact-insight-row');
+    topicRow.appendChild(icon('ph-hash'));
+    const topicBody = el('div', 'contact-insight-body');
+    topicBody.appendChild(el('div', 'contact-insight-label', 'Top topics'));
+    const topicChips = el('div', 'contact-insight-chips');
+    if (topics.length) {
+      topics.forEach(t => {
+        const chip = el('span', 'contact-insight-chip', t);
+        chip.addEventListener('click', () => {
+          state.searchQuery = t;
+          state.view = 'imbox';
+          renderMain();
+        });
+        topicChips.appendChild(chip);
+      });
+    } else {
+      topicChips.appendChild(el('span', 'contact-insight-empty', 'No topics yet'));
+    }
+    topicBody.appendChild(topicChips);
+    topicRow.appendChild(topicBody);
+    wrap.appendChild(topicRow);
+
+    // Frequency
+    const freq = computeMessageFrequency(msgs);
+    const freqRow = el('div', 'contact-insight-row');
+    freqRow.appendChild(icon('ph-chart-bar'));
+    const freqBody = el('div', 'contact-insight-body');
+    freqBody.appendChild(el('div', 'contact-insight-label', '3-month frequency'));
+    const bars = el('div', 'contact-frequency-bars');
+    freq.forEach(f => {
+      const col = el('div', 'contact-frequency-col');
+      const barWrap = el('div', 'contact-frequency-bar-wrap');
+      const bar = el('div', 'contact-frequency-bar');
+      bar.style.height = f.pct + '%';
+      barWrap.appendChild(bar);
+      col.appendChild(barWrap);
+      col.appendChild(el('div', 'contact-frequency-label', f.label));
+      col.appendChild(el('div', 'contact-frequency-count', f.count));
+      bars.appendChild(col);
+    });
+    freqBody.appendChild(bars);
+    freqRow.appendChild(freqBody);
+    wrap.appendChild(freqRow);
+
+    // Best contact time
+    const best = computeBestContactTime(msgs);
+    const bestRow = el('div', 'contact-insight-row');
+    bestRow.appendChild(icon('ph-calendar-check'));
+    const bestBody = el('div', 'contact-insight-body');
+    bestBody.appendChild(el('div', 'contact-insight-label', 'Best contact time'));
+    bestBody.appendChild(el('div', 'contact-insight-value', best || 'Not enough data'));
+    bestRow.appendChild(bestBody);
+    wrap.appendChild(bestRow);
+
+    section.appendChild(wrap);
     return section;
   }
 
