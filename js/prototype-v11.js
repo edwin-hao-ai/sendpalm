@@ -447,6 +447,30 @@
     return result;
   }
 
+  function meetingSortKey(m) {
+    const d = parseMeetingDate(m.dt);
+    if (!d) return 0;
+    const t = parseMeetingTime(m);
+    const date = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    if (t) date.setHours(Math.floor(t.start / 60), t.start % 60);
+    return date.getTime();
+  }
+
+  function meetingRelevanceScore(m) {
+    let score = 0;
+    if (m.post) score += 40;
+    if (m.prep && m.prep.length) score += 30;
+    if (m.notes) score += 15;
+    const pids = m.pids || [];
+    if (pids.length > 2) score += 15;
+    else if (pids.length > 1) score += 8;
+    const title = (m.title || '').toLowerCase();
+    const keywords = ['sync', 'review', 'demo', 'client', 'board', 'exec', 'kickoff', 'all-hands', '1:1', 'briefing'];
+    if (keywords.some(k => title.includes(k))) score += 12;
+    if (m.br) score += 5;
+    return score;
+  }
+
   function applyCalendarAdvancedFilters(meetings) {
     const f = getFilters('calendar');
     const selectedContacts = new Set(f.contacts || []);
@@ -454,7 +478,7 @@
     const to = f.dateTo ? new Date(f.dateTo) : null;
     if (to) to.setHours(23, 59, 59, 999);
 
-    return meetings.filter((m) => {
+    const result = meetings.filter((m) => {
       if (selectedContacts.size && !(m.pids || []).some((id) => selectedContacts.has(id))) return false;
 
       if (from || to) {
@@ -468,6 +492,16 @@
 
       return true;
     });
+
+    const sort = f.sort || 'newest';
+    if (sort === 'oldest') {
+      result.sort((a, b) => meetingSortKey(a) - meetingSortKey(b));
+    } else if (sort === 'most_relevant') {
+      result.sort((a, b) => meetingRelevanceScore(b) - meetingRelevanceScore(a));
+    } else {
+      result.sort((a, b) => meetingSortKey(b) - meetingSortKey(a));
+    }
+    return result;
   }
 
   function confirmDestructive(message, onConfirm) {
