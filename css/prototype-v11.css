@@ -10524,3 +10524,20 @@ button:focus-visible, input:focus-visible {
 
 .draft-card-scheduled { border-color: rgba(59, 130, 246, 0.25); background: rgba(59, 130, 246, 0.04); }
 .draft-meta { font-size: 11px; color: var(--accent); font-weight: 600; margin-bottom: 6px; }
+
+/* P4 Task G: compose send split button + schedule picker */
+.compose-send-wrap { display: inline-flex; }
+.compose-send-btn {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-right: 12px;
+}
+.compose-send-caret {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  padding: 0 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.2);
+}
+.compose-send-label { margin-left: 4px; }
+
+.schedule-quick-row { display: flex; gap: 8px; flex-wrap: wrap; }

@@ -7909,9 +7909,14 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
 
     const rightActions = el('div', 'compose-actions');
     const draftStatus = el('span', 'compose-draft-status', 'Draft saved');
-    const sendBtn = el('button', 'btn btn-primary btn-sm');
+
+    // Send split button: primary action + dropdown caret.
+    const sendBtn = el('button', 'btn btn-primary btn-sm compose-send-btn');
     sendBtn.appendChild(icon('ph-paper-plane-right'));
-    sendBtn.appendChild(el('span', '', mode === 'reply' ? 'Reply' : mode === 'forward' ? 'Forward' : 'Send'));
+    sendBtn.appendChild(el('span', 'compose-send-label', mode === 'reply' ? 'Reply' : mode === 'forward' ? 'Forward' : 'Send'));
+    const caretBtn = el('button', 'btn btn-primary btn-sm compose-send-caret');
+    caretBtn.type = 'button';
+    caretBtn.appendChild(icon('ph-caret-down'));
 
     function doSend() {
       const ok = sendMessage({
@@ -7926,7 +7931,128 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
       if (ok) closeCompose();
     }
 
+    function openScheduleSend() {
+      const now = new Date();
+      const tomorrow9 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 9, 0, 0, 0);
+      let pickedDate = tomorrow9;
+      let dateInput, timeInput;
+      openModalCard({
+        title: 'Schedule send',
+        renderBody: (body) => {
+          const stack = el('div', 'form-stack');
+          const quickRow = el('div', 'schedule-quick-row');
+          const presets = [
+            { label: 'Tomorrow 9:00', at: tomorrow9 },
+            { label: 'Monday 9:00', at: nextWeekday(now, 1, 9) },
+            { label: 'Next Friday', at: nextWeekday(now, 5, 9) },
+          ];
+          presets.forEach(p => {
+            const btn = el('button', 'btn btn-secondary btn-sm schedule-quick-btn');
+            btn.type = 'button';
+            btn.textContent = p.label;
+            btn.addEventListener('click', () => {
+              pickedDate = p.at;
+              dateInput.value = formatDateInput(p.at);
+              timeInput.value = formatTimeInput(p.at);
+            });
+            quickRow.appendChild(btn);
+          });
+          stack.appendChild(quickRow);
+
+          dateInput = elAttr('input', '', { type: 'date', value: formatDateInput(tomorrow9) });
+          timeInput = elAttr('input', '', { type: 'time', value: formatTimeInput(tomorrow9) });
+          dateInput.addEventListener('change', () => {
+            const next = parseDateTimeInputs(dateInput.value, timeInput.value);
+            if (next) pickedDate = next;
+          });
+          timeInput.addEventListener('change', () => {
+            const next = parseDateTimeInputs(dateInput.value, timeInput.value);
+            if (next) pickedDate = next;
+          });
+          const row = el('div', 'form-row');
+          row.appendChild(el('div', '', ''));
+          row.firstChild.appendChild(renderFormGroup('Date', dateInput));
+          row.appendChild(el('div', '', ''));
+          row.lastChild.appendChild(renderFormGroup('Time', timeInput));
+          stack.appendChild(row);
+          stack.appendChild(el('p', 'form-hint', 'Message will be sent at the scheduled time from your selected From account.'));
+          body.appendChild(stack);
+        },
+        renderActions: (actions) => {
+          const cancel = el('button', 'btn-secondary', 'Cancel');
+          cancel.addEventListener('click', () => closeCompose());
+          const set = el('button', 'btn-primary', 'Schedule');
+          set.addEventListener('click', () => {
+            if (!pickedDate || pickedDate.getTime() <= Date.now()) {
+              showToast('Pick a time in the future');
+              return;
+            }
+            if (!toInput.value) {
+              showToast('Add a recipient first');
+              return;
+            }
+            D.scheduledSends = D.scheduledSends || [];
+            D.scheduledSends.push({
+              id: 'ss-' + Date.now(),
+              accountId: fromSelect.value,
+              to: toInput.value,
+              subject: subjInput.value,
+              body: bodyInput.value,
+              scheduledAt: pickedDate.toISOString(),
+              createdAt: new Date().toISOString()
+            });
+            closeCompose();
+            showToast('Scheduled for ' + pickedDate.toLocaleString());
+            renderMain();
+          });
+          actions.appendChild(cancel);
+          actions.appendChild(set);
+        }
+      });
+    }
+
+    function nextWeekday(from, weekday, hour) {
+      const d = new Date(from);
+      const diff = (weekday - d.getDay() + 7) % 7 || 7;
+      d.setDate(d.getDate() + diff);
+      d.setHours(hour, 0, 0, 0);
+      return d;
+    }
+
     sendBtn.addEventListener('click', doSend);
+    caretBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const choices = [
+        { label: 'Send now', sub: mode === 'reply' ? 'Reply' : 'Send', icon: 'ph-paper-plane-right', action: () => { doSend(); } },
+        { label: 'Schedule send', sub: 'Pick date + time', icon: 'ph-clock', action: () => openScheduleSend() },
+        { label: 'Save as draft', sub: 'Drafts view', icon: 'ph-pencil-simple', action: () => {
+            if (!toInput.value && !subjInput.value && !bodyInput.value) { showToast('Empty draft'); return; }
+            const draft = {
+              id: 'md-' + Date.now(),
+              from: fromSelect.value,
+              to: toInput.value,
+              cc: ccInput.value,
+              bcc: bccInput.value,
+              subj: subjInput.value,
+              body: bodyInput.value,
+              at: [],
+              source: 'manual',
+              status: 'edited',
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              linkedSession: null,
+              linkedTask: null
+            };
+            D.drafts = D.drafts || [];
+            D.drafts.unshift(draft);
+            closeCompose();
+            renderMain();
+            showToast('Draft saved');
+          }
+        }
+      ];
+      openContextMenuFromElement(caretBtn, choices);
+    });
     bodyInput.addEventListener('keydown', (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault();
@@ -7934,8 +8060,11 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
       }
     });
 
+    const sendWrap = el('div', 'compose-send-wrap');
+    sendWrap.appendChild(sendBtn);
+    sendWrap.appendChild(caretBtn);
     rightActions.appendChild(draftStatus);
-    rightActions.appendChild(sendBtn);
+    rightActions.appendChild(sendWrap);
 
     footer.appendChild(leftActions);
     footer.appendChild(rightActions);
