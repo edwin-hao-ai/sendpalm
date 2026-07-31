@@ -31,6 +31,7 @@
     calendarFilter: 'all',
     filesFilter: 'all',
     selectedFileId: null,
+    filters: {},
     prepChecked: {},
     settings: D.appSettings,
     settingsTab: 'profile',
@@ -192,6 +193,281 @@
     refresh();
     wrap.appendChild(list);
     return wrap;
+  }
+
+  // Advanced filters
+  function getFilters(viewId) {
+    if (!state.filters[viewId]) state.filters[viewId] = {};
+    return state.filters[viewId];
+  }
+
+  function activeFilterCount(viewId) {
+    const f = getFilters(viewId);
+    let count = 0;
+    if (f.dateFrom) count++;
+    if (f.dateTo) count++;
+    if (f.channels && f.channels.length) count++;
+    if (f.contacts && f.contacts.length) count++;
+    if (f.unread) count++;
+    if (f.hasAttachment) count++;
+    if (f.followedUp) count++;
+    if (f.sort && f.sort !== 'newest') count++;
+    return count;
+  }
+
+  function renderMoreFiltersButton(viewId) {
+    const btn = el('button', 'filter-pill filter-more-btn');
+    btn.type = 'button';
+    btn.appendChild(icon('ph-sliders-horizontal'));
+    btn.appendChild(el('span', '', 'More filters'));
+    const count = activeFilterCount(viewId);
+    if (count > 0) {
+      btn.classList.add('active');
+      btn.appendChild(el('span', 'filter-count', String(count)));
+    }
+    btn.addEventListener('click', () => openFilterPanel(viewId));
+    return btn;
+  }
+
+  function renderMoreFiltersHeaderAction(viewId) {
+    const btn = el('button', 'view-header-action');
+    btn.type = 'button';
+    btn.appendChild(icon('ph-sliders-horizontal'));
+    btn.appendChild(el('span', '', 'More filters'));
+    const count = activeFilterCount(viewId);
+    if (count > 0) btn.appendChild(el('span', 'filter-count', String(count)));
+    btn.addEventListener('click', () => openFilterPanel(viewId));
+    return btn;
+  }
+
+  function openFilterPanel(viewId) {
+    const f = JSON.parse(JSON.stringify(getFilters(viewId)));
+    f.channels = f.channels || [];
+    f.contacts = f.contacts || [];
+    f.sort = f.sort || 'newest';
+
+    function update(key, value) {
+      f[key] = value;
+    }
+
+    openModalCard({
+      title: 'More filters',
+      renderBody: (body) => renderFilterPanelBody(viewId, f, update, body),
+      renderActions: (actions) => {
+        const clear = el('button', 'btn btn-text', 'Clear all');
+        clear.addEventListener('click', () => {
+          state.filters[viewId] = { sort: 'newest' };
+          closeCompose();
+          renderMain();
+        });
+        const apply = el('button', 'btn btn-primary', 'Apply');
+        apply.addEventListener('click', () => {
+          state.filters[viewId] = JSON.parse(JSON.stringify(f));
+          closeCompose();
+          renderMain();
+        });
+        actions.appendChild(clear);
+        actions.appendChild(apply);
+      }
+    });
+  }
+
+  function renderFilterPanelBody(viewId, f, update, body) {
+    // Date range
+    const fromInput = elAttr('input', 'form-input', { type: 'date' });
+    fromInput.value = f.dateFrom || '';
+    fromInput.addEventListener('change', (e) => update('dateFrom', e.target.value));
+    body.appendChild(renderFormGroup('From date', fromInput));
+
+    const toInput = elAttr('input', 'form-input', { type: 'date' });
+    toInput.value = f.dateTo || '';
+    toInput.addEventListener('change', (e) => update('dateTo', e.target.value));
+    body.appendChild(renderFormGroup('To date', toInput));
+
+    // Channel (Inbox only)
+    if (viewId === 'imbox') {
+      const channelOptions = [
+        { id: 'email', name: 'Email' },
+        { id: 'slack', name: 'Slack' },
+        { id: 'wechat', name: 'WeChat' },
+        { id: 'calendar', name: 'Calendar' },
+      ];
+      body.appendChild(renderFormGroup('Channel', renderPillInput(f.channels, channelOptions, (v) => update('channels', v))));
+    }
+
+    // Contacts
+    const contactOptions = D.contacts
+      .filter((c) => c.name)
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+      .map((c) => ({ id: c.id, name: c.name }));
+    body.appendChild(renderFormGroup('Contacts', renderPillInput(f.contacts, contactOptions, (v) => update('contacts', v))));
+
+    // Status toggles
+    body.appendChild(el('div', 'form-label', 'Status'));
+    body.appendChild(renderToggle('Unread only', !!f.unread, (v) => update('unread', v)));
+    body.appendChild(renderToggle('Has attachment', !!f.hasAttachment, (v) => update('hasAttachment', v)));
+    body.appendChild(renderToggle('Followed up', !!f.followedUp, (v) => update('followedUp', v)));
+
+    // Sort
+    const sortSelect = elAttr('select', 'form-input', {});
+    [
+      { id: 'newest', label: 'Newest first' },
+      { id: 'oldest', label: 'Oldest first' },
+      { id: 'most_relevant', label: 'Most relevant' },
+    ].forEach((opt) => {
+      const option = elAttr('option', '', { value: opt.id }, opt.label);
+      if (f.sort === opt.id) option.selected = true;
+      sortSelect.appendChild(option);
+    });
+    sortSelect.addEventListener('change', (e) => update('sort', e.target.value));
+    body.appendChild(renderFormGroup('Sort', sortSelect));
+  }
+
+  function applyImboxFilters(events) {
+    const f = getFilters('imbox');
+    const channelMap = {
+      email: ['Gmail'],
+      slack: ['Slack'],
+      wechat: ['WeChat'],
+      calendar: ['Calendar'],
+    };
+    const selectedChannels = f.channels || [];
+    const selectedContacts = new Set(f.contacts || []);
+    let fromTime = f.dateFrom ? new Date(f.dateFrom).getTime() : null;
+    let toTime = f.dateTo ? new Date(f.dateTo).getTime() : null;
+    if (toTime) {
+      const end = new Date(toTime);
+      end.setHours(23, 59, 59, 999);
+      toTime = end.getTime();
+    }
+
+    let result = events.filter((e) => {
+      if (fromTime && e.sortKey < fromTime) return false;
+      if (toTime && e.sortKey > toTime) return false;
+
+      if (selectedContacts.size) {
+        const pid = e.type === 'message' ? e.data.pid : (e.data.pids && e.data.pids[0]);
+        if (!selectedContacts.has(pid)) return false;
+      }
+
+      if (selectedChannels.length) {
+        if (e.type === 'meeting') {
+          if (!selectedChannels.includes('calendar')) return false;
+        } else {
+          const ch = e.data.ch;
+          const matches = selectedChannels.some((id) => (channelMap[id] || []).includes(ch));
+          if (!matches) return false;
+        }
+      }
+
+      const m = e.data;
+      if (f.unread && (e.type !== 'message' || m.seen)) return false;
+      if (f.hasAttachment && (e.type !== 'message' || !(m.at && m.at.length))) return false;
+      if (f.followedUp && (e.type !== 'message' || m.fl !== 'done')) return false;
+
+      return true;
+    });
+
+    const sort = f.sort || 'newest';
+    if (sort === 'oldest') {
+      result.sort((a, b) => a.sortKey - b.sortKey);
+    } else if (sort === 'most_relevant') {
+      result.sort((a, b) => priorityScore(b) - priorityScore(a));
+    } else {
+      result.sort((a, b) => b.sortKey - a.sortKey);
+    }
+    return result;
+  }
+
+  function applyContactsAdvancedFilters(contacts) {
+    const f = getFilters('contacts');
+    const selectedContacts = new Set(f.contacts || []);
+    const from = f.dateFrom ? new Date(f.dateFrom) : null;
+    const to = f.dateTo ? new Date(f.dateTo) : null;
+    if (to) to.setHours(23, 59, 59, 999);
+
+    let result = contacts.filter((c) => {
+      if (selectedContacts.size && !selectedContacts.has(c.id)) return false;
+
+      if (from || to) {
+        const d = c.firstContact ? new Date(c.firstContact) : null;
+        if (!d) return false;
+        if (from && d < from) return false;
+        if (to && d > to) return false;
+      }
+
+      if (f.unread && !D._msgs.some((m) => m.pid === c.id && !m.seen)) return false;
+      if (f.hasAttachment &&
+        !D._msgs.some((m) => m.pid === c.id && m.at && m.at.length) &&
+        !D._files.some((file) => file.pid === c.id)) return false;
+      if (f.followedUp && !D._msgs.some((m) => m.pid === c.id && m.fl === 'done')) return false;
+
+      return true;
+    });
+
+    const sort = f.sort || 'newest';
+    if (sort === 'oldest') {
+      result.sort((a, b) => (a.firstContact || '').localeCompare(b.firstContact || ''));
+    } else if (sort === 'most_relevant') {
+      result.sort((a, b) => (b.sc || 0) - (a.sc || 0));
+    } else {
+      result.sort((a, b) => (b.firstContact || '').localeCompare(a.firstContact || ''));
+    }
+    return result;
+  }
+
+  function applyFilesAdvancedFilters(files) {
+    const f = getFilters('files');
+    const selectedContacts = new Set(f.contacts || []);
+    const from = f.dateFrom ? new Date(f.dateFrom) : null;
+    const to = f.dateTo ? new Date(f.dateTo) : null;
+    if (to) to.setHours(23, 59, 59, 999);
+
+    let result = files.filter((fi) => {
+      if (selectedContacts.size && !selectedContacts.has(fi.pid)) return false;
+
+      if (from || to) {
+        const d = fi.dt ? new Date(fi.dt) : null;
+        if (!d) return false;
+        if (from && d < from) return false;
+        if (to && d > to) return false;
+      }
+
+      return true;
+    });
+
+    const sort = f.sort || 'newest';
+    if (sort === 'oldest') {
+      result.sort((a, b) => (a.dt || '').localeCompare(b.dt || ''));
+    } else if (sort === 'most_relevant') {
+      result.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    } else {
+      result.sort((a, b) => (b.dt || '').localeCompare(a.dt || ''));
+    }
+    return result;
+  }
+
+  function applyCalendarAdvancedFilters(meetings) {
+    const f = getFilters('calendar');
+    const selectedContacts = new Set(f.contacts || []);
+    const from = f.dateFrom ? new Date(f.dateFrom) : null;
+    const to = f.dateTo ? new Date(f.dateTo) : null;
+    if (to) to.setHours(23, 59, 59, 999);
+
+    return meetings.filter((m) => {
+      if (selectedContacts.size && !(m.pids || []).some((id) => selectedContacts.has(id))) return false;
+
+      if (from || to) {
+        const d = parseMeetingDate(m.dt);
+        if (!d) return false;
+        if (from && d < from) return false;
+        if (to && d > to) return false;
+      }
+
+      if (f.followedUp && !m.post) return false;
+
+      return true;
+    });
   }
 
   function confirmDestructive(message, onConfirm) {
@@ -1286,6 +1562,8 @@
         newDraftBtn.appendChild(el('span', '', 'New draft'));
         newDraftBtn.addEventListener('click', () => openDraftModal(null));
         header.appendChild(newDraftBtn);
+
+        header.appendChild(renderMoreFiltersHeaderAction('imbox'));
       }
       if (state.view === 'drafts') {
         const newDraftBtn = el('button', 'view-header-action');
@@ -2035,7 +2313,7 @@
 
   function renderImbox() {
     const container = el('div', 'view imbox-view');
-    const allEvents = filterFeedEvents(buildFeed());
+    const allEvents = applyImboxFilters(filterFeedEvents(buildFeed()));
 
     // Remind banner
     const bubbled = allEvents.filter(e => isInBucketView(e, 'bubbleUp'));
@@ -2066,13 +2344,11 @@
 
     if (newForYou.length) {
       list.appendChild(renderSectionHeader('New for you', 'Read together', openReadTogether, 'new'));
-      newForYou.sort((a, b) => priorityScore(b) - priorityScore(a));
       newForYou.forEach((ev, idx) => list.appendChild(renderFeedItem(ev, 'imbox', idx)));
     }
 
     if (previouslySeen.length) {
       list.appendChild(renderSectionHeader('Previously seen', null, null, 'seen'));
-      previouslySeen.sort((a, b) => b.sortKey - a.sortKey);
       previouslySeen.forEach((ev, idx) => list.appendChild(renderFeedItem(ev, 'imbox', newForYou.length + idx)));
     }
 
@@ -2117,6 +2393,7 @@
     groupToggle.appendChild(allBtn);
     groupToggle.appendChild(byBtn);
     filterBar.appendChild(groupToggle);
+    filterBar.appendChild(renderMoreFiltersButton('contacts'));
     container.appendChild(filterBar);
 
     const grid = el('div', 'people-grid');
@@ -2207,6 +2484,7 @@
         (c.tl && c.tl.toLowerCase().includes(q))
       );
     }
+    result = applyContactsAdvancedFilters(result);
     return result;
   }
 
@@ -3974,6 +4252,15 @@
       filters.appendChild(chip);
     });
 
+    const moreFiltersBtn = el('button', 'cal-filter-chip cal-more-filters' + (activeFilterCount('calendar') > 0 ? ' active' : ''));
+    moreFiltersBtn.type = 'button';
+    moreFiltersBtn.appendChild(icon('ph-sliders-horizontal'));
+    moreFiltersBtn.appendChild(el('span', '', 'More'));
+    const calFilterCount = activeFilterCount('calendar');
+    if (calFilterCount > 0) moreFiltersBtn.appendChild(el('span', 'filter-count', String(calFilterCount)));
+    moreFiltersBtn.addEventListener('click', () => openFilterPanel('calendar'));
+    filters.appendChild(moreFiltersBtn);
+
     const newBtn = el('button', 'btn btn-primary btn-sm');
     newBtn.appendChild(icon('ph-plus'));
     newBtn.appendChild(el('span', '', 'New'));
@@ -4786,6 +5073,7 @@
         (m.ppl && m.ppl.toLowerCase().includes(q))
       );
     }
+    result = applyCalendarAdvancedFilters(result);
     return result;
   }
 
@@ -4829,6 +5117,7 @@
       btn.addEventListener('click', () => { state.filesFilter = f.id; renderMain(); });
       filterBar.appendChild(btn);
     });
+    filterBar.appendChild(renderMoreFiltersButton('files'));
     container.appendChild(filterBar);
 
     const files = filterFiles(D._files);
@@ -5250,6 +5539,7 @@
           (contact && contact.name.toLowerCase().includes(q));
       });
     }
+    result = applyFilesAdvancedFilters(result);
     return result;
   }
 
