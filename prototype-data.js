@@ -10,9 +10,54 @@ const D = {
     signature:'Best,\nEdwin'
   },
   accounts:[
-    { id:'gmail-w', type:'email', provider:'gmail', email:'edwin@sendpalm.com', label:'SendPalm 工作', status:'connected', synced:1247, total:1247, privacy:'unified', color:'#ea4335', avatar:'S', lastSync:'刚刚' },
-    { id:'gmail-p', type:'email', provider:'gmail', email:'edwin.hao@gmail.com', label:'个人 Gmail', status:'connected', synced:892, total:892, privacy:'unified', color:'#ea4335', avatar:'G', lastSync:'5分钟前' },
-    { id:'outlook', type:'email', provider:'outlook', email:'edwin@sendpalm.com', label:'Outlook', status:'error', error:'令牌过期，请重新认证', synced:503, total:503, privacy:'isolated', color:'#0078d4', avatar:'O', lastSync:'3天前' },
+    {
+      id:'gmail-w', type:'email', provider:'gmail', email:'edwin@sendpalm.com', label:'SendPalm 工作',
+      displayName:'Edwin Hao', status:'connected', synced:1247, total:1247, privacy:'unified',
+      color:'#ea4335', avatar:'S', lastSync:'刚刚',
+      settings:{
+        aliases:['edwin@sendpalm.io','e.hao@sendpalm.com'],
+        signature:'Best,\nEdwin\nSendPalm',
+        replyTo:'',
+        defaultFrom:'edwin@sendpalm.com',
+        syncFolders:['INBOX','Sent','Drafts','Archive'],
+        syncFrequency:'15min',
+        autoBcc:false,
+        autoBccAddress:'',
+        vacationResponder:{ enabled:false, subject:'Out of office', body:'I am out of the office until Aug 5. For urgent matters please contact ops@sendpalm.com.' }
+      }
+    },
+    {
+      id:'gmail-p', type:'email', provider:'gmail', email:'edwin.hao@gmail.com', label:'个人 Gmail',
+      displayName:'Edwin', status:'connected', synced:892, total:892, privacy:'unified',
+      color:'#ea4335', avatar:'G', lastSync:'5分钟前',
+      settings:{
+        aliases:[],
+        signature:'— Edwin',
+        replyTo:'',
+        defaultFrom:'edwin.hao@gmail.com',
+        syncFolders:['INBOX','Sent','Drafts'],
+        syncFrequency:'30min',
+        autoBcc:true,
+        autoBccAddress:'edwin@sendpalm.com',
+        vacationResponder:{ enabled:false, subject:'', body:'' }
+      }
+    },
+    {
+      id:'outlook', type:'email', provider:'outlook', email:'edwin@sendpalm.com', label:'Outlook',
+      displayName:'Edwin Hao', status:'error', error:'令牌过期，请重新认证', synced:503, total:503,
+      privacy:'isolated', color:'#0078d4', avatar:'O', lastSync:'3天前',
+      settings:{
+        aliases:['edwin.hao@outlook.com'],
+        signature:'Best regards,\nEdwin',
+        replyTo:'',
+        defaultFrom:'edwin@sendpalm.com',
+        syncFolders:['INBOX','Sent','Drafts'],
+        syncFrequency:'1h',
+        autoBcc:false,
+        autoBccAddress:'',
+        vacationResponder:{ enabled:false, subject:'', body:'' }
+      }
+    },
     { id:'slack', type:'im', provider:'slack', workspace:'sendpalm', label:'Slack · sendpalm', status:'syncing', syncProgress:{done:128,total:340}, privacy:'unified', color:'#4a154b', avatar:'S', lastSync:'同步中' },
     { id:'wechat', type:'im', provider:'wechat', label:'微信', status:'connected', synced:156, total:156, privacy:'isolated', color:'#22c55e', avatar:'微', lastSync:'1小时前' },
     { id:'calendar', type:'calendar', provider:'google', label:'Google 日历', status:'connected', synced:24, total:24, privacy:'unified', color:'#a78bfa', avatar:'日', lastSync:'2小时前' },

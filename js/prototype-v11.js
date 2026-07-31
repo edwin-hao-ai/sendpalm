@@ -809,6 +809,7 @@
   window.downloadJSON = downloadJSON;
   window.downloadCSV = downloadCSV;
   window.resetAllData = resetAllData;
+  window.openEmailAccountSettings = openEmailAccountSettings;
 
   function addLongPressListener(element, callback, duration = 500) {
     let timer = null;
@@ -7378,11 +7379,20 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     fromRow.appendChild(el('label', '', 'From'));
     const fromWrap = el('div', 'compose-from');
     const fromSelect = el('select', 'compose-from-select');
-    accounts.filter(a => a.type === 'email').forEach(a => {
+    const emailAccounts = accounts.filter(a => a.type === 'email');
+    emailAccounts.forEach(a => {
       const opt = el('option', '', a.email + ' (' + a.label + ')');
       opt.value = a.id;
       fromSelect.appendChild(opt);
     });
+    // Pre-select the From account based on the defaultFrom setting, if available
+    // (matches the per-account Settings preference).
+    let initialFromId = context.fromAccountId
+      || ((emailAccounts.find(a => a.settings && a.settings.defaultFrom === a.email) || {}).id)
+      || (emailAccounts[0] && emailAccounts[0].id);
+    if (initialFromId && emailAccounts.some(a => a.id === initialFromId)) {
+      fromSelect.value = initialFromId;
+    }
     fromWrap.appendChild(fromSelect);
     fromRow.appendChild(fromWrap);
     fields.appendChild(fromRow);
@@ -7498,6 +7508,30 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     // Body
     const bodyRow = el('div', 'compose-body');
     bodyRow.appendChild(bodyInput);
+
+    // Per-account signature — pulled from the selected From account's settings.
+    // Falls back to the global D.user.signature when the account has no override.
+    const signatureWrap = el('div', 'compose-signature');
+    function getComposeSignature(accountId) {
+      const acct = (D.accounts || []).find(a => a.id === accountId);
+      if (acct && acct.settings && typeof acct.settings.signature === 'string' && acct.settings.signature.trim()) {
+        return { sig: acct.settings.signature, source: acct.label };
+      }
+      const global = (D.user && D.user.signature) || '';
+      return { sig: global, source: 'global' };
+    }
+    function renderSignature() {
+      signatureWrap.innerHTML = '';
+      const { sig, source } = getComposeSignature(fromSelect.value);
+      if (!sig) return;
+      const label = el('div', 'compose-signature-label', source === 'global' ? 'Global signature' : source + ' signature');
+      const text = el('div', 'compose-signature-text', sig);
+      signatureWrap.appendChild(label);
+      signatureWrap.appendChild(text);
+    }
+    fromSelect.addEventListener('change', renderSignature);
+    renderSignature();
+    bodyRow.appendChild(signatureWrap);
 
     if (context.quote) {
       const quote = el('div', 'compose-quote');
@@ -8036,6 +8070,11 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
       card.appendChild(top);
 
       const actions = el('div', 'account-card-actions');
+      if (a.type === 'email') {
+        const settingsBtn = el('button', 'btn btn-secondary btn-sm', 'Settings');
+        settingsBtn.addEventListener('click', () => openEmailAccountSettings(a.id));
+        actions.appendChild(settingsBtn);
+      }
       if (a.status === 'error') {
         const reconnect = el('button', 'btn btn-secondary btn-sm', 'Reconnect');
         reconnect.addEventListener('click', () => { a.status = 'connected'; a.lastSync = '刚刚'; showToast(a.label + ' reconnected'); renderMain(); });
@@ -8152,6 +8191,293 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     renderBody();
     modal.appendChild(content);
     document.body.appendChild(modal);
+  }
+
+  function openEmailAccountSettings(accountId) {
+    const account = (D.accounts || []).find(a => a.id === accountId);
+    if (!account || account.type !== 'email') return;
+
+    if (!account.settings) {
+      account.settings = {
+        aliases: [],
+        signature: '',
+        replyTo: '',
+        defaultFrom: account.email || '',
+        syncFolders: ['INBOX', 'Sent', 'Drafts'],
+        syncFrequency: '15min',
+        autoBcc: false,
+        autoBccAddress: '',
+        vacationResponder: { enabled: false, subject: '', body: '' }
+      };
+    }
+    if (!account.settings.vacationResponder) {
+      account.settings.vacationResponder = { enabled: false, subject: '', body: '' };
+    }
+    if (!Array.isArray(account.settings.aliases)) account.settings.aliases = [];
+    if (!Array.isArray(account.settings.syncFolders)) account.settings.syncFolders = ['INBOX', 'Sent', 'Drafts'];
+
+    const ALL_FOLDERS = ['INBOX', 'Sent', 'Drafts', 'Archive', 'Trash', 'Spam', 'Starred', 'Important'];
+    const SYNC_FREQUENCIES = [
+      { value: '5min', label: 'Every 5 minutes' },
+      { value: '15min', label: 'Every 15 minutes' },
+      { value: '30min', label: 'Every 30 minutes' },
+      { value: '1h', label: 'Every hour' },
+      { value: 'manual', label: 'Manual only' }
+    ];
+
+    // Draft values, kept in closure so the Save handler does not need to crawl the DOM.
+    let draftLabel = account.label || '';
+    let draftDisplayName = account.displayName || '';
+    let draftDefaultFrom = account.settings.defaultFrom || account.email || '';
+    let draftReplyTo = account.settings.replyTo || '';
+    let draftSignature = account.settings.signature || '';
+
+    openModalCard({
+      title: 'Email settings — ' + account.label,
+      renderBody: (body) => {
+        const stack = el('div', 'form-stack email-settings-stack');
+
+        const intro = el('div', 'email-settings-account-summary');
+        const introAvatar = el('div', 'email-settings-account-avatar', account.avatar || '?');
+        introAvatar.style.background = account.color || '#999';
+        intro.appendChild(introAvatar);
+        const introText = el('div', 'email-settings-account-info');
+        introText.appendChild(el('div', 'email-settings-account-label', account.label));
+        introText.appendChild(el('div', 'email-settings-account-email', account.email || ''));
+        intro.appendChild(introText);
+        stack.appendChild(intro);
+
+        // --- Identity ----------------------------------------------------
+        const identitySection = el('div', 'email-settings-section');
+        identitySection.appendChild(el('div', 'email-settings-section-title', 'Identity'));
+
+        const labelInput = elAttr('input', '', { type: 'text', value: draftLabel });
+        labelInput.addEventListener('input', () => { draftLabel = labelInput.value; });
+        const displayNameInput = elAttr('input', '', { type: 'text', value: draftDisplayName });
+        displayNameInput.addEventListener('input', () => { draftDisplayName = displayNameInput.value; });
+        const replyToInput = elAttr('input', '', { type: 'email', value: draftReplyTo, placeholder: '(optional)' });
+        replyToInput.addEventListener('input', () => { draftReplyTo = replyToInput.value; });
+
+        const fromOptions = [account.email].concat(account.settings.aliases || []).filter(Boolean);
+        const fromSelect = el('select', '');
+        fromOptions.forEach(addr => {
+          const opt = document.createElement('option');
+          opt.value = addr;
+          opt.textContent = addr;
+          if (addr === draftDefaultFrom) opt.selected = true;
+          fromSelect.appendChild(opt);
+        });
+        fromSelect.addEventListener('change', () => { draftDefaultFrom = fromSelect.value; });
+
+        identitySection.appendChild(renderFormGroup('Display label', labelInput, 'How this account appears in SendPalm'));
+        identitySection.appendChild(renderFormGroup('Display name', displayNameInput, 'The name recipients see in the From line'));
+        identitySection.appendChild(renderFormGroup('Default From address', fromSelect, 'Choose your primary address or an alias'));
+        identitySection.appendChild(renderFormGroup('Reply-to address', replyToInput, 'Optional — leave blank to use the From address'));
+        stack.appendChild(identitySection);
+
+        // --- Signature ---------------------------------------------------
+        const sigSection = el('div', 'email-settings-section');
+        sigSection.appendChild(el('div', 'email-settings-section-title', 'Signature'));
+
+        const sigTextarea = el('textarea', '');
+        sigTextarea.placeholder = 'Use your global signature';
+        sigTextarea.value = draftSignature;
+        sigTextarea.rows = 4;
+        sigTextarea.addEventListener('input', () => { draftSignature = sigTextarea.value; });
+        const globalSig = (D.user && D.user.signature) || '';
+        sigSection.appendChild(renderFormGroup('Account signature', sigTextarea,
+          globalSig ? 'Global signature: ' + globalSig.replace(/\n/g, ' ⏎ ') : 'No global signature set. Leave blank to use global.'));
+        stack.appendChild(sigSection);
+
+        // --- Aliases -----------------------------------------------------
+        const aliasSection = el('div', 'email-settings-section');
+        aliasSection.appendChild(el('div', 'email-settings-section-title', 'Aliases'));
+
+        const aliasList = el('div', 'email-settings-alias-list');
+
+        function renderAliases() {
+          aliasList.innerHTML = '';
+          if (!account.settings.aliases.length) {
+            aliasList.appendChild(el('div', 'email-settings-alias-empty', 'No aliases yet. Add one to send from extra addresses.'));
+            return;
+          }
+          account.settings.aliases.forEach((alias, idx) => {
+            const row = el('div', 'email-settings-alias-row');
+            row.appendChild(el('span', 'email-settings-alias-text', alias));
+            const removeBtn = el('button', 'btn-icon email-settings-alias-remove');
+            removeBtn.type = 'button';
+            removeBtn.title = 'Remove alias';
+            removeBtn.appendChild(icon('ph-x'));
+            removeBtn.addEventListener('click', () => {
+              account.settings.aliases.splice(idx, 1);
+              renderAliases();
+              // Also remove the alias from the From select so it cannot be re-selected.
+              const matchingOption = Array.from(fromSelect.options).find(o => o.value === alias);
+              if (matchingOption) matchingOption.remove();
+              if (draftDefaultFrom === alias) draftDefaultFrom = account.email || '';
+            });
+            row.appendChild(removeBtn);
+            aliasList.appendChild(row);
+          });
+        }
+        renderAliases();
+
+        const addRow = el('div', 'email-settings-alias-add');
+        const aliasInput = elAttr('input', 'email-settings-alias-input', { type: 'email', placeholder: 'alias@example.com' });
+        const addBtn = el('button', 'btn btn-secondary btn-sm', 'Add alias');
+        addBtn.type = 'button';
+        addBtn.addEventListener('click', () => {
+          const value = (aliasInput.value || '').trim().toLowerCase();
+          if (!value) {
+            showToast('Enter an alias email');
+            return;
+          }
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+            showToast('That does not look like a valid email');
+            return;
+          }
+          if (value === (account.email || '').toLowerCase() || account.settings.aliases.includes(value)) {
+            showToast('Alias already exists');
+            return;
+          }
+          account.settings.aliases.push(value);
+          aliasInput.value = '';
+          renderAliases();
+          // Refresh the From select to include the new alias
+          const existing = Array.from(fromSelect.options).map(o => o.value);
+          if (!existing.includes(value)) {
+            const opt = document.createElement('option');
+            opt.value = value;
+            opt.textContent = value;
+            fromSelect.appendChild(opt);
+          }
+        });
+        aliasInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); addBtn.click(); }
+        });
+        addRow.appendChild(aliasInput);
+        addRow.appendChild(addBtn);
+        aliasSection.appendChild(aliasList);
+        aliasSection.appendChild(addRow);
+        stack.appendChild(aliasSection);
+
+        // --- Sync --------------------------------------------------------
+        const syncSection = el('div', 'email-settings-section');
+        syncSection.appendChild(el('div', 'email-settings-section-title', 'Sync'));
+
+        const folderGrid = el('div', 'email-settings-folder-grid');
+        ALL_FOLDERS.forEach(folder => {
+          const id = 'folder-' + account.id + '-' + folder;
+          const row = el('label', 'email-settings-folder-row');
+          const cb = elAttr('input', 'email-settings-folder-cb', { type: 'checkbox', id });
+          cb.checked = account.settings.syncFolders.includes(folder);
+          cb.addEventListener('change', () => {
+            if (cb.checked) {
+              if (!account.settings.syncFolders.includes(folder)) account.settings.syncFolders.push(folder);
+            } else {
+              account.settings.syncFolders = account.settings.syncFolders.filter(f => f !== folder);
+            }
+          });
+          const labelText = el('span', '', folder);
+          row.appendChild(cb);
+          row.appendChild(labelText);
+          folderGrid.appendChild(row);
+        });
+        syncSection.appendChild(renderFormGroup('Folders to sync', folderGrid));
+
+        const freqSelect = el('select', '');
+        SYNC_FREQUENCIES.forEach(f => {
+          const opt = document.createElement('option');
+          opt.value = f.value;
+          opt.textContent = f.label;
+          if ((account.settings.syncFrequency || '15min') === f.value) opt.selected = true;
+          freqSelect.appendChild(opt);
+        });
+        freqSelect.addEventListener('change', () => { account.settings.syncFrequency = freqSelect.value; });
+        syncSection.appendChild(renderFormGroup('Sync frequency', freqSelect));
+        stack.appendChild(syncSection);
+
+        // --- Automation --------------------------------------------------
+        const autoSection = el('div', 'email-settings-section');
+        autoSection.appendChild(el('div', 'email-settings-section-title', 'Automation'));
+
+        autoSection.appendChild(renderToggle(
+          'Auto-BCC',
+          !!account.settings.autoBcc,
+          (v) => {
+            account.settings.autoBcc = v;
+            bccField.style.display = v ? '' : 'none';
+          },
+          'Silently send a copy of every outbound message to an address you control'
+        ));
+
+        const bccField = renderFormGroup('BCC address',
+          elAttr('input', '', { type: 'email', value: account.settings.autoBccAddress || '', placeholder: 'archive@example.com' }),
+          'Useful for keeping a personal archive of work mail'
+        );
+        const bccInput = bccField.querySelector('input');
+        bccInput.addEventListener('input', () => { account.settings.autoBccAddress = bccInput.value; });
+        bccField.style.display = account.settings.autoBcc ? '' : 'none';
+        autoSection.appendChild(bccField);
+
+        const vacationWrap = el('div', 'email-settings-vacation');
+        const vacationHeader = el('div', 'email-settings-vacation-header');
+        vacationHeader.appendChild(el('div', 'email-settings-vacation-title', 'Vacation responder'));
+        vacationHeader.appendChild(el('div', 'email-settings-vacation-desc', 'Auto-reply to incoming messages when you are away'));
+        vacationWrap.appendChild(vacationHeader);
+
+        const vacationToggle = renderToggle(
+          'Enable vacation responder',
+          !!account.settings.vacationResponder.enabled,
+          (v) => {
+            account.settings.vacationResponder.enabled = v;
+            vacationFields.style.display = v ? '' : 'none';
+          }
+        );
+        vacationWrap.appendChild(vacationToggle);
+
+        const vacationFields = el('div', 'email-settings-vacation-fields');
+        const vacationSubject = elAttr('input', '', { type: 'text', value: account.settings.vacationResponder.subject || '', placeholder: 'Subject line of auto-reply' });
+        vacationSubject.addEventListener('input', () => { account.settings.vacationResponder.subject = vacationSubject.value; });
+        const vacationBody = el('textarea', '');
+        vacationBody.rows = 4;
+        vacationBody.placeholder = 'Auto-reply message…';
+        vacationBody.value = account.settings.vacationResponder.body || '';
+        vacationBody.addEventListener('input', () => { account.settings.vacationResponder.body = vacationBody.value; });
+        vacationFields.appendChild(renderFormGroup('Subject', vacationSubject));
+        vacationFields.appendChild(renderFormGroup('Message', vacationBody));
+        vacationFields.style.display = account.settings.vacationResponder.enabled ? '' : 'none';
+        vacationWrap.appendChild(vacationFields);
+        autoSection.appendChild(vacationWrap);
+        stack.appendChild(autoSection);
+
+        body.appendChild(stack);
+      },
+      renderActions: (actions) => {
+        const cancel = el('button', 'btn-secondary', 'Cancel');
+        cancel.addEventListener('click', () => closeCompose());
+        const save = el('button', 'btn-primary', 'Save');
+        save.addEventListener('click', () => {
+          const trimmedLabel = (draftLabel || '').trim();
+          if (trimmedLabel) account.label = trimmedLabel;
+          const trimmedDisplayName = (draftDisplayName || '').trim();
+          if (trimmedDisplayName) account.displayName = trimmedDisplayName;
+          account.settings.defaultFrom = draftDefaultFrom || account.email || '';
+          account.settings.replyTo = (draftReplyTo || '').trim();
+          account.settings.signature = draftSignature || '';
+          // If the saved default From is no longer in the available options, fall back to the primary email.
+          const fromOptions = [account.email].concat(account.settings.aliases || []).filter(Boolean);
+          if (!fromOptions.includes(account.settings.defaultFrom)) {
+            account.settings.defaultFrom = account.email || '';
+          }
+          closeCompose();
+          renderMain();
+          showToast(account.label + ' settings saved');
+        });
+        actions.appendChild(cancel);
+        actions.appendChild(save);
+      }
+    });
   }
 
   function renderPreferencesSection() {
