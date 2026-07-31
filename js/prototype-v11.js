@@ -5536,9 +5536,13 @@
       counts[m.pid] = (counts[m.pid] || 0) + 1;
     });
     return Object.entries(counts)
-      .map(([pid, count]) => ({ contact: D.getP(pid), count }))
-      .filter(({ contact }) => contact && (contact.health || 0) > 0)
-      .sort((a, b) => b.count - a.count)
+      .map(([pid, count]) => {
+        const contact = D.getP(pid);
+        const health = contact && typeof contact.health === 'number' ? contact.health : 0;
+        return { contact, count, score: count + health };
+      })
+      .filter(({ contact }) => contact)
+      .sort((a, b) => b.score - a.score)
       .slice(0, limit);
   }
 
@@ -5648,10 +5652,13 @@
       info.appendChild(el('div', 'insights-person-name', contact.name));
       info.appendChild(el('div', 'insights-person-meta', contact.co + (contact.tl ? ' · ' + contact.tl : '')));
       row.appendChild(info);
+      const health = typeof contact.health === 'number' ? contact.health : 0;
+      const healthColor = health >= 70 ? 'var(--green)' : health >= 40 ? 'var(--yellow)' : 'var(--red)';
+      const healthIcon = health >= 70 ? 'ph-heart' : health >= 40 ? 'ph-warning' : 'ph-snowflake';
       const scoreWrap = el('div', 'insights-person-score');
-      scoreWrap.appendChild(icon(statusIconFor(contact.grp)));
-      scoreWrap.appendChild(el('span', '', contact.sc || 0));
-      scoreWrap.style.color = statusColorFor(contact.grp);
+      scoreWrap.appendChild(icon(healthIcon));
+      scoreWrap.appendChild(el('span', '', health + ''));
+      scoreWrap.style.color = healthColor;
       row.appendChild(scoreWrap);
       const countWrap = el('div', 'insights-person-count', count + '');
       row.appendChild(countWrap);
