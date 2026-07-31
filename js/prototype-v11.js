@@ -426,6 +426,8 @@
   window.renderMain = renderMain;
   window.openCompanyView = openCompanyView;
   window.renderCompanyView = renderCompanyView;
+  window.renderLabelsSection = renderLabelsSection;
+  window.openLabelModal = openLabelModal;
 
   function addLongPressListener(element, callback, duration = 500) {
     let timer = null;
@@ -6577,7 +6579,7 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     const tabLabels = { profile: 'Profile', accounts: 'Accounts', preferences: 'Preferences', agent: 'Agent', labels: 'Labels', data: 'Data', shortcuts: 'Shortcuts' };
     const tabBar = el('div', 'settings-tabs');
     tabs.forEach(tab => {
-      const isP2 = ['labels', 'data', 'shortcuts'].includes(tab);
+      const isP2 = ['data', 'shortcuts'].includes(tab);
       const btn = el('button', 'settings-tab' + (state.settingsTab === tab ? ' active' : '') + (isP2 ? ' disabled' : ''), tabLabels[tab]);
       btn.addEventListener('click', () => {
         if (isP2) {
@@ -6596,6 +6598,7 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
       case 'accounts': content.appendChild(renderAccountsSection()); break;
       case 'preferences': content.appendChild(renderPreferencesSection()); break;
       case 'agent': content.appendChild(renderAgentSection()); break;
+      case 'labels': content.appendChild(renderLabelsSection()); break;
       case 'profile':
       default: content.appendChild(renderProfileSection()); break;
     }
@@ -7262,6 +7265,164 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     wrapper.appendChild(memorySection);
 
     return wrapper;
+  }
+
+  const LABEL_PRESET_COLORS = [
+    '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4',
+    '#ec4899', '#f97316', '#eab308', '#14b8a6', '#6366f1', '#84cc16'
+  ];
+
+  function labelUsageCount(labelId) {
+    return (D.contacts || []).filter(c => (c.labels || []).includes(labelId)).length;
+  }
+
+  function slugifyLabelId(name) {
+    return 'l-' + name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  }
+
+  function renderLabelsSection() {
+    const section = el('div', 'settings-section');
+    const header = el('div', 'settings-section-header');
+    header.appendChild(el('div', 'settings-section-title', 'Labels'));
+    const addBtn = el('button', 'btn btn-primary btn-sm', '+ New label');
+    addBtn.addEventListener('click', () => openLabelModal());
+    header.appendChild(addBtn);
+    section.appendChild(header);
+
+    const list = el('div', 'label-list');
+    (D.labels || []).forEach(label => {
+      const row = el('div', 'label-row');
+      row.addEventListener('click', () => openLabelModal(label.id));
+
+      const dot = el('span', 'label-dot');
+      dot.style.backgroundColor = label.color || '#999';
+
+      const info = el('div', 'label-info');
+      info.appendChild(el('span', 'label-name', label.name));
+      const count = labelUsageCount(label.id);
+      info.appendChild(el('span', 'label-count', count + ' contact' + (count === 1 ? '' : 's')));
+
+      const actions = el('div', 'label-actions');
+      const editBtn = el('button', 'btn-icon label-action-btn');
+      editBtn.type = 'button';
+      editBtn.title = 'Edit label';
+      editBtn.appendChild(icon('ph-pencil-simple'));
+      editBtn.addEventListener('click', (e) => { e.stopPropagation(); openLabelModal(label.id); });
+      actions.appendChild(editBtn);
+
+      row.appendChild(dot);
+      row.appendChild(info);
+      row.appendChild(actions);
+      list.appendChild(row);
+    });
+    section.appendChild(list);
+    return section;
+  }
+
+  function openLabelModal(labelId) {
+    const isNew = !labelId;
+    const label = isNew
+      ? { id: '', name: '', color: LABEL_PRESET_COLORS[0] }
+      : (D.labels || []).find(l => l.id === labelId);
+    if (!label) return;
+
+    let name = label.name || '';
+    let color = label.color || LABEL_PRESET_COLORS[0];
+    const originalId = label.id;
+
+    openModalCard({
+      title: isNew ? 'New label' : 'Edit label',
+      renderBody: (body) => {
+        const stack = el('div', 'form-stack');
+        const nameInput = elAttr('input', '', { type: 'text', value: name, placeholder: 'Label name' });
+        nameInput.addEventListener('input', () => { name = nameInput.value; });
+        stack.appendChild(renderFormGroup('Name', nameInput));
+
+        const colorGroup = el('div', 'form-group');
+        colorGroup.appendChild(el('label', 'form-label', 'Color'));
+        const picker = el('div', 'color-picker');
+        LABEL_PRESET_COLORS.forEach(c => {
+          const swatch = el('button', 'color-swatch' + (c === color ? ' selected' : ''));
+          swatch.type = 'button';
+          swatch.dataset.color = c;
+          swatch.style.backgroundColor = c;
+          swatch.title = c;
+          swatch.addEventListener('click', () => {
+            color = c;
+            Array.from(picker.children).forEach(child => {
+              child.classList.toggle('selected', child.dataset.color === c);
+            });
+          });
+          picker.appendChild(swatch);
+        });
+        colorGroup.appendChild(picker);
+        stack.appendChild(colorGroup);
+        body.appendChild(stack);
+      },
+      renderActions: (actions) => {
+        if (!isNew) {
+          const del = el('button', 'btn-danger', 'Delete');
+          del.addEventListener('click', () => confirmDestructive(
+            `Delete label "${label.name}"? This will remove it from all contacts.`,
+            () => {
+              D.labels = (D.labels || []).filter(l => l.id !== originalId);
+              (D.contacts || []).forEach(c => {
+                c.labels = (c.labels || []).filter(id => id !== originalId);
+              });
+              closeCompose();
+              renderMain();
+              showToast('Label deleted');
+            }
+          ));
+          actions.appendChild(del);
+        } else {
+          actions.appendChild(el('span', ''));
+        }
+
+        const cancel = el('button', 'btn-secondary', 'Cancel');
+        cancel.addEventListener('click', () => closeCompose());
+        const save = el('button', 'btn-primary', 'Save');
+        save.addEventListener('click', () => {
+          const trimmed = name.trim();
+          if (!trimmed) {
+            showToast('Label name is required');
+            return;
+          }
+          const newId = slugifyLabelId(trimmed) || ('l-' + Date.now());
+          const existing = (D.labels || []).find(l => l.id === newId);
+          if (isNew) {
+            if (existing) {
+              showToast('A label with that name already exists');
+              return;
+            }
+            D.labels = D.labels || [];
+            D.labels.push({ id: newId, name: trimmed, color });
+          } else {
+            if (existing && existing.id !== originalId) {
+              showToast('A label with that name already exists');
+              return;
+            }
+            const target = (D.labels || []).find(l => l.id === originalId);
+            if (target) {
+              if (originalId && originalId !== newId) {
+                (D.contacts || []).forEach(c => {
+                  const idx = (c.labels || []).indexOf(originalId);
+                  if (idx !== -1) c.labels[idx] = newId;
+                });
+              }
+              target.id = newId;
+              target.name = trimmed;
+              target.color = color;
+            }
+          }
+          closeCompose();
+          renderMain();
+          showToast(isNew ? 'Label created' : 'Label saved');
+        });
+        actions.appendChild(cancel);
+        actions.appendChild(save);
+      }
+    });
   }
 
   function renderAgentMemoryModal() {
