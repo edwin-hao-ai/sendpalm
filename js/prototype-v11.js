@@ -6509,18 +6509,68 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
   function renderDrafts() {
     const container = el('div', 'view drafts-view');
     const list = el('div', 'drafts-list');
+
+    // Selected drafts for batch actions.
+    if (!state.draftSelected) state.draftSelected = new Set();
+
+    // Section 1: Scheduled sends.
+    const scheduled = (D.scheduledSends || []).slice();
+    if (scheduled.length) {
+      list.appendChild(el('div', 'drafts-group-title', 'Scheduled (' + scheduled.length + ')'));
+      scheduled.forEach(s => {
+        const card = el('div', 'draft-card draft-card-scheduled');
+        const t = new Date(s.scheduledAt);
+        const countdown = scheduledCountdown(s.scheduledAt);
+        const meta = el('div', 'draft-meta', 'Sends ' + countdown + ' · ' + t.toLocaleString());
+        card.appendChild(meta);
+        card.appendChild(el('div', 'draft-header-title', s.to));
+        card.appendChild(el('div', 'draft-subject', s.subj));
+        const actions = el('div', 'draft-actions');
+        const editBtn = el('button', 'btn btn-secondary btn-sm', 'Edit');
+        editBtn.addEventListener('click', () => showToast('Edit scheduled send — coming soon'));
+        const cancelBtn = el('button', 'btn btn-danger btn-sm', 'Cancel');
+        cancelBtn.addEventListener('click', () => confirmDestructive(
+          'Cancel scheduled send to "' + s.to + '"?',
+          () => {
+            D.scheduledSends = (D.scheduledSends || []).filter(x => x.id !== s.id);
+            renderMain();
+            showToast('Scheduled send cancelled');
+          }
+        ));
+        actions.appendChild(editBtn);
+        actions.appendChild(cancelBtn);
+        card.appendChild(actions);
+        list.appendChild(card);
+      });
+    }
+
     const manual = filterDrafts(D.drafts || []);
     const agent = filterDrafts((D.agentDrafts || []).map(d => ({ ...d, source: d.source || 'agent' })));
+    const pendingAgent = agent.filter(d => d.status === 'pending');
+    const sentAgent = agent.filter(d => d.status === 'sent');
 
     function renderGroup(title, drafts, isManual) {
       if (!drafts.length) return;
       list.appendChild(el('div', 'drafts-group-title', title));
       drafts.forEach(d => {
-        const card = el('div', 'draft-card');
+        const card = el('div', 'draft-card' + (state.draftSelected.has(d.id) ? ' selected' : ''));
+        const selectCb = elAttr('input', 'draft-select-cb', { type: 'checkbox' });
+        selectCb.checked = state.draftSelected.has(d.id);
+        const dKey = isManual ? 'manual:' + d.id : 'agent:' + d.id;
+        selectCb.addEventListener('change', () => {
+          if (selectCb.checked) state.draftSelected.add(dKey);
+          else state.draftSelected.delete(dKey);
+          renderMain();
+        });
+        card.appendChild(selectCb);
         card.appendChild(el('div', 'draft-header-title', d.to));
         card.appendChild(el('div', 'draft-subject', d.subj));
         const preview = isManual ? (d.body || '').slice(0, 140) : d.preview;
         card.appendChild(el('div', 'draft-preview', preview));
+        if (d.status) {
+          const badge = el('span', 'draft-status-badge draft-status-' + d.status, statusLabel(d.status));
+          card.appendChild(badge);
+        }
         const actions = el('div', 'draft-actions');
         if (isManual) {
           const editBtn = el('button', 'btn btn-secondary btn-sm', 'Edit');
@@ -6538,29 +6588,80 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
           actions.appendChild(editBtn);
           actions.appendChild(delBtn);
         } else {
-          const sendBtn = el('button', 'btn btn-primary btn-sm', 'Send');
+          if (d.status !== 'sent') {
+            const sendBtn = el('button', 'btn btn-primary btn-sm', 'Send');
+            sendBtn.addEventListener('click', () => sendAgentDraft(d.id));
+            actions.appendChild(sendBtn);
+          }
           const editBtn = el('button', 'btn btn-secondary btn-sm', 'Edit');
-          const manualBtn = el('button', 'btn btn-text btn-sm', 'Edit manually');
-          sendBtn.addEventListener('click', () => sendAgentDraft(d.id));
           editBtn.addEventListener('click', () => editAgentDraft(d));
-          manualBtn.addEventListener('click', () => editAgentDraftManually(d));
-          actions.appendChild(sendBtn);
           actions.appendChild(editBtn);
-          actions.appendChild(manualBtn);
         }
         card.appendChild(actions);
         list.appendChild(card);
       });
     }
 
-    renderGroup('Manual drafts', manual, true);
-    renderGroup('Agent drafts', agent, false);
+    renderGroup('Pending approval (' + pendingAgent.length + ')', pendingAgent, false);
+    renderGroup('Manual drafts (' + manual.length + ')', manual, true);
+    renderGroup('Sent drafts (' + sentAgent.length + ')', sentAgent, false);
 
-    if (manual.length === 0 && agent.length === 0) {
-      list.appendChild(renderEmpty('No drafts match your search.', 'ph-pencil-simple'));
+    // Batch action bar
+    if (state.draftSelected.size > 0) {
+      const bar = el('div', 'draft-batch-bar');
+      bar.appendChild(el('span', '', state.draftSelected.size + ' selected'));
+      const approveAll = el('button', 'btn btn-primary btn-sm', 'Approve all');
+      approveAll.addEventListener('click', () => {
+        state.draftSelected.forEach(key => {
+          if (key.startsWith('agent:')) {
+            const d = (D.agentDrafts || []).find(x => 'agent:' + x.id === key);
+            if (d && d.status === 'pending') d.status = 'approved';
+          }
+        });
+        state.draftSelected.clear();
+        renderMain();
+        showToast('Approved');
+      });
+      const discardAll = el('button', 'btn btn-danger btn-sm', 'Discard all');
+      discardAll.addEventListener('click', () => {
+        state.draftSelected.forEach(key => {
+          if (key.startsWith('agent:')) {
+            const d = (D.agentDrafts || []).find(x => 'agent:' + x.id === key);
+            if (d && d.status === 'pending') d.status = 'discarded';
+          }
+        });
+        state.draftSelected.clear();
+        renderMain();
+        showToast('Discarded');
+      });
+      const clear = el('button', 'btn-text', 'Clear');
+      clear.addEventListener('click', () => { state.draftSelected.clear(); renderMain(); });
+      bar.appendChild(approveAll);
+      bar.appendChild(discardAll);
+      bar.appendChild(clear);
+      list.appendChild(bar);
+    }
+
+    if (manual.length === 0 && pendingAgent.length === 0 && sentAgent.length === 0 && !scheduled.length) {
+      list.appendChild(renderEmpty('没有草稿。点 New 写信，或让 Agent 起草。', 'ph-pencil-simple'));
     }
     container.appendChild(list);
     return container;
+  }
+
+  function statusLabel(status) {
+    return { pending: '待审批', approved: '已批准', sent: '已发送', edited: '编辑中', discarded: '已丢弃' }[status] || status;
+  }
+
+  function scheduledCountdown(iso) {
+    const diff = new Date(iso).getTime() - Date.now();
+    if (diff <= 0) return '马上';
+    const min = Math.floor(diff / 60000);
+    if (min < 60) return 'in ' + min + ' min';
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return 'in ' + hr + ' h';
+    const day = Math.floor(hr / 24);
+    return 'in ' + day + ' d';
   }
 
   function filterDrafts(drafts) {
