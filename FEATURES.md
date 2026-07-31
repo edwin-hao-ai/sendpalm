@@ -1,175 +1,134 @@
-# Relay 完整功能矩阵 v2 — Xobni 全继承 + Agentic 全面升级
+# SendPalm Feature Inventory v11.38 (current prototype)
 
-## 一、Xobni 到底做了什么？（逐个功能对照）
+> Built on the **HEY**-inspired design language. See `PRD.md` for the product-level narrative and `DESIGN.md` for the visual system (HEY accents on light surfaces — the original dark-glass "Relay" direction is archived).
 
-| # | Xobni 功能 | 实现方式 | Relay 继承？ | Agentic 升级 |
-|---|-----------|---------|-------------|-------------|
-| 1 | 侧边栏显示联系人档案 | 在 Outlook 中点邮件→右侧显示发件人信息 | ✅ | 独立桌面应用，不是插件 |
-| 2 | 从签名提取电话/职位 | 自动解析邮件签名 | ✅ | LLM 提取更多字段（职位变动跟踪） |
-| 3 | 邮件历史时间线 | 同一人所有邮件倒序排列 | ✅ | 跨渠道（邮件+Slack+微信）混合时间线 |
-| 4 | 附件按人索引 | "Show me all files from John" | ✅ | 全域搜索 + 文件内容理解 |
-| 5 | Top People 排名 | 按通信频率排序 | ✅ | LLM 语义健康度（频率+情感+上下文） |
-| 6 | 对话/线索模式 | 同一主题邮件串在一起 | ✅ | AI 自动摘要 + 待办提取 |
-| 7 | 社交网络集成 | LinkedIn/Facebook 资料拉取 | ✅ | 身份跨渠道合并 |
-| 8 | 会议日历集成 | Outlook 日历同步 | ✅ | 自动生成简报 + 参会者关系图谱 |
-| 9 | 共同联系人 | "People you both know" | ❌ **缺** | 关系网络遍历 |
-| 10 | 公司级聚合 | 按域名分组联系人 | ❌ **缺** | 公司级关系看板 |
-| 11 | 通信统计分析 | 何时发、发给谁、回复速度 | ✅ | 趋势预测 + Agent 建议 |
-| 12 | 搜索增强 | 按人搜索优于按关键词 | ✅ | 语义搜索（理解上下文） |
-| 13 | 相关联系人 | 类似沟通模式的人 | ❌ **缺** | 基于 LLM 的行为相似度 |
-| 14 | 多 PST 索引 | Xobni Plus 功能 | ✅ | 多账号多渠道统一索引 |
-| 15 | Smartr Contacts | 手机端智能通讯录 | ❌ **缺** | 移动端 Companion App |
+## 1. Communication boxes (the spine)
 
-## 二、我漏掉的核心功能（逐个分析）
+| Box | View | Purpose |
+|---|---|---|
+| Gate (Screener) | `state.view === 'screener'` | First-time senders; user approves / blocks |
+| Imbox | `state.view === 'imbox'` | Important + immediate messages, split New for you / Previously seen |
+| Stream | `state.view === 'feed'` | Newsletters / long reads |
+| Records | `state.view === 'paperTrail'` | Receipts / transactions |
+| Trash | `state.view === 'trash'` | Recoverable for 30 days |
+| Spam | `state.view === 'spam'` | Filtered |
 
-### 2.1 共同联系人 / 关系网络遍历
-- 现状：完全没有
-- 应该怎么做：在联系人详情里加「关系网络」标签页，显示：
-  - 你和张磊的共同联系人（你和张磊都认识陈欣）
-  - 张磊的其他同事（同公司）
-  - 张磊经常联系的人（基于通信模式推测）
-- 数据：可以从通信频率推断——你给张磊和陈欣都发过邮件，那陈欣可能是你们之间的桥梁
+## 2. Workflows (HEY-style piles)
 
-### 2.2 按公司聚合
-- 现状：只显示个人，没有公司级视图
-- 应该怎么做：
-  - 联系人列表支持「按公司分组」
-  - 公司详情页：该公司所有联系人、所有沟通记录、关系健康度汇总
-  - 相当于 CRM 的 Account 概念
+| Pile / Action | Trigger | Behaviour |
+|---|---|---|
+| Reply Later / Pending | `l` | Email parks at bottom of Imbox; fan-out reveals list |
+| Set Aside / Saved | `s` | Same pattern, distinct pile |
+| Bubble Up / Remind | `z` then pick datetime | Message floats back to top at chosen time |
+| Snooze / Remind (custom) | picker — Tomorrow 9 / Monday / Next Friday / custom | Same as Bubble Up |
+| Follow-up | per-message `ph-bell-ringing` | Reminder fires when due; badge on message row; sidebar view |
 
-### 2.3 联系人统计洞察
-- 现状：只有健康度分数
-- 应该怎么做：
-  - 「你通常在周二上午给张磊发邮件」
-  - 「张磊的平均回复时间是 4.2 小时，比上月慢了 30%」
-  - 「你们最常见的讨论话题：Q4合同、付款条款、交付物」
-  - 「近3个月沟通频率趋势：↑ 活跃 / ↓ 下降 / → 持平」
+## 3. Detail panels
 
-### 2.4 跟进标记系统
-- 现状：消息只有查看
-- 应该怎么做：
-  - 每条消息可以标记：需要跟进 / 等待回复 / 已完成
-  - 跟进提醒：如果标记了"跟进"但 48h 内没动作，Agent 提醒
-  - 统一的"待跟进"视图
+| Entity | Tabs / Sections |
+|---|---|
+| Contact | Timeline · **Notes** · Files · Insights · Network · Calendar |
+| Message (thread) | Subject + participants + tracker-shield + body + sticky notes + clips + actions |
+| Meeting | Brief · Agenda · Notes · Action items · Materials |
+| File | Header · inline preview (image / pdf / doc) · Open · Copy Markdown |
+| Task | Title / due / status / priority / related / notes |
+| Draft | Recipient / subject / body / status / actions |
 
-### 2.5 会议全流程
-- 现状：只列了会议列表
-- 应该怎么做：
-  - **会议前**：自动生成简报（参会人背景、待讨论事项、历史上下文）
-  - **会议中**：实时转录 + Agent 记录要点（预留）
-  - **会议后**：自动生成纪要 + 提取 action items + 跟踪执行
-  - 参会者的关系健康度在会议详情里显示
+## 4. Compose
 
-### 2.6 Agent 任务进度透明化
-- 现状：只显示了「进行中」
-- 应该怎么做：
-  - 步骤级进度：⟳ 1/3 分析邮件 → ✓ 2/3 起草内容 → ⟳ 3/3 等待审批
-  - 耗时估计：预计还需 2 分钟
-  - 执行日志：可展开查看每个步骤的详情
+| Feature | Notes |
+|---|---|
+| Per-account From | Only email accounts; pre-selects via `defaultFrom` |
+| Per-account signature | Override or fall back to global `D.user.signature` |
+| Snippets (templates) | Data-driven picker; Settings → Manage snippets (full CRUD) |
+| Auto-title suggestion | ChatGPT-style pre-filled when body has content |
+| Send split-button | Send now / Schedule send / Save as draft |
+| Scheduled sends | Surface in Drafts view with countdown |
 
-### 2.7 草稿管理系统
-- 现状：草稿散落在各个地方
-- 应该怎么做：
-  - 统一的草稿中心（按人分组）
-  - 草稿状态：待审批 / 已批准 / 已发送 / 已编辑
-  - 批量操作
-  - Agent 的草稿版本历史
+## 5. Search & command
 
-### 2.8 全局搜索
-- 现状：每个视图各自有搜索
-- 应该怎么做：
-  - 一个全局搜索框（顶部），搜索所有：人、消息、文件、会议
-  - 搜索结果按类型分组
-  - 支持语义搜索（"找一下张磊发过的关于付款条款的邮件"）
+| Surface | Trigger | Behaviour |
+|---|---|---|
+| Command palette | ⌘K / Ctrl+K | Fuzzy across views / actions / contacts / messages / files / meetings |
+| Topbar live search | click magnifier, type | 200 ms debounce; grouped results; arrow-key navigation |
+| Search page | Enter from any search | Filters per type, full-page layout |
 
-### 2.9 通知与提醒系统
-- 现状：没有任何通知
-- 应该怎么做：
-  - 关系提醒：「王洋已45天未联系」
-  - 跟进提醒：「你标记的3条跟进尚未处理」
-  - 草稿提醒：「有2份草稿等待审批」
-  - Agent 完成提醒：「会议简报已生成」
-  - 右上角通知中心聚合
+## 6. Notifications
 
-### 2.10 联系人生命周期
-- 现状：只有当前分数
-- 应该怎么做：
-  - 关系 Timeline：第一次联系时间、关键里程碑、合同签署、会议历史
-  - 关系阶段：探索 → 建立 → 活跃 → 维护 → 冷淡 → 重新激活
-  - Agent 根据阶段建议不同行为
+| Element | Behaviour |
+|---|---|
+| Topbar bell | Unread count badge |
+| Dropdown panel | Grouped Today / Yesterday / Earlier |
+| Click-through | Navigate to source view + selection |
+| Mark all as read | Persists `sendpalm-notif-last-seen` to localStorage |
 
-## 三、重新设计的 7 视图
+## 7. Insights dashboard
 
-```
-联系人（默认）
-├── 左侧：联系人列表
-│   ├── 搜索（全局搜索入口）
-│   ├── 分类筛选：全部 / 活跃 / 需跟进 / 已冷淡
-│   ├── 分组模式切换：按人 / 按公司
-│   └── 联系人卡片（头像+姓名+公司+最近联系+健康度+状态灯）
-├── 右侧：联系人详情
-│   ├── 头部：头像 / 姓名 / 公司 / 职位 / 渠道 / 联系信息
-│   ├── 健康度 + 趋势指示器 + AI 建议按钮
-│   ├── 标签页：
-│   │   ├── 沟通记录（跨渠道时间线 + 跟进标记）
-│   │   ├── 文件（按人索引 + 预览）
-│   │   ├── 洞察（统计 + 话题 + 模式）
-│   │   ├── 关系网络（共同联系人 + 同事 + 相似联系人） ← NEW
-│   │   └── 日历（与该人的会议） ← NEW
-│   └── Agent 底栏（输入框 + 快捷建议）
-└── 通知中心（右上角铃铛）
+7 cards: weekly volume + trend / Top People / reply time trend / channel share / pending follow-up count / agent actions / health distribution.
 
-AI 助手
-├── 对话界面
-├── 右侧面板：
-│   ├── 进行中任务（步骤级进度 + 耗时估计） ← ENHANCED
-│   ├── 待审批草稿（统一管理） ← ENHANCED
-│   ├── 已排期操作
-│   ├── 待跟进标记 ← NEW
-│   └── 本周影响
+## 8. Drafts
 
-收件箱
-├── 左侧：按人分组的消息列表
-│   ├── 频道标签 + 跟进标记 ← NEW
-│   ├── 未读计数
-│   └── 待跟进筛选 ← NEW
-├── 右侧：消息详情
-│   ├── 完整内容
-│   ├── 操作：回复 / 交给AI / 标记跟进 / 归档
-│   └── Agent 上下文建议
+- Sections: Scheduled / Pending approval / Manual / Sent.
+- Status badges (pending / approved / sent / edited / discarded).
+- Multi-select with batch Approve / Discard.
 
-洞察
-├── 沟通量趋势
-├── Top People 排名
-├── 回复时间分析
-├── 渠道占比
-├── 健康度分布
-├── 沟通模式（时段 / 星期） ← NEW
-├── 关系网络概览（公司集群 / 共同联系） ← NEW
-└── Agent 影响
+## 9. Agent
 
-文件
-├── 按人索引的网格
-├── 筛选：类型 / 人 / 日期
-├── 搜索
-└── 预览
+- Right-side panel with sessions (freeform / message / contact / event / file).
+- Tasks with step-level progress + ETA.
+- Drafts (Send / Edit / Edit manually).
+- Memory editor (global + per-contact).
+- Audit log with undo where possible.
 
-日历
-├── 会议列表
-├── 每个会议：
-│   ├── 参会人 + 关系健康度 ← ENHANCED
-│   ├── 简报状态（已生成 / 未生成）
-│   ├── 会议前：资料准备清单 ← NEW
-│   └── 会议后：纪要 + action items ← NEW
-└── 快捷操作：生成简报 / 查看详情
+## 10. Files
 
-设置
-├── 账户连接
-├── 隐私控制
-├── 数据管理
-├── 通知偏好 ← NEW
-├── Agent 行为配置 ← NEW
-└── 快捷键 ← NEW
-```
+- Grid view with type filter pills + advanced filters (date / sender / size).
+- Inline preview for image (with spy-pixel shield) / pdf (with "tracking stripped" notice) / doc / spreadsheet.
 
-现在我需要把这些全部实现到原型里。
+## 11. Per-account email settings
+
+- Identity (label / display name / default From / reply-to)
+- Signature (per-account override)
+- Aliases (dynamic list, From dropdown sync)
+- Sync (folder checkboxes + frequency)
+- Automation (auto-BCC + vacation responder)
+
+## 12. Privacy / tracking
+
+- Tracker detector + HEY-style shield badge on thread header
+- Per-account signature override
+- Vacation responder toggle
+
+## 13. Settings (7 tabs)
+
+| Tab | Highlights |
+|---|---|
+| Profile | Display name / avatar / timezone / language / signature / Replay onboarding |
+| Accounts | Connected accounts + Add account + per-account Settings |
+| Preferences | Notifications / Quiet hours / Security / Sync & Storage / Snippets |
+| Agent | Behavior toggles + memory editor |
+| Labels | Full CRUD with preset colors |
+| Data | Mailbox backup / Contacts CSV / Tasks JSON / Empty Trash / Delete all data (typed) / Delete account (mock) |
+| Shortcuts | Editable keyboard shortcuts + restore defaults |
+
+## 14. Three states
+
+- **Empty:** every primary view has themed empty state with icon + title + copy.
+- **Loading:** skeleton placeholders match final layout.
+- **Error:** themed error state with retry.
+
+## 15. Keyboard shortcuts (default)
+
+- ⌘1–⌘9 views · `/` search · `?` help · `j`/`k` move · `x` select · `Enter` open · `;` bulk · `o` read together · `r` reply · `e` archive · `l` reply later · `a` set aside · `z` bubble up · `f` forward · `b` label · `v` move · `t` trash · `u` unread · `⌘N` new · `⌘K` palette · `⌘↩` send · `d/w/y` calendar views · `←/→` prev/next day.
+
+All customizable in Settings → Shortcuts; `D.shortcuts` is the source of truth.
+
+## 16. Onboarding
+
+4-step wizard: Welcome → Connect channels → Indexing → Done. Replayable from Settings → Profile.
+
+## 17. Sticky notes, contact notes, clips
+
+- **Sticky notes:** per-message private notes (yellow card).
+- **Contact notes:** Notes tab in contact detail with pinned notes.
+- **Clips:** sidebar Clips view (Today / Earlier); per-message Clip action.

@@ -1,206 +1,301 @@
-# PRD: Xobni 2.0 — AI Communication Agent
+# SendPalm — Product Requirements Document
 
-> **代号:** Relay
-> **状态:** v0.1 PRD
-> **设计语言:** taste-skill (DESIGN_VARIANCE=7, MOTION_INTENSITY=6, VISUAL_DENSITY=4)
-
----
-
-## 1. 产品概要
-
-Relay 是一个**以桌面客户端为主体的 AI 通信 Agent**。它不是邮件客户端，不是插件，而是一个覆盖在用户所有通信渠道之上的 AI 层——理解上下文、管理关系、主动执行任务。
-
-一句话定位：**你的通信副驾。数据归你，AI 替你行动。**
+> **Status:** v11.38 prototype (interaction layer complete)
+> **Type:** Vanilla JS / HTML / CSS prototype, in-memory data, all interactions wired but no backend
+> **Cache:** `v=11.38` (after P4)
+> **Primary reference product:** HEY (37signals) — we explicitly borrow their UX patterns
 
 ---
 
-## 2. 问题定义
+## 1. Product overview
 
-### 2.1 用户痛点
+SendPalm is a calm, HEY-inspired email + IM + calendar workspace with a built-in Agent layer. The current build is a single-page prototype (`prototype-v11.html`) that runs against in-memory sample data (`prototype-data.js`) so we can rehearse every interaction before any backend work begins.
 
-1. **渠道碎片化** — 一个人的通信分散在 Gmail、Outlook、Slack、微信、WhatsApp、LinkedIn 之间，没有统一视图
-2. **关系盲区** — 你记不清跟某个重要联系人上次联系是什么时候、聊了什么、有什么待办
-3. **重复劳动** — 写跟进邮件、安排会议、整理摘要占据了每天 2-3 小时
-4. **信息过载** — 收件箱里的邮件 80% 不需要立即处理，但筛选本身消耗认知
+### 1.1 Design lineage
 
-### 2.2 Xobni 当年为什么没解决
+The product ships in the **light-mode HEY aesthetic** (HEY-orange accent on near-white surfaces, monospace metadata, "New for you / Previously seen" split, piles at the bottom of the box). The original `DESIGN.md` describes an earlier "Relay" dark-mode glass direction that has since been **superseded by HEY**; keep that doc only for archival reference. All future design decisions follow HEY.
 
-| 问题 | Xobni 的做法 | 为什么不够 |
-|------|-------------|-----------|
-| 渠道碎片化 | 只做 Outlook | 其他渠道才是主战场 |
-| 关系盲区 | 表面统计（发邮件次数） | 没有语义理解 |
-| 重复劳动 | 不解决 | 被动工具 |
-| 信息过载 | 搜索增强 | 不主动筛选 |
-| 隐私 | 扫描本地 PST | 用户不信任 |
+### 1.2 Scope of the prototype
 
-### 2.3 Agentic 时代的新可能
-
-LLM 让从"搜索"到"理解"成为可能。Agent 让从"展示信息"到"执行任务"成为可能。On-device AI 让隐私问题不再是死穴。
+- **In scope:** every interaction listed in §3 — modals, nav, keyboard, gestures, empty states, three-states, accessibility primitives, notifications, ⌘K palette, per-account settings, data export, follow-ups, snippets, bundles, sticky notes, clips, file preview, meeting detail, drafts, scheduled sends.
+- **Out of scope (intentionally deferred to a real backend):** real OAuth, real IMAP/SMTP/Gmail-API, real LLM, persistence across reloads, real-time sync, audit logs beyond the prototype's mocked session.
 
 ---
 
-## 3. 目标用户
+## 2. Personas & use cases
 
-### 3.1 核心用户画像
-
-| 角色 | 痛点强度 | 付费意愿 | 典型场景 |
-|------|---------|---------|---------|
-| 高管 / 创始人 | ★★★★★ | ★★★★★ | 每天 200+ 邮件，需要 delegate |
-| 投行 / 咨询 | ★★★★ | ★★★★★ | 客户关系管理，快速响应 |
-| 销售 / BD | ★★★★★ | ★★★★ | 客户跟进，关系健康监控 |
-| 产品 / 工程负责人 | ★★★★ | ★★★ | 跨团队协作，会议摘要 |
-| 独立创业者 | ★★★★ | ★★★ | 一个人干所有沟通活 |
-
-### 3.2 早期切入点
-
-**投行 / 咨询 / 律所** — 邮件重度用户，隐私敏感度高，付费习惯好，口碑传播集中。
+| Persona | Why they care | What SendPalm gives them |
+|---|---|---|
+| Founder / executive | 200+ emails a day, needs delegation | Agent drafts, Follow-ups, Snooze |
+| Investor / consultant | Long client threads, frequent follow-ups | Relationship health, Reply Later, Sticky Notes |
+| Sales / BD | CRM-like discipline on relationships | Contact notes, Notifications, Company view |
+| Independent operator | One-person team, context-switching daily | Streams, Bundles, Clips, Command palette |
 
 ---
 
-## 4. 核心功能
+## 3. Functional surface (as-built in v11.38)
 
-### 4.1 统一信号层 (Unified Signal Layer)
+### 3.1 Inbox / boxes
 
-- 支持渠道: Gmail, Outlook, Google Calendar, Slack, WhatsApp, LinkedIn, SMS
-- 增量索引，不替换原生客户端
-- 本地向量数据库存储语义索引
+**Imbox** — HEY-style split into "New for you" (unread, surfaces by snooze/bubble-up) and "Previously seen" (read + sent). Sender bundling collapses any sender with ≥3 unread into a single row that fans out on click.
 
-### 4.2 关系图谱 2.0 (Relationship Graph)
+**Stream** — newsletters and casual reads, scannable list.
 
-- 基于 LLM 的语义关系理解（不只是频次统计）
-- 关系健康度评分（联系频率趋势、情感分析、响应时间）
-- 关键关系预警（"你和张总 45 天没联系了"）
-- 跨渠道关系聚合（同一个人在邮件和 Slack 里的身份合并）
+**Records** — receipts, transactions, auto-file.
 
-### 4.3 主动 Agent (Proactive Agent)
+**Gate (Screener)** — first-time senders land here; user decides Yes/No. History view shows who has been screened in or out.
 
-- 邮件摘要生成（会议前自动拉取上下文）
-- 智能跟进提醒（重要邮件未回复超过 24h）
-- 自动起草（基于上下文和用户风格）
-- 会议准备包（相关邮件 + 文档 + 上次纪要）
+**Reply Later / Saved / Remind piles** — at the bottom of the Imbox; each fans out on click and links to a dedicated view. Reply Later (L) / Saved (A) / Bubble Up (Z → datetime picker) are message-level actions.
 
-### 4.4 可委托工作流 (Delegatable Workflows)
+**Trash / Spam** — recoverable for 30 days (display copy).
 
-- "帮我 handle 跟华为项目所有的会议安排和后续跟进"
-- "这周我休假，所有邮件自动回复并转给 X 处理"
-- "每周一 9 点给我一份按项目分组的邮件摘要"
+### 3.2 Compose
 
-### 4.5 隐私架构
+- **From account** — email accounts only; remembers the per-account signature override; falls back to global `D.user.signature`.
+- **Subject + auto-title** — ChatGPT-style auto-title suggestion pre-filled when the user starts typing the body.
+- **Cc / Bcc** — toggle rows.
+- **Snippets** — data-driven picker (`D.snippets`); supports full CRUD via Settings → Manage snippets.
+- **Attach / Ask Agent / Send** — toolbar icons.
+- **Send split-button** — Send now / Schedule send / Save as draft. Schedule send uses quick presets (Tomorrow 9am / Monday 9am / Next Friday) or custom datetime.
+- **Scheduled sends** — appear in Drafts view with countdown.
 
-- 本地优先：所有通信数据在本地索引
-- On-device embedding + 轻量推理
-- 云端仅用于复杂任务（可选），传输加密，用完即删
-- 开源核心索引引擎（可审计）
+### 3.3 Detail panels
+
+Every primary entity opens a right-side detail panel (overlay on mobile):
+
+- **Contact** — hero with avatar / name / company / title / channel toggles (notify / delivery bucket / autofile / recycling); tabs: Timeline / **Notes** / Files / Insights / Network / Calendar.
+- **Message** — thread header with subject + participants + HEY-style "tracker blocked" shield; per-message body with reply actions + sticky notes + clip action; bottom action bar with Reply / Reply Later / Saved / Remind / Follow-up / Sticky / Clip / Unread / More.
+- **Meeting** — brief (auto-generated from attendees' recent messages), editable Agenda, editable Notes, Action items (owner / due / done), Materials (linked files).
+- **File** — header + inline preview (image with spy-pixel shield, pdf with "tracking stripped" notice, doc/spreadsheet with markdown extract) + Open + Copy Markdown actions.
+- **Task** — title / due / status / priority / related contact or event / notes.
+- **Draft** — recipient / subject / body / last edited / status (pending / approved / sent / edited).
+
+### 3.4 Contacts
+
+- **List** with filter pills (All / Active / Need follow up / Cold) and group toggle (All contacts / By company).
+- **Add / Edit modal** (full CRUD with avatar / company / title / emails / phones / stage / labels / topics / notes / blocked / notify / firstSeen / screened).
+- **Notes tab** (P4 L) — multiple private notes per contact with pin/unpin.
+- **Screener history** — shows screened-in / screened-out contacts.
+- **Company view** — per-company group: people + communications + files + meetings.
+
+### 3.5 Calendar
+
+- **Day / Week / Year views** with arrows / Today / jump-to-date.
+- **Event detail** with brief, agenda, notes, action items, materials.
+- **Create / Edit / Delete modal** with attendees, color, reminder, video link.
+
+### 3.6 Files
+
+- **Grid view** with type filters (All / PDF / Image / Doc / Spreadsheet) and More filters (date range, sender, etc.).
+- **File preview panel** with type-specific viewer.
+
+### 3.7 Insights dashboard
+
+7 modules: weekly volume + trend, Top People, average reply time, channel share, pending follow-up count, agent actions this week, health distribution. Each card is data-driven from `D.*`.
+
+### 3.8 Drafts
+
+- **Sections**: Scheduled / Pending approval / Manual / Sent.
+- **Multi-select** with batch approve / discard.
+- **Status badges** (pending / approved / sent / edited / discarded).
+- **Per-account signature** preview in compose (P4).
+
+### 3.9 Agent
+
+- **Agent panel** (right side, 340 px) — sessions with context, actions, chat input.
+- **Sessions**: freeform, message-anchored, contact-anchored, event-anchored, file-anchored.
+- **Tasks** with step-level progress and ETA.
+- **Drafts** with Send / Edit / Edit manually.
+- **Memory** global + per-contact, modifiable from UI.
+- **Audit log** with undo where possible.
+
+### 3.10 Follow-ups
+
+- **Sidebar view**: Overdue / Today / This week / Later groups, with Mark done / Remove actions.
+- **Per-message picker**: 1 day / 3 days / 1 week / 2 weeks / custom date.
+- **Compose-time prompt** after sending: "Set follow-up in 3 days".
+
+### 3.11 Snippets (Templates)
+
+- **Settings → Manage snippets** modal: list with Edit / Delete; + New snippet; Name + Body + optional Shortcut.
+- **Compose toolbar**: snippet button → data-driven picker + "Manage snippets…" entry.
+
+### 3.12 Sticky Notes
+
+- Per-message yellow sticky card list, add / remove.
+- Surface in global search.
+
+### 3.13 Clips
+
+- **Sidebar view**: Today / Earlier groups, copy / remove actions.
+- **Per-message Clip action**: saves selected text (or prompts) to `D.clips`.
+
+### 3.14 Notifications
+
+- **Topbar bell** with unread count badge.
+- **Dropdown panel** grouped by Today / Yesterday / Earlier.
+- **Click-through** navigates to source (view + contact / file / event).
+- **Mark all as read** + close on outside click.
+
+### 3.15 Command palette (⌘K / Ctrl+K)
+
+- Fuzzy search across: Views, Actions (compose / new event / new task / new contact), Contacts, Messages, Files, Meetings, Recent items.
+- ↑/↓ navigate, Enter to execute, Esc to close.
+
+### 3.16 Live search (topbar)
+
+- 200 ms debounced dropdown.
+- Grouped: People / Messages / Files / Views.
+- Arrow-key navigation, Enter to open, Esc to close.
+
+### 3.17 Keyboard shortcuts
+
+All customizable via Settings → Shortcuts (`D.shortcuts`):
+
+- **Navigation:** ⌘1–⌘9 (views), / search, ? help.
+- **Imbox:** j/k move, x select, Enter open, ; bulk menu, o read together, r reply.
+- **Per-message:** e archive, l reply later, a set aside, z bubble up, f forward, b label, v move, t trash, u unread.
+- **Compose:** ⌘N new, ⌘K palette, ⌘↩ send.
+- **Calendar:** d day, w week, y year, t today, ←/→ prev/next.
+
+### 3.18 Per-account email settings (Settings → Accounts → Settings)
+
+- Identity: display label, display name, default From address (primary or alias), reply-to.
+- Signature: per-account override with global fallback.
+- Aliases: dynamic list with add / remove + From dropdown sync.
+- Sync: folder checkboxes (INBOX, Sent, Drafts, Archive, Trash, Spam, Starred, Important) + frequency (5 min / 15 min / 30 min / 1 h / manual).
+- Automation: Auto-BCC toggle + address, Vacation responder toggle + subject + body.
+
+### 3.19 Settings (7 tabs)
+
+| Tab | Contents |
+|---|---|
+| Profile | Display name / avatar / timezone / language / signature / Replay onboarding |
+| Accounts | Connected accounts + Add account + per-account Settings |
+| Preferences | Notifications (desktop / digest / quiet hours) / Security (app lock / screenshot / clipboard) / Sync & Storage / Snippets |
+| Agent | Behavior toggles + memory editor |
+| Labels | Create / edit / delete labels with preset colors |
+| Data | Mailbox backup / Contacts CSV / Tasks JSON / Empty Trash / Delete all data (typed) / Delete account (mock) |
+| Shortcuts | Editable keyboard shortcuts + restore defaults |
+
+### 3.20 Onboarding
+
+4-step first-run wizard: Welcome → Connect channels → Indexing → Done. Replayable from Settings → Profile.
+
+### 3.21 Three states (empty / loading / error)
+
+- **Empty:** all major views render a themed empty state with icon + title + copy (`renderEmpty()`).
+- **Loading:** skeleton placeholders matching final layout (`renderSkeletonList()`).
+- **Error:** themed error state with retry (`renderErrorState()`).
+
+### 3.22 Privacy / tracking protection
+
+- Spy-pixel shield badge on every message thread that contains tracker URLs.
+- File preview declares "tracking stripped" for PDF and image.
+- Per-account signature override + vacation responder with explicit user toggle.
 
 ---
 
-## 5. 技术架构
+## 4. Data model (`D.*`)
 
-```
-┌─────────────────────────────────────────┐
-│           桌面客户端 (Tauri + Rust)        │
-│                                           │
-│  ├─ Local Vector DB (LanceDB / SQLite +   │
-│  │   pgvector 同级本地方案)                 │
-│  ├─ On-device Embedder (Ollama / MLX)     │
-│  ├─ 关系图谱引擎 (Rust 原生计算)            │
-│  └─ Local API Server (Tauri 内嵌)          │
-├─────────────────────────────────────────┤
-│        加密同步层 (可选)                    │
-│  └─ 图谱元数据 + 偏好加密同步              │
-│     (原始邮件永不上传)                     │
-├─────────────────────────────────────────┤
-│        AI Gateway (可选付费)               │
-│  └─ 按需调用 Claude / GPT-4o              │
-│     仅任务上下文上传，用完即删              │
-└─────────────────────────────────────────┘
-```
-
-### 5.1 技术选型
-
-| 层 | 技术 | 理由 |
-|----|------|------|
-| 桌面框架 | Tauri 2.0 | Rust 核心，Web 前端，包体小 |
-| 前端 | React + TypeScript + Tailwind v4 | 成熟生态 |
-| 动画 | Motion (framer-motion) | Scroll-driven 交互 |
-| 本地存储 | LanceDB (向量) + SQLite (关系) | 完全离线可用 |
-| Embedding | Ollama (本地) / 可选云 API | 隐私灵活度 |
-| LLM 网关 | 自建 Gateway (Rust) | 支持 OpenAI、Anthropic、本地模型 |
+| Field | Purpose |
+|---|---|
+| `D.user` | Display name, avatar, timezone, language, signature |
+| `D.accounts[]` | Email / IM / calendar accounts; each email account has `settings` (aliases / signature / replyTo / defaultFrom / syncFolders / syncFrequency / autoBcc / vacationResponder) |
+| `D.contacts[]` | Full contact records with health / stage / topics / labels / notes / blocked / notify / screened |
+| `D._msgs[]` | Messages across all channels, with bucket / replyLater / setAside / bubbleUpUntil / screened / seen |
+| `D._files[]` | Attachments with type / size / md extract |
+| `D.events[]` (alias `_meetings`) | Events with attendees / dt / tm / agenda / actionItems / materials |
+| `D.tasks[]` | Tasks with status / due / priority / related |
+| `D.drafts[]` + `D.agentDrafts[]` | Manual and agent drafts |
+| `D.labels[]` | Custom labels with color |
+| `D.workflowState` (per-message) | replyLater / setAside / bubbleUpUntil / remindAt |
+| `D.scheduledSends[]` | Future scheduled messages |
+| `D.followUps[]` | Per-message follow-up reminders |
+| `D.notifications[]` | Cross-feature notifications with type / read / ref |
+| `D.snippets[]` | Compose snippets (label / body / shortcut) |
+| `D.stickies[]` | Per-message private notes |
+| `D.contactNotes[]` | Per-contact private notes (with pinned flag) |
+| `D.clips[]` | Saved text snippets from messages |
+| `D.agentTasks[]`, `D.agentDrafts[]`, `D.agentMemory{}`, `D.agentAuditLog[]`, `D.agentCompleted[]` | Agent subsystem |
+| `D.bundles{}` | Per-sender bundle flag |
+| `D.shortcuts[]` | Customizable keyboard shortcuts |
 
 ---
 
-## 6. UI/UX 设计原则
+## 5. State model (`state`)
 
-遵循 taste-skill 规范：
+`state` owns: `view`, `selectedContactId`, `selectedMessageId`, `selectedMeetingId`, `selectedFileId`, `selectedIds`, `expandedThreadMessages`, `expandedStreamMessages`, `expandedPile`, `cursorIndex`, `contactTab`, `searchOpen`, `searchQuery`, `searchFilter`, `settingsTab`, `notificationsOpen`, `draftSelected`, `focusReplyOpen`, `focusReplyIndex`, `focusReplyCompletedIds`, `notifications` count, `prepChecked`, `commandPalette` selection, `agentSessions[]`, `currentAgentSessionId`, `calendarView`, `calendarSelected`, `composeOpen`, `composeMinimized`, `composeContext`, `appSettings`, `selectedIds` Set, `expandedPile`, `selectedSearchResult`, `readTogetherOpen`, `readTogetherIndex`, `viewHeader`, `viewHeaderLeft`, `composerAutoTitle`, and per-keyboard-shortcut edit buffers.
 
-- **DESIGN_VARIANCE = 7**: 非对称布局，左对齐内容 + 右侧资产，打破 zigzag
-- **MOTION_INTENSITY = 6**: Scroll-reveal 入场，hover 微物理，无炫耀性动画
-- **VISUAL_DENSITY = 4**: 充裕留白，信息分层清晰
-- **配色**: Slate 中性基底 + Electric Blue (#3B82F6) 单色强调
-- **字体**: Geist (Sans) + Geist Mono (代码/数据)
-- **禁止**: 紫色渐变、纯黑/纯白、3 等分功能卡、AI 紫光按钮
-
-### 6.1 关键页面
-
-1. **Landing Page** — 产品概念传达
-2. **Onboarding** — 连接邮箱 + 索引 + 展示第一个洞察
-3. **Dashboard** — 关系图谱 + 智能摘要 + 待处理
-4. **Agent Chat** — 自然语言委托工作流
-5. **Settings** — 隐私控制 + 数据管理
+Persistence: only `sendpalm-onboarding` and `sendpalm-notif-last-seen` are persisted to `localStorage`. Everything else resets on reload — by design.
 
 ---
 
-## 7. 商业模型
+## 6. Keyboard shortcuts (default)
 
-| 层级 | 定价 | 核心功能 |
-|------|------|---------|
-| **个人 Pro** | $15/月 | 单邮箱 + 关系图谱 + 基础 Agent |
-| **个人 Max** | $30/月 | 全渠道 + 完整 Agent + 工作流委托 |
-| **Team** | $50/seat/月 | 共享关系图谱 + 客户健康看板 |
-| **Enterprise** | 定制 | SSO + 私有部署 + 合规审计 |
+See §3.17. Every shortcut is editable; `D.shortcuts` is the source of truth, and the global keydown handler reads from it dynamically.
 
 ---
 
-## 8. 路线图
+## 7. Interaction glossary (HEY vocabulary we keep)
 
-### Phase 1 (3 个月) — MVP
-- Gmail + Outlook 索引
-- 本地向量搜索 + 关系图谱基础
-- 邮件摘要 + 智能跟进提醒
-- Tauri 桌面客户端 (Mac)
-
-### Phase 2 (6 个月) — Agent
-- 主动 Agent 能力（起草、跟进、会议准备）
-- Slack/Calendar 集成
-- 工作流委托（自然语言）
-- Team 共享关系图谱
-
-### Phase 3 (12 个月) — 平台
-- 全渠道覆盖 (WhatsApp, LinkedIn, SMS)
-- 企业版 (SSO, 合规, 私有部署)
-- 第三方 Agent API
-- 移动端 Companion App
-
----
-
-## 9. 竞争分析
-
-| 产品 | 定位 | 弱点 | Relay 的差异化 |
-|------|------|------|---------------|
-| Superhuman | 付费邮件客户端 | 只做邮件界面，不跨渠道 | 不做界面，做 AI 层 |
-| SaneBox | 邮件过滤 | 无 AI 理解，无 Agent | 语义理解 + 主动执行 |
-| Microsoft Copilot | 办公全家桶 | 平台锁定，数据给微软 | 跨平台，隐私本地 |
-| Google Gemini | 办公全家桶 | 同 Copilot | 跨平台，隐私本地 |
-| Xobni (2006) | Outlook 插件 | 被动，不跨渠道，不 AI | 主动 Agent + 全渠道 |
+| HEY term | SendPalm mapping | Notes |
+|---|---|---|
+| Screener | Gate | First-time senders land here |
+| Imbox | Inbox | Important + immediate messages |
+| The Feed | Stream | Newsletters / long reads |
+| Paper Trail | Records | Receipts / transactions |
+| Reply Later | Pending | Pile at bottom of Imbox |
+| Set Aside | Saved | Pile at bottom of Imbox |
+| Bubble Up | Remind | Future-floats-back message |
+| Cover Art | (planned, P5) | Slides image over Previously seen |
+| Sticky | Sticky note | Yellow card on message |
+| Clips | Clips | Saved text snippets |
+| Bundles | Bundles | Same-sender collapse |
+| Snippets | Snippets / Templates | Compose re-usable text |
+| Workflows | (planned, P5) | Multi-stage email tracking |
+| Read together | Read together | Multi-message scroll view |
+| Power Through New | (planned, P5) | Focus on unread |
+| Focus & Reply | (planned, P5) | Reply-only view |
+| Speakeasy | (planned, P5) | Subject-code to bypass screener |
+| Sticky thread | Sticky note (per-message) | Equivalent at message level |
 
 ---
 
-## 10. 风险与缓解
+## 8. Phases shipped
 
-| 风险 | 概率 | 影响 | 缓解 |
-|------|------|------|------|
-| API 变更 (Google/MS) | 中 | 高 | 开源核心，社区适配层 |
-| 隐私合规 | 中 | 高 | 本地优先架构，SOC 2 |
-| 获客成本高 | 高 | 中 | 垂直行业切入 + 口碑 |
-| Copilot/Gemini 免费 | 中 | 中 | 跨平台 + 隐私差异化 |
-| 用户不信任 AI | 中 | 高 | 可审计 + 透明 + 本地优先 |
+| Phase | Scope | Status |
+|---|---|---|
+| P1 | Shared form infrastructure + core CRUD modals (contacts / events / tasks / drafts / settings) | Done (P1 commit + review) |
+| P2 | Contact detail tabs / Company view / Global search / Label manager / Advanced filters | Done (P2 commit + review) |
+| P3 | Onboarding / Insights / Data / Shortcuts / Email settings | Done (P3 commit + review) |
+| P4 | HEY-style power features + notification center + ⌘K + file preview + meeting detail + drafts + send later + follow-up + snippets + bundles + sticky notes + contact notes + spy-pixel blocker + three states + live search + clips | **Done — current build v11.38** |
+| P5 (planned) | UX polish + mobile: theme / density / block list / drag-drop / inline edit / swipe gestures / pull-to-refresh / bottom sheet / long-press / unfurl / thread merge / rename subject / mute thread / share via link / read together / focus & reply / power through / modal nesting / form dirty state / duplicate detection / page transitions / toast stacking | Not started |
+| P6 (planned) | Accessibility + global polish: keyboard nav audit / aria / focus rings / color contrast / sound / haptic / page transitions / toast stacking / skeleton | Not started |
+| P7 | PRD / FEATURES / DESIGN sync — this doc | **Done** |
+
+---
+
+## 9. Open gaps (intentional, for production)
+
+These are visible in the prototype as mock data but require real implementation:
+
+- OAuth flows, IMAP / SMTP / Gmail API / Microsoft Graph / Slack API / WeChat integration
+- Real LLM-powered Agent (drafting / summarizing / action extraction)
+- Persistence (Postgres + API + auth)
+- Sync engine + delta queries + PubSub push
+- Server-side notification dispatcher (vs. in-memory `D.notifications`)
+- Real-time collaboration (multi-user contact notes / shared threads)
+- Mobile native apps (vs. PWA)
+- E2E encryption / on-device embedding (vs. localStorage only)
+- Real audit logs, GDPR data export, SOC 2 controls
+
+---
+
+## 10. Success criteria (prototype-level)
+
+- A user can complete a "Day in the life": receive → triage (Screener) → Imbox → reply or snooze → draft with snippets → schedule send → set follow-up → file in Records → review Insights — without leaving the prototype, and without runtime errors.
+- Every primary entity has a working CRUD path: contact, message, event, task, file, draft, label, snippet, sticky, clip, contact note, follow-up, notification.
+- Every view has an empty / error state.
+- ⌘K palette and topbar live search both work end-to-end with arrow-key navigation.
+- Per-account email settings persist across reload (within session).
