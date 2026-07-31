@@ -66,6 +66,70 @@
   D.events = D.events || D._meetings || [];
   D.tasks = D.tasks || [];
 
+  // Task 13: deep snapshot of default data so resetAllData can restore it.
+  const DEFAULT_D = JSON.parse(JSON.stringify(D));
+
+  function downloadJSON(filename, data) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadCSV(filename, rows) {
+    const csv = rows.map(r => r.map(cell => {
+      const s = String(cell ?? '').replace(/"/g, '""');
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? '"' + s + '"' : s;
+    }).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function resetAllData() {
+    const onboardingFlag = localStorage.getItem('sendpalm-onboarding');
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
+    keys.forEach(k => { if (k !== 'sendpalm-onboarding') localStorage.removeItem(k); });
+
+    Object.keys(DEFAULT_D).forEach(key => {
+      D[key] = JSON.parse(JSON.stringify(DEFAULT_D[key]));
+    });
+
+    if (onboardingFlag) localStorage.setItem('sendpalm-onboarding', onboardingFlag);
+
+    state.settings = D.appSettings;
+    state.agentSessions = JSON.parse(JSON.stringify(D.agentSessions || []));
+    state.currentAgentSessionId = (D.agentSessions && D.agentSessions[0] && D.agentSessions[0].id) || null;
+    state.agentMemory = D.agentMemory || { global: {}, contacts: {} };
+    state.onboardingStep = localStorage.getItem('sendpalm-onboarding') ? null : 0;
+    state.onboardingCompleted = !!localStorage.getItem('sendpalm-onboarding');
+    state.selectedContactId = null;
+    state.selectedMessageId = null;
+    state.selectedMeetingId = null;
+    state.selectedFileId = null;
+    state.selectedIds.clear();
+    state.expandedThreadMessages.clear();
+    state.expandedStreamMessages.clear();
+    state.expandedPile = null;
+    state.filters = {};
+    state.prepChecked = {};
+
+    renderMain();
+    showToast('All data reset to defaults');
+  }
+
   function isMobile() { return window.innerWidth < 768; }
   function isTablet() { return window.innerWidth >= 768 && window.innerWidth < 1024; }
   function isDesktop() { return window.innerWidth >= 1024; }
@@ -742,6 +806,9 @@
   window.renderCompanyView = renderCompanyView;
   window.renderLabelsSection = renderLabelsSection;
   window.openLabelModal = openLabelModal;
+  window.downloadJSON = downloadJSON;
+  window.downloadCSV = downloadCSV;
+  window.resetAllData = resetAllData;
 
   function addLongPressListener(element, callback, duration = 500) {
     let timer = null;
@@ -7541,7 +7608,7 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     const tabLabels = { profile: 'Profile', accounts: 'Accounts', preferences: 'Preferences', agent: 'Agent', labels: 'Labels', data: 'Data', shortcuts: 'Shortcuts' };
     const tabBar = el('div', 'settings-tabs');
     tabs.forEach(tab => {
-      const isP2 = ['data', 'shortcuts'].includes(tab);
+      const isP2 = tab === 'shortcuts';
       const btn = el('button', 'settings-tab' + (state.settingsTab === tab ? ' active' : '') + (isP2 ? ' disabled' : ''), tabLabels[tab]);
       btn.addEventListener('click', () => {
         if (isP2) {
@@ -7561,6 +7628,7 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
       case 'preferences': content.appendChild(renderPreferencesSection()); break;
       case 'agent': content.appendChild(renderAgentSection()); break;
       case 'labels': content.appendChild(renderLabelsSection()); break;
+      case 'data': content.appendChild(renderDataSection()); break;
       case 'profile':
       default: content.appendChild(renderProfileSection()); break;
     }
@@ -8483,6 +8551,164 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     content.appendChild(body);
     modal.appendChild(content);
     document.body.appendChild(modal);
+  }
+
+  function renderDataSection() {
+    const wrapper = el('div', '');
+
+    const exportSection = el('div', 'settings-section');
+    exportSection.appendChild(el('div', 'settings-section-title', 'Export'));
+    const exportCard = el('div', 'settings-card data-actions-card');
+
+    function addAction(card, opts) {
+      const row = el('div', 'data-action-row');
+      const text = el('div', 'data-action-text');
+      text.appendChild(el('div', 'data-action-title', opts.title));
+      text.appendChild(el('div', 'data-action-desc', opts.desc));
+      row.appendChild(text);
+      const btn = el('button', 'btn btn-secondary btn-sm', opts.btn);
+      btn.addEventListener('click', opts.onClick);
+      row.appendChild(btn);
+      card.appendChild(row);
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    addAction(exportCard, {
+      title: 'Mailbox backup',
+      desc: 'Full JSON export of messages, contacts, events, and tasks.',
+      btn: 'Export JSON',
+      onClick: () => {
+        const backup = {
+          user: D.user,
+          accounts: D.accounts,
+          contacts: D.contacts,
+          messages: D._msgs,
+          files: D._files,
+          events: D.events,
+          tasks: D.tasks,
+          labels: D.labels,
+          agentMemory: D.agentMemory,
+          exportedAt: new Date().toISOString()
+        };
+        downloadJSON('sendpalm-backup-' + today + '.json', backup);
+        showToast('Backup downloaded');
+      }
+    });
+
+    addAction(exportCard, {
+      title: 'Contacts CSV',
+      desc: 'Spreadsheet-friendly export of your contact list.',
+      btn: 'Export CSV',
+      onClick: () => {
+        const rows = [
+          ['Name', 'Company', 'Title', 'Email', 'Phone', 'Stage', 'Topics', 'Notes']
+        ];
+        (D.contacts || []).forEach(c => {
+          rows.push([
+            c.name || '',
+            c.company || '',
+            c.title || '',
+            (c.emails || []).map(e => e.value).join('; '),
+            (c.phones || []).map(p => p.value).join('; '),
+            c.stage || '',
+            (c.topics || []).join('; '),
+            c.notes || ''
+          ]);
+        });
+        downloadCSV('sendpalm-contacts-' + today + '.csv', rows);
+        showToast('Contacts CSV downloaded');
+      }
+    });
+
+    addAction(exportCard, {
+      title: 'Tasks JSON',
+      desc: 'Export tasks and reminders as JSON.',
+      btn: 'Export JSON',
+      onClick: () => {
+        downloadJSON('sendpalm-tasks-' + today + '.json', D.tasks || []);
+        showToast('Tasks downloaded');
+      }
+    });
+
+    exportSection.appendChild(exportCard);
+    wrapper.appendChild(exportSection);
+
+    const dangerSection = el('div', 'settings-section');
+    dangerSection.appendChild(el('div', 'settings-section-title', 'Danger zone'));
+    const dangerCard = el('div', 'settings-card data-actions-card data-actions-danger');
+
+    addAction(dangerCard, {
+      title: 'Empty Trash',
+      desc: 'Permanently delete all messages currently in Trash.',
+      btn: 'Empty Trash',
+      onClick: () => confirmDestructive('Permanently delete all messages in Trash? This cannot be undone.', () => {
+        D._msgs = (D._msgs || []).filter(m => m.bucket !== 'trash');
+        renderMain();
+        showToast('Trash emptied');
+      })
+    });
+
+    addAction(dangerCard, {
+      title: 'Delete all data',
+      desc: 'Reset SendPalm to its default sample data and clear local settings.',
+      btn: 'Delete all data',
+      onClick: () => {
+        let body;
+        openModalCard({
+          title: 'Delete all data?',
+          renderBody: (b) => {
+            body = b;
+            const stack = el('div', 'form-stack');
+            stack.appendChild(el('p', 'data-warning-text', 'This will reset all data to defaults and clear local settings. Onboarding state will be preserved.'));
+            stack.appendChild(el('p', 'data-warning-text', 'Type "delete all" below to confirm.'));
+            const input = elAttr('input', 'form-input', { type: 'text', placeholder: 'delete all' });
+            input.addEventListener('input', () => { input.dataset.value = input.value; });
+            stack.appendChild(renderFormGroup('Confirmation', input));
+            body.appendChild(stack);
+          },
+          renderActions: (actions) => {
+            const cancel = el('button', 'btn-secondary', 'Cancel');
+            cancel.addEventListener('click', () => closeCompose());
+            const confirm = el('button', 'btn-danger', 'Delete all data');
+            confirm.addEventListener('click', () => {
+              const input = body.querySelector('input');
+              if ((input.value || '').trim().toLowerCase() !== 'delete all') {
+                showToast('Type "delete all" to confirm');
+                return;
+              }
+              closeCompose();
+              resetAllData();
+            });
+            actions.appendChild(cancel);
+            actions.appendChild(confirm);
+          }
+        });
+      }
+    });
+
+    addAction(dangerCard, {
+      title: 'Delete account',
+      desc: 'This would delete your SendPalm account. Not available in prototype.',
+      btn: 'Delete account',
+      onClick: () => {
+        openModalCard({
+          title: 'Delete account',
+          renderBody: (body) => body.appendChild(el('p', 'data-warning-text', 'This would delete your SendPalm account and all associated data. Account deletion is not functional in this prototype.')),
+          renderActions: (actions) => {
+            const ok = el('button', 'btn-secondary', 'OK');
+            ok.addEventListener('click', () => closeCompose());
+            actions.appendChild(el('span', ''));
+            actions.appendChild(ok);
+          }
+        });
+      }
+    });
+
+    dangerSection.appendChild(dangerCard);
+    wrapper.appendChild(dangerSection);
+
+    return wrapper;
   }
 
   function sendAgentDraft(id) {

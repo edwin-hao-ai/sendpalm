@@ -6941,6 +6941,58 @@ img.file-cell-avatar {
 .settings-card .form-toggle-thumb { width: 18px; height: 18px; top: 2px; left: 2px; }
 .settings-card .form-toggle.on .form-toggle-thumb { transform: translateX(18px); }
 
+/* Data management (Task 13) */
+.data-actions-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.data-actions-danger {
+  border-color: rgba(255, 59, 48, 0.18);
+}
+
+.data-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.data-action-row:last-child { border-bottom: none; }
+
+.data-action-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.data-action-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.data-action-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.data-actions-danger .data-action-title { color: var(--red); }
+.data-actions-danger .data-action-desc { color: rgba(255, 59, 48, 0.7); }
+
+.data-warning-text {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
 /* Account cards */
 .account-cards {
   display: grid;
