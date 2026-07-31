@@ -10944,43 +10944,128 @@ ${D.stageSuggest[c.stage] || ''}
     const inputWrap = el('div', 'command-palette-input-wrap');
     inputWrap.appendChild(icon('ph-magnifying-glass'));
     const input = el('input', 'command-palette-input');
-    input.placeholder = 'Search commands or jump to...';
+    input.placeholder = 'Search commands, contacts, messages…';
     inputWrap.appendChild(input);
     windowEl.appendChild(inputWrap);
 
     const list = el('div', 'command-palette-list');
-    let filtered = commands.slice();
+    // Each "result" carries: { id, label, sub, icon, kind, action, hint }
+    let results = [];
     let selectedIndex = 0;
+
+    function searchContacts(q) {
+      return (D.contacts || []).filter(c => {
+        if (!q) return false;
+        const name = (c.name || '').toLowerCase();
+        const company = (c.company || '').toLowerCase();
+        const emails = (c.emails || []).map(e => (e.value || '').toLowerCase());
+        return name.includes(q) || company.includes(q) || emails.some(e => e.includes(q));
+      }).slice(0, 5).map(c => ({
+        id: 'contact:' + c.id,
+        label: c.name,
+        sub: [c.company, c.title].filter(Boolean).join(' · '),
+        icon: 'ph-user',
+        kind: 'People',
+        action: () => { state.view = 'contacts'; state.selectedContactId = c.id; }
+      }));
+    }
+
+    function searchMessages(q) {
+      if (!q) return [];
+      return (D._msgs || []).filter(m => {
+        if (!m.subj) return false;
+        const subj = m.subj.toLowerCase();
+        const body = (m.prev || '').toLowerCase();
+        return subj.includes(q) || body.includes(q);
+      }).slice(0, 5).map(m => ({
+        id: 'msg:' + (m.id || m._key),
+        label: m.subj,
+        sub: (m.fm || '') + ' · ' + (m.tm || ''),
+        icon: 'ph-envelope-simple',
+        kind: 'Messages',
+        action: () => openMessage(m)
+      }));
+    }
+
+    function searchFiles(q) {
+      if (!q) return [];
+      return (D._files || []).filter(f => (f.name || '').toLowerCase().includes(q))
+        .slice(0, 5)
+        .map(f => ({
+          id: 'file:' + f.id,
+          label: f.name,
+          sub: '文件 · ' + (f.sz || ''),
+          icon: 'ph-file',
+          kind: 'Files',
+          action: () => openFile(f)
+        }));
+    }
+
+    function searchMeetings(q) {
+      if (!q) return [];
+      return (D.events || []).filter(e => (e.title || '').toLowerCase().includes(q))
+        .slice(0, 5)
+        .map(e => ({
+          id: 'event:' + e.id,
+          label: e.title,
+          sub: (e.dt || '') + ' · ' + (e.tm || ''),
+          icon: 'ph-calendar',
+          kind: 'Meetings',
+          action: () => openMeeting(e)
+        }));
+    }
+
+    function buildResults(query) {
+      const q = (query || '').toLowerCase().trim();
+      let all = [];
+      // Commands
+      const cmds = q
+        ? commands.filter(c => c.label.toLowerCase().includes(q) || c.section.toLowerCase().includes(q))
+        : commands.slice();
+      cmds.forEach(cmd => all.push({
+        id: 'cmd:' + cmd.id,
+        label: cmd.label,
+        sub: cmd.section,
+        icon: cmd.icon,
+        kind: cmd.section,
+        hint: cmd.hint,
+        action: () => executeCommand(cmd.id)
+      }));
+      // Contacts / messages / files / meetings (only when there's a query)
+      if (q) {
+        searchContacts(q).forEach(r => all.push(r));
+        searchMessages(q).forEach(r => all.push(r));
+        searchFiles(q).forEach(r => all.push(r));
+        searchMeetings(q).forEach(r => all.push(r));
+      }
+      return all;
+    }
 
     function renderList(query) {
       list.innerHTML = '';
-      const q = query.toLowerCase().trim();
-      filtered = q ? commands.filter(c =>
-        c.label.toLowerCase().includes(q) ||
-        c.section.toLowerCase().includes(q)
-      ) : commands.slice();
+      results = buildResults(query);
       selectedIndex = 0;
-
-      if (filtered.length === 0) {
-        list.appendChild(el('div', 'command-palette-empty', 'No commands found'));
+      if (results.length === 0) {
+        list.appendChild(el('div', 'command-palette-empty', 'No results found'));
         return;
       }
-
       const sections = {};
-      filtered.forEach((c, i) => {
-        if (!sections[c.section]) sections[c.section] = [];
-        sections[c.section].push({ cmd: c, index: i });
+      results.forEach((r, i) => {
+        if (!sections[r.kind]) sections[r.kind] = [];
+        sections[r.kind].push({ r, i });
       });
-
       Object.keys(sections).forEach(section => {
         list.appendChild(el('div', 'command-palette-section', section));
-        sections[section].forEach(({ cmd, index }) => {
-          const item = el('div', 'command-palette-item' + (index === selectedIndex ? ' selected' : ''));
-          item.appendChild(icon(cmd.icon));
-          item.appendChild(el('span', 'command-palette-label', cmd.label));
-          if (cmd.hint) item.appendChild(el('span', 'command-palette-hint', cmd.hint));
-          item.addEventListener('click', () => { executeCommand(cmd.id); closeCommandPalette(); });
-          item.addEventListener('mouseenter', () => { selectedIndex = index; updateSelection(); });
+        sections[section].forEach(({ r, i }) => {
+          const item = el('div', 'command-palette-item' + (i === selectedIndex ? ' selected' : ''));
+          item.appendChild(icon(r.icon));
+          const textWrap = el('div', 'command-palette-text');
+          textWrap.appendChild(el('span', 'command-palette-label', r.label));
+          if (r.sub) textWrap.appendChild(el('span', 'command-palette-sub', r.sub));
+          item.appendChild(textWrap);
+          if (r.hint) item.appendChild(el('span', 'command-palette-hint', r.hint));
+          item.addEventListener('click', () => { r.action(); closeCommandPalette(); renderNav(); renderTopBar(); renderMain(); });
+          item.addEventListener('mouseenter', () => { selectedIndex = i; updateSelection(); });
           list.appendChild(item);
         });
       });
@@ -10997,14 +11082,21 @@ ${D.stageSuggest[c.stage] || ''}
     input.addEventListener('input', (e) => renderList(e.target.value));
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') { e.preventDefault(); closeCommandPalette(); }
-      else if (e.key === 'ArrowDown') { e.preventDefault(); selectedIndex = Math.min(selectedIndex + 1, filtered.length - 1); updateSelection(); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); selectedIndex = Math.min(selectedIndex + 1, results.length - 1); updateSelection(); }
       else if (e.key === 'ArrowUp') { e.preventDefault(); selectedIndex = Math.max(selectedIndex - 1, 0); updateSelection(); }
       else if (e.key === 'Enter') {
         e.preventDefault();
-        if (filtered[selectedIndex]) { executeCommand(filtered[selectedIndex].id); closeCommandPalette(); }
+        if (results[selectedIndex]) {
+          results[selectedIndex].action();
+          closeCommandPalette();
+          renderNav();
+          renderTopBar();
+          renderMain();
+        }
       }
     });
 
+    windowEl.appendChild(list);
     palette.appendChild(windowEl);
     renderList('');
 
