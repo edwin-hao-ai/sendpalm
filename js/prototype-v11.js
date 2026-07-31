@@ -805,6 +805,8 @@
   window.renderTopBar = renderTopBar;
   window.openCompanyView = openCompanyView;
   window.renderCompanyView = renderCompanyView;
+  window.openFile = openFile;
+  window.openMeeting = openMeeting;
   window.renderLabelsSection = renderLabelsSection;
   window.openLabelModal = openLabelModal;
   window.downloadJSON = downloadJSON;
@@ -6392,6 +6394,51 @@
     previewHeader.appendChild(iconBox);
     previewHeader.appendChild(titleBox);
     content.appendChild(previewHeader);
+
+    // HEY-style viewer block: image, pdf, text, generic
+    const viewer = el('div', 'file-viewer');
+    if (f.tp === 'image') {
+      const img = el('img', 'file-viewer-image');
+      img.src = f.url || ('https://picsum.photos/seed/' + f.id + '/800/600');
+      img.alt = f.name;
+      viewer.appendChild(img);
+      const guard = el('div', 'file-viewer-shield');
+      guard.appendChild(icon('ph-shield-check'));
+      guard.appendChild(el('span', '', 'Spy pixels stripped — image loaded locally'));
+      viewer.appendChild(guard);
+    } else if (f.tp === 'pdf') {
+      const placeholder = el('div', 'file-viewer-pdf');
+      const sheet = el('div', 'file-viewer-pdf-sheet');
+      sheet.appendChild(el('div', 'file-viewer-pdf-title', f.name.replace(/\.pdf$/i, '').replace(/[_-]/g, ' ')));
+      sheet.appendChild(el('div', 'file-viewer-pdf-line', '______________________________________________'));
+      sheet.appendChild(el('div', 'file-viewer-pdf-line', 'PDF preview rendered in-browser · 1 / ' + Math.max(1, Math.round((parseFloat(f.sz) || 1) * 0.8))));
+      sheet.appendChild(el('div', 'file-viewer-pdf-line', '______________________________________________'));
+      if (f.md) {
+        f.md.split('\n').slice(0, 8).forEach(l => {
+          sheet.appendChild(el('div', 'file-viewer-pdf-line file-viewer-pdf-text', l.replace(/^#+\s*/, '')));
+        });
+      }
+      placeholder.appendChild(sheet);
+      viewer.appendChild(placeholder);
+      const notice = el('div', 'file-viewer-pdf-notice');
+      notice.appendChild(icon('ph-shield-check'));
+      notice.appendChild(el('span', '', 'Spy pixels + tracking links stripped — preview is safe to view'));
+      viewer.appendChild(notice);
+    } else if (f.tp === 'doc' || f.tp === 'spreadsheet') {
+      const docBox = el('div', 'file-viewer-doc');
+      docBox.appendChild(el('div', 'file-viewer-doc-head', f.tp === 'spreadsheet' ? 'Spreadsheet preview' : 'Document preview'));
+      if (f.md) {
+        const pre = el('pre', 'file-viewer-doc-body');
+        pre.textContent = f.md;
+        docBox.appendChild(pre);
+      } else {
+        docBox.appendChild(el('div', 'file-viewer-doc-empty', 'No inline preview available. Use Open to view the original.'));
+      }
+      viewer.appendChild(docBox);
+    } else {
+      viewer.appendChild(el('div', 'file-viewer-generic', 'No inline preview available.'));
+    }
+    content.appendChild(viewer);
 
     const meta = el('div', 'file-preview-meta');
     const rows = [

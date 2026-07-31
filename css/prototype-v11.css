@@ -10301,3 +10301,126 @@ button:focus-visible, input:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* P4 Task D: file preview viewer */
+.file-viewer {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.file-viewer-image {
+  width: 100%;
+  height: auto;
+  display: block;
+  background: #f4f4f5;
+}
+
+.file-viewer-shield {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--accent-soft);
+  border-top: 1px solid var(--border);
+}
+.file-viewer-shield i { color: var(--accent); }
+
+.file-viewer-pdf {
+  position: relative;
+  background: linear-gradient(180deg, #fafafa 0%, #f4f4f5 100%);
+  padding: 24px 16px;
+  text-align: center;
+  min-height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.file-viewer-pdf-sheet {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+  padding: 20px 24px;
+  width: 100%;
+  max-width: 360px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.file-viewer-pdf-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.file-viewer-pdf-line {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #4b5563;
+  line-height: 1.7;
+}
+
+.file-viewer-pdf-text {
+  font-family: var(--font-sans, system-ui);
+  font-size: 12px;
+  color: #374151;
+}
+
+.file-viewer-pdf-notice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-top: 1px solid var(--border);
+}
+.file-viewer-pdf-notice i { color: var(--accent); }
+
+.file-viewer-doc {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.file-viewer-doc-head {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.file-viewer-doc-body {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  color: var(--text-primary);
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.file-viewer-doc-empty,
+.file-viewer-generic {
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 8px 0;
+}
