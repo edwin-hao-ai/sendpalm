@@ -2957,7 +2957,7 @@
 
     if (newForYou.length) {
       list.appendChild(renderSectionHeader('New for you', 'Read together', openReadTogether, 'new'));
-      newForYou.forEach((ev, idx) => list.appendChild(renderFeedItem(ev, 'imbox', idx)));
+      renderMessagesWithBundles(list, newForYou, newForYou.length);
     }
 
     if (previouslySeen.length) {
@@ -2968,7 +2968,6 @@
     container.appendChild(list);
 
     const workflowItems = [
-      { events: replyLater, title: 'Pending', icon: 'ph-clock', id: 'pending', view: 'replyLater' },
       { events: setAside, title: 'Saved', icon: 'ph-push-pin', id: 'saved', view: 'setAside' },
       { events: bubbleUp, title: 'Remind', icon: 'ph-arrow-fat-line-up', id: 'remind', view: 'bubbleUp' },
     ].filter(item => item.events.length > 0);
@@ -2980,6 +2979,52 @@
     }
 
     return container;
+  }
+
+  // P4 Task J: bundle same-sender messages (≥3) in the Imbox "New for you" section.
+  function renderMessagesWithBundles(list, events, offset) {
+    const bySender = {};
+    events.forEach(ev => {
+      const key = ev.data.pid || 'unknown';
+      if (!bySender[key]) bySender[key] = [];
+      bySender[key].push(ev);
+    });
+    let idx = 0;
+    Object.entries(bySender).forEach(([senderId, evs]) => {
+      if (evs.length >= 3) {
+        const c = D.getP(senderId);
+        const row = el('div', 'feed-card feed-card-bundle');
+        const top = el('div', 'feed-card-top');
+        const avatar = renderAvatar(c, 'feed-card-avatar', (c ? c.name : '?').charAt(0));
+        top.appendChild(avatar);
+        const body = el('div', 'feed-card-body');
+        body.appendChild(el('div', 'feed-card-from', (c ? c.name : '未知发件人') + ' · ' + evs.length + ' 封邮件'));
+        const latest = evs[0];
+        body.appendChild(el('div', 'feed-card-subject', latest.data.subj || '(无主题)'));
+        body.appendChild(el('div', 'feed-card-preview', latest.data.fm + ' · ' + (latest.data.tm || '')));
+        top.appendChild(body);
+        const bundleBadge = el('span', 'feed-card-bundle-count', evs.length);
+        top.appendChild(bundleBadge);
+        row.appendChild(top);
+        const drawer = el('div', 'bundle-drawer');
+        evs.forEach(ev => {
+          const r = el('div', 'bundle-drawer-row');
+          r.appendChild(el('div', 'bundle-drawer-line', ev.data.subj || '(无主题)'));
+          r.appendChild(el('div', 'bundle-drawer-meta', ev.data.fm + ' · ' + (ev.data.tm || '')));
+          r.addEventListener('click', () => openMessage(ev.data));
+          drawer.appendChild(r);
+        });
+        row.appendChild(drawer);
+        row.addEventListener('click', (e) => {
+          if (e.target.closest('.bundle-drawer-row')) return;
+          row.classList.toggle('expanded');
+        });
+        list.appendChild(row);
+      } else {
+        evs.forEach(ev => list.appendChild(renderFeedItem(ev, 'imbox', offset + idx)));
+      }
+      idx += evs.length;
+    });
   }
 
   function renderPeople() {

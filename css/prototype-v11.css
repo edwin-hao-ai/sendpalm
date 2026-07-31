@@ -10589,3 +10589,26 @@ button:focus-visible, input:focus-visible {
 .snippets-remove:hover { color: var(--red); background: rgba(255, 59, 48, 0.08); }
 .snippets-empty { font-size: 13px; color: var(--text-secondary); padding: 12px; text-align: center; }
 .snippets-add-btn { margin-top: 12px; }
+
+/* P4 Task J: sender bundles */
+.feed-card-bundle { background: var(--surface-2); cursor: pointer; }
+.feed-card-bundle-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--accent);
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+.bundle-drawer { display: none; flex-direction: column; gap: 4px; padding-top: 8px; }
+.feed-card-bundle.expanded .bundle-drawer { display: flex; }
+.bundle-drawer-row {
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+}
+.bundle-drawer-row:hover { background: var(--accent-soft); }
+.bundle-drawer-line { font-weight: 600; color: var(--text-primary); }
+.bundle-drawer-meta { font-size: 11px; color: var(--text-secondary); }
