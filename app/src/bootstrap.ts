@@ -41,6 +41,7 @@ import {
 import { seedIfEmpty } from "./seed/seed";
 
 export const STORE_PATH = "sendpalm.prefs.json";
+export { load } from "@tauri-apps/plugin-store";
 
 export async function initApp() {
   setLoading(true);

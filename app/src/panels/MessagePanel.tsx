@@ -2,7 +2,7 @@
  * Spec: prototype-v11 §3.3 + P4 features.
  */
 
-import { Show, For, createMemo, createResource } from "solid-js";
+import { Show, For, createMemo, createResource, createSignal } from "solid-js";
 import {
   getContact,
   getMessage,
@@ -18,6 +18,7 @@ import {
 import { setDetailOpen, setSelectedMessageId, setComposeOpen, showToast } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
+import { FollowUpPicker } from "../components/FollowUpPicker";
 import { uid } from "../utils/id";
 import { addDays, isoNow, relativeTime } from "../utils/date";
 import type { Clip, FollowUp, Sticky } from "../types";
@@ -106,6 +107,8 @@ export function MessagePanel(props: { messageId: string }) {
     (followUps() ?? []).filter((f) => f.msgId === props.messageId)
   );
 
+  const [fuPickerOpen, setFuPickerOpen] = createSignal(false);
+
   const addFollowUp = async (days: number) => {
     const fu: FollowUp = {
       id: uid("fu"),
@@ -117,6 +120,7 @@ export function MessagePanel(props: { messageId: string }) {
     await refetchFU();
     showToast({ message: `跟进已设 · ${days} 天后`, kind: "success" });
   };
+  void addFollowUp;
 
   const markFollowUpDone = async (id: string) => {
     const fu = (followUps() ?? []).find((x) => x.id === id);
@@ -305,11 +309,13 @@ export function MessagePanel(props: { messageId: string }) {
           <ActionBtn icon="ph-clock" label={message()!.replyLater ? "Unmark Later" : "Later"} active={!!message()!.replyLater} onClick={toggleReplyLater} />
           <ActionBtn icon="ph-push-pin" label={message()!.setAside ? "Unmark Aside" : "Save"} active={!!message()!.setAside} onClick={toggleSetAside} />
           <ActionBtn icon="ph-arrow-fat-line-up" label="Remind" onClick={bubbleUp} />
-          <ActionBtn icon="ph-bell-ringing" label="Follow-up" onClick={() => addFollowUp(3)} />
+          <ActionBtn icon="ph-bell-ringing" label="Follow-up" onClick={() => setFuPickerOpen(true)} />
           <ActionBtn icon="ph-note" label="Sticky" onClick={addSticky} />
           <ActionBtn icon="ph-bookmark-simple" label="Clip" onClick={addClip} />
         </div>
       </Show>
+
+      <FollowUpPicker open={fuPickerOpen()} onClose={() => setFuPickerOpen(false)} msgId={props.messageId} />
     </div>
   );
 }

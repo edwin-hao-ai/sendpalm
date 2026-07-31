@@ -1,36 +1,6 @@
 import { Empty } from "../components/Empty";
 import { setView } from "../stores/ui";
 
-export function Gate() {
-  return <Placeholder title="Gate (Screener)" milestone="M1" />;
-}
-export function Stream() {
-  return <Placeholder title="Stream" milestone="M1" />;
-}
-export function Records() {
-  return <Placeholder title="Records" milestone="M1" />;
-}
-export function Trash() {
-  return <Placeholder title="Trash" milestone="M1" />;
-}
-export function Spam() {
-  return <Placeholder title="Spam" milestone="M1" />;
-}
-export function Contacts() {
-  return <Placeholder title="Contacts" milestone="M5" />;
-}
-export function Companies() {
-  return <Placeholder title="Companies" milestone="M5" />;
-}
-export function Calendar() {
-  return <Placeholder title="Calendar" milestone="M5" />;
-}
-export function Files() {
-  return <Placeholder title="Files" milestone="M5" />;
-}
-export function Insights() {
-  return <Placeholder title="Insights" milestone="M5" />;
-}
 export function Drafts() {
   return <Placeholder title="Drafts" milestone="M3" />;
 }
@@ -45,6 +15,21 @@ export function Search() {
 }
 export function Settings() {
   return <Placeholder title="Settings" milestone="M7" />;
+}
+export function Insights() {
+  return <Placeholder title="Insights" milestone="M5" />;
+}
+export function Files() {
+  return <Placeholder title="Files" milestone="M5" />;
+}
+export function Companies() {
+  return <Placeholder title="Companies" milestone="M5" />;
+}
+export function Contacts() {
+  return <Placeholder title="Contacts" milestone="M5" />;
+}
+export function Calendar() {
+  return <Placeholder title="Calendar" milestone="M5" />;
 }
 
 function Placeholder(props: { title: string; milestone: string }) {

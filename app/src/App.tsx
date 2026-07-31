@@ -15,6 +15,7 @@ import { CommandPalette } from "./search/CommandPalette";
 import { LiveSearch } from "./search/LiveSearch";
 import { NotificationPanel } from "./notifications/NotificationPanel";
 import { DropBar } from "./components/DropBar";
+import { Compose } from "./compose/Compose";
 import { initApp } from "./bootstrap";
 import {
   detailOpen,
@@ -72,6 +73,7 @@ export default function App() {
           <LiveSearch />
         </Show>
         <ToastStack />
+        <Compose />
         <Show
           when={!onboardingCompleted() && onboardingStep() !== null}
         >
