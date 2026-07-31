@@ -12,6 +12,8 @@
     notificationsOpen: false,
     composeOpen: false,
     searchQuery: '',
+    searchFilter: 'all',
+    selectedSearchResult: null,
     peopleGroupBy: 'all',
     selectedCompanyName: null,
     companyTab: 'People',
@@ -789,6 +791,16 @@
           renderTopBar();
           renderMain();
         }
+        if (e.key === 'Enter') {
+          const value = searchInput.value.trim();
+          if (!value) return;
+          state.view = 'search';
+          state.searchQuery = value;
+          state.searchFilter = 'all';
+          state.selectedSearchResult = null;
+          renderTopBar();
+          renderMain();
+        }
       });
       searchWrap.appendChild(icon('ph-magnifying-glass'));
       searchWrap.appendChild(searchInput);
@@ -913,6 +925,7 @@
       drafts: 'Drafts',
       agent: 'Agent',
       settings: 'Settings',
+      search: 'Search',
       trash: 'Trash',
       spam: 'Spam',
     };
@@ -1223,6 +1236,8 @@
       viewEl = renderDrafts();
     } else if (state.view === 'settings') {
       viewEl = renderSettings();
+    } else if (state.view === 'search') {
+      viewEl = renderSearchView();
     } else {
       viewEl = el('div', 'view view-placeholder', viewTitle(state.view));
     }
@@ -1242,6 +1257,7 @@
         agent: 'Your AI workspace: sessions, tasks, drafts, and memory.',
         drafts: 'Messages you are working on.',
         settings: 'Preferences and account options.',
+        search: 'Results across people, messages, files, meetings, and tasks.',
         trash: 'Deleted emails.',
         spam: 'Emails marked as spam.',
       };
@@ -6584,6 +6600,321 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
       default: content.appendChild(renderProfileSection()); break;
     }
     container.appendChild(content);
+
+    return container;
+  }
+
+  // Task 8: global search
+  function escapeRegExp(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function highlightText(text, q) {
+    if (!q) return document.createTextNode(text || '');
+    const lower = q.toLowerCase();
+    const str = String(text || '');
+    const idx = str.toLowerCase().indexOf(lower);
+    if (idx === -1) return document.createTextNode(str);
+    const frag = document.createDocumentFragment();
+    if (idx > 0) frag.appendChild(document.createTextNode(str.slice(0, idx)));
+    const mark = el('mark', 'search-highlight', str.slice(idx, idx + q.length));
+    frag.appendChild(mark);
+    const rest = str.slice(idx + q.length);
+    if (rest) frag.appendChild(highlightText(rest, q));
+    return frag;
+  }
+
+  function searchContacts(q) {
+    const qq = q.toLowerCase();
+    return (D.contacts || []).filter(c => {
+      const hay = [
+        c.name, c.firstName, c.lastName, c.nickname, c.company, c.title,
+        c.notes, c.em, c.ph,
+        ...(c.topics || []),
+        ...(c.emails || []).map(e => e.value),
+        ...(c.phones || []).map(p => p.value)
+      ].join(' ');
+      return hay.toLowerCase().includes(qq);
+    });
+  }
+
+  function searchMessages(q) {
+    const qq = q.toLowerCase();
+    return (D._msgs || []).filter(m => {
+      const c = getContact(m.pid);
+      const hay = [
+        m.subj, m.prev, m.body, m.fm, m.tag, m.ch,
+        c ? c.name : '',
+        ...(m.at || [])
+      ].join(' ');
+      return hay.toLowerCase().includes(qq);
+    });
+  }
+
+  function searchFiles(q) {
+    const qq = q.toLowerCase();
+    return (D._files || []).filter(f => {
+      const c = getContact(f.pid);
+      const hay = [f.name, f.tp, f.ch, f.md, c ? c.name : ''].join(' ');
+      return hay.toLowerCase().includes(qq);
+    });
+  }
+
+  function searchMeetings(q) {
+    const qq = q.toLowerCase();
+    return (D.events || D._meetings || []).filter(m => {
+      const hay = [
+        m.title, m.ppl, m.dt, m.tm, m.notes, m.post,
+        ...(m.prep || [])
+      ].join(' ');
+      return hay.toLowerCase().includes(qq);
+    });
+  }
+
+  function searchTasks(q) {
+    const qq = q.toLowerCase();
+    return (D.tasks || []).filter(t => {
+      const hay = [t.title, t.description, t.status, t.priority, t.dueDate].join(' ');
+      return hay.toLowerCase().includes(qq);
+    });
+  }
+
+  function renderSearchResultRow(opts) {
+    const { type, iconName, title, meta, preview, onClick, selected } = opts;
+    const row = el('div', 'search-result' + (selected ? ' selected' : ''));
+    row.appendChild(icon(iconName));
+    const body = el('div', 'search-result-body');
+    const top = el('div', 'search-result-top');
+    const titleEl = el('div', 'search-result-title');
+    titleEl.appendChild(highlightText(title, state.searchQuery));
+    top.appendChild(titleEl);
+    if (meta) {
+      const metaEl = el('div', 'search-result-meta');
+      if (typeof meta === 'string') metaEl.textContent = meta;
+      else metaEl.appendChild(meta);
+      top.appendChild(metaEl);
+    }
+    body.appendChild(top);
+    if (preview) {
+      const previewEl = el('div', 'search-result-preview');
+      if (typeof preview === 'string') previewEl.appendChild(highlightText(preview, state.searchQuery));
+      else previewEl.appendChild(preview);
+      body.appendChild(previewEl);
+    }
+    row.appendChild(body);
+    row.addEventListener('click', () => {
+      state.selectedSearchResult = { type, id: opts.id };
+      onClick();
+      renderMain();
+    });
+    return row;
+  }
+
+  function renderSearchEmpty(text) {
+    return el('div', 'search-empty', text);
+  }
+
+  function renderTaskPanel(task) {
+    const wrapper = el('div', 'panel-wrapper');
+    const header = el('div', 'panel-header');
+    const closeBtn = el('button', 'icon-btn panel-close');
+    closeBtn.appendChild(icon('ph-x'));
+    closeBtn.addEventListener('click', closePanel);
+    header.appendChild(closeBtn);
+    header.appendChild(el('div', 'panel-title', 'Task'));
+    wrapper.appendChild(header);
+
+    const content = el('div', 'panel-content');
+    content.appendChild(el('h2', 'meeting-title', task.title || 'Untitled task'));
+    const rows = [
+      { icon: 'ph-check-circle', label: 'Status', value: (task.status || 'todo') },
+      { icon: 'ph-flag', label: 'Priority', value: (task.priority || 'medium') },
+      { icon: 'ph-calendar-blank', label: 'Due', value: [task.dueDate, task.dueTime].filter(Boolean).join(' ') || 'No due date' },
+    ];
+    if (task.description) {
+      rows.push({ icon: 'ph-note', label: 'Notes', value: task.description });
+    }
+    const info = el('div', 'meeting-info-list');
+    rows.forEach(r => {
+      const row = el('div', 'meeting-info-row');
+      const labelWrap = el('div', 'meeting-info-label');
+      labelWrap.appendChild(icon(r.icon));
+      labelWrap.appendChild(el('span', '', r.label));
+      row.appendChild(labelWrap);
+      row.appendChild(el('div', 'meeting-info-value', r.value));
+      info.appendChild(row);
+    });
+    content.appendChild(info);
+
+    const actions = el('div', 'panel-actions');
+    const editBtn = el('button', 'btn btn-primary btn-sm');
+    editBtn.appendChild(icon('ph-pencil-simple'));
+    editBtn.appendChild(el('span', '', 'Edit'));
+    editBtn.addEventListener('click', () => openTaskModal(task.id));
+    actions.appendChild(editBtn);
+    content.appendChild(actions);
+
+    wrapper.appendChild(content);
+    return wrapper;
+  }
+
+  function renderSearchView() {
+    const container = el('div', 'view search-view');
+    const q = (state.searchQuery || '').trim();
+
+    const layout = el('div', 'search-layout');
+
+    // Left filters
+    const filters = [
+      { id: 'all', label: 'All', icon: 'ph-magnifying-glass' },
+      { id: 'people', label: 'People', icon: 'ph-users' },
+      { id: 'messages', label: 'Messages', icon: 'ph-envelope-simple' },
+      { id: 'files', label: 'Files', icon: 'ph-files' },
+      { id: 'meetings', label: 'Meetings', icon: 'ph-calendar-blank' },
+      { id: 'tasks', label: 'Tasks', icon: 'ph-check-circle' },
+    ];
+
+    const counts = {
+      all: 0,
+      people: searchContacts(q).length,
+      messages: searchMessages(q).length,
+      files: searchFiles(q).length,
+      meetings: searchMeetings(q).length,
+      tasks: searchTasks(q).length,
+    };
+    counts.all = counts.people + counts.messages + counts.files + counts.meetings + counts.tasks;
+
+    const sidebar = el('div', 'search-filters');
+    filters.forEach(f => {
+      const active = state.searchFilter === f.id;
+      const btn = el('button', 'search-filter' + (active ? ' active' : ''));
+      btn.appendChild(icon(f.icon));
+      const text = el('span', '', f.label);
+      btn.appendChild(text);
+      const count = el('span', 'search-filter-count', String(counts[f.id] || 0));
+      btn.appendChild(count);
+      btn.addEventListener('click', () => {
+        state.searchFilter = f.id;
+        state.selectedSearchResult = null;
+        renderMain();
+      });
+      sidebar.appendChild(btn);
+    });
+
+    // Center results
+    const results = el('div', 'search-results');
+
+    if (!q) {
+      results.appendChild(renderSearchEmpty('Type a query and press Enter to search across people, messages, files, meetings, and tasks.'));
+    } else if (counts[state.searchFilter] === 0) {
+      results.appendChild(renderSearchEmpty('No results for “' + q + '” in ' + state.searchFilter + '.'));
+    } else {
+      const activeFilter = state.searchFilter;
+      const sections = [];
+
+      if (activeFilter === 'all' || activeFilter === 'people') {
+        const items = activeFilter === 'people' ? searchContacts(q) : searchContacts(q).slice(0, 4);
+        if (items.length) sections.push({ type: 'people', label: 'People', items });
+      }
+      if (activeFilter === 'all' || activeFilter === 'messages') {
+        const items = activeFilter === 'messages' ? searchMessages(q) : searchMessages(q).slice(0, 5);
+        if (items.length) sections.push({ type: 'messages', label: 'Messages', items });
+      }
+      if (activeFilter === 'all' || activeFilter === 'files') {
+        const items = activeFilter === 'files' ? searchFiles(q) : searchFiles(q).slice(0, 4);
+        if (items.length) sections.push({ type: 'files', label: 'Files', items });
+      }
+      if (activeFilter === 'all' || activeFilter === 'meetings') {
+        const items = activeFilter === 'meetings' ? searchMeetings(q) : searchMeetings(q).slice(0, 4);
+        if (items.length) sections.push({ type: 'meetings', label: 'Meetings', items });
+      }
+      if (activeFilter === 'all' || activeFilter === 'tasks') {
+        const items = activeFilter === 'tasks' ? searchTasks(q) : searchTasks(q).slice(0, 4);
+        if (items.length) sections.push({ type: 'tasks', label: 'Tasks', items });
+      }
+
+      sections.forEach(section => {
+        const sectionEl = el('div', 'search-section');
+        const headerEl = el('div', 'search-section-header');
+        headerEl.appendChild(el('h3', '', section.label));
+        if (activeFilter === 'all') {
+          const seeAll = el('button', 'btn-text', 'See all');
+          seeAll.addEventListener('click', () => {
+            state.searchFilter = section.type;
+            state.selectedSearchResult = null;
+            renderMain();
+          });
+          headerEl.appendChild(seeAll);
+        }
+        sectionEl.appendChild(headerEl);
+
+        section.items.forEach(item => {
+          const selected = state.selectedSearchResult &&
+            state.selectedSearchResult.type === section.type &&
+            state.selectedSearchResult.id === item.id;
+
+          if (section.type === 'people') {
+            const c = item;
+            sectionEl.appendChild(renderSearchResultRow({
+              type: 'people', id: c.id, iconName: 'ph-user',
+              title: c.name,
+              meta: [c.company, c.title].filter(Boolean).join(' · ') || c.em || '',
+              preview: c.notes ? c.notes.slice(0, 120) : '',
+              selected,
+              onClick: () => openContact(c.id)
+            }));
+          } else if (section.type === 'messages') {
+            const m = item;
+            const c = getContact(m.pid);
+            sectionEl.appendChild(renderSearchResultRow({
+              type: 'messages', id: m.id, iconName: channelIconName(m.ch),
+              title: m.subj || 'No subject',
+              meta: (c ? c.name : m.fm || 'Unknown') + ' · ' + (m.tm || ''),
+              preview: m.prev || m.body || '',
+              selected,
+              onClick: () => openMessage(m)
+            }));
+          } else if (section.type === 'files') {
+            const f = item;
+            const c = getContact(f.pid);
+            sectionEl.appendChild(renderSearchResultRow({
+              type: 'files', id: f.id, iconName: fileIconForName(f.name),
+              title: f.name,
+              meta: (c ? c.name : 'Unknown') + ' · ' + (f.sz || '') + ' · ' + (f.dt || ''),
+              preview: f.md ? f.md.slice(0, 140) : '',
+              selected,
+              onClick: () => openFile(f)
+            }));
+          } else if (section.type === 'meetings') {
+            const m = item;
+            sectionEl.appendChild(renderSearchResultRow({
+              type: 'meetings', id: m.id, iconName: 'ph-calendar-blank',
+              title: m.title,
+              meta: [m.dt, m.tm].filter(Boolean).join(' · '),
+              preview: m.ppl || '',
+              selected,
+              onClick: () => openMeeting(m)
+            }));
+          } else if (section.type === 'tasks') {
+            const t = item;
+            sectionEl.appendChild(renderSearchResultRow({
+              type: 'tasks', id: t.id, iconName: 'ph-check-circle',
+              title: t.title,
+              meta: [t.status, t.priority, t.dueDate].filter(Boolean).join(' · '),
+              preview: t.description ? t.description.slice(0, 140) : '',
+              selected,
+              onClick: () => openDetailPanel(renderTaskPanel(t))
+            }));
+          }
+        });
+
+        results.appendChild(sectionEl);
+      });
+    }
+
+    layout.appendChild(sidebar);
+    layout.appendChild(results);
+    container.appendChild(layout);
 
     return container;
   }
