@@ -1803,7 +1803,8 @@ body {
   border-radius: var(--radius-lg);
   cursor: pointer;
   transition: transform 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
-  max-width: 720px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .bubble-up-banner:hover {
@@ -10745,3 +10746,29 @@ button:focus-visible, input:focus-visible {
   border-top: 1px solid var(--border);
   text-align: center;
 }
+
+/* Pending pile: Focus & Reply action button */
+.imbox-pile-focus-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out);
+}
+.imbox-pile-focus-btn:hover { background: var(--accent); color: #fff; }
+.imbox-pile-focus-btn i { font-size: 13px; }
+.imbox-pile-header { display: flex; align-items: center; gap: 10px; }
+
+.pile-drawer-actions { display: flex; gap: 8px; padding: 4px 0; flex-wrap: wrap; }
+.pile-focus-btn { display: inline-flex; align-items: center; gap: 6px; }
+.pile-focus-btn i { font-size: 14px; }

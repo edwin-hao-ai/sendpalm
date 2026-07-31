@@ -2982,6 +2982,19 @@
     header.appendChild(icon(iconName));
     header.appendChild(el('span', '', title));
     header.appendChild(el('span', 'imbox-pile-count', events.length));
+    // Pending pile gets a one-click "Focus & Reply" action (HEY-style distraction-free reply mode).
+    if (pileId === 'pending' && events.length > 0) {
+      const focusBtn = el('button', 'imbox-pile-focus-btn');
+      focusBtn.type = 'button';
+      focusBtn.title = 'Focus & Reply (o)';
+      focusBtn.appendChild(icon('ph-target'));
+      focusBtn.appendChild(el('span', '', 'Focus & Reply'));
+      focusBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        startFocusReply();
+      });
+      header.appendChild(focusBtn);
+    }
     pile.appendChild(header);
     header.addEventListener('click', () => {
       state.expandedPile = state.expandedPile === pileId ? null : pileId;
@@ -3007,9 +3020,16 @@
         const more = el('div', 'pile-drawer-more', '+' + (events.length - 5) + ' more');
         drawer.appendChild(more);
       }
+      const focusInlineBtn = el('button', 'pile-board-btn pile-focus-btn');
+      focusInlineBtn.appendChild(icon('ph-target'));
+      focusInlineBtn.appendChild(el('span', '', 'Focus & Reply'));
+      focusInlineBtn.addEventListener('click', (e) => { e.stopPropagation(); startFocusReply(); });
       const boardBtn = el('button', 'pile-board-btn', 'Open ' + title + ' board');
       boardBtn.addEventListener('click', () => setView(pileView));
-      drawer.appendChild(boardBtn);
+      const actions = el('div', 'pile-drawer-actions');
+      actions.appendChild(focusInlineBtn);
+      actions.appendChild(boardBtn);
+      drawer.appendChild(actions);
       pile.appendChild(drawer);
     }
     return pile;
@@ -3112,6 +3132,7 @@
     container.appendChild(list);
 
     const workflowItems = [
+      { events: replyLater, title: 'Pending', icon: 'ph-clock', id: 'pending', view: 'replyLater' },
       { events: setAside, title: 'Saved', icon: 'ph-push-pin', id: 'saved', view: 'setAside' },
       { events: bubbleUp, title: 'Remind', icon: 'ph-arrow-fat-line-up', id: 'remind', view: 'bubbleUp' },
     ].filter(item => item.events.length > 0);
@@ -8113,6 +8134,19 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     });
   }
 
+  function startFocusReply() {
+    const all = buildFeed();
+    const pending = all.filter(e => isInBucketView(e, 'replyLater'));
+    if (!pending.length) {
+      showToast('Pending is empty');
+      return;
+    }
+    state.focusReplyOpen = true;
+    state.focusReplyIndex = 0;
+    state.focusReplyCompletedIds.clear();
+    renderMain();
+  }
+
   function renderContactNotesTab(c) {
     const wrap = el('div', 'contact-notes-tab');
     const header = el('div', 'contact-notes-header');
@@ -12639,6 +12673,14 @@ ${D.stageSuggest[c.stage] || ''}
       if (shortcutSingleMatches(e, getShortcutById('new-message'))) {
         e.preventDefault();
         openCompose();
+      }
+      // HEY-style Focus & Reply mode: jump straight into distraction-free reply flow.
+      if (!isTyping && !e.metaKey && !e.ctrlKey && !e.altKey && (e.key === 'o' || e.key === 'O')) {
+        const inField = e.target.matches('input, textarea, select');
+        if (!inField) {
+          e.preventDefault();
+          startFocusReply();
+        }
       }
       if (!isTyping && state.view === 'calendar' && !e.metaKey && !e.ctrlKey && !e.altKey) {
         if (shortcutSingleMatches(e, getShortcutById('calendar-day'))) { e.preventDefault(); state.calendarView = 'day'; renderMain(); }
