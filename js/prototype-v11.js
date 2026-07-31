@@ -1205,6 +1205,19 @@
 
       sidebar.appendChild(sectionEl);
     });
+
+    // Footer: replay onboarding link (more discoverable than Settings → Profile).
+    const footer = el('div', 'sidebar-footer');
+    const replay = el('button', 'sidebar-replay-onboarding');
+    replay.appendChild(icon('ph-graduation-cap'));
+    replay.appendChild(el('span', '', 'Replay onboarding'));
+    replay.title = 'Walk through SendPalm features again';
+    replay.addEventListener('click', () => {
+      state.view = 'imbox';
+      startOnboarding();
+    });
+    footer.appendChild(replay);
+    sidebar.appendChild(footer);
   }
 
   function navBadgeCount(view) {
@@ -3114,6 +3127,13 @@
 
     if (newForYou.length === 0 && previouslySeen.length === 0 && replyLater.length === 0 && setAside.length === 0 && bubbleUp.length === 0) {
       container.appendChild(renderEmpty('重要的、需要你来处理的对话会出现在这里。', 'ph-inbox', 'Inbox 是给你的重要邮件', 'art-purple'));
+      // First-time empty Imbox hint: nudge users toward the onboarding tour.
+      if (state.onboardingCompleted && !state.onboardingTourHintShown) {
+        state.onboardingTourHintShown = true;
+        requestAnimationFrame(() => {
+          showToast('New here? Tap "Replay onboarding" in the sidebar to take a tour.', { duration: 8000 });
+        });
+      }
       return container;
     }
 
