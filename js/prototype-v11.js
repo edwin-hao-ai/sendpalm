@@ -495,13 +495,12 @@
 
     const sort = f.sort || 'newest';
     if (sort === 'oldest') {
-      result.sort((a, b) => meetingSortKey(a) - meetingSortKey(b));
+      return [...result].sort((a, b) => meetingSortKey(a) - meetingSortKey(b));
     } else if (sort === 'most_relevant') {
-      result.sort((a, b) => meetingRelevanceScore(b) - meetingRelevanceScore(a));
+      return [...result].sort((a, b) => meetingRelevanceScore(b) - meetingRelevanceScore(a));
     } else {
-      result.sort((a, b) => meetingSortKey(b) - meetingSortKey(a));
+      return [...result].sort((a, b) => meetingSortKey(b) - meetingSortKey(a));
     }
-    return result;
   }
 
   function confirmDestructive(message, onConfirm) {
@@ -1554,7 +1553,7 @@
       viewEl = el('div', 'view view-placeholder', viewTitle(state.view));
     }
 
-    if (state.view !== 'calendar' && state.view !== 'company') {
+    if (state.view !== 'calendar' && state.view !== 'company' && state.view !== 'search') {
       const header = el('div', 'view-header');
       const headerLeft = el('div', 'view-header-left');
       headerLeft.appendChild(el('h1', 'view-title', viewTitle(state.view)));
@@ -2536,9 +2535,9 @@
   }
 
   function computeCompanyHealth(contacts) {
-    const active = contacts.filter(c => c.grp === 'active');
     if (contacts.length === 0) return { score: 0, label: '—' };
-    const score = Math.round(active.length / contacts.length * 100);
+    const total = contacts.reduce((sum, c) => sum + (c.health || 0), 0);
+    const score = Math.round(total / contacts.length);
     return { score, label: score >= 70 ? 'Healthy' : score >= 40 ? 'At risk' : 'Cold' };
   }
 
@@ -7089,6 +7088,13 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     const container = el('div', 'view search-view');
     const q = (state.searchQuery || '').trim();
 
+    const header = el('div', 'view-header');
+    const headerLeft = el('div', 'view-header-left');
+    headerLeft.appendChild(el('h1', 'view-title', 'Search'));
+    headerLeft.appendChild(el('div', 'view-subtitle', 'Results across people, messages, files, meetings, and tasks.'));
+    header.appendChild(headerLeft);
+    container.appendChild(header);
+
     const layout = el('div', 'search-layout');
 
     // Left filters
@@ -7597,7 +7603,9 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
   ];
 
   function labelUsageCount(labelId) {
-    return (D.contacts || []).filter(c => (c.labels || []).includes(labelId)).length;
+    return (D.contacts || []).filter(c =>
+      (c.labels || []).includes(labelId) || (c.autoLabel || []).includes(labelId)
+    ).length;
   }
 
   function slugifyLabelId(name) {
@@ -7692,6 +7700,7 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
               D.labels = (D.labels || []).filter(l => l.id !== originalId);
               (D.contacts || []).forEach(c => {
                 c.labels = (c.labels || []).filter(id => id !== originalId);
+                c.autoLabel = (c.autoLabel || []).filter(id => id !== originalId);
               });
               closeCompose();
               renderMain();
@@ -7732,6 +7741,8 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
                 (D.contacts || []).forEach(c => {
                   const idx = (c.labels || []).indexOf(originalId);
                   if (idx !== -1) c.labels[idx] = newId;
+                  const autoIdx = (c.autoLabel || []).indexOf(originalId);
+                  if (autoIdx !== -1) c.autoLabel[autoIdx] = newId;
                 });
               }
               target.id = newId;
