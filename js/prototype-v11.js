@@ -1005,6 +1005,84 @@
     return list;
   }
 
+  // P4 Task N: error state helper.
+  function renderErrorState(opts) {
+    const wrap = el('div', 'error-state');
+    wrap.appendChild(icon(opts.icon || 'ph-warning-circle'));
+    wrap.appendChild(el('h2', '', opts.title || '出错了'));
+    wrap.appendChild(el('p', '', opts.message || '请稍后重试。'));
+    if (opts.retry) {
+      const retryBtn = el('button', 'btn btn-primary btn-sm', opts.retryLabel || 'Retry');
+      retryBtn.addEventListener('click', opts.retry);
+      wrap.appendChild(retryBtn);
+    }
+    return wrap;
+  }
+
+  // P4 Task O: build live-search dropdown results from topbar search input.
+  function buildLiveSearchResults(q) {
+    if (!q) return [];
+    const lower = q.toLowerCase();
+    const results = [];
+    // People
+    (D.contacts || []).filter(c => {
+      const name = (c.name || '').toLowerCase();
+      const company = (c.company || '').toLowerCase();
+      return name.includes(lower) || company.includes(lower);
+    }).slice(0, 4).forEach(c => {
+      results.push({
+        kind: 'People',
+        icon: 'ph-user',
+        label: c.name,
+        sub: c.company,
+        action: () => { state.view = 'contacts'; state.selectedContactId = c.id; }
+      });
+    });
+    // Messages
+    (D._msgs || []).filter(m => {
+      const subj = (m.subj || '').toLowerCase();
+      return subj.includes(lower);
+    }).slice(0, 4).forEach(m => {
+      results.push({
+        kind: 'Messages',
+        icon: 'ph-envelope-simple',
+        label: m.subj || '(无主题)',
+        sub: (m.fm || '') + ' · ' + (m.tm || ''),
+        action: () => openMessage(m)
+      });
+    });
+    // Files
+    (D._files || []).filter(f => (f.name || '').toLowerCase().includes(lower)).slice(0, 3).forEach(f => {
+      results.push({
+        kind: 'Files',
+        icon: 'ph-file',
+        label: f.name,
+        sub: '附件 · ' + (f.sz || ''),
+        action: () => openFile(f)
+      });
+    });
+    // Views
+    const views = [
+      { id: 'imbox', label: 'Go to Inbox', icon: 'ph-tray' },
+      { id: 'contacts', label: 'Go to Contacts', icon: 'ph-users' },
+      { id: 'calendar', label: 'Go to Calendar', icon: 'ph-calendar' },
+      { id: 'files', label: 'Go to Files', icon: 'ph-files' },
+      { id: 'insights', label: 'Go to Insights', icon: 'ph-chart-bar' },
+      { id: 'followups', label: 'Go to Follow-ups', icon: 'ph-bell-ringing' },
+      { id: 'clips', label: 'Go to Clips', icon: 'ph-bookmarks-simple' },
+    ];
+    views.filter(v => v.label.toLowerCase().includes(lower) || v.id.includes(lower)).slice(0, 4).forEach(v => {
+      results.push({
+        kind: 'Views',
+        icon: v.icon,
+        label: v.label,
+        sub: '导航',
+        action: () => setView(v.id)
+      });
+    });
+    return results;
+  }
+
   function setView(view) {
     state.view = view;
     state.cursorIndex = -1;
@@ -1170,33 +1248,94 @@
     if (state.searchOpen) {
       const searchWrap = el('div', 'topbar-search topbar-search-active');
       const searchInput = el('input', 'search-input');
-      searchInput.placeholder = 'Search people, messages, files...';
+      searchInput.placeholder = 'Search people, messages, files…';
       searchInput.value = state.searchQuery;
-      searchInput.addEventListener('input', (e) => {
-        state.searchQuery = e.target.value.trim();
+
+      // P4 Task O: live debounced search dropdown.
+      const dropdown = el('div', 'topbar-search-dropdown hidden');
+      let dropdownIndex = 0;
+      let dropdownResults = [];
+
+      function renderDropdown(q) {
+        dropdown.innerHTML = '';
+        dropdownIndex = 0;
+        if (!q) { dropdown.classList.add('hidden'); return; }
+        dropdownResults = buildLiveSearchResults(q);
+        if (!dropdownResults.length) {
+          dropdown.classList.remove('hidden');
+          dropdown.appendChild(el('div', 'topbar-search-empty', 'No quick results — press Enter for full search'));
+          return;
+        }
+        dropdownResults.forEach((r, i) => {
+          const item = el('div', 'topbar-search-item' + (i === 0 ? ' selected' : ''));
+          item.appendChild(icon(r.icon));
+          const textWrap = el('div', 'topbar-search-item-text');
+          textWrap.appendChild(el('span', 'topbar-search-item-label', r.label));
+          if (r.sub) textWrap.appendChild(el('span', 'topbar-search-item-sub', r.sub));
+          item.appendChild(textWrap);
+          item.appendChild(el('span', 'topbar-search-item-kind', r.kind));
+          item.addEventListener('mousedown', (e) => { e.preventDefault(); r.action(); closeSearch(); });
+          item.addEventListener('mouseenter', () => { dropdownIndex = i; updateSelection(); });
+          dropdown.appendChild(item);
+        });
+        dropdown.appendChild(el('div', 'topbar-search-foot', '↑↓ navigate · Enter to open all results'));
+        dropdown.classList.remove('hidden');
+      }
+
+      function updateSelection() {
+        const items = dropdown.querySelectorAll('.topbar-search-item');
+        items.forEach((it, i) => it.classList.toggle('selected', i === dropdownIndex));
+      }
+
+      function closeSearch() {
+        state.searchOpen = false;
+        state.searchQuery = '';
+        renderTopBar();
         renderMain();
+      }
+
+      let debounceTimer;
+      searchInput.addEventListener('input', (e) => {
+        const value = e.target.value.trim();
+        state.searchQuery = value;
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => renderDropdown(value), 200);
+      });
+      searchInput.addEventListener('focus', () => {
+        if (searchInput.value.trim()) renderDropdown(searchInput.value.trim());
       });
       searchInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-          state.searchOpen = false;
-          state.searchQuery = '';
-          renderTopBar();
-          renderMain();
-        }
-        if (e.key === 'Enter') {
+        if (e.key === 'Escape') { closeSearch(); }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); dropdownIndex = Math.min(dropdownIndex + 1, dropdownResults.length - 1); updateSelection(); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); dropdownIndex = Math.max(dropdownIndex - 1, 0); updateSelection(); }
+        else if (e.key === 'Enter') {
+          e.preventDefault();
+          if (dropdownResults[dropdownIndex]) {
+            dropdownResults[dropdownIndex].action();
+            closeSearch();
+            return;
+          }
           const value = searchInput.value.trim();
           if (!value) return;
           state.view = 'search';
           state.searchQuery = value;
           state.searchFilter = 'all';
           state.selectedSearchResult = null;
-          renderTopBar();
-          renderMain();
+          closeSearch();
         }
       });
       searchWrap.appendChild(icon('ph-magnifying-glass'));
       searchWrap.appendChild(searchInput);
+      searchWrap.appendChild(dropdown);
       center.appendChild(searchWrap);
+
+      // Close dropdown when clicking outside.
+      setTimeout(() => {
+        const onDocClick = (e) => {
+          if (!searchWrap.contains(e.target)) dropdown.classList.add('hidden');
+        };
+        document.addEventListener('click', onDocClick);
+      }, 0);
     } else {
       const logo = el('a', 'topbar-logo');
       logo.href = '#';

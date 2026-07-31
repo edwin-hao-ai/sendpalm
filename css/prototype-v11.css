@@ -10683,3 +10683,65 @@ button:focus-visible, input:focus-visible {
 .clip-text { font-size: 14px; color: var(--text-primary); font-family: var(--font-mono); word-break: break-word; }
 .clip-meta { font-size: 11px; color: var(--text-secondary); }
 .clip-actions { display: flex; gap: 6px; align-items: center; }
+
+/* P4 Task N: error state */
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 60px 20px;
+  color: var(--text-secondary);
+}
+.error-state i { font-size: 48px; color: #DC2626; }
+.error-state h2 { font-size: 18px; font-weight: 700; color: var(--text-primary); margin: 0; }
+.error-state p { font-size: 13px; text-align: center; max-width: 360px; margin: 0; }
+
+/* P4 Task O: live search dropdown */
+.topbar-search { position: relative; }
+.topbar-search-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: rgba(255,255,255,0.98);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.12);
+  backdrop-filter: blur(16px);
+  z-index: 50;
+  max-height: 380px;
+  overflow: auto;
+}
+.topbar-search-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+.topbar-search-item:last-child { border-bottom: none; }
+.topbar-search-item.selected { background: var(--accent-soft); }
+.topbar-search-item i {
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 16px;
+}
+.topbar-search-item-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.topbar-search-item-label { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.topbar-search-item-sub { font-size: 11px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-search-item-kind {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--text-secondary); padding: 2px 6px; border-radius: 4px; background: var(--surface-2);
+}
+.topbar-search-empty { padding: 16px; text-align: center; font-size: 13px; color: var(--text-secondary); }
+.topbar-search-foot {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
