@@ -572,6 +572,11 @@ D.shortcuts = [
 // Backwards-compatible top-level alias for older prototype versions.
 const accounts = D.accounts;
 
+D.followUps = [
+  { id: 'fu1', msgId: 'zl-2', contactId: 'zl', dueAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 2).toISOString(), status: 'pending', createdAt: new Date(Date.now() - 86400000).toISOString() },
+  { id: 'fu2', msgId: 'wy-2', contactId: 'wy', dueAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), status: 'pending', createdAt: new Date(Date.now() - 86400000 * 5).toISOString() },
+];
+
 // Notification center (P4 Task B). Seed entries so the bell shows real-looking content.
 D.notifications = [
   { id: 'n1', type: 'remind', title: '3 messages bubbled up', body: '张磊 · Re: Q4 合同提案 +2 more', at: new Date(Date.now() - 1000 * 60 * 30).toISOString(), read: false, ref: { view: 'bubbleUp' } },

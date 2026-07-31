@@ -10541,3 +10541,34 @@ button:focus-visible, input:focus-visible {
 .compose-send-label { margin-left: 4px; }
 
 .schedule-quick-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* P4 Task H: follow-up view + picker */
+.followups-view { padding: 24px; max-width: 720px; }
+.followup-group-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  padding: 16px 0 8px;
+}
+.followup-card {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; margin-bottom: 6px;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+.followup-card.done { opacity: 0.5; }
+.followup-avatar { width: 36px; height: 36px; border-radius: 50%; }
+.followup-body { flex: 1; min-width: 0; }
+.followup-subject { font-size: 14px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.followup-meta { font-size: 12px; color: var(--text-secondary); }
+.followup-actions { display: flex; align-items: center; gap: 6px; }
+.followup-remove {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-secondary); padding: 4px; border-radius: 6px;
+}
+.followup-remove:hover { color: var(--red); background: rgba(255, 59, 48, 0.08); }
+
+.followup-presets { display: flex; gap: 8px; flex-wrap: wrap; }
+.followup-preset-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }

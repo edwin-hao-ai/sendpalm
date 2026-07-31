@@ -156,6 +156,7 @@
         { id: 'files', label: 'Files', icon: 'ph-files', hint: '⌘7' },
         { id: 'insights', label: 'Insights', icon: 'ph-chart-bar', hint: '⌘8' },
         { id: 'agent', label: 'Agent', icon: 'ph-sparkle', hint: '⌘9' },
+        { id: 'followups', label: 'Follow-ups', icon: 'ph-bell-ringing', hint: '' },
       ]
     },
     {
@@ -1614,6 +1615,147 @@
     });
   }
 
+  function openFollowUpPicker(m) {
+    const now = new Date();
+    const presets = [
+      { label: 'In 1 day', days: 1 },
+      { label: 'In 3 days', days: 3 },
+      { label: 'In 1 week', days: 7 },
+      { label: 'In 2 weeks', days: 14 },
+    ];
+    let pickedDays = 3;
+    openModalCard({
+      title: 'Set follow-up',
+      renderBody: (body) => {
+        const stack = el('div', 'form-stack');
+        const row = el('div', 'followup-presets');
+        presets.forEach(p => {
+          const btn = el('button', 'btn btn-secondary btn-sm followup-preset-btn');
+          btn.type = 'button';
+          btn.textContent = p.label;
+          if (p.days === pickedDays) btn.classList.add('active');
+          btn.addEventListener('click', () => {
+            pickedDays = p.days;
+            Array.from(row.children).forEach(c => c.classList.toggle('active', c === btn));
+            const next = new Date(now.getTime() + pickedDays * 24 * 60 * 60 * 1000);
+            dateInput.value = formatDateInput(next);
+          });
+          row.appendChild(btn);
+        });
+        stack.appendChild(row);
+        const dateInput = elAttr('input', '', { type: 'date', value: formatDateInput(new Date(now.getTime() + pickedDays * 24 * 60 * 60 * 1000)) });
+        const dateWrap = renderFormGroup('Follow up by', dateInput, 'If no reply by this date, the message surfaces in your Imbox.');
+        stack.appendChild(dateWrap);
+        body.appendChild(stack);
+      },
+      renderActions: (actions) => {
+        const cancel = el('button', 'btn-secondary', 'Cancel');
+        cancel.addEventListener('click', () => closeCompose());
+        const set = el('button', 'btn-primary', 'Set follow-up');
+        set.addEventListener('click', () => {
+          const dateInput = document.querySelector('.modal-card-body input[type="date"]');
+          const pickedDate = dateInput ? parseDateTimeInputs(dateInput.value, '09:00') : new Date(now.getTime() + pickedDays * 86400000);
+          if (!pickedDate || pickedDate.getTime() <= Date.now()) {
+            showToast('Pick a date in the future');
+            return;
+          }
+          setFollowUp(m, pickedDate);
+          closeCompose();
+          renderMain();
+          showToast('Follow-up set for ' + pickedDate.toLocaleDateString());
+        });
+        actions.appendChild(cancel);
+        actions.appendChild(set);
+      }
+    });
+  }
+
+  function setFollowUp(m, dueAt) {
+    const msgKey = m.pid + ':' + (m.subj || '');
+    // Remove any existing follow-up for this message.
+    D.followUps = (D.followUps || []).filter(f => f.msgKey !== msgKey);
+    D.followUps.push({
+      id: 'fu-' + Date.now(),
+      msgKey,
+      msgId: m._key || null,
+      pid: m.pid,
+      contactId: m.pid,
+      subject: m.subj || '',
+      dueAt: dueAt.toISOString(),
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    });
+  }
+
+  function completeFollowUp(id) {
+    const f = (D.followUps || []).find(x => x.id === id);
+    if (f) f.status = 'done';
+    renderMain();
+    showToast('Follow-up marked done');
+  }
+
+  function removeFollowUp(id) {
+    D.followUps = (D.followUps || []).filter(f => f.id !== id);
+    renderMain();
+    showToast('Follow-up removed');
+  }
+
+  function getFollowUpForMessage(m) {
+    if (!m) return null;
+    const msgKey = m.pid + ':' + (m.subj || '');
+    return (D.followUps || []).find(f => f.msgKey === msgKey && f.status === 'pending');
+  }
+
+  function followUpBucket(iso) {
+    const diff = new Date(iso).getTime() - Date.now();
+    if (diff < 0) return 'Overdue';
+    if (diff < 24 * 60 * 60 * 1000) return 'Today';
+    if (diff < 3 * 24 * 60 * 60 * 1000) return 'This week';
+    return 'Later';
+  }
+
+  function renderFollowUpsView() {
+    const container = el('div', 'view followups-view');
+    const all = (D.followUps || []).slice().sort((a, b) => new Date(a.dueAt) - new Date(b.dueAt));
+    if (all.length === 0) {
+      container.appendChild(renderEmpty('No follow-ups. Set one from any message to track unanswered threads.', 'ph-bell-ringing'));
+      return container;
+    }
+    const groups = { Overdue: [], Today: [], 'This week': [], Later: [] };
+    all.forEach(f => groups[followUpBucket(f.dueAt)].push(f));
+    Object.entries(groups).forEach(([groupName, items]) => {
+      if (!items.length) return;
+      container.appendChild(el('div', 'followup-group-title', groupName + ' (' + items.length + ')'));
+      items.forEach(f => {
+        const card = el('div', 'followup-card' + (f.status === 'done' ? ' done' : ''));
+        const c = D.getP(f.contactId);
+        if (c) {
+          const av = renderAvatar(c, 'followup-avatar', c.name[0]);
+          card.appendChild(av);
+        }
+        const body = el('div', 'followup-body');
+        body.appendChild(el('div', 'followup-subject', f.subject || 'No subject'));
+        body.appendChild(el('div', 'followup-meta', (c ? c.name : '') + ' · Due ' + new Date(f.dueAt).toLocaleDateString()));
+        card.appendChild(body);
+        const actions = el('div', 'followup-actions');
+        if (f.status !== 'done') {
+          const doneBtn = el('button', 'btn btn-secondary btn-sm', 'Mark done');
+          doneBtn.addEventListener('click', () => completeFollowUp(f.id));
+          actions.appendChild(doneBtn);
+        }
+        const removeBtn = el('button', 'btn-icon followup-remove');
+        removeBtn.type = 'button';
+        removeBtn.title = 'Remove';
+        removeBtn.appendChild(icon('ph-x'));
+        removeBtn.addEventListener('click', () => confirmDestructive('Remove this follow-up?', () => removeFollowUp(f.id)));
+        actions.appendChild(removeBtn);
+        card.appendChild(actions);
+        container.appendChild(card);
+      });
+    });
+    return container;
+  }
+
   function formatDateInput(d) {
     const pad = (n) => String(n).padStart(2, '0');
     return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -1704,6 +1846,8 @@
       viewEl = renderAgentView();
     } else if (state.view === 'drafts') {
       viewEl = renderDrafts();
+    } else if (state.view === 'followups') {
+      viewEl = renderFollowUpsView();
     } else if (state.view === 'settings') {
       viewEl = renderSettings();
     } else if (state.view === 'search') {
@@ -9943,6 +10087,7 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     const replyLaterBtn = makeActionBtn('ph-clock', 'Pending', false, true, 'Pending (l)');
     const setAsideBtn = makeActionBtn('ph-push-pin', 'Saved', false, true, 'Saved (s)');
     const bubbleUpBtn = makeActionBtn('ph-arrow-fat-line-up', 'Remind', false, true, 'Remind (b)');
+    const followUpBtn = makeActionBtn('ph-bell-ringing', 'Follow-up', false, true, 'Follow-up (u)');
     const unreadBtn = makeActionBtn(m.seen ? 'ph-eye-slash' : 'ph-eye', 'Unread', false, true, m.seen ? 'Mark as unread' : 'Mark as read');
     const moreBtn = makeActionBtn('ph-dots-three', 'More', false, true, 'More actions');
 
@@ -9953,6 +10098,7 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     });
     replyLaterBtn.addEventListener('click', () => replyLaterMessage(m));
     setAsideBtn.addEventListener('click', () => setAsideMessage(m));
+    followUpBtn.addEventListener('click', () => openFollowUpPicker(m));
     bubbleUpBtn.addEventListener('click', () => {
       const now = new Date();
       const fmt = (d) => {
@@ -10025,6 +10171,7 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     actions.appendChild(replyLaterBtn);
     actions.appendChild(setAsideBtn);
     actions.appendChild(bubbleUpBtn);
+    actions.appendChild(followUpBtn);
     actions.appendChild(unreadBtn);
     actions.appendChild(moreBtn);
     wrapper.appendChild(actions);
