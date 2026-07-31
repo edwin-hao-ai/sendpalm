@@ -1,0 +1,49 @@
+{
+  "name": "sendpalm-app",
+  "version": "0.1.0",
+  "description": "SendPalm — calm HEY-inspired email + calendar + agent workspace",
+  "type": "module",
+  "scripts": {
+    "start": "vite",
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "serve": "vite preview",
+    "tauri": "tauri",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint . --ext .ts,.tsx --max-warnings=0",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css,json}\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "solid-js": "^1.9.3",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-sql": "^2",
+    "@tauri-apps/plugin-store": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-notification": "^2",
+    "@tauri-apps/plugin-fs": "^2",
+    "@tauri-apps/plugin-clipboard-manager": "^2",
+    "@tauri-apps/plugin-os": "^2",
+    "@tauri-apps/plugin-opener": "^2"
+  },
+  "devDependencies": {
+    "typescript": "~5.6.2",
+    "vite": "^6.0.3",
+    "vite-plugin-solid": "^2.11.0",
+    "@tauri-apps/cli": "^2",
+    "vitest": "^4.1.10",
+    "@solidjs/testing-library": "^0.8.10",
+    "@testing-library/jest-dom": "^7.0.0",
+    "jsdom": "^30.0.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^10.8.0",
+    "eslint-plugin-solid": "^0.14.5",
+    "@typescript-eslint/parser": "^8.65.0",
+    "@typescript-eslint/eslint-plugin": "^8.65.0",
+    "prettier": "^3.9.6"
+  }
+}

@@ -1,0 +1,167 @@
+/** UI store — SolidJS signals for ephemeral app state.
+ *
+ * Anything in this file should be derivable from SQL on next boot.
+ * Persistent state lives in the tauri-plugin-store (see data.ts APP_SETTINGS_KEY).
+ */
+
+import { createSignal, createMemo } from "solid-js";
+import { createStore } from "solid-js/store";
+import type {
+  AgentMemory,
+  AppSettings,
+  ID,
+} from "../types";
+
+export type ViewName =
+  | "screener"
+  | "imbox"
+  | "feed"
+  | "paperTrail"
+  | "trash"
+  | "spam"
+  | "contacts"
+  | "companies"
+  | "calendar"
+  | "files"
+  | "insights"
+  | "drafts"
+  | "followUps"
+  | "clips"
+  | "search"
+  | "settings"
+  | "agent"
+  | "onboarding";
+
+export type ContactTab = "Timeline" | "Notes" | "Files" | "Insights" | "Network" | "Calendar";
+export type SettingsTab =
+  | "profile"
+  | "accounts"
+  | "preferences"
+  | "agent"
+  | "labels"
+  | "data"
+  | "shortcuts";
+
+export type PeopleFilter = "all" | "active" | "followup" | "cold";
+export type PeopleGroupBy = "all" | "company";
+
+export const [view, setView] = createSignal<ViewName>("imbox");
+export const [previousView, setPreviousView] = createSignal<ViewName | null>(null);
+
+export const [selectedContactId, setSelectedContactId] = createSignal<ID | null>(null);
+export const [selectedMessageId, setSelectedMessageId] = createSignal<ID | null>(null);
+export const [selectedMeetingId, setSelectedMeetingId] = createSignal<ID | null>(null);
+export const [selectedFileId, setSelectedFileId] = createSignal<ID | null>(null);
+export const [selectedTaskId, setSelectedTaskId] = createSignal<ID | null>(null);
+export const [selectedDraftId, setSelectedDraftId] = createSignal<ID | null>(null);
+
+export const [contactTab, setContactTab] = createSignal<ContactTab>("Timeline");
+export const [settingsTab, setSettingsTab] = createSignal<SettingsTab>("profile");
+export const [peopleFilter, setPeopleFilter] = createSignal<PeopleFilter>("all");
+export const [peopleGroupBy, setPeopleGroupBy] = createSignal<PeopleGroupBy>("all");
+
+export const [detailOpen, setDetailOpen] = createSignal(false);
+export const [agentPanelOpen, setAgentPanelOpen] = createSignal(false);
+
+export const [composeOpen, setComposeOpen] = createSignal(false);
+export const [composeMinimized, setComposeMinimized] = createSignal(false);
+
+export const [searchOpen, setSearchOpen] = createSignal(false);
+export const [searchQuery, setSearchQuery] = createSignal("");
+export const [searchFilter, setSearchFilter] = createSignal<"all" | "people" | "messages" | "files" | "views">("all");
+
+export const [commandPaletteOpen, setCommandPaletteOpen] = createSignal(false);
+export const [commandPaletteQuery, setCommandPaletteQuery] = createSignal("");
+
+export const [notificationsOpen, setNotificationsOpen] = createSignal(false);
+
+export const [calendarView, setCalendarView] = createSignal<"day" | "week" | "year">("day");
+export const [calendarSelected, setCalendarSelected] = createSignal(new Date());
+export const [calendarWeekStart, setCalendarWeekStart] = createSignal<Date>(
+  ((): Date => {
+    const d = new Date();
+    const day = d.getDay();
+    d.setDate(d.getDate() - day);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  })()
+);
+export const [calendarYearAnchor, setCalendarYearAnchor] = createSignal(new Date());
+
+export const [onboardingStep, setOnboardingStep] = createSignal<number | null>(null);
+export const [onboardingCompleted, setOnboardingCompleted] = createSignal(false);
+
+export const [loading, setLoading] = createSignal(true);
+export const [error, setError] = createSignal<string | null>(null);
+
+/* Cursor index for keyboard nav (j/k) in lists */
+export const [cursorIndex, setCursorIndex] = createSignal(-1);
+export const [selectedIds, setSelectedIds] = createSignal<Set<ID>>(new Set());
+
+/* App settings — mirrored from tauri-plugin-store */
+export const [appSettings, setAppSettings] = createStore<AppSettings>({
+  profile: {
+    displayName: "Edwin Hao",
+    avatar: "",
+    timezone: "Asia/Shanghai",
+    language: "zh-CN",
+    signature: "Best,\nEdwin",
+  },
+  preferences: {
+    notifications: {
+      desktop: true,
+      digest: false,
+      quietHoursEnabled: false,
+      quietHoursStart: "22:00",
+      quietHoursEnd: "08:00",
+    },
+    security: {
+      appLock: false,
+      screenshotAllowed: true,
+      clipboardSync: true,
+    },
+    syncAndStorage: {
+      autoDownloadAttachments: true,
+      maxAttachmentMb: 25,
+    },
+  },
+  agent: {
+    autoDraft: false,
+    autoSummarize: true,
+    memoryEditable: true,
+  },
+  shortcuts: {},
+});
+
+/* Agent memory */
+export const [agentMemory, setAgentMemory] = createStore<AgentMemory>({
+  global: {},
+  contacts: {},
+});
+
+/* Toast queue */
+export type ToastKind = "info" | "success" | "warning" | "error";
+export interface Toast {
+  id: ID;
+  message: string;
+  kind: ToastKind;
+  action?: { label: string; run: () => void };
+  ttlMs?: number;
+}
+export const [toasts, setToasts] = createSignal<Toast[]>([]);
+
+let toastSeq = 0;
+export function showToast(t: Omit<Toast, "id">) {
+  const id = `t_${++toastSeq}`;
+  const ttl = t.ttlMs ?? 4000;
+  setToasts((xs) => [...xs, { id, ...t }]);
+  if (ttl > 0) {
+    setTimeout(() => dismissToast(id), ttl);
+  }
+  return id;
+}
+export function dismissToast(id: ID) {
+  setToasts((xs) => xs.filter((t) => t.id !== id));
+}
+
+export const unreadNotificationCount = createMemo(() => 0); // wired in M4

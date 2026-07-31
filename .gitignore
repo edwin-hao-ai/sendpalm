@@ -15,3 +15,15 @@ qa-tmp/*
 
 # Subagent-driven development scratch files
 .superpowers/sdd/
+
+# QA scratch screenshots / headed browser dumps
+.qa/
+
+# Tauri build artifacts
+app/src-tauri/target/
+app/src-tauri/gen/
+app/dist/
+
+# Tauri local SQLite db (debug only — production lives in user data dir)
+app/dev.db
+app/dev.db-journal

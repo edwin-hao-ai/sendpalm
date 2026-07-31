@@ -1,0 +1,227 @@
+/* Base reset + typography. Mirrors prototype-v11 base rules. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100dvh;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--text-primary);
+  background: var(--surface);
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.008em;
+  margin: 0;
+  line-height: var(--leading-heading);
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--blurple);
+  text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+a:hover {
+  color: var(--cobalt);
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--blurple);
+  outline-offset: 2px;
+  border-radius: var(--radius-micro);
+}
+
+input,
+textarea,
+select {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text-primary);
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+hr {
+  border: 0;
+  border-top: 0.5px solid var(--border);
+  margin: var(--space-4) 0;
+}
+
+::selection {
+  background: rgba(85, 34, 250, 0.3);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(35, 28, 51, 0.12);
+  border-radius: var(--radius-pill);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(35, 28, 51, 0.24);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* App shell layout grid — 3-tier responsive */
+#app {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  grid-template-rows: var(--titlebar-height) var(--topbar-height) 1fr;
+  grid-template-areas:
+    "titlebar titlebar"
+    "sidebar  topbar"
+    "sidebar  main";
+  height: 100dvh;
+}
+
+#app.detail-open {
+  grid-template-columns: var(--sidebar-width) 1fr var(--detail-panel-width);
+  grid-template-areas:
+    "titlebar titlebar titlebar"
+    "sidebar  topbar   topbar"
+    "sidebar  main     detail";
+}
+
+#app.agent-open {
+  grid-template-columns: var(--sidebar-width) 1fr var(--agent-panel-width);
+  grid-template-areas:
+    "titlebar titlebar titlebar"
+    "sidebar  topbar   topbar"
+    "sidebar  main     agent";
+}
+
+#app.detail-open.agent-open {
+  grid-template-columns:
+    var(--sidebar-width) 1fr var(--detail-panel-width) var(--agent-panel-width);
+  grid-template-areas:
+    "titlebar titlebar titlebar titlebar"
+    "sidebar  topbar   topbar   topbar"
+    "sidebar  main     detail   agent";
+}
+
+#titlebar {
+  grid-area: titlebar;
+}
+
+#sidebar {
+  grid-area: sidebar;
+}
+
+#topbar {
+  grid-area: topbar;
+}
+
+#main {
+  grid-area: main;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+#detail-panel {
+  grid-area: detail;
+  background: var(--surface-elevated);
+  border-left: 0.5px solid var(--border);
+}
+
+#agent-panel {
+  grid-area: agent;
+}
+
+/* Tablet — iPad portrait */
+@media (min-width: 768px) and (max-width: 1023px) {
+  #app {
+    grid-template-columns: var(--sidebar-width-tablet) 1fr;
+    grid-template-rows: var(--titlebar-height) var(--topbar-height) 1fr;
+  }
+  #app.detail-open {
+    grid-template-columns:
+      var(--sidebar-width-tablet) 1fr var(--detail-panel-width);
+  }
+}
+
+/* Mobile — iPhone */
+@media (max-width: 767px) {
+  #app {
+    grid-template-columns: 1fr;
+    grid-template-rows: var(--topbar-height) 1fr var(--bottom-tab-height);
+    grid-template-areas:
+      "topbar"
+      "main"
+      "sidebar";
+  }
+  #app.detail-open {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "topbar"
+      "main"
+      "sidebar";
+  }
+  #app.agent-open {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "topbar"
+      "main"
+      "sidebar";
+  }
+}

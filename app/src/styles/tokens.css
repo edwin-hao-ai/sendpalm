@@ -1,0 +1,172 @@
+/* SendPalm Design Tokens — HEY-inspired
+ * Single source of truth for all visual decisions.
+ * Mirrors docs/HEY-DESIGN.md from prototype-v11.38.
+ * NO raw color / spacing values anywhere in the codebase outside this file.
+ */
+
+:root {
+  /* ── Paper palette (warm off-white base) ─────────────────────── */
+  --paper: #f9f7f5;
+  --paper-light: #fcfaf8;
+  --paper-mid: #f0eeea;
+  --paper-dark: #e8e4e0;
+
+  /* ── Ink palette (one color for all type) ────────────────────── */
+  --ink: #231c33;
+  --ink-soft: #736c83;
+  --ink-muted: #a09aae;
+  --ink-border: rgba(35, 28, 51, 0.08);
+  --ink-border-strong: rgba(35, 28, 51, 0.16);
+
+  /* ── Brand accents ───────────────────────────────────────────── */
+  --blurple: #5522fa;
+  --cobalt: #0074e4;
+  --mint: #b3f4e0;
+  --teal: #5fddc5;
+  --sky: #b6dbff;
+  --canary: #fff5ca;
+  --peach: #ffe5da;
+  --lavender: #d5d2ff;
+  --yellow: #f5d652;
+  --orange: #f87917;
+  --coral: #f95c5c;
+  --salmon: #ec8580;
+  --pink: #cf6fb6;
+  --purple: #7700a2;
+  --green: #299850;
+
+  /* ── SendPalm signature ──────────────────────────────────────── */
+  --palm: #0a8f63;
+  --palm-bright: #0cb87d;
+  --palm-soft: rgba(10, 143, 99, 0.1);
+  --palm-glow: rgba(10, 143, 99, 0.18);
+
+  /* ── Agent (AI surface) ──────────────────────────────────────── */
+  --agent: #6c5ce7;
+  --agent-soft: rgba(108, 92, 231, 0.1);
+
+  /* ── Surfaces (semantic) ─────────────────────────────────────── */
+  --surface: var(--paper);
+  --surface-elevated: var(--paper-light);
+  --surface-recessed: var(--paper-mid);
+  --border: var(--ink-border);
+  --border-strong: var(--ink-border-strong);
+  --text-primary: var(--ink);
+  --text-secondary: var(--ink-soft);
+  --text-muted: var(--ink-muted);
+
+  /* ── Status colors ───────────────────────────────────────────── */
+  --status-active: #34c759;
+  --status-warning: #ff9500;
+  --status-danger: #ff3b30;
+  --status-info: #5ac8fa;
+
+  /* ── Typography ──────────────────────────────────────────────── */
+  --font-display: "Really Sans Large", -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", sans-serif;
+  --font-body: Moniker, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas,
+    monospace;
+  --font-serif: "Playfair Display", "New York", Georgia, serif;
+
+  --text-hero: clamp(48px, 6vw, 74px);
+  --text-h1: clamp(32px, 4vw, 44px);
+  --text-h2: clamp(24px, 3.5vw, 34px);
+  --text-h3: clamp(20px, 2.5vw, 26px);
+  --text-h4: 20px;
+  --text-body-xl: 28px;
+  --text-body-lg: 20px;
+  --text-body: 18px;
+  --text-body-sm: 16px;
+  --text-label: 14px;
+  --text-button: 16px;
+  --text-caption: 13px;
+  --text-micro: 11px;
+
+  --leading-body: 1.5;
+  --leading-heading: 1.2;
+  --leading-label: 1.4;
+
+  /* ── Spacing (4px grid) ──────────────────────────────────────── */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ── Border radii ────────────────────────────────────────────── */
+  --radius-micro: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-pill: 9999px;
+
+  /* ── Shadows (multi-layer stacks) ────────────────────────────── */
+  --shadow-sm: 0 1px 2px rgba(35, 28, 51, 0.04);
+  --shadow-md:
+    0 4px 12px rgba(35, 28, 51, 0.06), 0 1px 2px rgba(35, 28, 51, 0.03);
+  --shadow-lg:
+    0 8px 24px rgba(35, 28, 51, 0.08), 0 2px 4px rgba(35, 28, 51, 0.04);
+  --shadow-xl:
+    0 16px 48px rgba(35, 28, 51, 0.1), 0 4px 8px rgba(35, 28, 51, 0.06);
+
+  /* ── Motion ──────────────────────────────────────────────────── */
+  --spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --spring-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 0.12s;
+  --duration-base: 0.2s;
+  --duration-card: 0.28s;
+  --duration-view: 0.35s;
+  --duration-toast: 0.4s;
+  --duration-modal: 0.5s;
+
+  /* ── Layout ──────────────────────────────────────────────────── */
+  --titlebar-height: 32px;
+  --topbar-height: 52px;
+  --sidebar-width: 64px;
+  --sidebar-width-tablet: 56px;
+  --bottom-tab-height: 64px;
+  --detail-panel-width: 380px;
+  --agent-panel-width: 340px;
+
+  /* ── Z-index ─────────────────────────────────────────────────── */
+  --z-base: 1;
+  --z-dropdown: 10;
+  --z-sticky: 20;
+  --z-modal: 50;
+  --z-detail: 60;
+  --z-agent: 70;
+  --z-toast: 100;
+}
+
+/* Dark mode (optional, opt-in via [data-theme="dark"] on :root) */
+[data-theme="dark"] {
+  --paper: #15131a;
+  --paper-light: #1f1d28;
+  --paper-mid: #2a2735;
+  --paper-dark: #353242;
+
+  --ink: #f0ecf5;
+  --ink-soft: #a09aae;
+  --ink-muted: #736c83;
+  --ink-border: rgba(255, 255, 255, 0.06);
+  --ink-border-strong: rgba(255, 255, 255, 0.12);
+
+  --surface: var(--paper);
+  --surface-elevated: var(--paper-light);
+  --surface-recessed: var(--paper-mid);
+  --border: var(--ink-border);
+  --border-strong: var(--ink-border-strong);
+  --text-primary: var(--ink);
+  --text-secondary: var(--ink-soft);
+  --text-muted: var(--ink-muted);
+}
