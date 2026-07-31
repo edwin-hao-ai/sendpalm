@@ -577,6 +577,13 @@ D.followUps = [
   { id: 'fu2', msgId: 'wy-2', contactId: 'wy', dueAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), status: 'pending', createdAt: new Date(Date.now() - 86400000 * 5).toISOString() },
 ];
 
+D.snippets = [
+  { id: 'sn1', label: 'Quick follow-up', body: 'Hi, just following up on this. Let me know if you have any updates.\n\nThanks!', shortcut: 'fu' },
+  { id: 'sn2', label: 'Thanks', body: 'Thanks for the update. Looks good to me.\n\nBest,', shortcut: 'thx' },
+  { id: 'sn3', label: 'Schedule call', body: 'Would you be available for a quick call this week? I\'m flexible on time.\n\nThanks,', shortcut: 'call' },
+  { id: 'sn4', label: 'Out of office', body: 'I\'m out of the office until next week. For urgent matters please reach out to ops@sendpalm.com.', shortcut: 'ooo' },
+];
+
 // Notification center (P4 Task B). Seed entries so the bell shows real-looking content.
 D.notifications = [
   { id: 'n1', type: 'remind', title: '3 messages bubbled up', body: '张磊 · Re: Q4 合同提案 +2 more', at: new Date(Date.now() - 1000 * 60 * 30).toISOString(), read: false, ref: { view: 'bubbleUp' } },

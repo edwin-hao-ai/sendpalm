@@ -7802,6 +7802,127 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     return { wrap, hidden, addRecipient };
   }
 
+  function openSnippetPicker(anchor, bodyInput) {
+    const snippets = D.snippets || [];
+    const choices = snippets.map(s => ({
+      label: s.label,
+      sub: s.shortcut ? '/' + s.shortcut : '',
+      action: () => {
+        const start = bodyInput.selectionStart;
+        const end = bodyInput.selectionEnd;
+        const before = bodyInput.value.substring(0, start);
+        const after = bodyInput.value.substring(end);
+        bodyInput.value = before + s.body + after;
+        bodyInput.focus();
+        bodyInput.selectionStart = bodyInput.selectionEnd = start + s.body.length;
+      }
+    }));
+    choices.push({ type: 'divider' });
+    choices.push({ label: 'Manage snippets…', icon: 'ph-gear', action: openSnippetsManager });
+    openContextMenuFromElement(anchor, choices);
+  }
+
+  function openSnippetsManager() {
+    openModalCard({
+      title: 'Snippets',
+      renderBody: (body) => {
+        const list = el('div', 'snippets-list');
+        const renderSnippets = () => {
+          list.innerHTML = '';
+          (D.snippets || []).forEach((s, idx) => {
+            const row = el('div', 'snippets-row');
+            const text = el('div', 'snippets-row-text');
+            text.appendChild(el('div', 'snippets-row-label', s.label));
+            text.appendChild(el('div', 'snippets-row-body', (s.body || '').slice(0, 80) + ((s.body || '').length > 80 ? '…' : '')));
+            if (s.shortcut) text.appendChild(el('div', 'snippets-row-shortcut', 'Shortcut: /' + s.shortcut));
+            row.appendChild(text);
+            const editBtn = el('button', 'btn btn-secondary btn-sm', 'Edit');
+            editBtn.addEventListener('click', () => openSnippetEditModal(s.id, renderSnippets));
+            const removeBtn = el('button', 'btn-icon snippets-remove');
+            removeBtn.type = 'button';
+            removeBtn.title = 'Delete';
+            removeBtn.appendChild(icon('ph-x'));
+            removeBtn.addEventListener('click', () => {
+              D.snippets = (D.snippets || []).filter(x => x.id !== s.id);
+              renderSnippets();
+            });
+            row.appendChild(editBtn);
+            row.appendChild(removeBtn);
+            list.appendChild(row);
+          });
+          if (!(D.snippets || []).length) {
+            list.appendChild(el('div', 'snippets-empty', 'No snippets yet. Click + New snippet to add one.'));
+          }
+        };
+        renderSnippets();
+        const addBtn = el('button', 'btn btn-primary btn-sm snippets-add-btn', '+ New snippet');
+        addBtn.type = 'button';
+        addBtn.addEventListener('click', () => openSnippetEditModal(null, renderSnippets));
+        body.appendChild(list);
+        body.appendChild(addBtn);
+      },
+      renderActions: (actions) => {
+        const done = el('button', 'btn-primary', 'Done');
+        done.addEventListener('click', () => closeCompose());
+        actions.appendChild(done);
+      }
+    });
+  }
+
+  function openSnippetEditModal(snippetId, onChange) {
+    const isNew = !snippetId;
+    const existing = isNew ? null : (D.snippets || []).find(x => x.id === snippetId);
+    let label = existing ? existing.label : '';
+    let body = existing ? existing.body : '';
+    let shortcut = existing ? existing.shortcut || '' : '';
+    openModalCard({
+      title: isNew ? 'New snippet' : 'Edit snippet',
+      renderBody: (bodyEl) => {
+        const stack = el('div', 'form-stack');
+        const labelInput = elAttr('input', '', { type: 'text', value: label, placeholder: 'Snippet name' });
+        labelInput.addEventListener('input', () => { label = labelInput.value; });
+        stack.appendChild(renderFormGroup('Name', labelInput));
+        const bodyArea = el('textarea', '');
+        bodyArea.placeholder = 'Snippet content (markdown supported)';
+        bodyArea.value = body;
+        bodyArea.rows = 5;
+        bodyArea.addEventListener('input', () => { body = bodyArea.value; });
+        stack.appendChild(renderFormGroup('Body', bodyArea));
+        const shortcutInput = elAttr('input', '', { type: 'text', value: shortcut, placeholder: 'Optional (e.g. fu)' });
+        shortcutInput.addEventListener('input', () => { shortcut = shortcutInput.value.trim(); });
+        stack.appendChild(renderFormGroup('Shortcut', shortcutInput, 'Optional short alias to remember.'));
+        bodyEl.appendChild(stack);
+      },
+      renderActions: (actions) => {
+        const cancel = el('button', 'btn-secondary', 'Cancel');
+        cancel.addEventListener('click', () => closeCompose());
+        const save = el('button', 'btn-primary', isNew ? 'Create' : 'Save');
+        save.addEventListener('click', () => {
+          const trimmedLabel = label.trim();
+          const trimmedBody = body;
+          if (!trimmedLabel) { showToast('Name is required'); return; }
+          if (!trimmedBody.trim()) { showToast('Body is required'); return; }
+          D.snippets = D.snippets || [];
+          if (isNew) {
+            D.snippets.push({ id: 'sn-' + Date.now(), label: trimmedLabel, body: trimmedBody, shortcut });
+          } else {
+            const target = D.snippets.find(x => x.id === snippetId);
+            if (target) {
+              target.label = trimmedLabel;
+              target.body = trimmedBody;
+              target.shortcut = shortcut;
+            }
+          }
+          closeCompose();
+          if (onChange) onChange();
+          showToast(isNew ? 'Snippet created' : 'Snippet saved');
+        });
+        actions.appendChild(cancel);
+        actions.appendChild(save);
+      }
+    });
+  }
+
   function renderComposeWindow(context) {
     const mode = context.mode || 'new';
     const title = mode === 'reply' ? 'Reply' : mode === 'forward' ? 'Forward' : 'New message';
@@ -8027,25 +8148,7 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     const snippetBtn = el('button', 'icon-btn');
     snippetBtn.appendChild(icon('ph-quotes'));
     snippetBtn.title = 'Insert snippet';
-    snippetBtn.addEventListener('click', () => {
-      const snippets = [
-        { label: 'Quick follow-up', text: 'Hi, just following up on this. Let me know if you have any updates.\n\nThanks!' },
-        { label: 'Thanks', text: 'Thanks for the update. Looks good to me.\n\nBest,' },
-        { label: 'Schedule call', text: 'Would you be available for a quick call this week? I\'m flexible on time.\n\nThanks,' },
-      ];
-      openContextMenuFromElement(snippetBtn, snippets.map(s => ({
-        label: s.label,
-        action: () => {
-          const start = bodyInput.selectionStart;
-          const end = bodyInput.selectionEnd;
-          const before = bodyInput.value.substring(0, start);
-          const after = bodyInput.value.substring(end);
-          bodyInput.value = before + s.text + after;
-          bodyInput.focus();
-          bodyInput.selectionStart = bodyInput.selectionEnd = start + s.text.length;
-        }
-      })));
-    });
+    snippetBtn.addEventListener('click', () => openSnippetPicker(snippetBtn, bodyInput));
 
     leftActions.appendChild(attachBtn);
     leftActions.appendChild(aiBtn);
@@ -8070,12 +8173,12 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
         subject: subjInput.value,
         body: bodyInput.value,
         mode: mode,
-        originalMsg: context.originalMsg
+originalMsg: context.originalMsg
       });
       if (ok) closeCompose();
     }
 
-    function openScheduleSend() {
+  function openScheduleSend() {
       const now = new Date();
       const tomorrow9 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 9, 0, 0, 0);
       let pickedDate = tomorrow9;
@@ -9123,6 +9226,19 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     securityCard.appendChild(renderToggle('Clear clipboard', state.settings.security.clipboardClear, v => { state.settings.security.clipboardClear = v; renderMain(); }, 'Auto-clear copied content after 30s'));
     securitySection.appendChild(securityCard);
     wrapper.appendChild(securitySection);
+
+    // Snippets section
+    const snippetSection = el('div', 'settings-section');
+    const snippetHeader = el('div', 'settings-section-header');
+    snippetHeader.appendChild(el('div', 'settings-section-title', 'Snippets'));
+    const manageSnippetsBtn = el('button', 'btn btn-secondary btn-sm', 'Manage…');
+    manageSnippetsBtn.addEventListener('click', openSnippetsManager);
+    snippetHeader.appendChild(manageSnippetsBtn);
+    snippetSection.appendChild(snippetHeader);
+    const snippetCard = el('div', 'settings-card');
+    snippetCard.appendChild(el('p', 'form-hint', (D.snippets || []).length + ' snippets saved. They appear in the compose toolbar.'));
+    snippetSection.appendChild(snippetCard);
+    wrapper.appendChild(snippetSection);
 
     const syncSection = el('div', 'settings-section');
     syncSection.appendChild(el('div', 'settings-section-title', 'Sync & Storage'));
