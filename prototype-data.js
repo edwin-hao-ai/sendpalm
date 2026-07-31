@@ -290,6 +290,9 @@ const D = {
     notifications:{quietHours:{enabled:true,start:'22:00',end:'08:00'},priority:'all',desktop:true,weeklyDigest:false},
     agent:{autoApproval:'low-risk',undoTimeout:10,confidenceThreshold:0.8},
     syncFormat:'markdown',
+  },
+  onboarding:{
+    completed:false
   }
 };
 

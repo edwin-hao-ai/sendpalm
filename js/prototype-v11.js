@@ -56,7 +56,11 @@
     agentSessions: JSON.parse(JSON.stringify(D.agentSessions || [])),
     currentAgentSessionId: (D.agentSessions && D.agentSessions[0] && D.agentSessions[0].id) || null,
     agentMemory: D.agentMemory || { global: {}, contacts: {} },
+    onboardingStep: localStorage.getItem('sendpalm-onboarding') ? null : 0,
+    onboardingCompleted: !!localStorage.getItem('sendpalm-onboarding'),
   };
+
+  let onboardingProgressInterval = null;
 
   // Task 2 data upgrade: canonical event/task arrays (alias legacy _meetings so existing views keep working).
   D.events = D.events || D._meetings || [];
@@ -1506,6 +1510,11 @@
 
   function _renderMainImpl(main) {
 
+    if (state.onboardingStep !== null) {
+      main.appendChild(renderOnboarding());
+      return;
+    }
+
     if (state.loading) {
       main.appendChild(renderSkeletonList(8));
       return;
@@ -1616,6 +1625,282 @@
     }
     main.appendChild(viewEl);
     renderDetailPanel();
+  }
+
+  function startOnboarding() {
+    localStorage.removeItem('sendpalm-onboarding');
+    state.onboardingCompleted = false;
+    state.onboardingStep = 0;
+    renderMain();
+  }
+
+  function completeOnboardingStep() {
+    if (state.onboardingStep >= 3) {
+      finishOnboarding();
+    } else {
+      state.onboardingStep++;
+      renderMain();
+    }
+  }
+
+  function finishOnboarding() {
+    clearOnboardingInterval();
+    localStorage.setItem('sendpalm-onboarding', '1');
+    state.onboardingCompleted = true;
+    state.onboardingStep = null;
+    state.view = 'imbox';
+    renderMain();
+    renderNav();
+    renderTopBar();
+    showToast('Welcome to SendPalm');
+  }
+
+  function skipOnboarding() {
+    finishOnboarding();
+  }
+
+  function clearOnboardingInterval() {
+    if (onboardingProgressInterval) {
+      clearInterval(onboardingProgressInterval);
+      onboardingProgressInterval = null;
+    }
+  }
+
+  function renderOnboarding() {
+    const view = el('div', 'onboarding-view');
+
+    const progress = el('div', 'onboarding-progress');
+    for (let i = 0; i < 4; i++) {
+      const dot = el('span', 'onboarding-dot' + (i === state.onboardingStep ? ' active' : '') + (i < state.onboardingStep ? ' completed' : ''));
+      progress.appendChild(dot);
+    }
+    view.appendChild(progress);
+
+    const content = el('div', 'onboarding-content');
+    const step = state.onboardingStep;
+
+    if (step === 0) content.appendChild(renderOnboardingWelcome());
+    else if (step === 1) content.appendChild(renderOnboardingConnect());
+    else if (step === 2) content.appendChild(renderOnboardingIndex());
+    else content.appendChild(renderOnboardingDone());
+    view.appendChild(content);
+
+    return view;
+  }
+
+  function renderOnboardingWelcome() {
+    const wrap = el('div', 'onboarding-step');
+    const iconWrap = el('div', 'onboarding-brand-icon');
+    iconWrap.appendChild(icon('ph-palm-tree'));
+    wrap.appendChild(iconWrap);
+    wrap.appendChild(el('h1', 'onboarding-title', 'Welcome to SendPalm'));
+    wrap.appendChild(el('p', 'onboarding-subtitle', 'Calm email + agent context. Focus on the people that matter, and let the noise fade into the background.'));
+
+    const actions = el('div', 'onboarding-actions');
+    const skip = el('button', 'btn btn-ghost', 'Skip');
+    skip.addEventListener('click', skipOnboarding);
+    actions.appendChild(skip);
+    const next = el('button', 'btn btn-primary', 'Get started');
+    next.addEventListener('click', completeOnboardingStep);
+    actions.appendChild(next);
+    wrap.appendChild(actions);
+    return wrap;
+  }
+
+  function renderOnboardingConnect() {
+    const wrap = el('div', 'onboarding-step');
+    wrap.appendChild(el('h1', 'onboarding-title', 'Connect your channels'));
+    wrap.appendChild(el('p', 'onboarding-subtitle', 'Choose the accounts you want to bring into SendPalm. You can always add more later in Settings.'));
+
+    const channels = [
+      { id: 'gmail', name: 'Gmail', desc: 'edwin.hao@gmail.com', provider: 'gmail', color: '#ea4335', icon: 'ph-envelope-simple' },
+      { id: 'outlook', name: 'Outlook', desc: 'edwin@sendpalm.com', provider: 'outlook', color: '#0078d4', icon: 'ph-envelope-simple' },
+      { id: 'slack', name: 'Slack', desc: 'sendpalm workspace', provider: 'slack', color: '#4a154b', icon: 'ph-slack-logo' },
+      { id: 'calendar', name: 'Google Calendar', desc: 'Upcoming events & meetings', provider: 'google', color: '#a78bfa', icon: 'ph-calendar-blank' },
+    ];
+
+    const selected = new Set(['gmail']);
+    const grid = el('div', 'onboarding-channel-grid');
+
+    function refresh() {
+      grid.innerHTML = '';
+      channels.forEach(ch => {
+        const card = el('div', 'onboarding-channel-card' + (selected.has(ch.id) ? ' selected' : ''));
+        const top = el('div', 'onboarding-channel-top');
+        const avatar = el('div', 'onboarding-channel-avatar');
+        avatar.style.background = ch.color;
+        avatar.appendChild(icon(ch.icon));
+        top.appendChild(avatar);
+        const info = el('div', 'onboarding-channel-info');
+        info.appendChild(el('div', 'onboarding-channel-name', ch.name));
+        info.appendChild(el('div', 'onboarding-channel-desc', ch.desc));
+        top.appendChild(info);
+        const toggle = renderToggle('', selected.has(ch.id), (on) => {
+          if (on) selected.add(ch.id);
+          else selected.delete(ch.id);
+          refresh();
+        });
+        top.appendChild(toggle);
+        card.appendChild(top);
+
+        const status = el('div', 'onboarding-channel-status');
+        const existing = (D.accounts || []).find(a => a.provider === ch.provider || a.id === ch.id);
+        if (existing && existing.status === 'connected') {
+          status.textContent = 'Connected';
+          status.className = 'onboarding-channel-status connected';
+        } else {
+          const connectBtn = el('button', 'btn btn-secondary btn-sm', selected.has(ch.id) ? 'Connect' : 'Select to connect');
+          connectBtn.disabled = !selected.has(ch.id);
+          connectBtn.addEventListener('click', () => {
+            connectBtn.textContent = 'Connecting…';
+            connectBtn.disabled = true;
+            setTimeout(() => {
+              let acct = (D.accounts || []).find(a => a.provider === ch.provider || a.id === ch.id);
+              if (!acct) {
+                acct = { id: ch.id, type: ch.id === 'calendar' ? 'calendar' : (ch.id === 'slack' ? 'im' : 'email'), provider: ch.provider, label: ch.name, status: 'connected', synced: 0, total: 0, privacy: 'unified', color: ch.color, avatar: ch.name[0], lastSync: '刚刚' };
+                D.accounts.push(acct);
+              }
+              acct.status = 'connected';
+              acct.lastSync = '刚刚';
+              showToast(ch.name + ' connected');
+              refresh();
+            }, 900);
+          });
+          status.appendChild(connectBtn);
+        }
+        card.appendChild(status);
+        grid.appendChild(card);
+      });
+    }
+    refresh();
+    wrap.appendChild(grid);
+
+    const actions = el('div', 'onboarding-actions');
+    const skip = el('button', 'btn btn-ghost', 'Skip');
+    skip.addEventListener('click', skipOnboarding);
+    actions.appendChild(skip);
+    const next = el('button', 'btn btn-primary', 'Continue');
+    next.addEventListener('click', completeOnboardingStep);
+    actions.appendChild(next);
+    wrap.appendChild(actions);
+    return wrap;
+  }
+
+  function renderOnboardingIndex() {
+    const wrap = el('div', 'onboarding-step');
+    wrap.appendChild(el('h1', 'onboarding-title', 'Indexing your email…'));
+    wrap.appendChild(el('p', 'onboarding-subtitle', 'We are scanning messages, extracting people, and finding files so you can focus on what matters.'));
+
+    const track = el('div', 'onboarding-progress-track');
+    const fill = el('div', 'onboarding-progress-fill');
+    fill.style.width = '0%';
+    track.appendChild(fill);
+    wrap.appendChild(track);
+
+    const status = el('div', 'onboarding-index-status', 'Starting…');
+    wrap.appendChild(status);
+
+    const insight = el('div', 'onboarding-insight hidden');
+    insight.appendChild(el('div', 'onboarding-insight-title', 'First insight ready'));
+    const unreadCount = (D._msgs || []).filter(m => !m.seen && m.bucket === 'imbox').length;
+    const todoCount = (D._msgs || []).filter(m => !m.seen && m.bucket === 'imbox' && (m.fl === 'todo' || m.replyLater)).length;
+    insight.appendChild(el('div', 'onboarding-insight-body', `You have ${unreadCount} unread messages in your Inbox, including ${todoCount} flagged for follow-up.`));
+    wrap.appendChild(insight);
+
+    const actions = el('div', 'onboarding-actions');
+    const skip = el('button', 'btn btn-ghost', 'Skip');
+    skip.addEventListener('click', skipOnboarding);
+    actions.appendChild(skip);
+    const next = el('button', 'btn btn-primary hidden', 'Continue');
+    next.addEventListener('click', completeOnboardingStep);
+    actions.appendChild(next);
+    wrap.appendChild(actions);
+
+    clearOnboardingInterval();
+    let progress = 0;
+    const statuses = ['Scanning messages…', 'Extracting people…', 'Finding files…', 'Building context…', 'Almost there…'];
+    onboardingProgressInterval = setInterval(() => {
+      progress += Math.random() * 18 + 6;
+      if (progress >= 100) {
+        progress = 100;
+        clearOnboardingInterval();
+        status.textContent = 'Ready';
+        insight.classList.remove('hidden');
+        next.classList.remove('hidden');
+        next.textContent = 'Continue';
+      } else {
+        status.textContent = statuses[Math.min(Math.floor((progress / 100) * statuses.length), statuses.length - 1)];
+      }
+      fill.style.width = progress + '%';
+    }, 240);
+
+    return wrap;
+  }
+
+  function renderOnboardingDone() {
+    const wrap = el('div', 'onboarding-step');
+    wrap.appendChild(el('h1', 'onboarding-title', 'You are all set'));
+    wrap.appendChild(el('p', 'onboarding-subtitle', 'Here are 3 things to focus on this week:'));
+
+    const list = el('div', 'onboarding-focus-list');
+    const focusItems = getOnboardingFocusItems();
+    focusItems.forEach(item => {
+      const row = el('div', 'onboarding-focus-item');
+      const iconEl = el('div', 'onboarding-focus-icon');
+      iconEl.appendChild(icon(item.icon));
+      row.appendChild(iconEl);
+      const body = el('div', 'onboarding-focus-body');
+      body.appendChild(el('div', 'onboarding-focus-title', item.title));
+      body.appendChild(el('div', 'onboarding-focus-meta', item.meta));
+      row.appendChild(body);
+      list.appendChild(row);
+    });
+    wrap.appendChild(list);
+
+    const actions = el('div', 'onboarding-actions');
+    const skip = el('button', 'btn btn-ghost', 'Skip');
+    skip.addEventListener('click', skipOnboarding);
+    actions.appendChild(skip);
+    const open = el('button', 'btn btn-primary', 'Open Inbox');
+    open.addEventListener('click', completeOnboardingStep);
+    actions.appendChild(open);
+    wrap.appendChild(actions);
+    return wrap;
+  }
+
+  function getOnboardingFocusItems() {
+    const items = [];
+    const unreadTodos = (D._msgs || [])
+      .filter(m => !m.seen && m.bucket === 'imbox' && (m.fl === 'todo' || m.replyLater || m.fl === 'wait'))
+      .sort((a, b) => (b.st || '').localeCompare(a.st || ''))
+      .slice(0, 3);
+    unreadTodos.forEach(m => {
+      const c = getContact(m.pid);
+      items.push({ icon: 'ph-envelope-simple', title: m.subj, meta: (c ? c.name : m.fm) + ' · ' + (m.tm || 'recent') });
+    });
+
+    if (items.length < 3) {
+      const tasks = (D.agentTasks || [])
+        .filter(t => t.status === 'go' || t.status === 'wt')
+        .slice(0, 3 - items.length);
+      tasks.forEach(t => {
+        items.push({ icon: 'ph-sparkle', title: t.name, meta: 'Agent task · ' + (t.eta || 'soon') });
+      });
+    }
+
+    if (items.length < 3) {
+      const meetings = (D.events || D._meetings || [])
+        .filter(m => m.br && !m.post)
+        .slice(0, 3 - items.length);
+      meetings.forEach(m => {
+        items.push({ icon: 'ph-calendar-blank', title: m.title, meta: m.ppl + ' · ' + (m.dt || '') });
+      });
+    }
+
+    if (items.length === 0) {
+      items.push({ icon: 'ph-tray', title: 'Your Inbox is calm', meta: 'No urgent items right now' });
+    }
+    return items.slice(0, 3);
   }
 
   function renderDetailPanel() {
@@ -7290,6 +7575,16 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     sigInput.addEventListener('change', () => { D.user.signature = sigInput.value; showToast('Signature saved'); });
     card.appendChild(renderFormGroup('Signature', sigInput));
 
+    const replayRow = el('div', 'settings-row');
+    replayRow.appendChild(el('span', 'settings-label', 'Onboarding'));
+    const replay = el('button', 'btn btn-secondary btn-sm', 'Replay onboarding');
+    replay.addEventListener('click', () => {
+      state.view = 'imbox';
+      startOnboarding();
+    });
+    replayRow.appendChild(replay);
+    card.appendChild(replayRow);
+
     section.appendChild(card);
     return section;
   }
@@ -9695,6 +9990,10 @@ ${D.stageSuggest[c.stage] || ''}
       const isTyping = tag === 'input' || tag === 'textarea' || e.target.isContentEditable;
 
       if (e.key === 'Escape') {
+        if (state.onboardingStep !== null) {
+          skipOnboarding();
+          return;
+        }
         const palette = document.getElementById('command-palette');
         const menu = document.getElementById('context-menu');
         if (palette.classList.contains('open')) closeCommandPalette();
