@@ -230,12 +230,12 @@ const D = {
     {id:'f18',pid:'zw',name:'Marketing_Assets.zip',tp:'doc',sz:'24 MB',dt:'2026-07-15',ch:'Gmail'},
   ],
   _meetings:[
-    {id:'m1',title:'Q4合同评审',pids:['zl'],ppl:'张磊',dt:'明天 7/19',tm:'14:00-15:00',br:true,notes:'合同条款最终确认',prep:['阅读张磊最新邮件','确认付款条款修改','准备3份附件'],post:''},
-    {id:'m2',title:'API变更对齐',pids:['cx'],ppl:'陈欣 + 技术团队',dt:'周四 7/24',tm:'15:00-16:00',br:true,notes:'API版本升级方案',prep:['查看陈欣Slack消息','准备API差异文档'],post:''},
-    {id:'m3',title:'AI项目验收',pids:['lh'],ppl:'刘华 + 百度团队',dt:'下周二 7/22',tm:'10:00-11:30',br:false,notes:'一期验收+二期规划',prep:['回顾项目方案','准备验收清单'],post:''},
-    {id:'m4',title:'供应链评审会',pids:['xm'],ppl:'谢明 + 采购团队',dt:'明天 7/19',tm:'09:30-10:30',br:true,notes:'Q3供应链评估review',prep:['阅读Q3报告','标注问题项'],post:'已生成纪要，待确认'},
-    {id:'m5',title:'联名活动创意会',pids:['yy'],ppl:'杨雨 + 市场团队',dt:'下周 7/23',tm:'14:00-15:00',br:false,notes:'创意方向对齐',prep:['回顾联名方案','收集竞品案例'],post:''},
-    {id:'m6',title:'Q3合作复盘',pids:['cx','zl'],ppl:'陈欣 + 张磊',dt:'已结束 7/15',tm:'14:00-15:30',br:true,notes:'Q3复盘已完成',prep:[],post:'纪要已生成 - Action: 发送Q4规划'},
+    {id:'m1',title:'Q4合同评审',pids:['zl'],ppl:'张磊',dt:'明天 7/19',tm:'14:00-15:00',br:true,notes:'合同条款最终确认',prep:['阅读张磊最新邮件','确认付款条款修改','准备3份附件'],agenda:['上次合同要点回顾','本次调整条款说明','付款节奏与违约责任确认','下一步行动项'],actionItems:[{id:'ai-m1-1',title:'张磊内部走合同审批',owner:'张磊',due:'7/22',done:false}],materials:['f1','f9'],post:''},
+    {id:'m2',title:'API变更对齐',pids:['cx'],ppl:'陈欣 + 技术团队',dt:'周四 7/24',tm:'15:00-16:00',br:true,notes:'API版本升级方案',prep:['查看陈欣Slack消息','准备API差异文档'],agenda:['当前API限制回顾','v2 升级方案','向后兼容策略','迁移时间表'],actionItems:[],materials:[],post:''},
+    {id:'m3',title:'AI项目验收',pids:['lh'],ppl:'刘华 + 百度团队',dt:'下周二 7/22',tm:'10:00-11:30',br:false,notes:'一期验收+二期规划',prep:['回顾项目方案','准备验收清单'],agenda:['一期交付物逐项 review','技术指标验收','二期预算对齐','下一步合作模式'],actionItems:[],materials:[],post:''},
+    {id:'m4',title:'供应链评审会',pids:['xm'],ppl:'谢明 + 采购团队',dt:'明天 7/19',tm:'09:30-10:30',br:true,notes:'Q3供应链评估review',prep:['阅读Q3报告','标注问题项'],agenda:['Q3 评分回顾','问题项讨论','Q4 优化计划'],actionItems:[{id:'ai-m4-1',title:'修订交付排产计划',owner:'谢明',due:'7/26',done:false}],materials:['f7'],post:'已生成纪要，待确认'},
+    {id:'m5',title:'联名活动创意会',pids:['yy'],ppl:'杨雨 + 市场团队',dt:'下周 7/23',tm:'14:00-15:00',br:false,notes:'创意方向对齐',prep:['回顾联名方案','收集竞品案例'],agenda:['方案核心创意回顾','预算压力点讨论','下一步执行节奏'],actionItems:[],materials:[],post:''},
+    {id:'m6',title:'Q3合作复盘',pids:['cx','zl'],ppl:'陈欣 + 张磊',dt:'已结束 7/15',tm:'14:00-15:30',br:true,notes:'Q3复盘已完成',prep:[],agenda:[],actionItems:[{id:'ai-m6-1',title:'发送Q4规划',owner:'我',due:'7/17',done:true}],materials:[],post:'纪要已生成 - Action: 发送Q4规划'},
   ],
   agentTasks:[
     {id:'at-1',name:'Q4 跟进方案',sessionId:'as-task-1',status:'go',steps:[{l:'分析王洋邮件历史',d:true},{l:'起草跟进邮件',d:true},{l:'等待你的审批',d:false}],eta:'2 min',createdAt:Date.now()-3600000},

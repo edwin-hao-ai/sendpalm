@@ -9869,6 +9869,43 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     renderAgentPanel();
   }
 
+  function generateMeetingBrief(m) {
+    const items = [];
+    const pids = m.pids || [];
+    // Recent messages from attendees (last 30 days)
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const recent = (D._msgs || []).filter(msg => {
+      if (!pids.includes(msg.pid)) return false;
+      const t = new Date(msg.st).getTime();
+      return !isNaN(t) && t >= cutoff;
+    });
+    if (recent.length) {
+      const contacts = pids.map(pid => D.getP(pid)).filter(Boolean);
+      const names = contacts.map(c => c.name).join(' + ');
+      items.push('过去 30 天与 ' + names + ' 共有 ' + recent.length + ' 条沟通。');
+      const topics = {};
+      recent.forEach(msg => {
+        const t = msg.ctx && msg.ctx.topic;
+        if (t) topics[t] = (topics[t] || 0) + 1;
+      });
+      const topTopic = Object.entries(topics).sort((a, b) => b[1] - a[1])[0];
+      if (topTopic) items.push('主要话题：' + topTopic[0] + '（' + topTopic[1] + ' 次提及）。');
+    }
+    // Open threads (waiting reply)
+    const waitingReply = (D._msgs || []).filter(msg =>
+      pids.includes(msg.pid) && msg.fm === '你' && msg.fl === 'wait'
+    );
+    if (waitingReply.length) {
+      items.push('你在等对方回复 ' + waitingReply.length + ' 条消息。');
+    }
+    // Attachments shared
+    const sharedFiles = (D._files || []).filter(f => pids.includes(f.pid));
+    if (sharedFiles.length) {
+      items.push('已与参会者共享 ' + sharedFiles.length + ' 个附件（自动列入 Materials）。');
+    }
+    return items;
+  }
+
   function renderMeetingPanel(m) {
     const wrapper = el('div', 'panel-wrapper');
     const header = el('div', 'panel-header');
@@ -9949,6 +9986,141 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
       });
       prepSection.appendChild(prepList);
       content.appendChild(prepSection);
+    }
+
+    // Brief — auto-generated summary from attendees' recent messages.
+    const briefSection = el('div', 'meeting-section meeting-brief');
+    briefSection.appendChild(el('div', 'meeting-section-title', 'Brief'));
+    const briefItems = generateMeetingBrief(m);
+    if (briefItems.length) {
+      briefItems.forEach(item => {
+        const row = el('div', 'meeting-brief-row');
+        row.appendChild(icon('ph-lightbulb'));
+        row.appendChild(el('span', '', item));
+        briefSection.appendChild(row);
+      });
+    } else {
+      briefSection.appendChild(el('div', 'meeting-brief-empty', 'No prior context found for these attendees.'));
+    }
+    content.appendChild(briefSection);
+
+    // Agenda — editable list.
+    const agendaSection = el('div', 'meeting-section');
+    const agendaHeader = el('div', 'meeting-section-header');
+    agendaHeader.appendChild(el('div', 'meeting-section-title', 'Agenda'));
+    const addAgendaBtn = el('button', 'btn btn-secondary btn-sm', '+ Item');
+    addAgendaBtn.type = 'button';
+    addAgendaBtn.addEventListener('click', () => {
+      m.agenda = m.agenda || [];
+      m.agenda.push('New agenda item');
+      renderMain();
+    });
+    agendaHeader.appendChild(addAgendaBtn);
+    agendaSection.appendChild(agendaHeader);
+    const agendaList = el('div', 'meeting-agenda-list');
+    (m.agenda || []).forEach((item, idx) => {
+      const row = el('div', 'meeting-agenda-row');
+      const num = el('span', 'meeting-agenda-num', String(idx + 1));
+      const input = elAttr('input', 'meeting-agenda-input', { type: 'text', value: item });
+      input.addEventListener('change', () => { m.agenda[idx] = input.value; });
+      const removeBtn = el('button', 'btn-icon meeting-agenda-remove');
+      removeBtn.type = 'button';
+      removeBtn.title = 'Remove';
+      removeBtn.appendChild(icon('ph-x'));
+      removeBtn.addEventListener('click', () => {
+        m.agenda.splice(idx, 1);
+        renderMain();
+      });
+      row.appendChild(num);
+      row.appendChild(input);
+      row.appendChild(removeBtn);
+      agendaList.appendChild(row);
+    });
+    if (!(m.agenda || []).length) {
+      agendaList.appendChild(el('div', 'meeting-agenda-empty', 'No agenda items yet. Click + Item to add one.'));
+    }
+    agendaSection.appendChild(agendaList);
+    content.appendChild(agendaSection);
+
+    // Notes — editable textarea (was static m.notes).
+    const notesSection = el('div', 'meeting-section');
+    notesSection.appendChild(el('div', 'meeting-section-title', 'Notes'));
+    const notesArea = el('textarea', 'meeting-notes-area');
+    notesArea.placeholder = 'Jot down meeting notes…';
+    notesArea.value = m.notes || '';
+    notesArea.rows = 4;
+    notesArea.addEventListener('change', () => { m.notes = notesArea.value; });
+    notesSection.appendChild(notesArea);
+    content.appendChild(notesSection);
+
+    // Action items — list with owner / due / done.
+    const actionsSection = el('div', 'meeting-section');
+    const actionsHeader = el('div', 'meeting-section-header');
+    actionsHeader.appendChild(el('div', 'meeting-section-title', 'Action items (' + (m.actionItems || []).filter(a => !a.done).length + ' open)'));
+    const addActionBtn = el('button', 'btn btn-secondary btn-sm', '+ Action');
+    addActionBtn.type = 'button';
+    addActionBtn.addEventListener('click', () => {
+      m.actionItems = m.actionItems || [];
+      m.actionItems.push({ id: 'ai-' + Date.now(), title: 'New action', owner: '我', due: '', done: false });
+      renderMain();
+    });
+    actionsHeader.appendChild(addActionBtn);
+    actionsSection.appendChild(actionsHeader);
+
+    const actionList = el('div', 'meeting-action-list');
+    (m.actionItems || []).forEach((ai, idx) => {
+      const row = el('div', 'meeting-action-row' + (ai.done ? ' done' : ''));
+      const cb = elAttr('input', 'meeting-action-cb', { type: 'checkbox' });
+      cb.checked = !!ai.done;
+      cb.addEventListener('change', () => { ai.done = cb.checked; renderMain(); });
+      const input = elAttr('input', 'meeting-action-input', { type: 'text', value: ai.title });
+      input.addEventListener('change', () => { ai.title = input.value; });
+      const ownerInput = elAttr('input', 'meeting-action-owner', { type: 'text', value: ai.owner || '', placeholder: 'Owner' });
+      ownerInput.addEventListener('change', () => { ai.owner = ownerInput.value; });
+      const dueInput = elAttr('input', 'meeting-action-due', { type: 'text', value: ai.due || '', placeholder: 'Due' });
+      dueInput.addEventListener('change', () => { ai.due = dueInput.value; });
+      const removeBtn = el('button', 'btn-icon meeting-action-remove');
+      removeBtn.type = 'button';
+      removeBtn.title = 'Remove';
+      removeBtn.appendChild(icon('ph-x'));
+      removeBtn.addEventListener('click', () => {
+        m.actionItems.splice(idx, 1);
+        renderMain();
+      });
+      row.appendChild(cb);
+      row.appendChild(input);
+      row.appendChild(ownerInput);
+      row.appendChild(dueInput);
+      row.appendChild(removeBtn);
+      actionList.appendChild(row);
+    });
+    if (!(m.actionItems || []).length) {
+      actionList.appendChild(el('div', 'meeting-action-empty', 'No action items yet.'));
+    }
+    actionsSection.appendChild(actionList);
+    content.appendChild(actionsSection);
+
+    // Materials — linked files (from contextLinks + explicit).
+    const linkedFiles = new Set(m.materials || []);
+    (m.pids || []).forEach(pid => {
+      (D._files || []).filter(f => f.pid === pid).slice(0, 3).forEach(f => linkedFiles.add(f.id));
+    });
+    if (linkedFiles.size) {
+      const matSection = el('div', 'meeting-section');
+      matSection.appendChild(el('div', 'meeting-section-title', 'Materials'));
+      const matList = el('div', 'meeting-materials-list');
+      Array.from(linkedFiles).forEach(fid => {
+        const f = (D._files || []).find(x => x.id === fid);
+        if (!f) return;
+        const item = el('div', 'meeting-material-row');
+        item.appendChild(icon(fileIconName(f.tp)));
+        item.appendChild(el('span', 'meeting-material-name', f.name));
+        item.appendChild(el('span', 'meeting-material-meta', (f.sz || '') + ' · ' + (f.dt || '')));
+        item.addEventListener('click', () => openFile(f));
+        matList.appendChild(item);
+      });
+      matSection.appendChild(matList);
+      content.appendChild(matSection);
     }
 
     if (m.post) {
