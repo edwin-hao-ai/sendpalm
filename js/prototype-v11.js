@@ -1278,6 +1278,32 @@
       viewEl.insertBefore(header, viewEl.firstChild);
     }
     main.appendChild(viewEl);
+    renderDetailPanel();
+  }
+
+  function renderDetailPanel() {
+    const panel = document.getElementById('detail-panel');
+    if (!panel || panel.classList.contains('hidden')) return;
+
+    let content = null;
+    if (state.selectedFileId) {
+      const f = (D._files || []).find(x => x.id === state.selectedFileId);
+      if (f) content = renderFilePanel(f);
+    } else if (state.selectedMessageId) {
+      const m = (D._msgs || []).find(x => x.pid + '-' + x.subj === state.selectedMessageId);
+      if (m) content = renderMessagePanel(m);
+    } else if (state.selectedMeetingId) {
+      const m = (D._meetings || []).find(x => x.id === state.selectedMeetingId);
+      if (m) content = renderMeetingPanel(m);
+    } else if (state.selectedContactId) {
+      const c = D.getP(state.selectedContactId);
+      if (c) content = renderContactPanel(c);
+    }
+
+    if (content) {
+      panel.innerHTML = '';
+      panel.appendChild(content);
+    }
   }
 
   function openReadTogether() {
@@ -2383,11 +2409,412 @@
     const content = el('div', 'panel-content');
     content.appendChild(renderContactProfileCard(c));
     content.appendChild(renderContactNotes(c));
-    content.appendChild(renderContactFiles(c));
-    content.appendChild(renderContactThreads(c));
+    content.appendChild(renderContactTabs(c));
+    content.appendChild(renderContactTabContent(c));
     wrapper.appendChild(content);
 
     return wrapper;
+  }
+
+  function renderContactTabs(c) {
+    const tabs = ['Timeline', 'Files', 'Insights', 'Network', 'Calendar'];
+    const activeTab = state.contactTab || 'Timeline';
+    const wrap = el('div', 'contact-tabs');
+    tabs.forEach(tab => {
+      const btn = el('button', 'contact-tab' + (tab === activeTab ? ' active' : ''), tab);
+      btn.addEventListener('click', () => {
+        state.contactTab = tab;
+        renderMain();
+      });
+      wrap.appendChild(btn);
+    });
+    return wrap;
+  }
+
+  function renderContactTabContent(c) {
+    const activeTab = state.contactTab || 'Timeline';
+    if (activeTab === 'Files') return renderContactFilesTab(c);
+    if (activeTab === 'Insights') return renderContactInsightsTab(c);
+    if (activeTab === 'Network') return renderContactNetworkTab(c);
+    if (activeTab === 'Calendar') return renderContactCalendarTab(c);
+    return renderContactTimelineTab(c);
+  }
+
+  function renderContactTimelineTab(c) {
+    const section = el('div', 'contact-section');
+    const header = el('div', 'contact-section-header');
+    header.appendChild(el('div', 'contact-section-title', 'Timeline'));
+    section.appendChild(header);
+
+    const filterBar = el('div', 'contact-thread-filters');
+    const filters = [
+      { id: 'all', label: 'All' },
+      { id: 'from', label: 'From them' },
+      { id: 'to', label: 'To them' },
+    ];
+    const currentFilter = state.contactThreadFilter || 'all';
+    filters.forEach(f => {
+      const btn = el('button', 'contact-thread-filter' + (currentFilter === f.id ? ' active' : ''), f.label);
+      btn.addEventListener('click', () => { state.contactThreadFilter = f.id; renderMain(); });
+      filterBar.appendChild(btn);
+    });
+    section.appendChild(filterBar);
+
+    let msgs = D.getMsgs(c.id);
+    if (currentFilter === 'from') msgs = msgs.filter(m => m.fm !== '你');
+    if (currentFilter === 'to') msgs = msgs.filter(m => m.fm === '你');
+
+    if (msgs.length === 0) {
+      section.appendChild(renderEmpty('No messages match this filter.', 'ph-chat-circle'));
+      return section;
+    }
+
+    const list = el('div', 'contact-timeline-list');
+    msgs.forEach(m => {
+      const row = el('div', 'contact-timeline-row');
+      const direction = el('span', 'contact-timeline-direction', m.fm === '你' ? 'To' : 'From');
+      const body = el('div', 'contact-timeline-body');
+      body.appendChild(el('div', 'contact-timeline-subj', m.subj));
+      body.appendChild(el('div', 'contact-timeline-preview', m.prev));
+      const meta = el('div', 'contact-timeline-meta');
+      meta.appendChild(el('span', '', m.tag));
+      meta.appendChild(el('span', '', m.tm));
+      body.appendChild(meta);
+
+      const marker = renderFollowUpMarker(m);
+
+      row.appendChild(direction);
+      row.appendChild(body);
+      row.appendChild(marker);
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('.contact-followup-marker')) return;
+        openMessage(m);
+      });
+      list.appendChild(row);
+    });
+    section.appendChild(list);
+    return section;
+  }
+
+  function renderFollowUpMarker(m) {
+    const order = ['', 'todo', 'wait', 'done'];
+    const labels = { todo: 'Todo', wait: 'Waiting', done: 'Done' };
+    const classes = { todo: 'todo', wait: 'wait', done: 'done' };
+    const status = order.includes(m.fl) ? m.fl : '';
+    const marker = el('button', 'contact-followup-marker' + (status ? ' ' + classes[status] : ''), status ? labels[status] : '+');
+    marker.title = status ? 'Follow-up: ' + labels[status] + ' (click to cycle)' : 'Add follow-up (click to cycle)';
+    marker.type = 'button';
+    marker.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const idx = order.indexOf(status);
+      const next = order[(idx + 1) % order.length];
+      m.fl = next;
+      renderMain();
+    });
+    return marker;
+  }
+
+  function renderContactFilesTab(c) {
+    const section = el('div', 'contact-section');
+    const header = el('div', 'contact-section-header');
+    header.appendChild(el('div', 'contact-section-title', 'Files'));
+    section.appendChild(header);
+
+    const grid = el('div', 'mini-grid');
+    const files = D.getFiles(c.id);
+    if (files.length === 0) {
+      section.appendChild(renderEmpty('No files yet.', 'ph-files'));
+    } else {
+      files.forEach(f => {
+        const card = el('div', 'mini-file');
+        const name = el('div', 'mini-file-name');
+        name.appendChild(icon(fileIconName(f.tp)));
+        name.appendChild(el('span', '', f.name));
+        card.appendChild(name);
+        card.appendChild(el('div', 'mini-file-meta', f.sz + ' · ' + f.dt));
+        card.addEventListener('click', () => openFile(f));
+        grid.appendChild(card);
+      });
+      section.appendChild(grid);
+    }
+    return section;
+  }
+
+  function renderContactInsightsTab(c) {
+    const section = el('div', 'contact-section');
+    const header = el('div', 'contact-section-header');
+    header.appendChild(el('div', 'contact-section-title', 'Insights'));
+    section.appendChild(header);
+
+    const wrap = el('div', 'contact-insights');
+    const msgs = D.getMsgs(c.id);
+
+    // Reply time
+    const replyStat = computeReplyTimeStats(c, msgs);
+    const replyRow = el('div', 'contact-insight-row');
+    replyRow.appendChild(icon('ph-clock'));
+    const replyBody = el('div', 'contact-insight-body');
+    replyBody.appendChild(el('div', 'contact-insight-label', 'Avg reply time'));
+    replyBody.appendChild(el('div', 'contact-insight-value', replyStat.text));
+    replyRow.appendChild(replyBody);
+    wrap.appendChild(replyRow);
+
+    // Top topics
+    const topics = computeTopTopics(c, msgs);
+    const topicRow = el('div', 'contact-insight-row');
+    topicRow.appendChild(icon('ph-hash'));
+    const topicBody = el('div', 'contact-insight-body');
+    topicBody.appendChild(el('div', 'contact-insight-label', 'Top topics'));
+    const topicChips = el('div', 'contact-insight-chips');
+    if (topics.length) {
+      topics.forEach(t => {
+        const chip = el('span', 'contact-insight-chip', t);
+        chip.addEventListener('click', () => {
+          state.searchQuery = t;
+          state.view = 'imbox';
+          renderMain();
+          closePanel();
+        });
+        topicChips.appendChild(chip);
+      });
+    } else {
+      topicChips.appendChild(el('span', 'contact-insight-empty', 'No topics yet'));
+    }
+    topicBody.appendChild(topicChips);
+    topicRow.appendChild(topicBody);
+    wrap.appendChild(topicRow);
+
+    // 3-month frequency
+    const freq = computeMessageFrequency(msgs);
+    const freqRow = el('div', 'contact-insight-row');
+    freqRow.appendChild(icon('ph-chart-bar'));
+    const freqBody = el('div', 'contact-insight-body');
+    freqBody.appendChild(el('div', 'contact-insight-label', '3-month frequency'));
+    const bars = el('div', 'contact-frequency-bars');
+    freq.forEach(f => {
+      const col = el('div', 'contact-frequency-col');
+      const barWrap = el('div', 'contact-frequency-bar-wrap');
+      const bar = el('div', 'contact-frequency-bar');
+      bar.style.height = f.pct + '%';
+      barWrap.appendChild(bar);
+      col.appendChild(barWrap);
+      col.appendChild(el('div', 'contact-frequency-label', f.label));
+      col.appendChild(el('div', 'contact-frequency-count', f.count));
+      bars.appendChild(col);
+    });
+    freqBody.appendChild(bars);
+    freqRow.appendChild(freqBody);
+    wrap.appendChild(freqRow);
+
+    // Best contact time
+    const best = computeBestContactTime(msgs);
+    const bestRow = el('div', 'contact-insight-row');
+    bestRow.appendChild(icon('ph-calendar-check'));
+    const bestBody = el('div', 'contact-insight-body');
+    bestBody.appendChild(el('div', 'contact-insight-label', 'Best contact time'));
+    bestBody.appendChild(el('div', 'contact-insight-value', best || 'Not enough data'));
+    bestRow.appendChild(bestBody);
+    wrap.appendChild(bestRow);
+
+    section.appendChild(wrap);
+    return section;
+  }
+
+  function computeReplyTimeStats(c, msgs) {
+    const appNow = new Date('2026-07-20T00:00:00');
+    const thisMonthStart = new Date(appNow.getFullYear(), appNow.getMonth(), 1);
+    const lastMonthStart = new Date(appNow.getFullYear(), appNow.getMonth() - 1, 1);
+    const lastMonthEnd = new Date(thisMonthStart.getTime() - 1);
+
+    function avgReply(list) {
+      let total = 0, count = 0;
+      for (let i = 0; i < list.length - 1; i++) {
+        const cur = list[i], next = list[i + 1];
+        const curFromThem = cur.fm !== '你';
+        const nextFromMe = next.fm === '你';
+        if (curFromThem && nextFromMe) {
+          const a = new Date(cur.st).getTime();
+          const b = new Date(next.st).getTime();
+          if (a && b && b > a) {
+            total += (b - a) / (1000 * 60 * 60);
+            count++;
+          }
+        }
+      }
+      return count ? total / count : 0;
+    }
+
+    const sorted = [...msgs].sort((a, b) => new Date(a.st) - new Date(b.st));
+    const thisMonth = sorted.filter(m => new Date(m.st) >= thisMonthStart);
+    const lastMonth = sorted.filter(m => {
+      const d = new Date(m.st);
+      return d >= lastMonthStart && d <= lastMonthEnd;
+    });
+
+    const thisAvg = avgReply(thisMonth);
+    const lastAvg = avgReply(lastMonth);
+
+    function fmt(h) {
+      if (!h) return '—';
+      if (h < 1) return Math.round(h * 60) + ' min';
+      if (h < 24) return Math.round(h) + 'h';
+      return Math.round(h / 24) + 'd';
+    }
+
+    let text = 'This month ' + fmt(thisAvg);
+    if (lastAvg) text += ' · Last month ' + fmt(lastAvg);
+    if (c.pattern) text += ' · ' + c.pattern;
+    return { text };
+  }
+
+  function computeTopTopics(c, msgs) {
+    const counts = {};
+    (c.topics || []).forEach(t => { counts[t] = (counts[t] || 0) + 2; });
+    msgs.forEach(m => {
+      const topic = m.ctx && m.ctx.topic;
+      if (topic) counts[topic] = (counts[topic] || 0) + 1;
+    });
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k]) => k).slice(0, 6);
+  }
+
+  function computeMessageFrequency(msgs) {
+    const now = new Date('2026-07-20T00:00:00');
+    const months = [];
+    for (let i = 2; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({ d, label: (d.getMonth() + 1) + '月', count: 0 });
+    }
+    msgs.forEach(m => {
+      const d = new Date(m.st);
+      months.forEach(mo => {
+        if (d.getFullYear() === mo.d.getFullYear() && d.getMonth() === mo.d.getMonth()) mo.count++;
+      });
+    });
+    const max = Math.max(1, ...months.map(m => m.count));
+    return months.map(mo => ({ ...mo, pct: Math.round((mo.count / max) * 100) }));
+  }
+
+  function computeBestContactTime(msgs) {
+    if (!msgs.length) return null;
+    const dayCounts = {};
+    const hourCounts = {};
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    msgs.forEach(m => {
+      const d = new Date(m.st);
+      if (!d.getTime()) return;
+      const day = days[d.getDay()];
+      dayCounts[day] = (dayCounts[day] || 0) + 1;
+      const hour = d.getHours();
+      hourCounts[hour] = (hourCounts[hour] || 0) + 1;
+    });
+    const bestDay = Object.entries(dayCounts).sort((a, b) => b[1] - a[1])[0];
+    const bestHour = Object.entries(hourCounts).sort((a, b) => b[1] - a[1])[0];
+    if (!bestDay || !bestHour) return null;
+    const hour = parseInt(bestHour[0], 10);
+    const hourLabel = hour + ':00';
+    return bestDay[0] + 's around ' + hourLabel;
+  }
+
+  function renderContactNetworkTab(c) {
+    const section = el('div', 'contact-section');
+    const header = el('div', 'contact-section-header');
+    header.appendChild(el('div', 'contact-section-title', 'Network'));
+    section.appendChild(header);
+
+    const wrap = el('div', 'contact-network');
+
+    // Common contacts (from message ctx.people)
+    const commonIds = new Set();
+    D.getMsgs(c.id).forEach(m => {
+      if (m.ctx && m.ctx.people) {
+        m.ctx.people.forEach(id => { if (id !== c.id) commonIds.add(id); });
+      }
+    });
+    const common = Array.from(commonIds).map(id => D.getP(id)).filter(Boolean);
+    wrap.appendChild(renderNetworkGroup('Common contacts', common, 'ph-share-network'));
+
+    // Colleagues (same company)
+    const colleagues = D.contacts.filter(p => p.id !== c.id && p.company && p.company === c.company);
+    wrap.appendChild(renderNetworkGroup('Colleagues', colleagues, 'ph-buildings'));
+
+    // Similar contacts (shared topics)
+    const myTopics = new Set(c.topics || []);
+    const similar = D.contacts.filter(p => {
+      if (p.id === c.id) return false;
+      const theirTopics = new Set(p.topics || []);
+      for (const t of myTopics) if (theirTopics.has(t)) return true;
+      return false;
+    });
+    wrap.appendChild(renderNetworkGroup('Similar contacts', similar, 'ph-users-three'));
+
+    section.appendChild(wrap);
+    return section;
+  }
+
+  function renderNetworkGroup(title, people, iconName) {
+    const group = el('div', 'contact-network-group');
+    const head = el('div', 'contact-network-header');
+    head.appendChild(icon(iconName));
+    head.appendChild(el('span', '', title));
+    head.appendChild(el('span', 'contact-network-count', people.length));
+    group.appendChild(head);
+
+    if (people.length === 0) {
+      group.appendChild(el('div', 'contact-network-empty', 'No ' + title.toLowerCase()));
+      return group;
+    }
+
+    const grid = el('div', 'mini-grid');
+    people.forEach(p => {
+      const card = el('div', 'mini-person');
+      const av = renderAvatar(p, 'mini-person-avatar', p.name ? p.name[0] : '?');
+      card.appendChild(av);
+      const info = el('div', 'mini-person-info');
+      info.appendChild(el('div', 'mini-person-name', p.name));
+      info.appendChild(el('div', 'mini-person-meta', p.co || p.company || ''));
+      card.appendChild(info);
+      card.addEventListener('click', () => openContact(p.id));
+      grid.appendChild(card);
+    });
+    group.appendChild(grid);
+    return group;
+  }
+
+  function renderContactCalendarTab(c) {
+    const section = el('div', 'contact-section');
+    const header = el('div', 'contact-section-header');
+    header.appendChild(el('div', 'contact-section-title', 'Calendar'));
+    section.appendChild(header);
+
+    const meetings = D.getMeetings(c.id).slice().sort((a, b) => {
+      const da = parseMeetingDate(a.dt);
+      const db = parseMeetingDate(b.dt);
+      if (!da && !db) return 0;
+      if (!da) return 1;
+      if (!db) return -1;
+      return db.getTime() - da.getTime();
+    });
+
+    if (meetings.length === 0) {
+      section.appendChild(renderEmpty('No meetings with ' + c.name + '.', 'ph-calendar-blank'));
+      return section;
+    }
+
+    const list = el('div', 'contact-calendar-list');
+    meetings.forEach(m => {
+      const row = el('div', 'contact-calendar-row');
+      const iconBox = el('div', 'contact-calendar-icon');
+      iconBox.appendChild(icon('ph-calendar-blank'));
+      const body = el('div', 'contact-calendar-body');
+      body.appendChild(el('div', 'contact-calendar-title', m.title));
+      body.appendChild(el('div', 'contact-calendar-meta', m.dt + ' · ' + m.tm + ' · ' + m.ppl));
+      row.appendChild(iconBox);
+      row.appendChild(body);
+      row.addEventListener('click', () => openMeeting(m));
+      list.appendChild(row);
+    });
+    section.appendChild(list);
+    return section;
   }
 
   function renderContactRecycling(c) {
