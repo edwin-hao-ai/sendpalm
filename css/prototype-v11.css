@@ -10612,3 +10612,74 @@ button:focus-visible, input:focus-visible {
 .bundle-drawer-row:hover { background: var(--accent-soft); }
 .bundle-drawer-line { font-weight: 600; color: var(--text-primary); }
 .bundle-drawer-meta { font-size: 11px; color: var(--text-secondary); }
+
+/* P4 Task K: sticky notes on email */
+.sticky-list { display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow: auto; }
+.sticky-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 12px;
+  background: #fef3c7;
+  border: 1px solid #fbbf24;
+  border-radius: var(--radius-md);
+  color: #78350f;
+}
+.sticky-body { flex: 1; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+.sticky-meta { font-size: 11px; color: rgba(120, 53, 15, 0.7); margin-top: 4px; }
+.sticky-remove { background: none; border: none; cursor: pointer; color: rgba(120, 53, 15, 0.7); padding: 2px; }
+.sticky-remove:hover { color: #78350f; }
+.sticky-add-wrap { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.sticky-input { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-md); resize: vertical; box-sizing: border-box; font-size: 13px; font-family: inherit; }
+.sticky-input:focus { outline: none; border-color: var(--accent); }
+.sticky-empty { padding: 12px; color: var(--text-secondary); text-align: center; font-size: 13px; }
+
+/* P4 Tasks K, L, M, P */
+.msg-tracker-guard {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: var(--radius-md);
+  margin-top: 8px;
+}
+
+.contact-notes-tab { padding: 20px 24px; }
+.contact-notes-header { margin-bottom: 12px; }
+.contact-notes-header > div:first-child { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+.contact-notes-sub { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+.contact-notes-list { display: flex; flex-direction: column; gap: 8px; }
+.contact-notes-group {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-secondary); padding: 8px 0 4px;
+}
+.contact-note-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--accent-soft);
+}
+.contact-note-body { flex: 1; font-size: 13px; line-height: 1.5; color: var(--text-primary); white-space: pre-wrap; }
+.contact-note-meta { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+.contact-note-pin, .contact-note-remove, .clip-remove {
+  background: none; border: none; cursor: pointer; color: var(--text-secondary); padding: 4px; border-radius: 6px;
+}
+.contact-note-pin:hover, .contact-note-remove:hover, .clip-remove:hover { color: var(--red); }
+.contact-notes-empty { font-size: 13px; color: var(--text-secondary); padding: 12px; text-align: center; }
+.contact-notes-add { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+.contact-notes-input { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 13px; resize: vertical; font-family: inherit; box-sizing: border-box; }
+
+.clips-view { padding: 24px; max-width: 720px; }
+.clips-group-title {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-secondary); padding: 14px 0 6px;
+}
+.clip-card {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  margin-bottom: 6px;
+}
+.clip-text { font-size: 14px; color: var(--text-primary); font-family: var(--font-mono); word-break: break-word; }
+.clip-meta { font-size: 11px; color: var(--text-secondary); }
+.clip-actions { display: flex; gap: 6px; align-items: center; }

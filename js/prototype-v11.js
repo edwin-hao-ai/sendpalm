@@ -157,6 +157,7 @@
         { id: 'insights', label: 'Insights', icon: 'ph-chart-bar', hint: '⌘8' },
         { id: 'agent', label: 'Agent', icon: 'ph-sparkle', hint: '⌘9' },
         { id: 'followups', label: 'Follow-ups', icon: 'ph-bell-ringing', hint: '' },
+        { id: 'clips', label: 'Clips', icon: 'ph-bookmarks-simple', hint: '' },
       ]
     },
     {
@@ -814,6 +815,8 @@
   window.downloadCSV = downloadCSV;
   window.resetAllData = resetAllData;
   window.openEmailAccountSettings = openEmailAccountSettings;
+  window.openContact = openContact;
+  window.openStickyModal = openStickyModal;
 
   function addLongPressListener(element, callback, duration = 500) {
     let timer = null;
@@ -1848,6 +1851,8 @@
       viewEl = renderDrafts();
     } else if (state.view === 'followups') {
       viewEl = renderFollowUpsView();
+    } else if (state.view === 'clips') {
+      viewEl = openClipsView();
     } else if (state.view === 'settings') {
       viewEl = renderSettings();
     } else if (state.view === 'search') {
@@ -3495,7 +3500,7 @@
   }
 
   function renderContactTabs(c) {
-    const tabs = ['Timeline', 'Files', 'Insights', 'Network', 'Calendar'];
+    const tabs = ['Timeline', 'Notes', 'Files', 'Insights', 'Network', 'Calendar'];
     const activeTab = state.contactTab || 'Timeline';
     const wrap = el('div', 'contact-tabs');
     tabs.forEach(tab => {
@@ -3511,6 +3516,7 @@
 
   function renderContactTabContent(c) {
     const activeTab = state.contactTab || 'Timeline';
+    if (activeTab === 'Notes') return renderContactNotesTab(c);
     if (activeTab === 'Files') return renderContactFilesTab(c);
     if (activeTab === 'Insights') return renderContactInsightsTab(c);
     if (activeTab === 'Network') return renderContactNetworkTab(c);
@@ -7968,6 +7974,231 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     });
   }
 
+  function renderContactNotesTab(c) {
+    const wrap = el('div', 'contact-notes-tab');
+    const header = el('div', 'contact-notes-header');
+    header.appendChild(el('div', '', 'Notes about ' + c.name));
+    header.appendChild(el('div', 'contact-notes-sub', 'Private to you. Pin important ones to the top.'));
+    wrap.appendChild(header);
+
+    const list = el('div', 'contact-notes-list');
+    const renderList = () => {
+      list.innerHTML = '';
+      const notes = (D.contactNotes || []).filter(n => n.contactId === c.id);
+      const pinned = notes.filter(n => n.pinned);
+      const others = notes.filter(n => !n.pinned);
+      const renderNote = (n) => {
+        const row = el('div', 'contact-note-row');
+        row.appendChild(el('div', 'contact-note-body', n.body));
+        row.appendChild(el('div', 'contact-note-meta', new Date(n.createdAt).toLocaleString()));
+        const pinBtn = el('button', 'btn-icon contact-note-pin');
+        pinBtn.type = 'button';
+        pinBtn.title = n.pinned ? 'Unpin' : 'Pin';
+        pinBtn.appendChild(icon(n.pinned ? 'ph-push-pin-fill' : 'ph-push-pin'));
+        pinBtn.addEventListener('click', () => {
+          n.pinned = !n.pinned;
+          renderList();
+        });
+        const removeBtn = el('button', 'btn-icon contact-note-remove');
+        removeBtn.type = 'button';
+        removeBtn.title = 'Remove';
+        removeBtn.appendChild(icon('ph-x'));
+        removeBtn.addEventListener('click', () => {
+          D.contactNotes = (D.contactNotes || []).filter(x => x.id !== n.id);
+          renderList();
+        });
+        row.appendChild(pinBtn);
+        row.appendChild(removeBtn);
+        list.appendChild(row);
+      };
+      if (pinned.length) {
+        list.appendChild(el('div', 'contact-notes-group', 'Pinned'));
+        pinned.forEach(renderNote);
+      }
+      if (others.length) {
+        if (pinned.length) list.appendChild(el('div', 'contact-notes-group', 'Other'));
+        others.forEach(renderNote);
+      }
+      if (!notes.length) {
+        list.appendChild(el('div', 'contact-notes-empty', 'No notes yet. Add one below.'));
+      }
+    };
+    renderList();
+    wrap.appendChild(list);
+
+    const addWrap = el('div', 'contact-notes-add');
+    const input = el('textarea', 'contact-notes-input');
+    input.placeholder = 'Add a note about ' + c.name + '…';
+    input.rows = 2;
+    const addBtn = el('button', 'btn btn-primary btn-sm', 'Add note');
+    addBtn.type = 'button';
+    addBtn.addEventListener('click', () => {
+      const value = input.value.trim();
+      if (!value) { showToast('Empty note'); return; }
+      D.contactNotes = D.contactNotes || [];
+      D.contactNotes.push({
+        id: 'cn-' + Date.now(),
+        contactId: c.id,
+        body: value,
+        pinned: false,
+        createdAt: new Date().toISOString()
+      });
+      input.value = '';
+      renderList();
+    });
+    addWrap.appendChild(input);
+    addWrap.appendChild(addBtn);
+    wrap.appendChild(addWrap);
+
+    return wrap;
+  }
+
+  // P4 Task M: detect tracking pixels / spy URLs in a message thread.
+  function detectTrackers(thread) {
+    const trackers = [];
+    const seen = new Set();
+    thread.forEach(msg => {
+      const text = (msg.prev || '') + ' ' + (msg.subj || '');
+      const regex = /(?:https?:\/\/[^\s)]+|www\.[^\s)]+)|utm_[\w]+=|track|pixel\.gif|tracker\.(png|jpg|gif)/gi;
+      let m;
+      while ((m = regex.exec(text)) !== null) {
+        const token = m[0];
+        if (/utm_/i.test(token) || /track/i.test(token) || /pixel/i.test(token) || /\.(gif|png|jpg)/i.test(token)) {
+          if (!seen.has(token)) {
+            seen.add(token);
+            trackers.push(token);
+          }
+        }
+        if (seen.size >= 8) break;
+      }
+    });
+    return trackers;
+  }
+
+  // P4 Task P: Clips — text snippets saved from messages.
+  function openClipsView() {
+    const container = el('div', 'view clips-view');
+    const all = (D.clips || []).slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    if (!all.length) {
+      container.appendChild(renderEmpty('No clips yet. Select text in any message and save it for later.', 'ph-bookmarks-simple'));
+      return container;
+    }
+    const groups = { Today: [], Earlier: [] };
+    all.forEach(c => {
+      const t = new Date(c.createdAt);
+      const isToday = (Date.now() - t.getTime()) < 24 * 60 * 60 * 1000;
+      (isToday ? groups.Today : groups.Earlier).push(c);
+    });
+    Object.entries(groups).forEach(([groupName, items]) => {
+      if (!items.length) return;
+      container.appendChild(el('div', 'clips-group-title', groupName));
+      items.forEach(clip => {
+        const card = el('div', 'clip-card');
+        card.appendChild(el('div', 'clip-text', clip.text));
+        card.appendChild(el('div', 'clip-meta', new Date(clip.createdAt).toLocaleString()));
+        const actions = el('div', 'clip-actions');
+        const copyBtn = el('button', 'btn btn-secondary btn-sm', 'Copy');
+        copyBtn.addEventListener('click', () => copyToClipboard(clip.text, 'Clip'));
+        const removeBtn = el('button', 'btn-icon clip-remove');
+        removeBtn.type = 'button';
+        removeBtn.title = 'Remove';
+        removeBtn.appendChild(icon('ph-x'));
+        removeBtn.addEventListener('click', () => {
+          D.clips = (D.clips || []).filter(x => x.id !== clip.id);
+          renderMain();
+        });
+        actions.appendChild(copyBtn);
+        actions.appendChild(removeBtn);
+        card.appendChild(actions);
+        container.appendChild(card);
+      });
+    });
+    return container;
+  }
+
+  function addClip(text, msgKey) {
+    if (!text || !text.trim()) return false;
+    D.clips = D.clips || [];
+    D.clips.push({
+      id: 'cl-' + Date.now(),
+      text: text.trim(),
+      msgKey: msgKey || null,
+      createdAt: new Date().toISOString()
+    });
+    showToast('Saved to Clips');
+    return true;
+  }
+
+  function stickyMsgKey(m) {
+    return m.pid + ':' + (m.subj || '');
+  }
+
+  function getStickiesForMessage(m) {
+    return (D.stickies || []).filter(s => s.msgKey === stickyMsgKey(m));
+  }
+
+  function openStickyModal(m) {
+    const msgKey = stickyMsgKey(m);
+    const stickies = getStickiesForMessage(m);
+    openModalCard({
+      title: 'Sticky notes',
+      renderBody: (body) => {
+        const list = el('div', 'sticky-list');
+        const renderList = () => {
+          list.innerHTML = '';
+          const current = (D.stickies || []).filter(s => s.msgKey === msgKey);
+          current.forEach(s => {
+            const row = el('div', 'sticky-row');
+            row.appendChild(el('div', 'sticky-body', s.body));
+            row.appendChild(el('div', 'sticky-meta', new Date(s.createdAt).toLocaleString()));
+            const removeBtn = el('button', 'btn-icon sticky-remove');
+            removeBtn.type = 'button';
+            removeBtn.title = 'Remove';
+            removeBtn.appendChild(icon('ph-x'));
+            removeBtn.addEventListener('click', () => {
+              D.stickies = (D.stickies || []).filter(x => x.id !== s.id);
+              renderList();
+            });
+            row.appendChild(removeBtn);
+            list.appendChild(row);
+          });
+          if (!current.length) {
+            list.appendChild(el('div', 'sticky-empty', 'No sticky notes yet for this message.'));
+          }
+        };
+        renderList();
+        body.appendChild(list);
+        const addWrap = el('div', 'sticky-add-wrap');
+        const input = el('textarea', 'sticky-input');
+        input.placeholder = 'Jot a personal note… (only you can see this)';
+        input.rows = 3;
+        const addBtn = el('button', 'btn btn-primary btn-sm', 'Add sticky');
+        addBtn.type = 'button';
+        addBtn.addEventListener('click', () => {
+          const value = input.value.trim();
+          if (!value) { showToast('Empty note'); return; }
+          D.stickies = D.stickies || [];
+          D.stickies.push({
+            id: 'st-' + Date.now(),
+            msgKey,
+            body: value,
+            createdAt: new Date().toISOString()
+          });
+          input.value = '';
+          renderList();
+        });
+        addWrap.appendChild(input);
+        addWrap.appendChild(addBtn);
+        body.appendChild(addWrap);
+      },
+      renderActions: (actions) => {
+        const done = el('button', 'btn-primary', 'Done');
+        done.addEventListener('click', () => { closeCompose(); renderMain(); });
+        actions.appendChild(done);
+      }
+    });
+  }
+
   function renderComposeWindow(context) {
     const mode = context.mode || 'new';
     const title = mode === 'reply' ? 'Reply' : mode === 'forward' ? 'Forward' : 'New message';
@@ -10122,6 +10353,16 @@ originalMsg: context.originalMsg
       participants.appendChild(chip);
     });
     threadHeader.appendChild(participants);
+
+    // P4 Task M: Spy pixel / tracker blocker indicator.
+    const trackers = detectTrackers(thread);
+    if (trackers.length) {
+      const guard = el('div', 'msg-tracker-guard');
+      guard.appendChild(icon('ph-shield-check'));
+      guard.appendChild(el('span', '', trackers.length + ' tracker' + (trackers.length > 1 ? 's' : '') + ' blocked — images + tracking pixels stripped from this thread'));
+      threadHeader.appendChild(guard);
+    }
+
     threadEl.appendChild(threadHeader);
 
     if (m.summary) {
@@ -10249,6 +10490,8 @@ originalMsg: context.originalMsg
     const setAsideBtn = makeActionBtn('ph-push-pin', 'Saved', false, true, 'Saved (s)');
     const bubbleUpBtn = makeActionBtn('ph-arrow-fat-line-up', 'Remind', false, true, 'Remind (b)');
     const followUpBtn = makeActionBtn('ph-bell-ringing', 'Follow-up', false, true, 'Follow-up (u)');
+    const stickyBtn = makeActionBtn('ph-note', 'Sticky', false, true, 'Sticky note');
+    const clipBtn = makeActionBtn('ph-bookmarks-simple', 'Clip', false, true, 'Save selection as Clip');
     const unreadBtn = makeActionBtn(m.seen ? 'ph-eye-slash' : 'ph-eye', 'Unread', false, true, m.seen ? 'Mark as unread' : 'Mark as read');
     const moreBtn = makeActionBtn('ph-dots-three', 'More', false, true, 'More actions');
 
@@ -10260,6 +10503,13 @@ originalMsg: context.originalMsg
     replyLaterBtn.addEventListener('click', () => replyLaterMessage(m));
     setAsideBtn.addEventListener('click', () => setAsideMessage(m));
     followUpBtn.addEventListener('click', () => openFollowUpPicker(m));
+    stickyBtn.addEventListener('click', () => openStickyModal(m));
+    clipBtn.addEventListener('click', () => {
+      const sel = window.getSelection ? window.getSelection().toString() : '';
+      const text = sel || prompt('Clip text:');
+      if (!text) { showToast('Nothing to save'); return; }
+      addClip(text, stickyMsgKey(m));
+    });
     bubbleUpBtn.addEventListener('click', () => {
       const now = new Date();
       const fmt = (d) => {
@@ -10333,6 +10583,8 @@ originalMsg: context.originalMsg
     actions.appendChild(setAsideBtn);
     actions.appendChild(bubbleUpBtn);
     actions.appendChild(followUpBtn);
+    actions.appendChild(stickyBtn);
+    actions.appendChild(clipBtn);
     actions.appendChild(unreadBtn);
     actions.appendChild(moreBtn);
     wrapper.appendChild(actions);

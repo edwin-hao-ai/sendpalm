@@ -610,3 +610,24 @@ if (D.agentDrafts && D.agentDrafts.length) {
 }
 D.drafts = D.drafts || [];
 
+// Bundles (P4 Task J): per-sender bundle toggle.
+D.bundles = {};
+
+// Stickies (P4 Task K): per-message personal notes.
+D.stickies = [
+  { id: 'st1', msgKey: 'zl:Q4 合同提案', body: '记得跟进付款条款的最终版本 — 张磊对 30-40-30 还有疑问', createdAt: new Date(Date.now() - 86400000).toISOString() },
+];
+
+// Contact notes (P4 Task L): distinct from c.notes.
+D.contactNotes = [
+  { id: 'cn1', contactId: 'zl', body: '上次见面在 7/18 华为展厅，下次约 8/5 电话', pinned: true, createdAt: new Date(Date.now() - 86400000 * 3).toISOString() },
+  { id: 'cn2', contactId: 'zl', body: '张磊偏好周三/周四下午', pinned: false, createdAt: new Date(Date.now() - 86400000 * 10).toISOString() },
+  { id: 'cn3', contactId: 'cx', body: '陈欣 Slack 比邮件响应快 — 紧急事优先 Slack', pinned: true, createdAt: new Date(Date.now() - 86400000 * 2).toISOString() },
+];
+
+// Clips (P4 Task P): text snippets saved from messages.
+D.clips = [
+  { id: 'cl1', text: '付款节奏 30-40-30', msgKey: 'zl:Q4 合同提案', createdAt: new Date(Date.now() - 86400000).toISOString() },
+  { id: 'cl2', text: '+86 138****1234', msgKey: 'zl:Q4 合同提案', createdAt: new Date(Date.now() - 86400000).toISOString() },
+];
+
