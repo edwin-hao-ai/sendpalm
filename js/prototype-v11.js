@@ -8745,13 +8745,9 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     return section;
   }
 
-  function shortcutKeys(sc) {
-    return (sc.key || '').split(/\s+/).filter(Boolean);
-  }
-
   function shortcutDescription(sc) {
     if (!sc || !sc.key) return '';
-    const keys = shortcutKeys(sc);
+    const keys = shortcutKeyList(sc);
     if (!keys.length) return '';
     const prefix = sc.modifier === 'cmd' ? 'Cmd + ' : '';
     return prefix + keys.map(k => displayKeyName(k)).join(' then ');
@@ -8805,15 +8801,15 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
         const stack = el('div', 'form-stack');
         stack.appendChild(el('p', 'form-hint', 'Action: ' + sc.action));
 
-        const captureGroup = el('div', 'form-group');
-        captureGroup.appendChild(el('label', 'form-label', 'Shortcut'));
         const captureBox = elAttr('div', 'shortcut-capture-box', { tabindex: '0' });
         const captureText = el('span', 'shortcut-capture-text', captured.key ? shortcutDescription(captured) : 'Click here, then press a key or key sequence…');
         captureBox.appendChild(captureText);
-        captureGroup.appendChild(captureBox);
 
-        const sub = el('div', 'form-hint', 'Press up to two keys in sequence (e.g. g then i), or hold Cmd/Ctrl with a key. Press Backspace to clear.');
-        captureGroup.appendChild(sub);
+        const captureGroup = renderFormGroup(
+          'Shortcut',
+          captureBox,
+          'Press up to two keys in sequence (e.g. g then i), or hold Cmd/Ctrl with a key. Press Backspace to clear.'
+        );
 
         const errorEl = el('div', 'shortcut-capture-error');
         captureGroup.appendChild(errorEl);
@@ -10791,7 +10787,12 @@ ${D.stageSuggest[c.stage] || ''}
   }
 
   function shortcutSequenceMatches(e, isTyping) {
-    if (isTyping || e.metaKey || e.ctrlKey || e.altKey) return null;
+    if (isTyping) {
+      shortcutSequenceBuffer = [];
+      clearTimeout(shortcutSequenceTimer);
+      return null;
+    }
+    if (e.metaKey || e.ctrlKey || e.altKey) return null;
     if (e.key.length !== 1) return null;
 
     const pressed = e.key.toLowerCase();
@@ -10863,9 +10864,10 @@ ${D.stageSuggest[c.stage] || ''}
         }
         const palette = document.getElementById('command-palette');
         const menu = document.getElementById('context-menu');
+        const composeModal = document.getElementById('compose-modal');
         if (palette.classList.contains('open')) closeCommandPalette();
         else if (menu.classList.contains('open')) closeContextMenu();
-        else if (state.composeOpen) closeCompose();
+        else if (state.composeOpen || (composeModal && composeModal.classList.contains('open'))) closeCompose();
         else if (state.notificationsOpen) toggleNotifications();
         else if (state.agentOpen) toggleAgent();
         else if (!document.getElementById('detail-panel').classList.contains('hidden')) closePanel();
@@ -10929,7 +10931,9 @@ ${D.stageSuggest[c.stage] || ''}
         'nav-agent': 'agent'
       };
       for (const [id, view] of Object.entries(navMap)) {
-        if (shortcutSingleMatches(e, getShortcutById(id))) {
+        const sc = getShortcutById(id);
+        if (isTyping && sc.modifier !== 'cmd') continue;
+        if (shortcutSingleMatches(e, sc)) {
           e.preventDefault();
           setView(view);
           break;
