@@ -473,6 +473,52 @@ D.agentMemory = {
   }
 };
 
+// Task 14: customizable keyboard shortcuts.
+D.shortcuts = [
+  { id: 'new-message', action: 'New message', key: 'n', modifier: 'cmd' },
+  { id: 'search', action: 'Search', key: '/' },
+  { id: 'command-palette', action: 'Command palette', key: 'k', modifier: 'cmd' },
+  { id: 'shortcuts-help', action: 'Shortcuts help', key: '?' },
+
+  { id: 'nav-gate', action: 'Go to Gate', key: '1', modifier: 'cmd' },
+  { id: 'nav-inbox', action: 'Go to Inbox', key: '2', modifier: 'cmd' },
+  { id: 'nav-stream', action: 'Go to Stream', key: '3', modifier: 'cmd' },
+  { id: 'nav-records', action: 'Go to Records', key: '4', modifier: 'cmd' },
+  { id: 'nav-contacts', action: 'Go to Contacts', key: '5', modifier: 'cmd' },
+  { id: 'nav-calendar', action: 'Go to Calendar', key: '6', modifier: 'cmd' },
+  { id: 'nav-files', action: 'Go to Files', key: '7', modifier: 'cmd' },
+  { id: 'nav-insights', action: 'Go to Insights', key: '8', modifier: 'cmd' },
+  { id: 'nav-agent', action: 'Go to Agent', key: '9', modifier: 'cmd' },
+
+  { id: 'inbox-seq', action: 'Inbox (sequence)', key: 'g i' },
+  { id: 'stream-seq', action: 'Stream (sequence)', key: 'g s' },
+  { id: 'records-seq', action: 'Records (sequence)', key: 'g r' },
+  { id: 'contacts-seq', action: 'Contacts (sequence)', key: 'g c' },
+  { id: 'calendar-seq', action: 'Calendar (sequence)', key: 'g d' },
+
+  { id: 'calendar-day', action: 'Calendar day view', key: 'd' },
+  { id: 'calendar-week', action: 'Calendar week view', key: 'w' },
+  { id: 'calendar-year', action: 'Calendar year view', key: 'y' },
+  { id: 'calendar-today', action: 'Calendar today', key: 't' },
+  { id: 'calendar-prev', action: 'Calendar previous day', key: 'ArrowLeft' },
+  { id: 'calendar-next', action: 'Calendar next day', key: 'ArrowRight' },
+
+  { id: 'list-next', action: 'Next item', key: 'j' },
+  { id: 'list-prev', action: 'Previous item', key: 'k' },
+  { id: 'list-open', action: 'Open selected', key: 'Enter' },
+  { id: 'list-select', action: 'Select item', key: 'x' },
+  { id: 'list-bulk', action: 'Bulk actions', key: ';' },
+
+  { id: 'msg-archive', action: 'Archive message', key: 'e' },
+  { id: 'msg-reply', action: 'Reply to message', key: 'r' },
+  { id: 'msg-pending', action: 'Move to Pending', key: 'l' },
+  { id: 'msg-save', action: 'Save message', key: 's' },
+  { id: 'msg-remind', action: 'Remind tomorrow', key: 'b' },
+  { id: 'msg-unread', action: 'Toggle read/unread', key: 'u' },
+  { id: 'msg-trash', action: 'Move to Trash', key: '#' },
+  { id: 'msg-spam', action: 'Mark as spam', key: '!' }
+];
+
 // Backwards-compatible top-level alias for older prototype versions.
 const accounts = D.accounts;
 

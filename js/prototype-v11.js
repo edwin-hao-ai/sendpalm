@@ -7608,13 +7608,8 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     const tabLabels = { profile: 'Profile', accounts: 'Accounts', preferences: 'Preferences', agent: 'Agent', labels: 'Labels', data: 'Data', shortcuts: 'Shortcuts' };
     const tabBar = el('div', 'settings-tabs');
     tabs.forEach(tab => {
-      const isP2 = tab === 'shortcuts';
-      const btn = el('button', 'settings-tab' + (state.settingsTab === tab ? ' active' : '') + (isP2 ? ' disabled' : ''), tabLabels[tab]);
+      const btn = el('button', 'settings-tab' + (state.settingsTab === tab ? ' active' : ''), tabLabels[tab]);
       btn.addEventListener('click', () => {
-        if (isP2) {
-          showToast(tabLabels[tab] + ' settings coming soon');
-          return;
-        }
         state.settingsTab = tab;
         renderMain();
       });
@@ -7629,6 +7624,7 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
       case 'agent': content.appendChild(renderAgentSection()); break;
       case 'labels': content.appendChild(renderLabelsSection()); break;
       case 'data': content.appendChild(renderDataSection()); break;
+      case 'shortcuts': content.appendChild(renderShortcutsSection()); break;
       case 'profile':
       default: content.appendChild(renderProfileSection()); break;
     }
@@ -8709,6 +8705,233 @@ ${contact ? contact.name + ' (' + contact.co + ')' : 'Unknown'}
     wrapper.appendChild(dangerSection);
 
     return wrapper;
+  }
+
+  // Task 14: customizable keyboard shortcuts.
+  function renderShortcutsSection() {
+    const section = el('div', 'settings-section');
+    const header = el('div', 'settings-section-header');
+    header.appendChild(el('div', 'settings-section-title', 'Keyboard shortcuts'));
+    const resetBtn = el('button', 'btn btn-secondary btn-sm', 'Restore defaults');
+    resetBtn.addEventListener('click', () => confirmDestructive('Restore all shortcuts to defaults?', restoreDefaultShortcuts));
+    header.appendChild(resetBtn);
+    section.appendChild(header);
+
+    const list = el('div', 'shortcut-list');
+    (D.shortcuts || []).forEach(sc => {
+      const row = el('div', 'shortcut-row' + (hasShortcutConflict(sc) ? ' shortcut-row-conflict' : ''));
+      const info = el('div', 'shortcut-info');
+      info.appendChild(el('div', 'shortcut-name', sc.action));
+      const desc = shortcutDescription(sc);
+      info.appendChild(el('div', 'shortcut-binding', desc || 'Not set'));
+      if (hasShortcutConflict(sc)) {
+        info.appendChild(el('div', 'shortcut-conflict-note', 'Conflict with another shortcut'));
+      }
+
+      const actions = el('div', 'shortcut-actions');
+      const editBtn = el('button', 'btn btn-secondary btn-sm', 'Edit');
+      editBtn.addEventListener('click', () => openShortcutEditModal(sc.id));
+      actions.appendChild(editBtn);
+
+      row.appendChild(info);
+      row.appendChild(actions);
+      list.appendChild(row);
+    });
+    section.appendChild(list);
+
+    const hint = el('div', 'shortcut-hint', 'Press ? from anywhere to open the shortcuts cheatsheet.');
+    section.appendChild(hint);
+
+    return section;
+  }
+
+  function shortcutKeys(sc) {
+    return (sc.key || '').split(/\s+/).filter(Boolean);
+  }
+
+  function shortcutDescription(sc) {
+    if (!sc || !sc.key) return '';
+    const keys = shortcutKeys(sc);
+    if (!keys.length) return '';
+    const prefix = sc.modifier === 'cmd' ? 'Cmd + ' : '';
+    return prefix + keys.map(k => displayKeyName(k)).join(' then ');
+  }
+
+  function displayKeyName(key) {
+    const map = {
+      arrowleft: '←',
+      arrowright: '→',
+      arrowup: '↑',
+      arrowdown: '↓',
+      enter: '↵',
+      escape: 'Esc',
+      cmd: 'Cmd',
+      meta: 'Cmd'
+    };
+    return map[key.toLowerCase()] || key.toUpperCase();
+  }
+
+  function findShortcut(id) {
+    return (D.shortcuts || []).find(s => s.id === id);
+  }
+
+  function hasShortcutConflict(sc) {
+    if (!sc || !sc.key) return false;
+    const key = normalizeShortcutKey(sc.key);
+    return (D.shortcuts || []).some(other => {
+      if (other === sc || other.id === sc.id) return false;
+      if (!other.key) return false;
+      return normalizeShortcutKey(other.key) === key && (other.modifier || '') === (sc.modifier || '');
+    });
+  }
+
+  function normalizeShortcutKey(key) {
+    return (key || '').toLowerCase().trim().replace(/\s+/g, ' ');
+  }
+
+  function openShortcutEditModal(shortcutId) {
+    const sc = findShortcut(shortcutId);
+    if (!sc) return;
+
+    let captured = { key: sc.key || '', modifier: sc.modifier || '' };
+    let captureError = '';
+    let listening = false;
+    let sequenceBuffer = [];
+    let sequenceTimer = null;
+
+    openModalCard({
+      title: 'Edit shortcut',
+      renderBody: (body) => {
+        const stack = el('div', 'form-stack');
+        stack.appendChild(el('p', 'form-hint', 'Action: ' + sc.action));
+
+        const captureGroup = el('div', 'form-group');
+        captureGroup.appendChild(el('label', 'form-label', 'Shortcut'));
+        const captureBox = elAttr('div', 'shortcut-capture-box', { tabindex: '0' });
+        const captureText = el('span', 'shortcut-capture-text', captured.key ? shortcutDescription(captured) : 'Click here, then press a key or key sequence…');
+        captureBox.appendChild(captureText);
+        captureGroup.appendChild(captureBox);
+
+        const sub = el('div', 'form-hint', 'Press up to two keys in sequence (e.g. g then i), or hold Cmd/Ctrl with a key. Press Backspace to clear.');
+        captureGroup.appendChild(sub);
+
+        const errorEl = el('div', 'shortcut-capture-error');
+        captureGroup.appendChild(errorEl);
+
+        stack.appendChild(captureGroup);
+        body.appendChild(stack);
+
+        function updateCapture() {
+          captureText.textContent = captured.key ? shortcutDescription(captured) : 'Click here, then press a key or key sequence…';
+          captureBox.classList.toggle('has-value', !!captured.key);
+          captureBox.classList.toggle('listening', listening);
+          errorEl.textContent = captureError;
+        }
+
+        function onCaptureKey(e) {
+          if (e.key === 'Escape' || e.key === 'Enter' || e.key === 'Tab') return;
+          e.preventDefault();
+          e.stopPropagation();
+
+          if (e.key === 'Backspace' || e.key === 'Delete') {
+            captured = { key: '', modifier: '' };
+            sequenceBuffer = [];
+            captureError = '';
+            updateCapture();
+            return;
+          }
+
+          if (e.metaKey || e.ctrlKey) {
+            if (e.key.length === 1) {
+              captured = { key: e.key.toLowerCase(), modifier: 'cmd' };
+              sequenceBuffer = [];
+              captureError = '';
+              updateCapture();
+            }
+            return;
+          }
+
+          if (e.key.length !== 1 && !/^Arrow/.test(e.key) && e.key !== 'Enter') return;
+
+          sequenceBuffer.push(e.key);
+          clearTimeout(sequenceTimer);
+
+          if (sequenceBuffer.length >= 2) {
+            captured = { key: sequenceBuffer.slice(0, 2).join(' '), modifier: '' };
+            sequenceBuffer = [];
+            captureError = '';
+            updateCapture();
+          } else {
+            captured = { key: sequenceBuffer[0], modifier: '' };
+            captureError = '';
+            updateCapture();
+            sequenceTimer = setTimeout(() => {
+              sequenceBuffer = [];
+            }, 600);
+          }
+        }
+
+        captureBox.addEventListener('focus', () => {
+          listening = true;
+          updateCapture();
+        });
+        captureBox.addEventListener('blur', () => {
+          listening = false;
+          sequenceBuffer = [];
+          clearTimeout(sequenceTimer);
+          updateCapture();
+        });
+        captureBox.addEventListener('keydown', onCaptureKey);
+
+        updateCapture();
+      },
+      renderActions: (actions) => {
+        const clear = el('button', 'btn-text', 'Clear');
+        clear.addEventListener('click', () => {
+          captured = { key: '', modifier: '' };
+          captureError = '';
+          const captureBox = document.querySelector('.shortcut-capture-box');
+          if (captureBox) captureBox.focus();
+          const text = document.querySelector('.shortcut-capture-text');
+          if (text) text.textContent = 'Click here, then press a key or key sequence…';
+          captureBox?.classList.remove('has-value');
+          const err = document.querySelector('.shortcut-capture-error');
+          if (err) err.textContent = '';
+        });
+        actions.appendChild(clear);
+
+        const cancel = el('button', 'btn-secondary', 'Cancel');
+        cancel.addEventListener('click', () => closeCompose());
+        const save = el('button', 'btn-primary', 'Save');
+        save.addEventListener('click', () => {
+          const conflict = (D.shortcuts || []).find(other => {
+            if (other.id === sc.id) return false;
+            if (!other.key) return false;
+            return normalizeShortcutKey(other.key) === normalizeShortcutKey(captured.key) && (other.modifier || '') === (captured.modifier || '');
+          });
+          if (conflict) {
+            captureError = 'This shortcut conflicts with "' + conflict.action + '"';
+            const err = document.querySelector('.shortcut-capture-error');
+            if (err) err.textContent = captureError;
+            return;
+          }
+          sc.key = captured.key;
+          sc.modifier = captured.modifier;
+          closeCompose();
+          renderMain();
+          showToast('Shortcut updated');
+        });
+        actions.appendChild(cancel);
+        actions.appendChild(save);
+      }
+    });
+  }
+
+  function restoreDefaultShortcuts() {
+    const defaults = (DEFAULT_D.shortcuts || []).map(s => ({ ...s }));
+    D.shortcuts = defaults;
+    renderMain();
+    showToast('Shortcuts restored to defaults');
   }
 
   function sendAgentDraft(id) {
@@ -10537,6 +10760,70 @@ ${D.stageSuggest[c.stage] || ''}
     setTimeout(() => dropBar.classList.add('hidden'), 200);
   }
 
+  // Task 14: shortcut matching helpers.
+  let shortcutSequenceBuffer = [];
+  let shortcutSequenceTimer = null;
+
+  function getShortcutById(id) {
+    return (D.shortcuts || []).find(s => s.id === id);
+  }
+
+  function shortcutEventKey(e) {
+    return e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  }
+
+  function shortcutKeyList(sc) {
+    return (sc.key || '').split(/\s+/).filter(Boolean);
+  }
+
+  function shortcutSingleMatches(e, sc) {
+    if (!sc || !sc.key) return false;
+    const keys = shortcutKeyList(sc);
+    if (keys.length !== 1) return false;
+    const hasCmd = e.metaKey || e.ctrlKey;
+    const mod = sc.modifier;
+    if (mod === 'cmd') {
+      if (!hasCmd || e.altKey) return false;
+    } else {
+      if (hasCmd || e.altKey) return false;
+    }
+    return shortcutEventKey(e).toLowerCase() === keys[0].toLowerCase();
+  }
+
+  function shortcutSequenceMatches(e, isTyping) {
+    if (isTyping || e.metaKey || e.ctrlKey || e.altKey) return null;
+    if (e.key.length !== 1) return null;
+
+    const pressed = e.key.toLowerCase();
+    const seqShortcuts = (D.shortcuts || []).filter(s => shortcutKeyList(s).length > 1);
+    if (!seqShortcuts.length) return null;
+
+    shortcutSequenceBuffer.push(pressed);
+    clearTimeout(shortcutSequenceTimer);
+
+    const bufferStr = shortcutSequenceBuffer.join(' ');
+    for (const sc of seqShortcuts) {
+      const keys = shortcutKeyList(sc);
+      if (bufferStr === keys.join(' ')) {
+        shortcutSequenceBuffer = [];
+        return sc;
+      }
+    }
+
+    const isPrefix = seqShortcuts.some(sc => {
+      const prefix = shortcutKeyList(sc).slice(0, shortcutSequenceBuffer.length).join(' ');
+      return prefix === bufferStr;
+    });
+
+    if (isPrefix) {
+      shortcutSequenceTimer = setTimeout(() => { shortcutSequenceBuffer = []; }, 800);
+      return { __sequencePrefix: true };
+    }
+
+    shortcutSequenceBuffer = [];
+    return null;
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     D._msgs.forEach((m, idx) => { if (!m.id) m.id = 'msg-' + idx; });
 
@@ -10583,27 +10870,45 @@ ${D.stageSuggest[c.stage] || ''}
         else if (state.agentOpen) toggleAgent();
         else if (!document.getElementById('detail-panel').classList.contains('hidden')) closePanel();
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      // Sequence shortcuts (e.g. "g i") take precedence over single keys.
+      const seq = shortcutSequenceMatches(e, isTyping);
+      if (seq && !seq.__sequencePrefix) {
+        const seqNavMap = {
+          'inbox-seq': 'imbox',
+          'stream-seq': 'feed',
+          'records-seq': 'paperTrail',
+          'contacts-seq': 'contacts',
+          'calendar-seq': 'calendar'
+        };
+        if (seqNavMap[seq.id]) {
+          e.preventDefault();
+          setView(seqNavMap[seq.id]);
+          return;
+        }
+      }
+      if (seq && seq.__sequencePrefix) return;
+
+      if (shortcutSingleMatches(e, getShortcutById('command-palette'))) {
         e.preventDefault();
         openCommandPalette();
       }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+      if (shortcutSingleMatches(e, getShortcutById('new-message'))) {
         e.preventDefault();
         openCompose();
       }
       if (!isTyping && state.view === 'calendar' && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        if (e.key === 'd') { e.preventDefault(); state.calendarView = 'day'; renderMain(); }
-        else if (e.key === 'w') { e.preventDefault(); state.calendarView = 'week'; renderMain(); }
-        else if (e.key === 'y') { e.preventDefault(); state.calendarView = 'year'; renderMain(); }
-        else if (e.key === 't') { e.preventDefault(); goToToday(); }
-        else if (e.key === 'ArrowLeft') { e.preventDefault(); changeSelectedDate(-1); }
-        else if (e.key === 'ArrowRight') { e.preventDefault(); changeSelectedDate(1); }
+        if (shortcutSingleMatches(e, getShortcutById('calendar-day'))) { e.preventDefault(); state.calendarView = 'day'; renderMain(); }
+        else if (shortcutSingleMatches(e, getShortcutById('calendar-week'))) { e.preventDefault(); state.calendarView = 'week'; renderMain(); }
+        else if (shortcutSingleMatches(e, getShortcutById('calendar-year'))) { e.preventDefault(); state.calendarView = 'year'; renderMain(); }
+        else if (shortcutSingleMatches(e, getShortcutById('calendar-today'))) { e.preventDefault(); goToToday(); }
+        else if (shortcutSingleMatches(e, getShortcutById('calendar-prev'))) { e.preventDefault(); changeSelectedDate(-1); }
+        else if (shortcutSingleMatches(e, getShortcutById('calendar-next'))) { e.preventDefault(); changeSelectedDate(1); }
       }
-      if (!isTyping && !e.metaKey && !e.ctrlKey && !e.altKey && e.key === '?') {
+      if (!isTyping && shortcutSingleMatches(e, getShortcutById('shortcuts-help'))) {
         e.preventDefault();
         showShortcutsCheatsheet();
       }
-      if (!isTyping && !e.metaKey && !e.ctrlKey && !e.altKey && e.key === '/') {
+      if (!isTyping && shortcutSingleMatches(e, getShortcutById('search'))) {
         e.preventDefault();
         state.searchOpen = true;
         renderTopBar();
@@ -10611,21 +10916,23 @@ ${D.stageSuggest[c.stage] || ''}
         const input = document.querySelector('.topbar-search input');
         if (input) input.focus();
       }
-      if (e.metaKey || e.ctrlKey) {
-        const viewShortcuts = {
-          '1': 'screener',
-          '2': 'imbox',
-          '3': 'feed',
-          '4': 'paperTrail',
-          '5': 'contacts',
-          '6': 'calendar',
-          '7': 'files',
-          '8': 'insights',
-          '9': 'agent',
-        };
-        if (viewShortcuts[e.key]) {
+
+      const navMap = {
+        'nav-gate': 'screener',
+        'nav-inbox': 'imbox',
+        'nav-stream': 'feed',
+        'nav-records': 'paperTrail',
+        'nav-contacts': 'contacts',
+        'nav-calendar': 'calendar',
+        'nav-files': 'files',
+        'nav-insights': 'insights',
+        'nav-agent': 'agent'
+      };
+      for (const [id, view] of Object.entries(navMap)) {
+        if (shortcutSingleMatches(e, getShortcutById(id))) {
           e.preventDefault();
-          setView(viewShortcuts[e.key]);
+          setView(view);
+          break;
         }
       }
 
@@ -10643,9 +10950,9 @@ ${D.stageSuggest[c.stage] || ''}
         if (listViews.includes(state.view) && !isOverlayOpen()) {
           const events = getCurrentViewEvents();
           if (events.length > 0) {
-            if (e.key === 'j' || e.key === 'k' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            if (shortcutSingleMatches(e, getShortcutById('list-next')) || shortcutSingleMatches(e, getShortcutById('list-prev')) || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
               e.preventDefault();
-              const down = e.key === 'j' || e.key === 'ArrowDown';
+              const down = shortcutSingleMatches(e, getShortcutById('list-next')) || e.key === 'ArrowDown';
               if (down) {
                 state.cursorIndex = state.cursorIndex < 0 ? 0 : Math.min(state.cursorIndex + 1, events.length - 1);
               } else {
@@ -10653,7 +10960,7 @@ ${D.stageSuggest[c.stage] || ''}
               }
               renderMain();
               scrollCursorIntoView();
-            } else if (e.key === 'x') {
+            } else if (shortcutSingleMatches(e, getShortcutById('list-select'))) {
               e.preventDefault();
               if (state.cursorIndex < 0) state.cursorIndex = 0;
               const ev = events[state.cursorIndex];
@@ -10663,30 +10970,39 @@ ${D.stageSuggest[c.stage] || ''}
                 renderMain();
                 scrollCursorIntoView();
               }
-            } else if (e.key === ';') {
+            } else if (shortcutSingleMatches(e, getShortcutById('list-bulk'))) {
               e.preventDefault();
               openBulkActionsMenu();
-            } else if (e.key === 'Enter') {
+            } else if (shortcutSingleMatches(e, getShortcutById('list-open'))) {
               e.preventDefault();
               const ev = events[state.cursorIndex];
               if (ev) {
                 if (ev.type === 'message') openMessage(ev.data);
                 else if (ev.type === 'meeting') openMeeting(ev.data);
               }
-            } else if (e.key === 'e' || e.key === 'r' || e.key === 'l' || e.key === 's' || e.key === 'b' || e.key === 'u' || e.key === '#' || e.key === '!') {
+            } else if (
+              shortcutSingleMatches(e, getShortcutById('msg-archive')) ||
+              shortcutSingleMatches(e, getShortcutById('msg-reply')) ||
+              shortcutSingleMatches(e, getShortcutById('msg-pending')) ||
+              shortcutSingleMatches(e, getShortcutById('msg-save')) ||
+              shortcutSingleMatches(e, getShortcutById('msg-remind')) ||
+              shortcutSingleMatches(e, getShortcutById('msg-unread')) ||
+              shortcutSingleMatches(e, getShortcutById('msg-trash')) ||
+              shortcutSingleMatches(e, getShortcutById('msg-spam'))
+            ) {
               e.preventDefault();
               if (state.cursorIndex < 0) state.cursorIndex = 0;
               const ev = events[state.cursorIndex];
               if (ev && ev.type === 'message') {
                 const msg = ev.data;
-                if (e.key === 'e') archiveMessage(msg);
-                else if (e.key === 'r') openMessage(msg);
-                else if (e.key === 'l') replyLaterMessage(msg);
-                else if (e.key === 's') setAsideMessage(msg);
-                else if (e.key === 'b') bubbleUpMessage(msg, 'tomorrow');
-                else if (e.key === 'u') toggleUnreadMessage(msg);
-                else if (e.key === '#') trashMessage(msg);
-                else if (e.key === '!') spamMessage(msg);
+                if (shortcutSingleMatches(e, getShortcutById('msg-archive'))) archiveMessage(msg);
+                else if (shortcutSingleMatches(e, getShortcutById('msg-reply'))) openMessage(msg);
+                else if (shortcutSingleMatches(e, getShortcutById('msg-pending'))) replyLaterMessage(msg);
+                else if (shortcutSingleMatches(e, getShortcutById('msg-save'))) setAsideMessage(msg);
+                else if (shortcutSingleMatches(e, getShortcutById('msg-remind'))) bubbleUpMessage(msg, 'tomorrow');
+                else if (shortcutSingleMatches(e, getShortcutById('msg-unread'))) toggleUnreadMessage(msg);
+                else if (shortcutSingleMatches(e, getShortcutById('msg-trash'))) trashMessage(msg);
+                else if (shortcutSingleMatches(e, getShortcutById('msg-spam'))) spamMessage(msg);
               }
             }
           }
