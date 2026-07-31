@@ -1,31 +1,128 @@
-/** MessagePanel — message detail with thread + sticky + actions. M2 will expand. */
+/** MessagePanel — full message detail with thread, sticky notes, clips, follow-ups.
+ * Spec: prototype-v11 §3.3 + P4 features.
+ */
 
-import { Show, createResource } from "solid-js";
-import { getContact, getMessage } from "../stores/data";
+import { Show, For, createMemo, createResource } from "solid-js";
+import {
+  getContact,
+  getMessage,
+  listMessages,
+  listStickies,
+  upsertSticky,
+  deleteSticky,
+  listFollowUps,
+  upsertFollowUp,
+  upsertClip,
+  upsertMessage,
+} from "../stores/data";
 import { setDetailOpen, setSelectedMessageId, setComposeOpen, showToast } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
+import { uid } from "../utils/id";
+import { addDays, isoNow, relativeTime } from "../utils/date";
+import type { Clip, FollowUp, Sticky } from "../types";
 
 export function MessagePanel(props: { messageId: string }) {
-  const [message] = createResource(() => props.messageId, getMessage);
+  const [message, { refetch: refetchMessage }] = createResource(() => props.messageId, getMessage);
   const [contact] = createResource(
     () => message()?.pid ?? "",
     (pid) => getContact(pid)
   );
+  const [, { refetch: refetchAll }] = createResource(listMessages);
+  const [stickies, { refetch: refetchStickies }] = createResource(listStickies);
+  const [followUps, { refetch: refetchFU }] = createResource(listFollowUps);
 
   const reply = () => {
     setComposeOpen(true);
     showToast({ message: "Compose opened", kind: "info" });
   };
 
-  const replyLater = () => {
-    showToast({ message: "已标记 Reply Later（M3 实装持久化）", kind: "success" });
+  const toggleReplyLater = async () => {
+    const m = message();
+    if (!m) return;
+    await upsertMessage({ ...m, replyLater: !m.replyLater });
+    await refetchMessage();
+    await refetchAll();
+    showToast({ message: m.replyLater ? "已取消 Reply Later" : "已 Reply Later", kind: "success" });
   };
-  const setAside = () => {
-    showToast({ message: "已 Set Aside（M3 实装持久化）", kind: "success" });
+
+  const toggleSetAside = async () => {
+    const m = message();
+    if (!m) return;
+    await upsertMessage({ ...m, setAside: !m.setAside });
+    await refetchMessage();
+    await refetchAll();
+    showToast({ message: m.setAside ? "已取消 Set Aside" : "已 Set Aside", kind: "success" });
   };
-  const bubbleUp = () => {
-    showToast({ message: "Bubble Up（M3 实装 datetime picker）", kind: "info" });
+
+  const bubbleUp = async () => {
+    const m = message();
+    if (!m) return;
+    const when = addDays(new Date(), 1);
+    await upsertMessage({ ...m, bubbleUpAt: when.toISOString() });
+    await refetchMessage();
+    showToast({ message: `已 Bubble Up → ${when.toLocaleString()}`, kind: "success" });
+  };
+
+  const trackCount = () => (message()?.trackers?.length ?? 0);
+
+  const stickyForMsg = createMemo<Sticky[]>(() =>
+    (stickies() ?? []).filter((s) => s.msgId === props.messageId)
+  );
+
+  const addSticky = async () => {
+    const body = prompt("写一条 sticky note…");
+    if (!body || !body.trim()) return;
+    const s: Sticky = {
+      id: uid("st"),
+      msgId: props.messageId,
+      body,
+      createdAt: isoNow(),
+    };
+    await upsertSticky(s);
+    await refetchStickies();
+  };
+
+  const removeSticky = async (id: string) => {
+    await deleteSticky(id);
+    await refetchStickies();
+  };
+
+  const addClip = async () => {
+    const m = message();
+    if (!m) return;
+    const c: Clip = {
+      id: uid("cl"),
+      text: m.prev || m.body.slice(0, 200),
+      msgId: m.id,
+      contactId: m.pid,
+      createdAt: isoNow(),
+    };
+    await upsertClip(c);
+    showToast({ message: "已保存为 Clip", kind: "success" });
+  };
+
+  const fuForMsg = createMemo<FollowUp[]>(() =>
+    (followUps() ?? []).filter((f) => f.msgId === props.messageId)
+  );
+
+  const addFollowUp = async (days: number) => {
+    const fu: FollowUp = {
+      id: uid("fu"),
+      msgId: props.messageId,
+      dueAt: addDays(new Date(), days).toISOString(),
+      status: "pending",
+    };
+    await upsertFollowUp(fu);
+    await refetchFU();
+    showToast({ message: `跟进已设 · ${days} 天后`, kind: "success" });
+  };
+
+  const markFollowUpDone = async (id: string) => {
+    const fu = (followUps() ?? []).find((x) => x.id === id);
+    if (!fu) return;
+    await upsertFollowUp({ ...fu, status: "done" });
+    await refetchFU();
   };
 
   return (
@@ -60,10 +157,30 @@ export function MessagePanel(props: { messageId: string }) {
         <strong style={{ "font-size": "var(--text-body-sm)", "font-weight": "700" }}>
           Message
         </strong>
+        <Show when={trackCount() > 0}>
+          <span
+            title={`${trackCount()} tracker blocked`}
+            style={{
+              display: "inline-flex",
+              "align-items": "center",
+              gap: "4px",
+              padding: "2px 8px",
+              background: "rgba(255,59,48,0.1)",
+              color: "var(--coral)",
+              "border-radius": "var(--radius-pill)",
+              "font-size": "var(--text-micro)",
+              "font-weight": "700",
+            }}
+          >
+            <Icon name="ph-shield-check" size={11} />
+            {trackCount()} tracker blocked
+          </span>
+        </Show>
       </div>
 
       <Show when={message() && contact()}>
         <div style={{ padding: "var(--space-5)", flex: 1, "overflow-y": "auto" }}>
+          {/* Hero */}
           <div style={{ display: "flex", "align-items": "center", gap: "var(--space-3)", "margin-bottom": "var(--space-4)" }}>
             <Avatar name={contact()!.name} src={contact()!.avatar} size={40} />
             <div>
@@ -94,8 +211,87 @@ export function MessagePanel(props: { messageId: string }) {
           >
             {message()!.body}
           </p>
+
+          {/* Stickies */}
+          <Show when={stickyForMsg().length > 0 || true}>
+            <SectionHeader title="Sticky notes" icon="ph-note" />
+            <For each={stickyForMsg()}>
+              {(s) => (
+                <div
+                  style={{
+                    background: "var(--canary)",
+                    "border-radius": "var(--radius-md)",
+                    padding: "var(--space-3) var(--space-4)",
+                    "margin-bottom": "var(--space-2)",
+                    "font-size": "var(--text-body-sm)",
+                    color: "var(--text-primary)",
+                    "white-space": "pre-wrap",
+                  }}
+                >
+                  <div style={{ display: "flex", "align-items": "center", gap: "var(--space-2)" }}>
+                    <span style={{ "font-size": "var(--text-micro)", color: "var(--text-muted)", "margin-left": "auto" }}>
+                      {relativeTime(s.createdAt)}
+                    </span>
+                    <button
+                      onClick={() => removeSticky(s.id)}
+                      aria-label="Remove sticky"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      <Icon name="ph-x" size={12} />
+                    </button>
+                  </div>
+                  {s.body}
+                </div>
+              )}
+            </For>
+          </Show>
+
+          {/* Follow-ups */}
+          <SectionHeader title="Follow-ups" icon="ph-bell-ringing" />
+          <Show when={fuForMsg().length > 0} fallback={
+            <p style={{ color: "var(--text-muted)", "font-size": "var(--text-caption)", "margin-bottom": "var(--space-2)" }}>
+              暂无跟进。
+            </p>
+          }>
+            <For each={fuForMsg()}>
+              {(f) => (
+                <div
+                  style={{
+                    display: "flex",
+                    "align-items": "center",
+                    gap: "var(--space-2)",
+                    padding: "var(--space-2) var(--space-3)",
+                    background: "var(--paper-mid)",
+                    "border-radius": "var(--radius-md)",
+                    "margin-bottom": "var(--space-2)",
+                  }}
+                >
+                  <Icon name="ph-clock" size={14} />
+                  <span style={{ flex: 1, "font-size": "var(--text-body-sm)" }}>
+                    {relativeTime(f.dueAt)} · {f.status}
+                  </span>
+                  <Show when={f.status === "pending"}>
+                    <button
+                      onClick={() => markFollowUpDone(f.id)}
+                      style={{
+                        padding: "4px 10px",
+                        background: "var(--palm-soft)",
+                        color: "var(--palm)",
+                        "border-radius": "var(--radius-pill)",
+                        "font-size": "var(--text-micro)",
+                        "font-weight": "700",
+                      }}
+                    >
+                      Mark done
+                    </button>
+                  </Show>
+                </div>
+              )}
+            </For>
+          </Show>
         </div>
 
+        {/* Bottom action bar */}
         <div
           style={{
             display: "flex",
@@ -106,21 +302,43 @@ export function MessagePanel(props: { messageId: string }) {
           }}
         >
           <ActionBtn icon="ph-arrow-u-up-left" label="Reply" onClick={reply} />
-          <ActionBtn icon="ph-clock" label="Later" onClick={replyLater} />
-          <ActionBtn icon="ph-push-pin" label="Save" onClick={setAside} />
+          <ActionBtn icon="ph-clock" label={message()!.replyLater ? "Unmark Later" : "Later"} active={!!message()!.replyLater} onClick={toggleReplyLater} />
+          <ActionBtn icon="ph-push-pin" label={message()!.setAside ? "Unmark Aside" : "Save"} active={!!message()!.setAside} onClick={toggleSetAside} />
           <ActionBtn icon="ph-arrow-fat-line-up" label="Remind" onClick={bubbleUp} />
-          <ActionBtn icon="ph-sparkle" label="Agent" onClick={() => showToast({ message: "Ask Agent（M6 实装）", kind: "info" })} />
+          <ActionBtn icon="ph-bell-ringing" label="Follow-up" onClick={() => addFollowUp(3)} />
+          <ActionBtn icon="ph-note" label="Sticky" onClick={addSticky} />
+          <ActionBtn icon="ph-bookmark-simple" label="Clip" onClick={addClip} />
         </div>
       </Show>
     </div>
   );
 }
 
-function ActionBtn(props: { icon: string; label: string; onClick: () => void }) {
+function SectionHeader(props: { title: string; icon: string }) {
+  return (
+    <h4
+      style={{
+        "font-family": "var(--font-display)",
+        "font-size": "var(--text-h4)",
+        "font-weight": "800",
+        margin: "var(--space-5) 0 var(--space-2)",
+        display: "flex",
+        "align-items": "center",
+        gap: "var(--space-2)",
+      }}
+    >
+      <Icon name={props.icon} size={16} />
+      {props.title}
+    </h4>
+  );
+}
+
+function ActionBtn(props: { icon: string; label: string; onClick: () => void; active?: boolean }) {
   return (
     <button
       onClick={props.onClick}
       title={props.label}
+      aria-label={props.label}
       style={{
         flex: 1,
         display: "flex",
@@ -129,12 +347,13 @@ function ActionBtn(props: { icon: string; label: string; onClick: () => void }) 
         gap: "2px",
         padding: "8px",
         "border-radius": "var(--radius-md)",
-        color: "var(--text-secondary)",
+        color: props.active ? "var(--palm)" : "var(--text-secondary)",
+        background: props.active ? "var(--palm-soft)" : "transparent",
         "font-size": "10px",
         "font-weight": "600",
       }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--paper-mid)")}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      onMouseEnter={(e) => (e.currentTarget.style.background = props.active ? "var(--palm-soft)" : "var(--paper-mid)")}
+      onMouseLeave={(e) => (e.currentTarget.style.background = props.active ? "var(--palm-soft)" : "transparent")}
     >
       <Icon name={props.icon} size={18} />
       <span>{props.label}</span>
