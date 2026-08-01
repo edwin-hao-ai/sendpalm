@@ -22,6 +22,7 @@ import { FollowUpPicker } from "../components/FollowUpPicker";
 import { RemindPicker } from "../components/RemindPicker";
 import { uid } from "../utils/id";
 import { addDays, isoNow, relativeTime } from "../utils/date";
+import { trackerSummary } from "../utils/trackers";
 import type { Clip, FollowUp, Sticky } from "../types";
 
 export function MessagePanel(props: { messageId: string }) {
@@ -61,7 +62,20 @@ export function MessagePanel(props: { messageId: string }) {
     setRemindPickerOpen(true);
   };
 
-  const trackCount = () => (message()?.trackers?.length ?? 0);
+  const trackCount = () => {
+  const m = message();
+  if (!m) return 0;
+  const summary = trackerSummary(m.body + " " + m.prev);
+  return summary.count;
+};
+
+const trackerTypes = () => {
+  const m = message();
+  if (!m) return [];
+  return trackerSummary(m.body + " " + m.prev).types;
+};
+
+const [trackerExpanded, setTrackerExpanded] = createSignal(false);
 
   const stickyForMsg = createMemo<Sticky[]>(() =>
     (stickies() ?? []).filter((s) => s.msgId === props.messageId)
@@ -159,7 +173,8 @@ export function MessagePanel(props: { messageId: string }) {
           Message
         </strong>
         <Show when={trackCount() > 0}>
-          <span
+          <button
+            onClick={() => setTrackerExpanded(!trackerExpanded())}
             title={`${trackCount()} tracker blocked`}
             style={{
               display: "inline-flex",
@@ -171,13 +186,45 @@ export function MessagePanel(props: { messageId: string }) {
               "border-radius": "var(--radius-pill)",
               "font-size": "var(--text-micro)",
               "font-weight": "700",
+              cursor: "pointer",
             }}
           >
             <Icon name="ph-shield-check" size={11} />
             {trackCount()} tracker blocked
-          </span>
+          </button>
         </Show>
       </div>
+
+      <Show when={trackerExpanded() && trackCount() > 0}>
+        <div
+          style={{
+            padding: "var(--space-3) var(--space-5)",
+            background: "rgba(255,59,48,0.04)",
+            "border-bottom": "0.5px solid var(--border)",
+            "font-size": "var(--text-caption)",
+          }}
+        >
+          <p style={{ margin: 0, color: "var(--text-secondary)" }}>
+            检测到以下 tracker 类型（已自动剥离）：
+          </p>
+          <div style={{ display: "flex", "flex-wrap": "wrap", gap: "4px", "margin-top": "var(--space-2)" }}>
+            <For each={trackerTypes()}>
+              {(t) => (
+                <span style={{
+                  padding: "2px 8px",
+                  background: "var(--coral)",
+                  color: "white",
+                  "border-radius": "var(--radius-pill)",
+                  "font-size": "10px",
+                  "font-weight": "700",
+                }}>
+                  {t}
+                </span>
+              )}
+            </For>
+          </div>
+        </div>
+      </Show>
 
       <Show when={message() && contact()}>
         <div style={{ padding: "var(--space-5)", flex: 1, "overflow-y": "auto" }}>
