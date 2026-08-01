@@ -188,8 +188,8 @@ hr {
   grid-area: agent;
 }
 
-/* Tablet — iPad portrait */
-@media (min-width: 768px) and (max-width: 1023px) {
+/* Tablet — iPad portrait (>=720 includes iPad mini 744px) */
+@media (min-width: 720px) and (max-width: 1023px) {
   #app {
     grid-template-columns: var(--sidebar-width-tablet) 1fr;
     grid-template-rows: var(--titlebar-height) var(--topbar-height) 1fr;
@@ -201,7 +201,7 @@ hr {
 }
 
 /* Mobile — iPhone */
-@media (max-width: 767px) {
+@media (max-width: 719px) {
   #app {
     grid-template-columns: 1fr;
     grid-template-rows: var(--topbar-height) 1fr var(--bottom-tab-height);

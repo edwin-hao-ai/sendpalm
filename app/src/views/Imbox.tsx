@@ -66,9 +66,11 @@ export function Imbox() {
     // Auto-bundled: 3+ unread OR explicit bundle config
     const bundlesByContact = new Map<string, Message[]>();
     for (const m of imboxMsgs()) {
+      const cfg = bundlesEnabled().get(m.pid);
       const enabled =
-        bundlesEnabled().get(m.pid)?.enabled ||
-        detectedBundleSenders().has(m.pid);
+        cfg !== undefined
+          ? cfg.enabled
+          : detectedBundleSenders().has(m.pid);
       if (!enabled || !m.unread) continue;
       bundledIds.add(m.id);
       const arr = bundlesByContact.get(m.pid) ?? [];

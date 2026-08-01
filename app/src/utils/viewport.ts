@@ -1,13 +1,13 @@
 /** Viewport helpers — match prototype's isMobile/isTablet/isDesktop. */
 
 export function isMobile(): boolean {
-  return typeof window !== "undefined" && window.innerWidth < 768;
+  return typeof window !== "undefined" && window.innerWidth < 720;
 }
 
 export function isTablet(): boolean {
   return (
     typeof window !== "undefined" &&
-    window.innerWidth >= 768 &&
+    window.innerWidth >= 720 &&
     window.innerWidth < 1024
   );
 }
