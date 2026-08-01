@@ -207,8 +207,11 @@ export function Contacts() {
                 <div style={{ display: "grid", "grid-template-columns": "repeat(auto-fill, minmax(220px, 1fr))", gap: "var(--space-3)" }}>
                   <For each={list}>
                     {(c) => (
-                      <button
+                      <div
+                        role="button"
+                        tabIndex={0}
                         onClick={() => open(c.id)}
+                        onKeyDown={(e) => { if (e.key === "Enter") open(c.id); }}
                         style={{
                           display: "flex",
                           gap: "var(--space-3)",
@@ -253,7 +256,7 @@ export function Contacts() {
                         >
                           <Icon name="ph-pencil-simple" size={14} />
                         </button>
-                      </button>
+                      </div>
                     )}
                   </For>
                 </div>

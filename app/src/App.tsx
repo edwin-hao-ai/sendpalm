@@ -17,6 +17,7 @@ import { NotificationPanel } from "./notifications/NotificationPanel";
 import { DropBar } from "./components/DropBar";
 import { Compose } from "./compose/Compose";
 import { ResurfaceLoop } from "./services/reminder";
+import { ShortcutHelp } from "./components/ShortcutHelp";
 import { initApp } from "./bootstrap";
 import {
   detailOpen,
@@ -76,6 +77,7 @@ export default function App() {
         <ToastStack />
         <Compose />
         <ResurfaceLoop />
+        <ShortcutHelp />
         <Show
           when={!onboardingCompleted() && onboardingStep() !== null}
         >

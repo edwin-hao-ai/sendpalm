@@ -91,6 +91,8 @@ export const [calendarYearAnchor, setCalendarYearAnchor] = createSignal(new Date
 export const [onboardingStep, setOnboardingStep] = createSignal<number | null>(null);
 export const [onboardingCompleted, setOnboardingCompleted] = createSignal(false);
 
+export const [helpOpen, setHelpOpen] = createSignal(false);
+
 export const [loading, setLoading] = createSignal(true);
 export const [error, setError] = createSignal<string | null>(null);
 
