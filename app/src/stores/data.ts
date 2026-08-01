@@ -892,13 +892,23 @@ export async function appendAgentAudit(entry: AgentAuditEntry): Promise<void> {
   const db = await getDb();
   await db.execute(
     `INSERT INTO agent_audit (id,session_id,kind,message,payload,created_at,undoable)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
+     ON CONFLICT(id) DO UPDATE SET
+       session_id=excluded.session_id, kind=excluded.kind,
+       message=excluded.message, payload=excluded.payload,
+       undoable=excluded.undoable`,
     [
       entry.id, entry.sessionId ?? null, entry.kind, entry.message,
       entry.payload ?? null, entry.createdAt, entry.undoable ? 1 : 0,
     ]
   );
 }
+
+export const upsertAgentAudit = appendAgentAudit;
+export const deleteAgentAudit = async (id: ID): Promise<void> => {
+  const db = await getDb();
+  await db.execute("DELETE FROM agent_audit WHERE id = $1", [id]);
+};
 
 export async function clearAgentAudit(): Promise<void> {
   const db = await getDb();
