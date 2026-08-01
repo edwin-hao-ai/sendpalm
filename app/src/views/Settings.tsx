@@ -10,7 +10,7 @@ import {
   listContacts,
   resetAllData,
 } from "../stores/data";
-import { appSettings, setAppSettings, settingsTab, setSettingsTab, showToast } from "../stores/ui";
+import { appSettings, setAppSettings, settingsTab, setSettingsTab, showToast, setOnboardingStep } from "../stores/ui";
 import { Modal } from "../components/Modal";
 import { Icon } from "../components/Icon";
 import { Avatar } from "../components/Avatar";
@@ -96,6 +96,13 @@ function ProfileTab() {
     await store.save();
     showToast({ message: "已保存", kind: "success" });
   };
+  const replayOnboarding = async () => {
+    const store = await load(STORE_PATH);
+    await store.set("onboarding_completed", false);
+    await store.save();
+    setOnboardingStep(0);
+    showToast({ message: "开始 Onboarding 教程", kind: "info" });
+  };
   return (
     <div>
       <SectionTitle>Profile</SectionTitle>
@@ -136,7 +143,10 @@ function ProfileTab() {
           style={{ ...inputStyle, "min-height": "100px", "font-family": "var(--font-body)", resize: "vertical" }}
         />
       </Field>
-      <button onClick={save} style={primaryBtn}>保存</button>
+      <div style={{ display: "flex", gap: "var(--space-2)" }}>
+        <button onClick={save} style={primaryBtn}>保存</button>
+        <button onClick={replayOnboarding} style={secondaryBtn}>重放 Onboarding</button>
+      </div>
     </div>
   );
 }

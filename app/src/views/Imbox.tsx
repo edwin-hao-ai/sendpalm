@@ -82,7 +82,9 @@ export function Imbox() {
       out.push({ contactId, contact: c, messages: msgs });
     }
 
+    // Remaining unread (not bundled) — appear as individual rows.
     for (const m of imboxMsgs()) {
+      if (!m.unread) continue;
       if (bundledIds.has(m.id)) continue;
       out.push(m);
     }
