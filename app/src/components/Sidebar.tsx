@@ -4,9 +4,10 @@ import { For, Show } from "solid-js";
 import { Icon } from "./Icon";
 import { setView, view } from "../stores/ui";
 import { NAV_SECTIONS } from "../utils/labels";
-import { isMobile } from "../utils/viewport";
+import { useViewport } from "../utils/gestures";
 
 export function Sidebar() {
+  const { isMobile } = useViewport();
   return (
     <nav
       id="sidebar"
@@ -44,6 +45,7 @@ function NavItem(props: {
   active: boolean;
   onClick: () => void;
 }) {
+  const { isMobile } = useViewport();
   return (
     <button
       onClick={props.onClick}
