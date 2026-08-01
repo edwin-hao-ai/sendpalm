@@ -1,6 +1,6 @@
 /** Main — switches view by state.view(). */
 
-import { Show, Switch, Match } from "solid-js";
+import { Show, Switch, Match, For } from "solid-js";
 import { view, loading, error } from "../stores/ui";
 import { Imbox } from "../views/Imbox";
 import { Gate } from "../views/Gate";
@@ -18,13 +18,13 @@ import { FollowUps } from "../views/FollowUps";
 import { Clips } from "../views/Clips";
 import { Search } from "../views/Search";
 import { Settings } from "../views/Settings";
-import { Empty } from "../components/Empty";
+import { Empty, Skeleton } from "../components/Empty";
 
 export function Main() {
   return (
     <main id="main">
       <Show when={loading()}>
-        <Empty title="Loading…" description="正在准备你的工作区" />
+        <FeedSkeleton />
       </Show>
       <Show when={error()}>
         <Empty
@@ -54,5 +54,34 @@ export function Main() {
         </Switch>
       </Show>
     </main>
+  );
+}
+
+function FeedSkeleton() {
+  return (
+    <div style={{ padding: "var(--space-5)", "max-width": "720px", margin: "0 auto" }}>
+      <div style={{ display: "flex", "align-items": "center", gap: "var(--space-3)", "margin-bottom": "var(--space-4)" }}>
+        <Skeleton width="36px" height="36px" radius="50%" />
+        <div style={{ flex: 1 }}>
+          <Skeleton width="40%" height="14px" />
+          <div style={{ "margin-top": "6px" }}>
+            <Skeleton width="70%" height="12px" />
+          </div>
+        </div>
+      </div>
+      <For each={[0, 1, 2, 3, 4, 5]}>
+        {() => (
+          <div style={{ display: "flex", gap: "var(--space-3)", "margin-bottom": "var(--space-3)" }}>
+            <Skeleton width="36px" height="36px" radius="50%" />
+            <div style={{ flex: 1 }}>
+              <Skeleton width="30%" height="14px" />
+              <div style={{ "margin-top": "6px" }}>
+                <Skeleton width="80%" height="12px" />
+              </div>
+            </div>
+          </div>
+        )}
+      </For>
+    </div>
   );
 }
