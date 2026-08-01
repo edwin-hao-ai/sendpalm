@@ -25,3 +25,16 @@ tauri-plugin-os = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
+
+# M10 — real backend
+async-imap = { version = "0.10", features = ["tokio"] }
+async-native-tls = "0.5"
+native-tls = "0.2"
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "ring", "rustls-native-certs", "builder", "smtp-transport"] }
+mailparse = "0.16"
+dotenvy = "0.15"
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+futures = "0.3"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio-util = { version = "0.7", features = ["compat"] }

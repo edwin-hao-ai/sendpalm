@@ -1,6 +1,11 @@
 // SendPalm — Tauri 2.x backend entry point.
 // See docs/PRD-v1.md §9 and docs/STACK-DECISION.md for design rationale.
 
+pub mod commands;
+pub mod services;
+
+use services::state::SyncStateStore;
+use tauri::Manager;
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -13,6 +18,10 @@ pub fn run() {
     }];
 
     tauri::Builder::default()
+        .setup(|app| {
+            app.manage(SyncStateStore::new());
+            Ok(())
+        })
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:sendpalm.db", migrations)
@@ -25,6 +34,12 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
+        .invoke_handler(tauri::generate_handler![
+            commands::sync_now,
+            commands::list_mailboxes,
+            commands::send_message,
+            commands::get_sync_state,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running SendPalm");
 }

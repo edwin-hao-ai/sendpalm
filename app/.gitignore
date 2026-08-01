@@ -22,3 +22,18 @@ src-tauri/.cargo/
 
 # Test artifacts
 coverage/
+
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+**/credentials.json
+**/app-password.txt
+
+# Local Tauri user data (SQLite + store) when running tests
+.tauri/
+*.sqlite-journal
+
+# Build outputs from iOS bundle
+src-tauri/gen/apple/build/
+src-tauri/gen/apple/.build/

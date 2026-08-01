@@ -302,3 +302,57 @@ When **everything** in PRD-v1.md is implemented and the user signs off, the goal
 - [ ] No new TODOs without justification.
 - [ ] Conventional commit message.
 - [ ] `docs/PROGRESS.md` updated.
+
+---
+
+## 10. Real backend integration (M10 — currently active)
+
+SendPalm is **local-first**, but the user wants the email client to talk to **real IMAP/SMTP** servers so messages persist across devices.
+
+### 10.1 Test credentials (production-grade IMAP/SMTP account)
+
+These are real credentials provided by the user for end-to-end testing. They live in `app/.env` (gitignored) and are referenced by every agent that runs the backend suite.
+
+```
+SENDPALM_TEST_EMAIL=edwinhao@sendpalm.com
+SENDPALM_TEST_PASSWORD=<app-specific password from user, see .env>
+SENDPALM_TEST_IMAP_HOST=imap.feishu.cn
+SENDPALM_TEST_IMAP_PORT=993
+SENDPALM_TEST_SMTP_HOST=smtp.feishu.cn
+SENDPALM_TEST_SMTP_PORT=465
+```
+
+**Do NOT** commit `.env` or paste the password into any file, commit, screenshot, or log. Use `.env.example` for placeholders only.
+
+### 10.2 Tech stack (web-search verified 2026-08-01)
+
+| Concern | Crate | Why |
+|---|---|---|
+| IMAP receive | `async-imap` | Async-native, tokio-compatible, used by Delta Chat. |
+| SMTP send | `lettre` | Async SMTP client with TLS/rustls + SMTP AUTH. |
+| MIME parse | `mailparse` | RFC 3501 / 2045 / 5322 compliant, no_std-friendly. |
+| Config | `dotenvy` | Loads `.env` at Rust boot (dev) and skips in release. |
+
+### 10.3 Sync semantics
+
+- Each `accounts` row stores: `last_uid`, `uid_validity`, `last_synced_at`.
+- On sync: connect → `SELECT INBOX` → fetch UIDs > `last_uid` → `mailparse::parse_mail` → upsert into `messages`, `contacts`, `files`.
+- New senders get a `Contact` row (firstSeen=false, screened=true).
+- `Re-surfacing tick` is replaced by real IMAP `IDLE` (when async-imap supports it) or 60 s polling.
+
+### 10.4 E2E strategy
+
+| Test | Type | Verifies |
+|---|---|---|
+| `src-tauri/tests/parser_test.rs` | Unit (no network) | MIME → Message round-trip on RFC822 fixtures. |
+| `src-tauri/tests/imap_real.rs` | Integration (network, gated by env) | Connect to imap.feishu.cn, list INBOX, assert ≥ 1 msg, message fields parse. |
+| `src-tauri/tests/smtp_roundtrip.rs` | Integration (network, gated) | Send a unique-subject email to self, poll IMAP for it, assert body matches. |
+| `app/e2e/` (Playwright) | Frontend | Boot desktop build, assert all 16 views render without error. |
+
+Network tests are **gated** behind `if std::env::var("SENDPALM_E2E_NETWORK").is_ok()`. CI without credentials skips them; locally with `.env` present they run.
+
+### 10.5 Privacy
+
+- The app-specific password in `.env` is **read-only for app source**. Never log it.
+- IMAP/SMTP connections use TLS (`SslTunnel` for IMAP, `SmtpTransport::relay` over rustls for SMTP).
+- Sync metadata (UID, UIDVALIDITY) is persisted locally; message bodies pass through memory only.
