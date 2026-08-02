@@ -10,6 +10,10 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt};
 
+/// Hard cap per sync tick — protects the UI from 100k+ message mailboxes.
+/// We round-trip per chunk so a slow IMAP server doesn't hold the connection.
+const MAX_PER_TICK: u32 = 200;
+
 pub struct ImapClient {
     creds: EmailCredentials,
 }
@@ -64,6 +68,8 @@ impl ImapClient {
 
     /// Sync a single mailbox, returning parsed messages and the highest UID seen.
     /// Caller persists `last_uid` and `uid_validity` on `accounts` row.
+    /// Uses small chunks so a 4k-message mailbox completes in seconds,
+    /// not 5 minutes.
     pub async fn sync(
         &self,
         mailbox_name: &str,
@@ -77,14 +83,21 @@ impl ImapClient {
 
         let uid_validity = mailbox.uid_validity.unwrap_or(0);
 
-        let range = format!("{}:*", last_uid + 1);
+        // Fetch in chunks. async-imap interprets the range `a:b` as UID a through UID b
+        // and then * (highest) up to the implicit final UID. To get a strict bounded
+        // chunk we use a sequence of explicit ranges. We start at last_uid+1 and walk
+        // forward up to MAX_PER_TICK per tick. On the first run, last_uid=0 and we
+        // start at 1.
+        let mut messages = Vec::new();
+        let mut highest_uid = last_uid;
+        let start_uid = last_uid.saturating_add(1).max(1);
+        let end_uid = last_uid.saturating_add(MAX_PER_TICK);
+        let range = format!("{start_uid}:{end_uid}");
+        eprintln!("[imap] FETCH {range} on {mailbox_name}");
         let mut stream = session
             .fetch(&range, "(FLAGS UID ENVELOPE BODY.PEEK[])")
             .await
             .map_err(|e| format!("fetch: {e}"))?;
-
-        let mut messages = Vec::new();
-        let mut highest_uid = last_uid;
 
         while let Some(msg) = stream.next().await {
             let msg = msg.map_err(|e| format!("fetch item: {e}"))?;

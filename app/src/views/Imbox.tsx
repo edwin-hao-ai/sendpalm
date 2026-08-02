@@ -598,8 +598,11 @@ function InboxZero() {
   return (
     <Empty
       icon="ph-tray"
-      title="Inbox zero"
-      description="没有新消息。给自己倒杯咖啡，或者看看 Records。"
+      title="Inbox 是空的"
+      description={
+        "请到 Settings → Accounts → Add account 接入真实邮箱。背景同步会从 IMAP 拉取最近的邮件。"
+      }
+      action={{ label: "打开 Settings", onClick: () => setView("settings") }}
     />
   );
 }

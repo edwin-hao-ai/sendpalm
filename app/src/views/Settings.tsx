@@ -19,7 +19,7 @@ import type { Account, AccountSettings, Label, Shortcut } from "../types";
 import { isoNow } from "../utils/date";
 import { load, STORE_PATH } from "../bootstrap";
 import { listSnippets } from "../stores/data";
-import { listProviders as fetchProviders } from "../services/backend";
+import { listProviders as fetchProviders, vaultSave } from "../services/backend";
 
 const TABS = [
   { id: "profile", label: "Profile", icon: "ph-user-circle" },
@@ -277,7 +277,19 @@ function AddAccountModal(props: { onClose: () => void }) {
       },
     } as unknown as Account;
     await upsertAccount(account);
-    showToast({ message: `已添加 ${prov.label} 账户 ${e}`, kind: "success" });
+    // Persist password into OS keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service).
+    try {
+      await vaultSave(id, accountPassword());
+      showToast({
+        message: `已添加 ${prov.label} 账户 ${e} · 密码已存入 Keychain`,
+        kind: "success",
+      });
+    } catch (vaultErr) {
+      showToast({
+        message: `已添加账户 ${e}，但 Keychain 写入失败：${vaultErr}`,
+        kind: "warning",
+      });
+    }
     setSaving(false);
     props.onClose();
   };

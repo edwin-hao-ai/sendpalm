@@ -69,3 +69,25 @@ export async function listProviders(): Promise<EmailProvider[]> {
   if (!IS_TAURI) return [];
   return invoke<EmailProvider[]>("list_email_providers");
 }
+
+// ── OS Keychain vault ──
+
+export async function vaultSave(
+  accountId: string,
+  password: string
+): Promise<void> {
+  if (!IS_TAURI) throw new Error("vault requires Tauri runtime");
+  await invoke("vault_save", { accountId, password });
+}
+
+export async function vaultLoad(
+  accountId: string
+): Promise<string | null> {
+  if (!IS_TAURI) return null;
+  return invoke<string | null>("vault_load", { accountId });
+}
+
+export async function vaultDelete(accountId: string): Promise<void> {
+  if (!IS_TAURI) return;
+  await invoke("vault_delete", { accountId });
+}

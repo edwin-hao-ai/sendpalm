@@ -74,22 +74,28 @@ async fn run_loop(_app: AppHandle) -> Result<(), String> {
     let mut interval = tokio::time::interval(Duration::from_millis(TICK_MS));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+    let mut tick_n = 0u32;
     loop {
         interval.tick().await;
+        tick_n += 1;
+        eprintln!("[sync] tick #{tick_n} — fetching from {}", account.account_id);
         match sync_one(&pool, &account).await {
             Ok((n, new_last_uid, new_uv)) => {
+                eprintln!(
+                    "[sync] tick #{tick_n} ok: {} new msgs, uid {}..={}, uv {}",
+                    n, account.last_uid, new_last_uid, new_uv
+                );
                 if n > 0 {
                     eprintln!(
-                        "[sync] inserted {} new message(s) for {} (uid_validity {} -> {})",
-                        n, account.account_id, account.uid_validity, new_uv
+                        "[sync] inserted {} new message(s) for {}",
+                        n, account.account_id
                     );
                 }
                 account.last_uid = new_last_uid;
                 account.uid_validity = new_uv;
             }
             Err(e) => {
-                eprintln!("[sync] tick failed for {}: {e}", account.account_id);
-                // Retry on next tick; do not break the loop.
+                eprintln!("[sync] tick #{tick_n} FAILED for {}: {e}", account.account_id);
             }
         }
     }
@@ -102,27 +108,34 @@ async fn sync_one(
     let client = ImapClient::new(account.creds.clone());
     let bundle = client.sync("INBOX", account.last_uid).await?;
 
+    // Ensure the account row exists in the accounts table so the foreign
+    // key on messages.ac is satisfied.
+    upsert_account(pool, account).await?;
+
     let mut inserted = 0u32;
     for (uid, parsed) in &bundle.messages {
         let contact_id = upsert_contact(pool, &parsed.sender_email, parsed.sender_name.as_deref()).await?;
         let mid = format!("imap_{uid}");
 
         // INSERT OR IGNORE; if already present, just refresh last-read state.
+        // Note: messages table has no message_id column (we use id as the primary
+        // key derived from the IMAP UID). The RFC822 Message-ID is stored
+        // alongside as a tag inside the body or tracked separately.
+        let prev_excerpt = parsed.body_text.split('\n').next().unwrap_or("").chars().take(140).collect::<String>();
         sqlx::query(
             "INSERT OR IGNORE INTO messages \
-             (id, pid, subj, prev, body, tm, st, ac, bucket, unread, labels_json, attachments_json, trackers_json, thread_id, message_id) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'imbox', 1, '[]', '[]', '[]', $9, $10)"
+             (id, pid, subj, prev, body, tm, st, ac, bucket, unread, labels_json, attachments_json, trackers_json, thread_id) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'imbox', 1, '[]', '[]', '[]', $9)"
         )
         .bind(&mid)
         .bind(&contact_id)
         .bind(&parsed.subject)
-        .bind(parsed.body_text.split('\n').next().unwrap_or("").chars().take(140).collect::<String>())
+        .bind(&prev_excerpt)
         .bind(&parsed.body_text)
         .bind(parsed.date.format("%Y-%m-%d %H:%M").to_string())
         .bind(parsed.date.to_rfc3339())
         .bind(&account.account_id)
         .bind(parsed.thread_id.as_deref().unwrap_or(""))
-        .bind(&parsed.message_id)
         .execute(pool)
         .await
         .map_err(|e| format!("insert message uid={uid}: {e}"))?;
@@ -149,6 +162,38 @@ async fn sync_one(
     Ok((inserted, bundle.highest_uid, bundle.uid_validity))
 }
 
+async fn upsert_account(pool: &SqlitePool, account: &SyncAccount) -> Result<(), String> {
+    let settings_json = serde_json::to_string(&serde_json::json!({
+        "aliases": [],
+        "signature": "",
+        "replyTo": "",
+        "defaultFrom": account.creds.email,
+        "syncFolders": [
+            { "name": "INBOX", "enabled": true },
+            { "name": "Sent", "enabled": true }
+        ],
+        "syncFrequency": "15min",
+        "autoBcc": false,
+        "autoBccAddress": "",
+        "vacationResponder": { "enabled": false, "subject": "", "body": "" }
+    }))
+    .unwrap_or_default();
+    sqlx::query(
+        "INSERT INTO accounts (id, type, provider, email, label, display_name, status, synced, total, privacy, color, avatar, last_sync, settings_json) \
+         VALUES ($1, 'email', 'feishu', $2, $3, $4, 'connected', 0, 0, 'unified', '#0A8F63', substr($4, 1, 1), datetime('now'), $5) \
+         ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, last_sync = excluded.last_sync"
+    )
+    .bind(&account.account_id)
+    .bind(&account.creds.email)
+    .bind(&account.creds.email)
+    .bind(&account.creds.email)
+    .bind(&settings_json)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("upsert account: {e}"))?;
+    Ok(())
+}
+
 async fn upsert_contact(
     pool: &SqlitePool,
     email: &str,
@@ -161,12 +206,20 @@ async fn upsert_contact(
     let display_name = name
         .map(|s| s.to_string())
         .unwrap_or_else(|| email.split('@').next().unwrap_or(email).to_string());
+    // Split the display name into first/last parts. The SQL store requires
+    // both fields (NOT NULL).
+    let (first, last) = match display_name.split_once(' ') {
+        Some((f, l)) => (f.to_string(), l.to_string()),
+        None => (display_name.clone(), "".to_string()),
+    };
     sqlx::query(
-        "INSERT INTO contacts (id, name, emails_json, stage, health, first_contact) \
-         VALUES ($1, $2, $3, 'active', 50, datetime('now')) \
-         ON CONFLICT(id) DO UPDATE SET name = excluded.name"
+        "INSERT INTO contacts (id, first_name, last_name, nickname, name, emails_json, stage, health, first_contact) \
+         VALUES ($1, $2, $3, '', $4, $5, 'active', 50, datetime('now')) \
+         ON CONFLICT(id) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name, name = excluded.name"
     )
     .bind(&id)
+    .bind(&first)
+    .bind(&last)
     .bind(&display_name)
     .bind(format!("[{{\"value\":\"{}\",\"label\":\"work\"}}]", email))
     .execute(pool)

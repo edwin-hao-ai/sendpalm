@@ -13,25 +13,25 @@ import { STORE_PATH } from "../bootstrap";
 const STEPS = [
   {
     title: "Welcome to SendPalm",
-    body: "A calm, HEY-inspired workspace for email + calendar + agent.",
+    body: "A calm, HEY-inspired email + calendar + agent workspace. 100% local, end-to-end.",
     icon: "ph-sparkle",
     color: "var(--palm)",
   },
   {
-    title: "Connect channels",
-    body: "Plug in Gmail, Outlook, IMAP, Slack, WeChat, Google Calendar. We'll keep the inbox unified.",
+    title: "Connect your real email",
+    body: "Settings → Accounts → Add account. We support Gmail / Outlook / iCloud / QQ / 网易 163 / 126 / Yahoo / Fastmail / 自定义 IMAP. Credentials are stored in your OS keychain (Keychain / Credential Manager / Secret Service).",
     icon: "ph-plug",
     color: "var(--cobalt)",
   },
   {
-    title: "Indexing",
-    body: "SendPalm sorts your inbox into Imbox, Stream, Records. First-time senders go to Gate for your approval.",
-    icon: "ph-funnel",
+    title: "Background sync",
+    body: "After connecting, the 60-second IMAP loop pulls new mail directly into your local SQLite. No mock data, no cloud round-trips.",
+    icon: "ph-arrow-clockwise",
     color: "var(--purple)",
   },
   {
-    title: "All set",
-    body: "Press ? for keyboard shortcuts. ⌘K opens the command palette. You're ready.",
+    title: "Real outbound",
+    body: "Compose in-app and we send via SMTP. Hit ⌘K to navigate, ? for shortcuts. You're ready.",
     icon: "ph-rocket-launch",
     color: "var(--orange)",
   },

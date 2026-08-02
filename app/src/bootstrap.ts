@@ -1,6 +1,7 @@
 /** Application bootstrap — runs once on mount.
  * - Loads app settings from tauri-plugin-store
- * - Seeds demo data if DB is empty (first-run)
+ * - No mock data. UI starts empty until the background IMAP sync loop
+ *   pulls real messages from the user's account.
  * - Wires up the reminder re-surfacing tick
  */
 
@@ -38,7 +39,6 @@ import {
   setOnboardingCompleted,
   setOnboardingStep,
 } from "./stores/ui";
-import { seedIfEmpty } from "./seed/seed";
 
 export const STORE_PATH = "sendpalm.prefs.json";
 export { load } from "@tauri-apps/plugin-store";
@@ -63,7 +63,11 @@ export async function initApp() {
       setOnboardingStep(0);
     }
 
-    await seedIfEmpty();
+    // No mock seed. Data only comes from:
+    //   - The background IMAP sync loop (60s tick) which pulls real messages
+    //   - User actions (compose, add account, follow-up, snippet, etc.)
+    // The first sync may take 1–2 min on a large mailbox; the UI shows
+    // empty states everywhere until that completes.
 
     await Promise.all([
       listAccounts(),

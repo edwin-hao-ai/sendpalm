@@ -37,20 +37,34 @@ export function Topbar() {
         "z-index": "var(--z-sticky)",
       }}
     >
-      <h1
+      <div
         style={{
-          "font-family": "var(--font-display)",
-          "font-size": "var(--text-h4)",
-          "font-weight": "800",
-          color: "var(--text-primary)",
-          margin: 0,
-          "letter-spacing": "-0.01em",
+          display: "flex",
+          "align-items": "center",
+          gap: "var(--space-2)",
+          "min-width": "0",
         }}
       >
-        {currentTitle()}
-      </h1>
+        <Icon
+          name="ph-leaf"
+          size={18}
+          style={{ color: "var(--palm)", "flex-shrink": "0" }}
+        />
+        <span
+          style={{
+            "font-family": "var(--font-display)",
+            "font-weight": "800",
+            "font-size": "var(--text-body)",
+            color: "var(--text-primary)",
+            "letter-spacing": "-0.01em",
+            "white-space": "nowrap",
+          }}
+        >
+          {currentTitle()}
+        </span>
+      </div>
 
-      <div style={{ display: "flex", "align-items": "center", gap: "var(--space-3)", flex: 1, "max-width": "560px" }}>
+      <div style={{ display: "flex", "align-items": "center", gap: "var(--space-3)", flex: 1, "min-width": "0", "max-width": "560px" }}>
         <button
           onClick={() => setSearchOpen(true)}
           title="Search (/)"
@@ -67,6 +81,7 @@ export function Topbar() {
             "font-size": "var(--text-caption)",
             border: "0.5px solid var(--border)",
             cursor: "text",
+            "min-width": "0",
           }}
         >
           <Icon name="ph-magnifying-glass" size={14} />

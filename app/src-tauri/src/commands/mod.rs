@@ -79,6 +79,26 @@ pub async fn list_email_providers() -> Result<Vec<EmailProvider>, String> {
     Ok(provider_list())
 }
 
+#[tauri::command]
+pub async fn vault_save(
+    account_id: String,
+    password: String,
+) -> Result<(), String> {
+    crate::services::vault::set_password(&account_id, &password)
+}
+
+#[tauri::command]
+pub async fn vault_load(
+    account_id: String,
+) -> Result<Option<String>, String> {
+    crate::services::vault::get_password(&account_id)
+}
+
+#[tauri::command]
+pub async fn vault_delete(account_id: String) -> Result<(), String> {
+    crate::services::vault::delete_password(&account_id)
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SendResult {
     pub message_id: String,

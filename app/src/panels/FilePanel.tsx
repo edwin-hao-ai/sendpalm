@@ -124,7 +124,7 @@ export function FilePanel(props: { fileId: string }) {
                     <Show when={f().url} fallback={
                       <div style={{ padding: "var(--space-5)", color: "var(--text-muted)", "text-align": "center" }}>
                         <Icon name="ph-image" size={32} />
-                        <p>无图片预览（demo 数据无 url）</p>
+                        <p>无图片预览（附件 URL 缺失）</p>
                       </div>
                     }>
                       <img

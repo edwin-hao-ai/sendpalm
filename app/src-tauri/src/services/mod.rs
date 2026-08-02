@@ -9,6 +9,7 @@ pub mod parser;
 pub mod state;
 pub mod providers;
 pub mod sync_loop;
+pub mod vault;
 
 use serde::{Deserialize, Serialize};
 

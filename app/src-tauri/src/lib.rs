@@ -47,6 +47,9 @@ pub fn run() {
             commands::send_message,
             commands::get_sync_state,
             commands::list_email_providers,
+            commands::vault_save,
+            commands::vault_load,
+            commands::vault_delete,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SendPalm");
