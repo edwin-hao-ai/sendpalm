@@ -12,6 +12,7 @@ import { Modal } from "../components/Modal";
 import { Icon } from "../components/Icon";
 import { listAccounts, listSnippets, upsertDraft, upsertScheduledSend } from "../stores/data";
 import { composeOpen, setComposeOpen, appSettings, showToast } from "../stores/ui";
+import { sendEmailViaBackend } from "../services/backend";
 import type { Draft, ScheduledSend, Snippet } from "../types";
 import { uid } from "../utils/id";
 import { addHours, addDays, isoNow, nextWeekday } from "../utils/date";
@@ -109,17 +110,33 @@ export function Compose() {
 
   /* Send split-button actions */
   const sendNow = async () => {
-    await persistDraft("sent");
+    const d = draft();
+    const subject = d.subject || "(no subject)";
+    const recipient = d.recipient.trim();
+    if (!recipient) {
+      showToast({ message: "请输入收件人地址", kind: "warning" });
+      return;
+    }
     setSendMenuOpen(false);
-    setComposeOpen(false);
-    showToast({
-      message: "已发送（M10 接入真实 SMTP 后生效）",
-      kind: "success",
-      action: {
-        label: "设置跟进 3 天",
-        run: () => showToast({ message: "跟进设置（M3 实装）", kind: "info" }),
-      },
-    });
+    showToast({ message: "正在通过 SMTP 发送…", kind: "info", ttlMs: 2000 });
+    try {
+      const result = await sendEmailViaBackend(recipient, subject, d.body);
+      await persistDraft("sent");
+      setComposeOpen(false);
+      showToast({
+        message: `已发送 · ${result.message_id.slice(0, 24)}…`,
+        kind: "success",
+        action: {
+          label: "设置跟进 3 天",
+          run: () => showToast({ message: "跟进设置（M3 实装）", kind: "info" }),
+        },
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showToast({ message: `发送失败：${msg}`, kind: "error", ttlMs: 8000 });
+      // Keep modal open so user can retry.
+      setSendMenuOpen(false);
+    }
   };
 
   const saveAsDraft = async () => {

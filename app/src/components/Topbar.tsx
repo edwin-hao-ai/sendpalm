@@ -8,9 +8,12 @@ import {
   setNotificationsOpen,
   setSearchOpen,
   view,
+  showToast,
 } from "../stores/ui";
 import { NAV_SECTIONS } from "../utils/labels";
 import { Avatar } from "./Avatar";
+import { getSyncState, syncNow } from "../services/backend";
+import { createSignal, onCleanup } from "solid-js";
 
 export function Topbar() {
   const currentTitle = () => {
@@ -72,6 +75,8 @@ export function Topbar() {
         </button>
       </div>
 
+      <SyncBadge />
+
       <div style={{ display: "flex", "align-items": "center", gap: "var(--space-2)" }}>
         <button
           onClick={() => setCommandPaletteOpen(!commandPaletteOpen())}
@@ -105,3 +110,69 @@ const iconButtonStyle = {
   color: "var(--text-secondary)",
   transition: "background var(--duration-fast) var(--ease-out)",
 };
+/**
+ * Tiny badge in the topbar showing the last IMAP sync time + a manual
+ * "Sync now" button. Auto-refreshes every 60 s. Shows a dot when
+ * no sync has happened yet.
+ */
+function SyncBadge() {
+  const DEFAULT_ACCT = "acct_edwinhao@sendpalm.com";
+  const [state, setState] = createSignal<{ last: string; uid: number; busy: boolean }>({
+    last: "—",
+    uid: 0,
+    busy: false,
+  });
+
+  const refresh = async () => {
+    try {
+      const s = await getSyncState(DEFAULT_ACCT);
+      setState((p) => ({
+        ...p,
+        last: s.last_uid > 0 ? `${s.last_uid} 封 · ${s.last_synced_at.slice(11, 16)}` : "未连接",
+        uid: s.last_uid,
+      }));
+    } catch {
+      // ignore
+    }
+  };
+
+  refresh();
+  const interval = window.setInterval(refresh, 60_000);
+  onCleanup(() => clearInterval(interval));
+
+  const manual = async () => {
+    if (state().busy) return;
+    setState((p) => ({ ...p, busy: true }));
+    try {
+      await syncNow(DEFAULT_ACCT);
+      showToast({ message: "正在从 IMAP 同步…", kind: "info", ttlMs: 2000 });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showToast({ message: `同步失败：${msg}`, kind: "error" });
+    } finally {
+      setState((p) => ({ ...p, busy: false }));
+      await refresh();
+    }
+  };
+
+  return (
+    <button
+      onClick={manual}
+      title={`IMAP · 账户 ${DEFAULT_ACCT} · 点击手动同步`}
+      style={{
+        display: "flex",
+        "align-items": "center",
+        gap: "var(--space-1)",
+        padding: "4px 10px",
+        "border-radius": "var(--radius-pill)",
+        background: "var(--paper-mid)",
+        color: "var(--text-secondary)",
+        "font-size": "var(--text-micro)",
+        "font-weight": "600",
+      }}
+    >
+      <Icon name={state().busy ? "spinner" : "arrows-clockwise"} size={11} />
+      <span>{state().last}</span>
+    </button>
+  );
+}

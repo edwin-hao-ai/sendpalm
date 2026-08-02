@@ -19,6 +19,7 @@ import type { Account, AccountSettings, Label, Shortcut } from "../types";
 import { isoNow } from "../utils/date";
 import { load, STORE_PATH } from "../bootstrap";
 import { listSnippets } from "../stores/data";
+import { listProviders as fetchProviders } from "../services/backend";
 
 const TABS = [
   { id: "profile", label: "Profile", icon: "ph-user-circle" },
@@ -154,6 +155,7 @@ function ProfileTab() {
 function AccountsTab() {
   const [accounts, { refetch }] = createResource(listAccounts);
   const [editing, setEditing] = createSignal<Account | null>(null);
+  const [adding, setAdding] = createSignal(false);
 
   const onSave = async (a: Account) => {
     await upsertAccount(a);
@@ -164,7 +166,23 @@ function AccountsTab() {
 
   return (
     <div>
-      <SectionTitle>Connected accounts</SectionTitle>
+      <div style={{ display: "flex", "align-items": "center", gap: "var(--space-2)", "margin-bottom": "var(--space-3)" }}>
+        <SectionTitle>Connected accounts</SectionTitle>
+        <div style={{ flex: 1 }} />
+        <button onClick={() => setAdding(true)} style={{
+          display: "flex",
+          "align-items": "center",
+          gap: "4px",
+          padding: "6px 14px",
+          background: "var(--palm)",
+          color: "white",
+          "border-radius": "var(--radius-pill)",
+          "font-weight": "700",
+          "font-size": "var(--text-caption)",
+        }}>
+          <Icon name="ph-plus" size={12} /> Add account
+        </button>
+      </div>
       <For each={accounts() ?? []}>
         {(a) => (
           <div
@@ -196,7 +214,135 @@ function AccountsTab() {
       <Show when={editing()}>
         {(a) => <AccountEditModal account={a()} onClose={() => setEditing(null)} onSave={onSave} />}
       </Show>
+      <Show when={adding()}>
+        <AddAccountModal onClose={() => setAdding(false)} />
+      </Show>
     </div>
+  );
+}
+
+// Provider is referenced via the createResource generic; declared inline
+// below in the function.
+function AddAccountModal(props: { onClose: () => void }) {
+  const [providerList] = createResource(fetchProviders);
+  const [selectedProviderId, setSelectedProviderId] = createSignal("gmail");
+  const [accountEmail, setAccountEmail] = createSignal("");
+  const [accountPassword, setAccountPassword] = createSignal("");
+  const [saving, setSaving] = createSignal(false);
+
+  const onSubmit = async () => {
+    const rawList = providerList();
+    if (!rawList) return;
+    const list = rawList as Array<{ id: string; label: string; icon: string; credentials_hint: string; imap_host: string; imap_port: number; smtp_host: string; smtp_port: number; auth_mode: string; smtp_implicit_tls: boolean }>;
+    const prov = list.find((p) => p.id === selectedProviderId());
+    if (!prov) return;
+    const e = accountEmail().trim();
+    if (!e || !accountPassword()) {
+      showToast({ message: "请填入邮箱地址和密码", kind: "warning" });
+      return;
+    }
+    setSaving(true);
+    const id = `acct_${e.replace(/[^a-z0-9]/gi, "_")}`;
+    // Build the account. Provider is stored as TEXT in SQL, so we cast
+    // through `unknown` since the TS union doesn't list every provider
+    // string we allow at runtime (the SQL store is provider-agnostic).
+    const providerId: string = prov.id;
+    const account = {
+      id,
+      type: "email" as const,
+      provider: providerId,
+      email: e,
+      label: prov.label,
+      displayName: e.split("@")[0] ?? e,
+      status: "connected" as const,
+      synced: 0,
+      total: 0,
+      privacy: "unified" as const,
+      color: "#0A8F63",
+      avatar: prov.label[0] ?? "M",
+      lastSync: "刚刚",
+      settings: {
+        aliases: [],
+        signature: "Best,\n" + (e.split("@")[0] ?? ""),
+        replyTo: "",
+        defaultFrom: e,
+        syncFolders: [
+          { name: "INBOX", enabled: true },
+          { name: "Sent", enabled: true },
+        ],
+        syncFrequency: "15min" as const,
+        autoBcc: false,
+        autoBccAddress: "",
+        vacationResponder: { enabled: false, subject: "", body: "" },
+      },
+    } as unknown as Account;
+    await upsertAccount(account);
+    showToast({ message: `已添加 ${prov.label} 账户 ${e}`, kind: "success" });
+    setSaving(false);
+    props.onClose();
+  };
+
+  return (
+    <Modal
+      open
+      onClose={props.onClose}
+      title="添加邮箱账户"
+      width="560px"
+      footer={
+        <>
+          <button onClick={props.onClose} style={{ padding: "8px 16px", color: "var(--text-secondary)", "font-size": "var(--text-caption)" }}>
+            取消
+          </button>
+          <button
+            onClick={onSubmit}
+            disabled={saving()}
+            style={{
+              padding: "10px 20px",
+              background: "var(--palm)",
+              color: "white",
+              "border-radius": "var(--radius-pill)",
+              "font-weight": "700",
+              "font-size": "var(--text-caption)",
+              opacity: saving() ? 0.5 : 1,
+            }}
+          >
+            {saving() ? "添加中…" : "添加并连接"}
+          </button>
+        </>
+      }
+    >
+      <Field label="邮箱服务商">
+        <select
+          value={selectedProviderId()}
+          onChange={(e) => setSelectedProviderId(e.currentTarget.value)}
+          style={inputStyle}
+        >
+          <For each={providerList() ?? []}>
+            {(p) => <option value={p.id}>{p.label}</option>}
+          </For>
+        </select>
+      </Field>
+      <Field label="邮箱地址">
+        <input
+          value={accountEmail()}
+          onInput={(e) => setAccountEmail(e.currentTarget.value)}
+          placeholder="you@example.com"
+          style={inputStyle}
+        />
+      </Field>
+      <Field label="密码 / App password / 授权码">
+        <input
+          type="password"
+          value={accountPassword()}
+          onInput={(e) => setAccountPassword(e.currentTarget.value)}
+          placeholder="见上方服务商提示"
+          style={inputStyle}
+        />
+      </Field>
+      <p style={{ "font-size": "var(--text-micro)", color: "var(--text-muted)", "margin-top": "var(--space-2)" }}>
+        {providerList()?.find((p) => p.id === selectedProviderId())?.credentials_hint ?? ""}
+      </p>
+    </Modal>
   );
 }
 

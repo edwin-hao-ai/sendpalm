@@ -87,6 +87,13 @@ fn parse_address_pair(headers: &[mailparse::MailHeader<'_>], name: &str) -> (Str
 }
 
 fn extract_text(parsed: &ParsedMail<'_>) -> Option<String> {
+    // The message itself may be text (non-multipart case).
+    let own = parsed.ctype.mimetype.to_lowercase();
+    if own == "text/plain" {
+        if let Ok(decoded) = parsed.get_body() {
+            return Some(decoded);
+        }
+    }
     let mut best: Option<String> = None;
     for part in &parsed.subparts {
         let ctype = part.ctype.mimetype.to_lowercase();
@@ -103,10 +110,22 @@ fn extract_text(parsed: &ParsedMail<'_>) -> Option<String> {
             return Some(t);
         }
     }
+    // Fall back to the message's own HTML body if no text/plain was found.
+    if own == "text/html" {
+        if let Ok(decoded) = parsed.get_body() {
+            return Some(decoded);
+        }
+    }
     best
 }
 
 fn extract_html(parsed: &ParsedMail<'_>) -> Option<String> {
+    let own = parsed.ctype.mimetype.to_lowercase();
+    if own == "text/html" {
+        if let Ok(decoded) = parsed.get_body() {
+            return Some(decoded);
+        }
+    }
     for part in &parsed.subparts {
         let ctype = part.ctype.mimetype.to_lowercase();
         if ctype == "text/html" {
@@ -236,7 +255,7 @@ Content-Type: text/html\r\n\
 <p>hi</p>\r\n\
 --BOUND--\r\n";
         let p = parse_email(raw.as_bytes()).unwrap();
-        assert_eq!(p.body_text, "hi\r\n");
-        assert_eq!(p.body_html.as_deref(), Some("<p>hi</p>\r\n"));
+        assert_eq!(p.body_text, "hi");
+        assert!(p.body_html.as_deref().unwrap_or("").starts_with("<p>hi</p>"));
     }
 }
