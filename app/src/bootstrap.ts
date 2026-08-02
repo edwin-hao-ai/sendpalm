@@ -6,6 +6,7 @@
  */
 
 import { load } from "@tauri-apps/plugin-store";
+import { IS_BROWSER } from "./services/tauri-shim";
 import {
   listAccounts,
   listAgentAudit,
@@ -46,21 +47,29 @@ export { load } from "@tauri-apps/plugin-store";
 export async function initApp() {
   setLoading(true);
   try {
-    const store = await load(STORE_PATH);
-
-    const settings = await loadAppSettings(store);
-    setAppSettings(settings);
-
-    const memory = await loadAgentMemory(store);
-    setAgentMemory(memory);
-
-    const completed = await store.get<boolean>("onboarding_completed");
-    if (completed) {
+    // The tauri-plugin-store throws if invoked outside the Tauri runtime.
+    // In browser mode we just skip app-settings/onboarding loading — the
+    // UI will use the in-memory defaults from stores/ui.ts.
+    if (IS_BROWSER()) {
       setOnboardingCompleted(true);
       setOnboardingStep(null);
     } else {
-      setOnboardingCompleted(false);
-      setOnboardingStep(0);
+      const store = await load(STORE_PATH);
+
+      const settings = await loadAppSettings(store);
+      setAppSettings(settings);
+
+      const memory = await loadAgentMemory(store);
+      setAgentMemory(memory);
+
+      const completed = await store.get<boolean>("onboarding_completed");
+      if (completed) {
+        setOnboardingCompleted(true);
+        setOnboardingStep(null);
+      } else {
+        setOnboardingCompleted(false);
+        setOnboardingStep(0);
+      }
     }
 
     // No mock seed. Data only comes from:
@@ -68,7 +77,6 @@ export async function initApp() {
     //   - User actions (compose, add account, follow-up, snippet, etc.)
     // The first sync may take 1–2 min on a large mailbox; the UI shows
     // empty states everywhere until that completes.
-
     await Promise.all([
       listAccounts(),
       listContacts(),

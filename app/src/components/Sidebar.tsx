@@ -11,6 +11,7 @@ export function Sidebar() {
   return (
     <nav
       id="sidebar"
+      data-testid="sidebar"
       style={{
         display: "flex",
         "flex-direction": isMobile() ? "row" : "column",
@@ -30,6 +31,7 @@ export function Sidebar() {
           <NavItem
             icon={section.icon}
             label={section.label}
+            view={section.view}
             active={view() === section.view}
             onClick={() => setView(section.view as never)}
           />
@@ -42,6 +44,7 @@ export function Sidebar() {
 function NavItem(props: {
   icon: string;
   label: string;
+  view: string;
   active: boolean;
   onClick: () => void;
 }) {
@@ -51,6 +54,8 @@ function NavItem(props: {
       onClick={props.onClick}
       title={props.label}
       aria-label={props.label}
+      data-nav={props.label}
+      data-nav-view={props.view}
       style={{
         display: "flex",
         "flex-direction": "column",

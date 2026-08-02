@@ -12,6 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "e2e": "playwright test",
+    "e2e:headed": "playwright test --headed",
     "lint": "eslint . --ext .ts,.tsx --max-warnings=0",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css,json}\"",
@@ -32,6 +34,7 @@
     "solid-js": "^1.9.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@solidjs/testing-library": "^0.8.10",
     "@tauri-apps/cli": "^2",
     "@testing-library/jest-dom": "^7.0.0",

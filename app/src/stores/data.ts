@@ -5,6 +5,16 @@
  */
 
 import Database from "@tauri-apps/plugin-sql";
+import { IS_BROWSER } from "../services/tauri-shim";
+
+// Browser-mode guard. When running outside Tauri (pnpm dev alone, Playwright),
+// the SQL plugin can't open the SQLite file. We expose a getter that returns
+// a stub DB in that case so the UI renders its empty states instead of crashing.
+
+class StubDb {
+  async select<T>(): Promise<T> { return [] as unknown as T; }
+  async execute(): Promise<void> { /* no-op */ }
+}
 import type {
   Account,
   AgentAuditEntry,
@@ -38,6 +48,9 @@ const DB_URL = "sqlite:sendpalm.db";
 let dbPromise: Promise<Database> | null = null;
 
 export function getDb(): Promise<Database> {
+  if (IS_BROWSER()) {
+    return Promise.resolve(new StubDb() as unknown as Database);
+  }
   if (!dbPromise) dbPromise = Database.load(DB_URL);
   return dbPromise;
 }

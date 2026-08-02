@@ -123,14 +123,21 @@ export function Compose() {
       const result = await sendEmailViaBackend(recipient, subject, d.body);
       await persistDraft("sent");
       setComposeOpen(false);
-      showToast({
-        message: `已发送 · ${result.message_id.slice(0, 24)}…`,
-        kind: "success",
-        action: {
-          label: "设置跟进 3 天",
-          run: () => showToast({ message: "跟进设置（M3 实装）", kind: "info" }),
-        },
-      });
+      if (result) {
+        showToast({
+          message: `已发送 · ${result.message_id.slice(0, 24)}…`,
+          kind: "success",
+          action: {
+            label: "设置跟进 3 天",
+            run: () => showToast({ message: "跟进设置（M3 实装）", kind: "info" }),
+          },
+        });
+      } else {
+        showToast({
+          message: "已保存为草稿（未配置真实账户）",
+          kind: "info",
+        });
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       showToast({ message: `发送失败：${msg}`, kind: "error", ttlMs: 8000 });

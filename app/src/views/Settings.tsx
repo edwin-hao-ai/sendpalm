@@ -279,11 +279,18 @@ function AddAccountModal(props: { onClose: () => void }) {
     await upsertAccount(account);
     // Persist password into OS keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service).
     try {
-      await vaultSave(id, accountPassword());
-      showToast({
-        message: `已添加 ${prov.label} 账户 ${e} · 密码已存入 Keychain`,
-        kind: "success",
-      });
+      const ok = await vaultSave(id, accountPassword());
+      if (ok) {
+        showToast({
+          message: `已添加 ${prov.label} 账户 ${e} · 密码已存入 Keychain`,
+          kind: "success",
+        });
+      } else {
+        showToast({
+          message: `已添加 ${prov.label} 账户 ${e}（浏览器模式，未存密码到 Keychain）`,
+          kind: "info",
+        });
+      }
     } catch (vaultErr) {
       showToast({
         message: `已添加账户 ${e}，但 Keychain 写入失败：${vaultErr}`,

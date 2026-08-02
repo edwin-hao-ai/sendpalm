@@ -65,14 +65,15 @@ export function Topbar() {
       </div>
 
       <div style={{ display: "flex", "align-items": "center", gap: "var(--space-3)", flex: 1, "min-width": "0", "max-width": "560px" }}>
-        <button
+        <input
+          type="text"
+          onFocus={() => setSearchOpen(true)}
           onClick={() => setSearchOpen(true)}
-          title="Search (/)"
+          placeholder="Search contacts, messages, files… (⌘K)"
           aria-label="Search"
+          readOnly
           style={{
-            display: "flex",
-            "align-items": "center",
-            gap: "var(--space-2)",
+            display: "block",
             width: "100%",
             padding: "8px 14px",
             background: "var(--paper-mid)",
@@ -80,14 +81,12 @@ export function Topbar() {
             color: "var(--text-muted)",
             "font-size": "var(--text-caption)",
             border: "0.5px solid var(--border)",
-            cursor: "text",
+            cursor: "pointer",
             "min-width": "0",
+            "font-family": "var(--font-body)",
+            outline: "none",
           }}
-        >
-          <Icon name="ph-magnifying-glass" size={14} />
-          <span>Search contacts, messages, files…</span>
-          <span style={{ "margin-left": "auto", "font-size": "10px", "font-weight": "600" }}>⌘K</span>
-        </button>
+        />
       </div>
 
       <SyncBadge />
