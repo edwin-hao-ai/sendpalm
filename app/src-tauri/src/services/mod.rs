@@ -7,6 +7,8 @@ pub mod imap;
 pub mod smtp;
 pub mod parser;
 pub mod state;
+pub mod providers;
+pub mod sync_loop;
 
 use serde::{Deserialize, Serialize};
 

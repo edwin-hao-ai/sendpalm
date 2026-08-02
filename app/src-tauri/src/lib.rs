@@ -20,6 +20,13 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             app.manage(SyncStateStore::new());
+            let disable = std::env::var("SENDPALM_DISABLE_BACKGROUND_SYNC")
+                .ok()
+                .map(|v| v == "1")
+                .unwrap_or(false);
+            if !disable {
+                services::sync_loop::start(app.handle().clone());
+            }
             Ok(())
         })
         .plugin(
@@ -39,6 +46,7 @@ pub fn run() {
             commands::list_mailboxes,
             commands::send_message,
             commands::get_sync_state,
+            commands::list_email_providers,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SendPalm");

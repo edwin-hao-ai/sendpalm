@@ -1,19 +1,16 @@
 //! Tauri commands exposing real IMAP/SMTP services to JS.
-//!
-//! These are the IPC bridge between `src/stores/data.ts` and the Rust
-//! services in `services/`.
 
 use crate::services::{
     EmailCredentials, SyncReport, imap::ImapClient, load_test_credentials, smtp::SmtpClient,
 };
+use crate::services::providers::{EmailProvider, list as provider_list};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager};
 use tokio::sync::OnceCell;
 
-/// Lazily-loaded test credentials (loaded from `.env`).
 static TEST_CREDS: OnceCell<EmailCredentials> = OnceCell::const_new();
 
-async fn get_creds(_app: &AppHandle) -> Result<EmailCredentials, String> {
+async fn get_creds() -> Result<EmailCredentials, String> {
     let creds = TEST_CREDS
         .get_or_try_init(|| async { load_test_credentials() })
         .await
@@ -27,7 +24,7 @@ pub async fn sync_now(
     account_id: String,
     mailbox: String,
 ) -> Result<SyncReport, String> {
-    let creds = get_creds(&app).await?;
+    let creds = get_creds().await?;
     let client = ImapClient::new(creds);
     let state = app.state::<crate::services::state::SyncStateStore>();
     let prev = state.get(&account_id);
@@ -40,24 +37,22 @@ pub async fn sync_now(
             last_synced_at: chrono::Utc::now(),
         },
     );
-    let new_count = bundle.messages.len();
-    Ok(bundle.report(&account_id, new_count, 0))
+    Ok(bundle.report(&account_id, bundle.messages.len(), 0))
 }
 
 #[tauri::command]
-pub async fn list_mailboxes(app: AppHandle) -> Result<Vec<String>, String> {
-    let creds = get_creds(&app).await?;
+pub async fn list_mailboxes() -> Result<Vec<String>, String> {
+    let creds = get_creds().await?;
     ImapClient::new(creds).list_mailboxes().await
 }
 
 #[tauri::command]
 pub async fn send_message(
-    app: AppHandle,
     to: String,
     subject: String,
     body: String,
 ) -> Result<SendResult, String> {
-    let creds = get_creds(&app).await?;
+    let creds = get_creds().await?;
     let smtp = SmtpClient::new(creds);
     let from = smtp.creds().email.clone();
     let id = smtp.send(&from, &to, &subject, &body).await?;
@@ -77,6 +72,11 @@ pub async fn get_sync_state(
         last_uid: s.last_uid,
         last_synced_at: s.last_synced_at.to_rfc3339(),
     })
+}
+
+#[tauri::command]
+pub async fn list_email_providers() -> Result<Vec<EmailProvider>, String> {
+    Ok(provider_list())
 }
 
 #[derive(Debug, Serialize, Deserialize)]
