@@ -14,6 +14,7 @@ const ICON_BY_TYPE: Record<string, string> = {
   schedule: "ph-calendar",
   system: "ph-info",
   surfaced: "ph-arrow-fat-line-up",
+  mail: "ph-envelope",
 };
 
 export function NotificationPanel() {
@@ -23,7 +24,9 @@ export function NotificationPanel() {
     const items = list() ?? [];
     const today = items.filter((n) => isToday(n.createdAt));
     const yesterday = items.filter((n) => isYesterday(n.createdAt));
-    const earlier = items.filter((n) => !isToday(n.createdAt) && !isYesterday(n.createdAt));
+    const earlier = items.filter(
+      (n) => !isToday(n.createdAt) && !isYesterday(n.createdAt),
+    );
     return { today, yesterday, earlier };
   });
 
@@ -50,17 +53,29 @@ export function NotificationPanel() {
           "border-bottom": "0.5px solid var(--border)",
         }}
       >
-        <strong style={{ flex: 1, "font-size": "var(--text-body-sm)" }}>Notifications</strong>
+        <strong style={{ flex: 1, "font-size": "var(--text-body-sm)" }}>
+          Notifications
+        </strong>
         <button
-          onClick={async () => { await markAllNotificationsRead(); refetch(); }}
-          style={{ "font-size": "var(--text-caption)", color: "var(--palm)", "font-weight": "700" }}
+          onClick={async () => {
+            await markAllNotificationsRead();
+            refetch();
+          }}
+          style={{
+            "font-size": "var(--text-caption)",
+            color: "var(--palm)",
+            "font-weight": "700",
+          }}
         >
           Mark all read
         </button>
         <button
           onClick={() => setNotificationsOpen(false)}
           aria-label="Close"
-          style={{ "margin-left": "var(--space-3)", color: "var(--text-muted)" }}
+          style={{
+            "margin-left": "var(--space-3)",
+            color: "var(--text-muted)",
+          }}
         >
           <Icon name="ph-x" size={14} />
         </button>
@@ -107,15 +122,27 @@ function Group(props: { title: string; children: unknown }) {
   );
 }
 
-function Row(props: { n: { id: string; type: string; title: string; body: string; read: boolean; createdAt: string; ref?: { type: string; id: string } } }) {
+function Row(props: {
+  n: {
+    id: string;
+    type: string;
+    title: string;
+    body: string;
+    read: boolean;
+    createdAt: string;
+    ref?: { type: string; id: string };
+  };
+}) {
   const n = () => props.n;
+  const onClick = () => {
+    if (n().ref?.type === "contact") setView("contacts");
+    if (n().ref?.type === "event") setView("calendar");
+    if (n().ref?.type === "message") setView("imbox");
+    setNotificationsOpen(false);
+  };
   return (
     <button
-      onClick={() => {
-        if (n().ref?.type === "contact") setView("contacts");
-        if (n().ref?.type === "event") setView("calendar");
-        setNotificationsOpen(false);
-      }}
+      onClick={onClick}
       style={{
         display: "flex",
         gap: "var(--space-3)",
@@ -128,11 +155,26 @@ function Row(props: { n: { id: string; type: string; title: string; body: string
     >
       <Icon name={ICON_BY_TYPE[n().type] ?? "ph-info"} size={18} />
       <div style={{ flex: 1, "min-width": 0 }}>
-        <div style={{ "font-weight": "600", "font-size": "var(--text-body-sm)" }}>{n().title}</div>
-        <div style={{ "font-size": "var(--text-caption)", color: "var(--text-secondary)" }}>
+        <div
+          style={{ "font-weight": "600", "font-size": "var(--text-body-sm)" }}
+        >
+          {n().title}
+        </div>
+        <div
+          style={{
+            "font-size": "var(--text-caption)",
+            color: "var(--text-secondary)",
+          }}
+        >
           {n().body}
         </div>
-        <div style={{ "font-size": "var(--text-micro)", color: "var(--text-muted)", "margin-top": "2px" }}>
+        <div
+          style={{
+            "font-size": "var(--text-micro)",
+            color: "var(--text-muted)",
+            "margin-top": "2px",
+          }}
+        >
           {relativeTime(n().createdAt as unknown as string)}
         </div>
       </div>

@@ -100,3 +100,22 @@ async fn imap_sync_returns_messages() {
         );
     }
 }
+
+#[tokio::test]
+async fn imap_idle_inits_and_times_out() {
+    if !e2e_enabled() {
+        eprintln!("SENDPALM_E2E_NETWORK not set — skipping");
+        return;
+    }
+    let Some(c) = creds().await else {
+        eprintln!("Test creds missing");
+        return;
+    };
+    let client = sendpalm_app_lib::services::imap::ImapClient::new(c);
+    // Use a short timeout so the test finishes quickly. The server should
+    // accept IDLE, then return either a keep-alive or the timeout path.
+    client
+        .idle_wait("INBOX", std::time::Duration::from_secs(3))
+        .await
+        .expect("IDLE init should succeed");
+}

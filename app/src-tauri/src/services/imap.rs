@@ -10,9 +10,16 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt};
 
+use async_imap::extensions::idle::IdleResponse;
+use std::time::Duration;
+
 /// Hard cap per sync tick — protects the UI from 100k+ message mailboxes.
 /// We round-trip per chunk so a slow IMAP server doesn't hold the connection.
 const MAX_PER_TICK: u32 = 200;
+
+/// Default IDLE timeout before we re-issue the command to avoid server
+/// inactivity cut-offs (RFC 2177 recommends < 30 min).
+pub const IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 pub struct ImapClient {
     creds: EmailCredentials,
@@ -41,7 +48,7 @@ impl ImapClient {
             .await
             .map_err(|e| format!("imap tls: {e}"))?;
 
-        let mut client = Client::new(tls);
+        let client = Client::new(tls);
         let session: async_imap::Session<_> = client
             .login(&self.creds.email, &self.creds.password)
             .await
@@ -64,6 +71,40 @@ impl ImapClient {
             .collect();
         let _ = session.logout().await;
         Ok(names)
+    }
+
+    /// Block on IMAP IDLE for `timeout`, returning Ok when the server reports
+    /// new mailbox activity or when the timeout fires. This lets us react to
+    /// new mail in seconds instead of polling every 60 s.
+    pub async fn idle_wait(
+        &self,
+        mailbox_name: &str,
+        timeout: Duration,
+    ) -> Result<(), String> {
+        let mut session = self.connect().await?;
+        session
+            .select(mailbox_name)
+            .await
+            .map_err(|e| format!("select {mailbox_name}: {e}"))?;
+
+        let mut handle = session.idle();
+        handle
+            .init()
+            .await
+            .map_err(|e| format!("idle init: {e}"))?;
+
+        let (wait_fut, _stop) = handle.wait_with_timeout(timeout);
+        let result = wait_fut.await;
+
+        // Always try to terminate IDLE cleanly so the server releases the
+        // connection state for the next command.
+        let _ = handle.done().await;
+
+        match result {
+            Ok(IdleResponse::NewData(_)) => Ok(()),
+            Ok(_) => Ok(()),
+            Err(e) => Err(format!("idle wait: {e}")),
+        }
     }
 
     /// Sync a single mailbox, returning parsed messages and the highest UID seen.

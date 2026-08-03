@@ -65,19 +65,19 @@ interface AccountBase {
 }
 
 export type Account =
-  | (AccountBase & { type: "email"; provider: EmailProvider; email: string; settings: AccountSettings })
+  | (AccountBase & {
+      type: "email";
+      provider: EmailProvider;
+      email: string;
+      settings: AccountSettings;
+    })
   | (AccountBase & { type: "im"; provider: IMProvider })
   | (AccountBase & { type: "calendar"; provider: CalendarProvider });
 
 /* ── Contact ──────────────────────────────────────────── */
 
 export type ContactStage =
-  | "explore"
-  | "build"
-  | "active"
-  | "maintain"
-  | "cold"
-  | "rekindle";
+  "explore" | "build" | "active" | "maintain" | "cold" | "rekindle";
 
 export type ContactGroup = "active" | "risk" | "cold" | "";
 
@@ -250,7 +250,8 @@ export interface Task {
 
 /* ── Draft ──────────────────────────────────────────── */
 
-export type DraftStatus = "pending" | "approved" | "sent" | "edited" | "discarded";
+export type DraftStatus =
+  "pending" | "approved" | "sent" | "edited" | "discarded";
 
 export interface Draft {
   id: ID;
@@ -266,7 +267,8 @@ export interface Draft {
 
 /* ── Agent ──────────────────────────────────────────── */
 
-export type AgentSessionKind = "freeform" | "message" | "contact" | "event" | "file";
+export type AgentSessionKind =
+  "freeform" | "message" | "contact" | "event" | "file";
 
 export interface AgentSession {
   id: ID;
@@ -337,7 +339,8 @@ export type NotificationType =
   | "relationship"
   | "schedule"
   | "system"
-  | "surfaced";
+  | "surfaced"
+  | "mail";
 
 export interface Notification {
   id: ID;
@@ -475,4 +478,6 @@ export interface AppSettings {
 
 /* ── Helpers ──────────────────────────────────────────── */
 
-export type WithRequired<T, K extends keyof T> = T & { [P in K]-?: NonNullable<T[P]> };
+export type WithRequired<T, K extends keyof T> = T & {
+  [P in K]-?: NonNullable<T[P]>;
+};

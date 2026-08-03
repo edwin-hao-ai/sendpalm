@@ -1,16 +1,18 @@
-//! Background periodic sync loop — walks every connected account every
-//! 60 s and persists new messages to the same SQLite DB the frontend uses.
+//! Background sync loop — uses IMAP IDLE for INBOX when possible, falling
+//! back to a short poll sleep if the server doesn't support IDLE.
 
-use crate::services::imap::ImapClient;
+use crate::services::imap::{ImapClient, IDLE_TIMEOUT};
 use crate::services::{EmailCredentials, load_test_credentials};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 use tauri::async_runtime::spawn;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
-pub const TICK_MS: u64 = 60_000;
+/// When IDLE fails (server doesn't support it, connection drop, etc.), wait
+/// this long before the next sync attempt.
+const IDLE_ERROR_BACKOFF: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone)]
 pub struct SyncAccount {
@@ -30,13 +32,15 @@ pub fn start(app: AppHandle) {
     });
 }
 
-async fn run_loop(_app: AppHandle) -> Result<(), String> {
+async fn run_loop(app: AppHandle) -> Result<(), String> {
     let creds = load_test_credentials()
         .map_err(|e| format!("no credentials: {e}"))?;
     let account_id = format!("acct_{}", creds.email);
 
     let pool = open_pool().await?;
     ensure_schema(&pool).await?;
+
+    let client = ImapClient::new(creds.clone());
 
     let mut account = SyncAccount {
         account_id: account_id.clone(),
@@ -71,41 +75,59 @@ async fn run_loop(_app: AppHandle) -> Result<(), String> {
         account.account_id, account.last_uid
     );
 
-    let mut interval = tokio::time::interval(Duration::from_millis(TICK_MS));
-    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // Do an initial sync so the UI is populated on first launch, then keep
+    // the connection parked in IMAP IDLE for instant new-mail delivery.
+    if let Err(e) = sync_and_notify(&app, &pool, &client, &mut account).await {
+        eprintln!("[sync] initial sync failed for {}: {e}", account.account_id);
+        tokio::time::sleep(IDLE_ERROR_BACKOFF).await;
+    }
 
-    let mut tick_n = 0u32;
     loop {
-        interval.tick().await;
-        tick_n += 1;
-        eprintln!("[sync] tick #{tick_n} — fetching from {}", account.account_id);
-        match sync_one(&pool, &account).await {
-            Ok((n, new_last_uid, new_uv)) => {
-                eprintln!(
-                    "[sync] tick #{tick_n} ok: {} new msgs, uid {}..={}, uv {}",
-                    n, account.last_uid, new_last_uid, new_uv
-                );
-                if n > 0 {
-                    eprintln!(
-                        "[sync] inserted {} new message(s) for {}",
-                        n, account.account_id
-                    );
+        match client.idle_wait("INBOX", IDLE_TIMEOUT).await {
+            Ok(()) => {
+                eprintln!("[sync] IDLE triggered for {}, syncing", account.account_id);
+                if let Err(e) = sync_and_notify(&app, &pool, &client, &mut account).await {
+                    eprintln!("[sync] sync failed for {}: {e}", account.account_id);
+                    tokio::time::sleep(IDLE_ERROR_BACKOFF).await;
                 }
-                account.last_uid = new_last_uid;
-                account.uid_validity = new_uv;
             }
             Err(e) => {
-                eprintln!("[sync] tick #{tick_n} FAILED for {}: {e}", account.account_id);
+                eprintln!(
+                    "[sync] IDLE failed for {}: {e}; falling back to poll",
+                    account.account_id
+                );
+                if let Err(e) = sync_and_notify(&app, &pool, &client, &mut account).await {
+                    eprintln!("[sync] fallback sync failed for {}: {e}", account.account_id);
+                }
+                tokio::time::sleep(IDLE_ERROR_BACKOFF).await;
             }
         }
     }
 }
 
-async fn sync_one(
+async fn sync_and_notify(
+    app: &AppHandle,
     pool: &SqlitePool,
+    client: &ImapClient,
+    account: &mut SyncAccount,
+) -> Result<(), String> {
+    let previous_last_uid = account.last_uid;
+    let (n, new_last_uid, new_uv) = sync_one(app, pool, client, account, previous_last_uid).await?;
+    account.last_uid = new_last_uid;
+    account.uid_validity = new_uv;
+    if n > 0 {
+        eprintln!("[sync] inserted {} new message(s) for {}", n, account.account_id);
+    }
+    Ok(())
+}
+
+async fn sync_one(
+    app: &AppHandle,
+    pool: &SqlitePool,
+    client: &ImapClient,
     account: &SyncAccount,
+    previous_last_uid: u32,
 ) -> Result<(u32, u32, u32), String> {
-    let client = ImapClient::new(account.creds.clone());
     let bundle = client.sync("INBOX", account.last_uid).await?;
 
     // Ensure the account row exists in the accounts table so the foreign
@@ -139,6 +161,30 @@ async fn sync_one(
         .execute(pool)
         .await
         .map_err(|e| format!("insert message uid={uid}: {e}"))?;
+
+        // Only notify for genuinely new mail (skip the historic backlog on
+        // the first sync). previous_last_uid == 0 means this is the initial
+        // backfill.
+        if previous_last_uid > 0 && uid > &previous_last_uid {
+            let sender = parsed.sender_name.as_deref().unwrap_or(&parsed.sender_email);
+            let title = if parsed.subject.is_empty() {
+                format!("New message from {sender}")
+            } else {
+                parsed.subject.clone()
+            };
+            sqlx::query(
+                "INSERT OR IGNORE INTO notifications (id, type, title, body, ref_json, read, created_at) \
+                 VALUES ($1, 'mail', $2, $3, $4, 0, datetime('now'))"
+            )
+            .bind(format!("nt_{mid}"))
+            .bind(&title)
+            .bind(format!("From {sender}"))
+            .bind(format!("{{\"type\":\"message\",\"id\":\"{mid}\"}}"))
+            .execute(pool)
+            .await
+            .map_err(|e| format!("insert notification uid={uid}: {e}"))?;
+        }
+
         inserted += 1;
     }
 
@@ -158,6 +204,18 @@ async fn sync_one(
     .execute(pool)
     .await
     .map_err(|e| format!("save sync state: {e}"))?;
+
+    // Notify the frontend so it can refresh Imbox / Notifications in real time.
+    let report = crate::services::SyncReport {
+        account_id: account.account_id.clone(),
+        mailbox: bundle.mailbox.clone(),
+        new_messages: inserted as usize,
+        skipped: bundle.messages.len().saturating_sub(inserted as usize),
+        uid_validity: bundle.uid_validity as u64,
+        last_uid: bundle.highest_uid as u64,
+        error: None,
+    };
+    let _ = app.emit("sync:new-messages", report);
 
     Ok((inserted, bundle.highest_uid, bundle.uid_validity))
 }

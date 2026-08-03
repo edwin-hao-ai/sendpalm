@@ -16,13 +16,13 @@
 | **M7** | Settings + Onboarding | ✅ Done | 7 tabs (Profile/Accounts/Preferences/Agent/Labels/Data/Shortcuts) with live save to tauri-plugin-store, replay onboarding button, 4-step onboarding wizard |
 | **M8** | Mobile + Tablet responsive | ✅ Done | 3-tier CSS breakpoints (mobile <768 / tablet 768-1023 / desktop ≥1024), bottom-tab bar on mobile, full-screen modals on mobile, gesture helpers (useSwipe, useLongPress) |
 | **M9** | Polish + Accessibility | ✅ Done | Full keyboard shortcut system (PRD §3.17), ?-help modal, focus rings, semantic role attributes, keyboard nav (j/k/Enter/x in Imbox) |
-| **M10** | Backend (OAuth / IMAP / SMTP / real LLM / push) | ⏸ Deferred | Out of scope per AGENTS.md §2 |
+| **M10** | Real backend integration (IMAP / SMTP / vault / sync) | ✅ Done | `async-imap` + `lettre` + `keyring`, 10 provider registry, IMAP IDLE loop, real-time frontend event bridge, OS Keychain credential vault, 21 Rust integration tests (real Feishu), 17 Playwright E2E |
 
 ## Definition-of-Done status
 
-- [x] Code compiles, tests pass, lint clean (TypeScript strict mode)
+- [x] Code compiles, tests pass, lint clean (TypeScript strict mode, `cargo check` clean)
 - [x] Visual diff vs. prototype matches (HEY warm paper + palm-green palette)
-- [x] Mobile (iPhone SE viewport) and tablet (iPad mini viewport) breakpoints in CSS
+- [x] Mobile (iPhone SE viewport) and tablet (iPad mini viewport) breakpoints in CSS + E2E
 - [x] No new TODOs without justification
 - [x] Conventional commit messages
 - [x] PROGRESS.md updated
@@ -42,7 +42,21 @@ pnpm install
 pnpm tauri dev
 ```
 
+Tests:
+
+```bash
+# Frontend unit tests (Vitest)
+cd app && pnpm test
+
+# Playwright E2E (browser-mode UI verification)
+cd app && pnpm e2e
+
+# Rust integration tests against real IMAP/SMTP (requires .env credentials)
+cd app/src-tauri && SENDPALM_E2E_NETWORK=1 cargo test --tests
+```
+
 Bundle:
+
 ```bash
 pnpm tauri build
 ```
