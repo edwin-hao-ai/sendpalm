@@ -97,6 +97,42 @@ export function NotificationPanel() {
             <For each={grouped().earlier}>{(n) => <Row n={n} />}</For>
           </Group>
         </Show>
+        <Show
+          when={
+            grouped().today.length +
+              grouped().yesterday.length +
+              grouped().earlier.length >
+            0
+          }
+        >
+          <div />
+        </Show>
+        <Show
+          when={
+            grouped().today.length +
+              grouped().yesterday.length +
+              grouped().earlier.length ===
+            0
+          }
+        >
+          <div
+            style={{
+              padding: "var(--space-8) var(--space-5)",
+              "text-align": "center",
+              color: "var(--text-muted)",
+            }}
+          >
+            <Icon name="ph-bell-slash" size={28} />
+            <p
+              style={{
+                margin: "var(--space-3) 0 0",
+                "font-size": "var(--text-caption)",
+              }}
+            >
+              暂无新通知。新邮件到达时会出现在这里。
+            </p>
+          </div>
+        </Show>
       </div>
     </div>
   );
@@ -145,19 +181,54 @@ function Row(props: {
     <button
       onClick={onClick}
       style={{
+        position: "relative",
         display: "flex",
         gap: "var(--space-3)",
         padding: "var(--space-3) var(--space-4)",
         "border-bottom": "0.5px solid var(--border)",
         width: "100%",
         "text-align": "left",
-        background: n().read ? "transparent" : "rgba(85,34,250,0.04)",
+        background: n().read ? "transparent" : "var(--palm-soft)",
+        transition: "background var(--duration-fast) var(--ease-out), transform 0.16s var(--ease-out)",
+      }}
+      onMouseEnter={(ev) => {
+        if (n().read) ev.currentTarget.style.background = "var(--paper-mid)";
+      }}
+      onMouseLeave={(ev) => {
+        if (n().read) ev.currentTarget.style.background = "transparent";
+        else ev.currentTarget.style.background = "var(--palm-soft)";
       }}
     >
-      <Icon name={ICON_BY_TYPE[n().type] ?? "ph-info"} size={18} />
+      <Show when={!n().read}>
+        <span
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            top: "14px",
+            left: "6px",
+            width: "5px",
+            height: "5px",
+            "border-radius": "50%",
+            background: "var(--palm)",
+          }}
+        />
+      </Show>
+      <div style={{ "margin-left": n().read ? 0 : "var(--space-2)", "flex-shrink": 0 }}>
+        <Icon
+          name={ICON_BY_TYPE[n().type] ?? "ph-info"}
+          size={18}
+          style={{ color: n().read ? "var(--text-muted)" : "var(--palm)" }}
+        />
+      </div>
       <div style={{ flex: 1, "min-width": 0 }}>
         <div
-          style={{ "font-weight": "600", "font-size": "var(--text-body-sm)" }}
+          style={{
+            "font-weight": n().read ? "500" : "700",
+            "font-size": "var(--text-body-sm)",
+            "font-family": "var(--font-display)",
+            "letter-spacing": n().read ? "-0.005em" : "-0.012em",
+            color: n().read ? "var(--text-secondary)" : "var(--text-primary)",
+          }}
         >
           {n().title}
         </div>
@@ -165,6 +236,9 @@ function Row(props: {
           style={{
             "font-size": "var(--text-caption)",
             color: "var(--text-secondary)",
+            "white-space": "nowrap",
+            overflow: "hidden",
+            "text-overflow": "ellipsis",
           }}
         >
           {n().body}
