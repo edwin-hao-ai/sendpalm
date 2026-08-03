@@ -80,6 +80,9 @@ function rowToMessage(r: Record<string, unknown>): Message {
     cc: safeParse<string[]>(r.cc_json as string, []),
     bcc: safeParse<string[]>(r.bcc_json as string, []),
     threadId: (r.thread_id as string | undefined) ?? undefined,
+    calendarInvite: r.calendar_json
+      ? safeParse<Message["calendarInvite"]>(r.calendar_json as string, null)
+      : null,
   };
 }
 

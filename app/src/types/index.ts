@@ -163,6 +163,19 @@ export interface Message {
   cc?: string[];
   bcc?: string[];
   threadId?: ID;
+  /** Parsed iCalendar VEVENT, if this message is a meeting invite. */
+  calendarInvite?: IcalEvent | null;
+}
+
+export interface IcalEvent {
+  uid?: string;
+  summary: string;
+  dtstart?: string;
+  dtstartTzid?: string;
+  dtend?: string;
+  dtendTzid?: string;
+  location?: string;
+  description?: string;
 }
 
 /* ── File ──────────────────────────────────────────── */
