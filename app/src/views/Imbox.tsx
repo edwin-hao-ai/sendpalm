@@ -285,7 +285,11 @@ export function Imbox() {
                     cursor: "pointer",
                     position: "relative",
                     background: cursorHere() ? "var(--palm-soft)" : "transparent",
-                    transition: "background var(--duration-fast) var(--ease-out)",
+                    transition: "background var(--duration-fast) var(--ease-out), transform 0.18s var(--ease-out)",
+                    animation: i() < 12
+                      ? `list-item-enter 0.34s var(--ease-out) both`
+                      : undefined,
+                    "animation-delay": i() < 12 ? `${i() * 28}ms` : undefined,
                   }}
                   onMouseEnter={(e) => {
                     if (!cursorHere()) e.currentTarget.style.background = "rgba(35,28,51,0.03)";
@@ -484,7 +488,16 @@ function MessageSummary(props: { m: Message; contactName: string }) {
           "margin-top": "2px",
         }}
       >
-        <strong style={{ "font-weight": props.m.unread ? "700" : "500" }}>{props.m.subj}</strong>
+        <span
+          style={{
+            "font-family": "var(--font-display)",
+            "font-weight": props.m.unread ? "650" : "500",
+            "letter-spacing": props.m.unread ? "-0.012em" : "-0.005em",
+            color: props.m.unread ? "var(--text-primary)" : "var(--text-secondary)",
+          }}
+        >
+          {props.m.subj}
+        </span>
         <span style={{ color: "var(--text-muted)", "margin-left": "6px" }}>— {props.m.prev}</span>
       </div>
     </>
