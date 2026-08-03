@@ -41,7 +41,7 @@ export function Modal(props: ModalProps) {
             "align-items": "center",
             "justify-content": "center",
             "z-index": "var(--z-modal)",
-            animation: "view-enter 0.2s var(--ease-out) both",
+            animation: "backdrop-fade-in 0.22s var(--ease-out) both",
             padding: "var(--space-5)",
           }}
           onClick={(e) => {

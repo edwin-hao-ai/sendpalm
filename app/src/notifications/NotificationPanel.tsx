@@ -41,7 +41,8 @@ export function NotificationPanel() {
         "border-radius": "var(--radius-lg)",
         "box-shadow": "var(--shadow-xl)",
         "z-index": "var(--z-modal)",
-        animation: "view-enter 0.2s var(--ease-out) both",
+        animation: "view-enter 0.26s cubic-bezier(0.34, 1.56, 0.64, 1) both",
+        "transform-origin": "top right",
         overflow: "hidden",
       }}
     >

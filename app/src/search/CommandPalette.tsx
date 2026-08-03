@@ -182,7 +182,7 @@ export function CommandPalette() {
         "justify-content": "center",
         "padding-top": "12vh",
         "z-index": "var(--z-modal)",
-        animation: "view-enter 0.2s var(--ease-out) both",
+        animation: "backdrop-fade-in 0.18s var(--ease-out) both",
       }}
       onClick={() => setCommandPaletteOpen(false)}
     >
@@ -194,6 +194,8 @@ export function CommandPalette() {
           "border-radius": "var(--radius-lg)",
           "box-shadow": "var(--shadow-xl)",
           overflow: "hidden",
+          "transform-origin": "top center",
+          animation: "modal-enter 0.24s cubic-bezier(0.34, 1.56, 0.64, 1) both",
         }}
         onClick={(e) => e.stopPropagation()}
       >
