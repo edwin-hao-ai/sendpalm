@@ -1,0 +1,44 @@
+
+  <div id="app">
+    <header id="topbar"><div class="topbar-left"><button class="icon-btn topbar-search-toggle" title="Search (/)"><i class="ph ph-magnifying-glass"></i></button></div><div class="topbar-center"><a class="topbar-logo" href="#" title="SendPalm"><span class="topbar-logo-mark"><i class="ph ph-paper-plane-tilt"></i><span class="logo-dot"></span></span><span>SendPalm</span></a></div><div class="topbar-right"><button class="icon-btn topbar-compose-mobile" title="New message"><i class="ph ph-pencil-simple"></i></button><button class="icon-btn topbar-notify-btn has-badge" title="Notifications"><i class="ph ph-bell"></i></button><button class="topbar-avatar" title="Edwin Hao" style="background-image: url(&quot;https://picsum.photos/seed/edwinhao/64/64&quot;);"></button></div></header>
+    <nav id="sidebar"><button class="sidebar-compose-btn" title="New message (⌘N)"><i class="ph ph-pencil-simple"></i><span>New</span></button><div class="nav-section"><button class="nav-item" title="Gate (⌘1)"><i class="ph ph-funnel"></i><div class="nav-label-wrap"><span class="nav-label">Gate</span><span class="nav-badge">2</span></div></button><button class="nav-item" title="Inbox (⌘2)"><i class="ph ph-tray"></i><div class="nav-label-wrap"><span class="nav-label">Inbox</span><span class="nav-badge">8</span></div></button><button class="nav-item" title="Stream (⌘3)"><i class="ph ph-newspaper"></i><div class="nav-label-wrap"><span class="nav-label">Stream</span></div></button><button class="nav-item" title="Records (⌘4)"><i class="ph ph-receipt"></i><div class="nav-label-wrap"><span class="nav-label">Records</span></div></button></div><div class="nav-section"><div class="nav-section-label">Tools</div><button class="nav-item" title="Contacts (⌘5)"><i class="ph ph-users"></i><div class="nav-label-wrap"><span class="nav-label">Contacts</span></div></button><button class="nav-item" title="Calendar (⌘6)"><i class="ph ph-calendar"></i><div class="nav-label-wrap"><span class="nav-label">Calendar</span></div></button><button class="nav-item" title="Files (⌘7)"><i class="ph ph-files"></i><div class="nav-label-wrap"><span class="nav-label">Files</span></div></button><button class="nav-item active" title="Insights (⌘8)"><i class="ph ph-chart-bar"></i><div class="nav-label-wrap"><span class="nav-label">Insights</span></div></button><button class="nav-item" title="Agent (⌘9)"><i class="ph ph-sparkle"></i><div class="nav-label-wrap"><span class="nav-label">Agent</span></div></button></div><div class="nav-section"><div class="nav-section-label">Trash</div><button class="nav-item" title="Trash"><i class="ph ph-trash"></i><div class="nav-label-wrap"><span class="nav-label">Trash</span></div></button><button class="nav-item" title="Spam"><i class="ph ph-warning-circle"></i><div class="nav-label-wrap"><span class="nav-label">Spam</span></div></button></div></nav>
+    <main id="main"><div class="onboarding-view"><div class="onboarding-progress"><span class="onboarding-dot active"></span><span class="onboarding-dot"></span><span class="onboarding-dot"></span><span class="onboarding-dot"></span></div><div class="onboarding-content"><div class="onboarding-step"><div class="onboarding-brand-icon"><i class="ph ph-palm-tree"></i></div><h1 class="onboarding-title">Welcome to SendPalm</h1><p class="onboarding-subtitle">Calm email + agent context. Focus on the people that matter, and let the noise fade into the background.</p><div class="onboarding-actions"><button class="btn btn-ghost">Skip</button><button class="btn btn-primary">Get started</button></div></div></div></div></main>
+    <aside id="detail-panel" class="hidden"></aside>
+    <div id="agent-fab" aria-label="Open SendPalm Agent" title="Ask SendPalm Agent" class="has-tasks"><i class="ph ph-sparkle"></i></div>
+    <div id="agent-panel" class="hidden"><div class="agent-header"><div class="agent-session-select-wrap"><button class="agent-session-select"><i class="ph ph-envelope"></i><span>张磊合同跟进</span><i class="ph ph-caret-down"></i></button></div><div class="agent-header-actions"><button class="icon-btn agent-new-session-btn" title="New session"><i class="ph ph-plus"></i></button><button class="icon-btn agent-close" title="Close"><i class="ph ph-x"></i></button></div></div><div class="agent-suggestions"><button class="agent-chip">Morning briefing</button><button class="agent-chip">What needs attention?</button><button class="agent-chip">Draft weekly update</button></div><div class="agent-messages"><div class="agent-message agent-message-user"><div class="agent-message-bubble">帮我草拟回复</div></div><div class="agent-message agent-message-agent"><div class="agent-message-bubble">好的，我已根据合同附件为你草拟回复：
+
+张磊，
+
+验收标准 v2 已收到...</div><div class="agent-message-actions"><button class="agent-message-action-btn">Copy</button><button class="agent-message-action-btn">Regenerate</button><button class="agent-message-action-btn">Use as draft</button></div></div></div><div class="agent-tasks"><div class="agent-section-title">In progress</div><div class="agent-task"><div class="agent-task-name">Q4 跟进方案</div><div class="agent-task-meta"><span class="agent-task-progress" title="✓ 分析王洋邮件历史
+✓ 起草跟进邮件
+○ 等待你的审批">2/3</span><span class="agent-task-eta">2 min</span></div></div><div class="agent-task"><div class="agent-task-name">本周沟通总结</div><div class="agent-task-meta"><span class="agent-task-progress" title="✓ 收集47条消息
+✓ 跨渠道分析
+○ 生成报告">2/3</span><span class="agent-task-eta">5 min</span></div></div><div class="agent-task"><div class="agent-task-name">激活李晨关系</div><div class="agent-task-meta"><span class="agent-task-progress" title="✓ 分析冷淡原因
+✓ 建议联系策略
+○ 等待你批准">2/3</span><span class="agent-task-eta">1 min</span></div></div></div><div class="agent-input-wrap"><input class="agent-input" placeholder="Ask SendPalm..."></div></div>
+    <div id="notification-panel" class="hidden"><div class="notification-header"><div class="notification-title">Notifications</div><button class="icon-btn"><i class="ph ph-x"></i></button></div><div class="notification-list"><div class="notification-row unread"><div class="notification-dot"></div><div class="notification-body"><div class="notification-text"><strong>王洋</strong> 已45天未联系，建议跟进</div><div class="notification-time">2小时前</div></div></div><div class="notification-row unread"><div class="notification-dot"></div><div class="notification-body"><div class="notification-text"><strong>SendPalm</strong> 张磊会议简报已生成</div><div class="notification-time">3小时前</div></div></div><div class="notification-row unread"><div class="notification-dot"></div><div class="notification-body"><div class="notification-text"><strong>2份草稿</strong> 等待审批</div><div class="notification-time">5小时前</div></div></div><div class="notification-row"><div class="notification-dot read"></div><div class="notification-body"><div class="notification-text"><strong>李晨</strong> 关系冷淡（62天），建议激活</div><div class="notification-time">昨天</div></div></div><div class="notification-row"><div class="notification-dot read"></div><div class="notification-body"><div class="notification-text"><strong>Outlook</strong> 令牌过期，请重新认证</div><div class="notification-time">2天前</div></div></div></div></div>
+    <div id="compose-modal" class="hidden"></div>
+    <div id="command-palette" class="hidden"></div>
+    <div id="event-modal" class="hidden"></div>
+    <div id="context-menu" class="hidden"></div>
+    <div id="drop-bar" class="hidden">
+      <div class="drop-zone" data-bucket="imbox"><i class="ph ph-tray"></i><span>Inbox</span></div>
+      <div class="drop-zone" data-bucket="feed"><i class="ph ph-newspaper"></i><span>Stream</span></div>
+      <div class="drop-zone" data-bucket="paperTrail"><i class="ph ph-receipt"></i><span>Records</span></div>
+      <div class="drop-zone" data-workflow="pending"><i class="ph ph-clock"></i><span>Pending</span></div>
+      <div class="drop-zone" data-workflow="saved"><i class="ph ph-push-pin"></i><span>Saved</span></div>
+      <div class="drop-zone" data-workflow="remind"><i class="ph ph-arrow-fat-line-up"></i><span>Remind</span></div>
+      <div class="drop-zone" data-bucket="trash"><i class="ph ph-trash"></i><span>Trash</span></div>
+      <div class="drop-zone" data-bucket="spam"><i class="ph ph-warning-circle"></i><span>Spam</span></div>
+    </div>
+    <div id="toast"></div>
+  </div>
+  <script src="prototype-data.js?v=11.36"></script>
+  <script src="js/prototype-v11.js?v=11.36"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+  </script>
+
+
