@@ -58,6 +58,7 @@ pub fn run() {
             commands::vault_save,
             commands::vault_load,
             commands::vault_delete,
+            commands::add_calendar_event,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SendPalm");

@@ -108,3 +108,22 @@ export async function vaultDelete(accountId: string): Promise<boolean> {
   const r = await safeInvoke<void>("vault_delete", { accountId });
   return r !== null;
 }
+
+// ── Calendar invites ──
+
+export interface IcalEvent {
+  uid?: string;
+  summary: string;
+  dtstart?: string;
+  dtstart_tzid?: string;
+  dtend?: string;
+  dtend_tzid?: string;
+  location?: string;
+  description?: string;
+}
+
+export async function addCalendarEvent(
+  invite: IcalEvent,
+): Promise<string | null> {
+  return safeInvoke<string>("add_calendar_event", { invite });
+}
