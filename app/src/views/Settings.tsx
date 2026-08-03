@@ -19,7 +19,7 @@ import type { Account, AccountSettings, Label, Shortcut } from "../types";
 import { isoNow } from "../utils/date";
 import { load, STORE_PATH } from "../bootstrap";
 import { listSnippets } from "../stores/data";
-import { listProviders as fetchProviders, vaultSave, vaultDelete, getSyncState } from "../services/backend";
+import { listProviders as fetchProviders, vaultSave, vaultDelete, getSyncState, syncNow } from "../services/backend";
 
 const TABS = [
   { id: "profile", label: "Profile", icon: "ph-user-circle" },
@@ -243,8 +243,27 @@ function AccountsTab() {
                 <SyncStatus accountId={a.id} />
               </p>
             </div>
+            <button
+              onClick={async () => {
+                const r = await syncNow(a.id, "INBOX");
+                if (r) {
+                  showToast({
+                    message: `已同步 ${a.label} · 新增 ${r.new_messages} 封`,
+                    kind: "success",
+                  });
+                } else {
+                  showToast({
+                    message: `同步请求已发送（${a.label}）`,
+                    kind: "info",
+                  });
+                }
+              }}
+              style={{ color: "var(--palm)", "font-size": "var(--text-caption)", "font-weight": "700" }}
+            >
+              立即同步
+            </button>
             <button onClick={() => setEditing(a)} style={{ color: "var(--blurple)", "font-size": "var(--text-caption)", "font-weight": "700" }}>
-              Settings
+              设置
             </button>
           </div>
         )}
