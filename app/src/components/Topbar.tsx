@@ -1,6 +1,6 @@
 /** Topbar — search, view title, notification bell, avatar. */
 
-import { Show } from "solid-js";
+import { Show, For } from "solid-js";
 import { Icon } from "./Icon";
 import {
   commandPaletteOpen,
@@ -171,59 +171,49 @@ function NotificationBell(props: { onClick: () => void }) {
 
 function SyncBadge() {
   const [accounts] = createResource(listAccounts);
-  const [state, setState] = createSignal<{
-    last: string;
-    uid: number;
-    busy: boolean;
-    connected: boolean;
-  }>({
-    last: "—",
-    uid: 0,
-    busy: false,
-    connected: false,
+  const [open, setOpen] = createSignal(false);
+  const [busyIds, setBusyIds] = createSignal<Set<string>>(new Set());
+  const [states, setStates] = createSignal<Record<string, { last_uid: number; last_synced_at: string; busy: boolean }>>({});
+
+  const emailAccounts = () => (accounts() ?? []).filter((a) => a.type === "email");
+
+  const refreshAll = async () => {
+    const list = emailAccounts();
+    const next: Record<string, { last_uid: number; last_synced_at: string; busy: boolean }> = {};
+    await Promise.all(
+      list.map(async (a) => {
+        try {
+          const s = await getSyncState(a.id);
+          next[a.id] = {
+            last_uid: s.last_uid,
+            last_synced_at: s.last_synced_at,
+            busy: s.busy,
+          };
+        } catch {
+          next[a.id] = { last_uid: 0, last_synced_at: "", busy: false };
+        }
+      }),
+    );
+    setStates(next);
+  };
+
+  createResource(() => emailAccounts().length, () => {
+    refreshAll();
+    return null;
   });
-
-  const accountId = () => {
-    const list = accounts() ?? [];
-    const firstEmail = list.find((a) => a.type === "email");
-    return firstEmail?.id;
-  };
-
-  const refresh = async () => {
-    const id = accountId();
-    if (!id) {
-      setState({ last: "未连接", uid: 0, busy: false, connected: false });
-      return;
-    }
-    try {
-      const s = await getSyncState(id);
-      const syncedAt = s.last_synced_at
-        ? new Date(s.last_synced_at).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })
-        : "—";
-      setState({
-        last: s.last_uid > 0 ? `${s.last_uid} 封 · ${syncedAt}` : "已连接",
-        uid: s.last_uid,
-        busy: s.busy,
-        connected: true,
-      });
-    } catch {
-      setState({ last: "未连接", uid: 0, busy: false, connected: false });
-    }
-  };
-
-  createResource(() => accountId(), refresh);
-
-  refresh();
-  const interval = window.setInterval(refresh, 10_000);
+  refreshAll();
+  const interval = window.setInterval(refreshAll, 10_000);
   onCleanup(() => clearInterval(interval));
 
-  const manual = async () => {
-    const id = accountId();
-    if (!id || state().busy) return;
-    setState((p) => ({ ...p, busy: true }));
+  const aggregateBusy = () => {
+    const s = states();
+    return emailAccounts().some((a) => busyIds().has(a.id) || s[a.id]?.busy);
+  };
+  const aggregateConnected = () => emailAccounts().length > 0;
+
+  const triggerSync = async (id: string) => {
+    if (busyIds().has(id)) return;
+    setBusyIds((p) => new Set([...p, id]));
     try {
       await syncNow(id);
       showToast({ message: "正在从 IMAP 同步…", kind: "info", ttlMs: 2000 });
@@ -231,30 +221,157 @@ function SyncBadge() {
       const msg = e instanceof Error ? e.message : String(e);
       showToast({ message: `同步失败：${msg}`, kind: "error" });
     } finally {
-      setState((p) => ({ ...p, busy: false }));
-      await refresh();
+      setBusyIds((p) => {
+        const n = new Set(p);
+        n.delete(id);
+        return n;
+      });
+      await refreshAll();
     }
   };
 
   return (
-    <button
-      onClick={manual}
-      title={`IMAP · ${accountId() ?? "无账户"} · 点击手动同步`}
-      style={{
-        display: "flex",
-        "align-items": "center",
-        gap: "var(--space-1)",
-        padding: "4px 10px",
-        "border-radius": "var(--radius-pill)",
-        background: state().connected ? "var(--palm-soft)" : "var(--paper-mid)",
-        color: state().connected ? "var(--palm)" : "var(--text-secondary)",
-        "font-size": "var(--text-micro)",
-        "font-weight": "600",
-        transition: "background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out)",
-      }}
-    >
-      <Icon name={state().busy ? "spinner" : "arrows-clockwise"} size={11} />
-      <span>{state().last}</span>
-    </button>
+    <div style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen(!open())}
+        title="IMAP 同步状态"
+        aria-label="IMAP 同步状态"
+        data-sync-badge
+        style={{
+          display: "flex",
+          "align-items": "center",
+          gap: "var(--space-1)",
+          padding: "4px 10px",
+          "border-radius": "var(--radius-pill)",
+          background: aggregateConnected() ? "var(--palm-soft)" : "var(--paper-mid)",
+          color: aggregateConnected() ? "var(--palm)" : "var(--text-secondary)",
+          "font-size": "var(--text-micro)",
+          "font-weight": "600",
+          transition: "background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out)",
+        }}
+      >
+        <Icon name={aggregateBusy() ? "spinner" : "arrows-clockwise"} size={11} />
+        <span>
+          {emailAccounts().length === 0
+            ? "未连接"
+            : aggregateBusy()
+              ? "同步中…"
+              : `${emailAccounts().length} 账户`}
+        </span>
+        <Show when={emailAccounts().length > 0}>
+          <Icon name="ph-caret-down" size={9} />
+        </Show>
+      </button>
+      <Show when={open()}>
+        <div
+          data-sync-popover
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute",
+            top: "calc(100% + 6px)",
+            right: "0",
+            "min-width": "280px",
+            background: "var(--surface)",
+            border: "0.5px solid var(--border)",
+            "border-radius": "var(--radius-md)",
+            "box-shadow": "0 8px 24px rgba(0,0,0,0.12)",
+            padding: "var(--space-2)",
+            "z-index": "var(--z-popover)",
+          }}
+        >
+          <p style={{
+            margin: "var(--space-1) var(--space-2)",
+            "font-size": "var(--text-micro)",
+            "font-weight": "700",
+            color: "var(--text-muted)",
+            "text-transform": "uppercase",
+            "letter-spacing": "0.04em",
+          }}>
+            IMAP 同步 · {emailAccounts().length} 账户
+          </p>
+          <Show when={emailAccounts().length === 0}>
+            <p style={{
+              margin: "var(--space-2)",
+              "font-size": "var(--text-caption)",
+              color: "var(--text-muted)",
+            }}>
+              请到 Settings → Accounts 添加邮箱账户
+            </p>
+          </Show>
+          <For each={emailAccounts()}>
+            {(a) => {
+              const s = () => states()[a.id];
+              const busy = () => busyIds().has(a.id) || s()?.busy;
+              const syncedAt = () => {
+                const t = s()?.last_synced_at;
+                if (!t || t === "未配置（无 Tauri runtime）") return "—";
+                const d = new Date(t);
+                if (Number.isNaN(d.getTime())) return "—";
+                return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+              };
+              return (
+                <div
+                  style={{
+                    display: "flex",
+                    "align-items": "center",
+                    gap: "var(--space-2)",
+                    padding: "var(--space-2)",
+                    "border-radius": "var(--radius-sm)",
+                  }}
+                >
+                  <div style={{ flex: 1, "min-width": "0" }}>
+                    <p style={{
+                      margin: 0,
+                      "font-size": "var(--text-caption)",
+                      "font-weight": "600",
+                      "white-space": "nowrap",
+                      overflow: "hidden",
+                      "text-overflow": "ellipsis",
+                    }}>
+                      {a.label}
+                    </p>
+                    <p style={{
+                      margin: 0,
+                      "font-size": "var(--text-micro)",
+                      color: busy() ? "var(--palm)" : "var(--text-muted)",
+                    }}>
+                      <Show when={busy()} fallback={<>最近同步 {syncedAt()}</>}>
+                        正在同步…
+                      </Show>
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => triggerSync(a.id)}
+                    disabled={busy()}
+                    title="立即同步"
+                    style={{
+                      padding: "4px 10px",
+                      "border-radius": "var(--radius-pill)",
+                      background: busy() ? "var(--paper-mid)" : "var(--palm-soft)",
+                      color: busy() ? "var(--text-muted)" : "var(--palm)",
+                      "font-size": "var(--text-micro)",
+                      "font-weight": "700",
+                      opacity: busy() ? 0.5 : 1,
+                    }}
+                  >
+                    {busy() ? "…" : "同步"}
+                  </button>
+                </div>
+              );
+            }}
+          </For>
+        </div>
+      </Show>
+      <Show when={open()}>
+        <div
+          onClick={() => setOpen(false)}
+          style={{
+            position: "fixed",
+            inset: "0",
+            "z-index": "calc(var(--z-popover) - 1)",
+          }}
+        />
+      </Show>
+    </div>
   );
 }
