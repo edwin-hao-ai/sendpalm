@@ -61,8 +61,10 @@ function NavItem(props: {
         "flex-direction": "column",
         "align-items": "center",
         "justify-content": "center",
-        width: isMobile() ? "auto" : "48px",
-        height: isMobile() ? "auto" : "48px",
+        width: isMobile() ? "auto" : "100%",
+        "max-width": isMobile() ? "auto" : "92px",
+        height: isMobile() ? "auto" : "56px",
+        padding: isMobile() ? "0" : "4px 4px",
         "border-radius": isMobile() ? "8px" : "var(--radius-md)",
         background: props.active ? "var(--palm-soft)" : "transparent",
         color: props.active ? "var(--palm)" : "var(--text-secondary)",
@@ -84,13 +86,17 @@ function NavItem(props: {
       <Show when={!isMobile()}>
         <span
           style={{
-            "font-size": "9px",
+            "font-size": "10px",
             "font-weight": "600",
             "margin-top": "3px",
-            "letter-spacing": "0.02em",
+            "letter-spacing": "0.01em",
+            "white-space": "nowrap",
+            "max-width": "100%",
+            overflow: "hidden",
+            "text-overflow": "ellipsis",
           }}
         >
-          {props.label.slice(0, 5)}
+          {props.label}
         </span>
       </Show>
     </button>

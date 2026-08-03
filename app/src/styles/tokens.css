@@ -132,8 +132,8 @@
   /* ── Layout ──────────────────────────────────────────────────── */
   --titlebar-height: 32px;
   --topbar-height: 52px;
-  --sidebar-width: 64px;
-  --sidebar-width-tablet: 56px;
+  --sidebar-width: 96px;
+  --sidebar-width-tablet: 80px;
   --bottom-tab-height: 64px;
   --detail-panel-width: 380px;
   --agent-panel-width: 340px;
