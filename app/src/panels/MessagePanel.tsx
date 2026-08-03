@@ -23,7 +23,7 @@ import { RemindPicker } from "../components/RemindPicker";
 import { uid } from "../utils/id";
 import { addDays, isoNow, relativeTime } from "../utils/date";
 import { trackerSummary } from "../utils/trackers";
-import type { Clip, FollowUp, Sticky } from "../types";
+import type { Clip, FollowUp, Message, Sticky } from "../types";
 import { addCalendarEvent } from "../services/backend";
 
 export function MessagePanel(props: { messageId: string }) {
@@ -100,6 +100,17 @@ const [trackerExpanded, setTrackerExpanded] = createSignal(false);
   const sortedMessages = createMemo(() => {
     const list = allMessages() ?? [];
     return [...list].sort((a, b) => (b.st ?? "").localeCompare(a.st ?? ""));
+  });
+
+  // Other messages in the same conversation (matched by threadId). Excludes
+  // the current message. Sorted oldest-first so the thread reads top-down.
+  const threadMessages = createMemo<Message[]>(() => {
+    const cur = message();
+    if (!cur?.threadId) return [];
+    const tid = cur.threadId;
+    return (allMessages() ?? [])
+      .filter((m) => m.id !== cur.id && m.threadId === tid)
+      .sort((a, b) => (a.st ?? "").localeCompare(b.st ?? ""));
   });
 
   const currentIndex = createMemo(() => {
@@ -517,6 +528,97 @@ const [trackerExpanded, setTrackerExpanded] = createSignal(false);
               >
                 <Icon name="ph-calendar-plus" size={14} /> 添加到日历
               </button>
+            </div>
+          </Show>
+
+          {/* Thread (other messages in the same conversation) */}
+          <Show when={threadMessages().length > 0}>
+            <SectionHeader
+              title={`串内其他邮件 · ${threadMessages().length}`}
+              icon="ph-chat-circle-dots"
+            />
+            <div
+              style={{
+                display: "flex",
+                "flex-direction": "column",
+                gap: "var(--space-2)",
+                animation: "list-item-enter 0.32s var(--ease-out) both",
+              }}
+            >
+              <For each={threadMessages()}>
+                {(m) => (
+                  <button
+                    onClick={() => setSelectedMessageId(m.id)}
+                    style={{
+                      display: "flex",
+                      "flex-direction": "column",
+                      gap: "4px",
+                      padding: "var(--space-3) var(--space-4)",
+                      background: "var(--paper-mid)",
+                      "border-radius": "var(--radius-md)",
+                      "border-left": `3px solid ${
+                        m.unread ? "var(--palm)" : "var(--border)"
+                      }`,
+                      "text-align": "left",
+                      cursor: "pointer",
+                      transition:
+                        "background var(--duration-fast) var(--ease-out), transform 0.16s var(--ease-out)",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = "var(--paper-light)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "var(--paper-mid)";
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        "align-items": "baseline",
+                        gap: "var(--space-2)",
+                      }}
+                    >
+                      <strong
+                        style={{
+                          "font-size": "var(--text-caption)",
+                          "font-weight": m.unread ? "700" : "500",
+                          color: m.unread
+                            ? "var(--text-primary)"
+                            : "var(--text-secondary)",
+                          "white-space": "nowrap",
+                          overflow: "hidden",
+                          "text-overflow": "ellipsis",
+                          flex: 1,
+                        }}
+                      >
+                        {m.subj || "(无主题)"}
+                      </strong>
+                      <span
+                        style={{
+                          "font-size": "var(--text-micro)",
+                          color: "var(--text-muted)",
+                          "white-space": "nowrap",
+                          "flex-shrink": 0,
+                        }}
+                      >
+                        {m.tm}
+                      </span>
+                    </div>
+                    <p
+                      style={{
+                        margin: 0,
+                        "font-size": "var(--text-caption)",
+                        color: "var(--text-secondary)",
+                        "white-space": "nowrap",
+                        overflow: "hidden",
+                        "text-overflow": "ellipsis",
+                      }}
+                    >
+                      {m.prev || "(无内容预览)"}
+                    </p>
+                  </button>
+                )}
+              </For>
             </div>
           </Show>
 
