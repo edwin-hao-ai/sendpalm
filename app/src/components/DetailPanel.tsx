@@ -20,25 +20,26 @@ import { DraftPanel } from "../panels/DraftPanel";
 
 export function DetailPanel() {
   return (
-    <aside
-      id="detail-panel"
-      classList={{
-        open: detailOpen(),
-        hidden: !detailOpen(),
-      }}
-    >
-      <Switch fallback={<Empty />}>
-        <Match when={selectedContactId()}>{(id) => <ContactPanel contactId={id()} />}</Match>
-        <Match when={selectedMessageId()}>{(id) => <MessagePanel messageId={id()} />}</Match>
-        <Match when={selectedMeetingId()}>{(id) => <MeetingPanel meetingId={id()} />}</Match>
-        <Match when={selectedFileId()}>{(id) => <FilePanel fileId={id()} />}</Match>
-        <Match when={selectedTaskId()}>{(id) => <TaskPanel taskId={id()} />}</Match>
-        <Match when={selectedDraftId()}>{(id) => <DraftPanel draftId={id()} />}</Match>
-      </Switch>
-      <Show when={detailOpen() && !selectedContactId() && !selectedMessageId() && !selectedMeetingId() && !selectedFileId() && !selectedTaskId() && !selectedDraftId()}>
-        <Empty />
-      </Show>
-    </aside>
+    <Show when={detailOpen()}>
+      <aside
+        id="detail-panel"
+        classList={{
+          open: detailOpen(),
+        }}
+      >
+        <Switch fallback={<Empty />}>
+          <Match when={selectedContactId()}>{(id) => <ContactPanel contactId={id()} />}</Match>
+          <Match when={selectedMessageId()}>{(id) => <MessagePanel messageId={id()} />}</Match>
+          <Match when={selectedMeetingId()}>{(id) => <MeetingPanel meetingId={id()} />}</Match>
+          <Match when={selectedFileId()}>{(id) => <FilePanel fileId={id()} />}</Match>
+          <Match when={selectedTaskId()}>{(id) => <TaskPanel taskId={id()} />}</Match>
+          <Match when={selectedDraftId()}>{(id) => <DraftPanel draftId={id()} />}</Match>
+        </Switch>
+        <Show when={detailOpen() && !selectedContactId() && !selectedMessageId() && !selectedMeetingId() && !selectedFileId() && !selectedTaskId() && !selectedDraftId()}>
+          <Empty />
+        </Show>
+      </aside>
+    </Show>
   );
 }
 

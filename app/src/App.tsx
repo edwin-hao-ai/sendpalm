@@ -64,7 +64,9 @@ export default function App() {
           <Topbar />
           <Main />
           <DetailPanel />
-          <AgentPanel />
+          <Show when={agentPanelOpen()}>
+            <AgentPanel />
+          </Show>
           <DropBar />
         </div>
         <Show when={notificationsOpen()}>
