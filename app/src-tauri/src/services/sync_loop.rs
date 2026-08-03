@@ -88,6 +88,11 @@ async fn run_loop(app: AppHandle) -> Result<(), String> {
             if let Some((stop, handle)) = handles.remove(&id) {
                 stop.store(true, Ordering::Relaxed);
                 handle.abort();
+                // Best-effort cleanup of persisted sync state so a re-added
+                // account with the same id starts from scratch.
+                if let Err(e) = delete_sync_state(&pool, &id).await {
+                    eprintln!("[sync] cleanup sync_state for {id} failed: {e}");
+                }
                 eprintln!("[sync] stopped account loop for {id}");
             }
         }
@@ -308,6 +313,15 @@ async fn load_sync_state(pool: &SqlitePool, account_id: &str) -> Result<Option<S
         .fetch_optional(pool)
         .await
         .map(|opt| opt.map(|(json,)| json))
+        .map_err(|e| e.to_string())
+}
+
+async fn delete_sync_state(pool: &SqlitePool, account_id: &str) -> Result<(), String> {
+    sqlx::query("DELETE FROM app_kv WHERE key = $1")
+        .bind(format!("sync_state::{account_id}"))
+        .execute(pool)
+        .await
+        .map(|_| ())
         .map_err(|e| e.to_string())
 }
 
