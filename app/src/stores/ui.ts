@@ -80,6 +80,9 @@ export const [notificationsOpen, setNotificationsOpen] = createSignal(false);
 
 export const [calendarView, setCalendarView] = createSignal<"day" | "week" | "year">("day");
 export const [calendarSelected, setCalendarSelected] = createSignal(new Date());
+// A timestamp that, when set, asks the Calendar view to recenter on this date
+// (e.g. after adding an event from a meeting-invite email).
+export const [calendarJumpTo, setCalendarJumpTo] = createSignal<number>(0);
 export const [calendarWeekStart, setCalendarWeekStart] = createSignal<Date>(
   ((): Date => {
     const d = new Date();

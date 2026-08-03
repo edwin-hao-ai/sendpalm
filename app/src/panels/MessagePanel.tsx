@@ -15,7 +15,7 @@ import {
   upsertClip,
   upsertMessage,
 } from "../stores/data";
-import { setDetailOpen, setSelectedMessageId, setComposeOpen, showToast } from "../stores/ui";
+import { setDetailOpen, setSelectedMessageId, setComposeOpen, showToast, setCalendarJumpTo, setView } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { FollowUpPicker } from "../components/FollowUpPicker";
@@ -497,7 +497,24 @@ const [trackerExpanded, setTrackerExpanded] = createSignal(false);
                   try {
                     const id = await addCalendarEvent(invite);
                     if (id) {
-                      showToast({ message: "已添加到日历", kind: "success" });
+                      showToast({
+                        message: "已添加到日历",
+                        kind: "success",
+                        action: invite.dtstart
+                          ? {
+                              label: "查看",
+                              run: () => {
+                                const d = new Date(invite.dtstart!);
+                                sessionStorage.setItem(
+                                  "calendarJumpDate",
+                                  d.toISOString(),
+                                );
+                                setCalendarJumpTo(Date.now());
+                                setView("calendar");
+                              },
+                            }
+                          : undefined,
+                      });
                     } else {
                       showToast({ message: "未配置 Tauri 运行时，无法添加", kind: "info" });
                     }

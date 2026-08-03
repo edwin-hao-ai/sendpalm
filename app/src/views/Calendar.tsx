@@ -2,14 +2,14 @@
  * Spec: prototype-v11 §3.5.
  */
 
-import { For, Show, createMemo, createResource, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource, createSignal } from "solid-js";
 import { listEvents, upsertEvent, deleteEvent } from "../stores/data";
 import { Modal } from "../components/Modal";
 import { Empty } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { addDays } from "../utils/date";
 import { uid } from "../utils/id";
-import { setDetailOpen, setSelectedMeetingId, showToast } from "../stores/ui";
+import { setDetailOpen, setSelectedMeetingId, showToast, calendarJumpTo } from "../stores/ui";
 import type { CalendarEvent } from "../types";
 
 export function Calendar() {
@@ -18,6 +18,20 @@ export function Calendar() {
   const [cursor, setCursor] = createSignal(new Date());
   const [editing, setEditing] = createSignal<CalendarEvent | null>(null);
   const [creating, setCreating] = createSignal(false);
+
+  // When something asks us to recenter on a date (e.g. "已添加到日历" toast),
+  // jump the cursor to that date and refetch events so it shows up.
+  createEffect(() => {
+    const stamp = calendarJumpTo();
+    if (stamp === 0) return;
+    const raw = sessionStorage.getItem("calendarJumpDate");
+    if (!raw) return;
+    const d = new Date(raw);
+    if (!Number.isNaN(d.getTime())) {
+      setCursor(d);
+      refetch();
+    }
+  });
 
   const eventsByDay = createMemo(() => {
     const list = events() ?? [];
