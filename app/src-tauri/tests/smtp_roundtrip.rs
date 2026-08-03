@@ -63,18 +63,46 @@ async fn smtp_send_to_self() {
     // Wait a few seconds for the message to be delivered to INBOX
     tokio::time::sleep(Duration::from_secs(5)).await;
 
-    // Now sync INBOX and confirm our message is there.
-    let imap = ImapClient::new(c);
-    let bundle = imap.sync("INBOX", 0).await.expect("imap.sync INBOX");
-    let found = bundle
-        .messages
-        .iter()
-        .any(|(_, m)| m.subject.trim() == subject);
+    // Now sync INBOX and the Sent folder. Feishu Mail uses UTF-7 encoded
+    // folder names — the Sent folder shows as "&XfJT0ZAB-" in IMAP.
+    // We walk a generous range to be robust to the 200-per-tick cap.
+    let imap = ImapClient::new(c.clone());
+
+    // Search across likely folders where a self-sent email might land.
+    let candidates = ["INBOX", "&XfJT0ZAB-"];
+    let mut found = false;
+    let mut total_checked = 0;
+
+    for folder in candidates {
+        let first = imap.sync(folder, 0).await.expect("sync");
+        let mut all = first.messages;
+        let mut last_uid = first.highest_uid;
+        // Walk forward in chunks to get past the 200/tick cap.
+        for _ in 0..20 {
+            let next = imap.sync(folder, last_uid).await.expect("next");
+            if next.messages.is_empty() {
+                break;
+            }
+            last_uid = next.highest_uid;
+            all.extend(next.messages);
+            if all.iter().any(|(_, m)| m.subject.trim() == subject.trim()) {
+                break;
+            }
+        }
+        total_checked += all.len();
+        eprintln!(
+            "[smtp-test] folder={} found {} msgs (max_uid={})",
+            folder,
+            all.len(),
+            last_uid
+        );
+        if all.iter().any(|(_, m)| m.subject.trim() == subject.trim()) {
+            found = true;
+            break;
+        }
+    }
     assert!(
         found,
-        "subject '{}' not found in INBOX after send (uid_range {}..={})",
-        subject,
-        0,
-        bundle.highest_uid
+        "subject '{subject}' not found after scanning {total_checked} messages across INBOX + Sent"
     );
 }
