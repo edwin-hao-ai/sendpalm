@@ -15,7 +15,7 @@ use std::time::Duration;
 
 /// Hard cap per sync tick — protects the UI from 100k+ message mailboxes.
 /// We round-trip per chunk so a slow IMAP server doesn't hold the connection.
-const MAX_PER_TICK: u32 = 200;
+pub const MAX_PER_TICK: u32 = 200;
 
 /// Default IDLE timeout before we re-issue the command to avoid server
 /// inactivity cut-offs (RFC 2177 recommends < 30 min).

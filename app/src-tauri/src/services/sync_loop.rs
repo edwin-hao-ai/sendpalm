@@ -244,6 +244,10 @@ async fn resolve_credentials(
     let provider = providers::by_id(provider_id)
         .ok_or_else(|| format!("unknown provider '{provider_id}'"))?;
 
+    // Ensure dev `.env` is loaded so the test-account fallback works when
+    // `resolve_credentials` runs before any explicit `load_test_credentials()`.
+    let _ = dotenvy::dotenv();
+
     // 1. Prefer the OS keyring.
     let password = match vault::get_password(account_id) {
         Ok(Some(p)) => p,
@@ -387,71 +391,49 @@ async fn sync_one(
     account: &SyncAccount,
     previous_last_uid: u32,
 ) -> Result<(u32, u32, u32), String> {
-    let bundle = client.sync("INBOX", account.last_uid).await?;
-
     // Ensure the account row exists in the accounts table so the foreign
     // key on messages.ac is satisfied. For DB-configured accounts this is a
     // no-op update; for the test fallback it creates the row.
     upsert_account(pool, account).await?;
 
     let mut inserted = 0u32;
-    for (uid, parsed) in &bundle.messages {
-        let contact_id = upsert_contact(pool, &parsed.sender_email, parsed.sender_name.as_deref()).await?;
-        let mid = format!("imap_{uid}");
+    #[allow(unused_assignments)]
+    let mut uid_validity: u32 = 0;
+    let mut cursor = account.last_uid;
+    let mailbox = "INBOX".to_string();
 
-        // INSERT OR IGNORE; if already present, just refresh last-read state.
-        // Note: messages table has no message_id column (we use id as the primary
-        // key derived from the IMAP UID). The RFC822 Message-ID is stored
-        // alongside as a tag inside the body or tracked separately.
-        let prev_excerpt = parsed.body_text.split('\n').next().unwrap_or("").chars().take(140).collect::<String>();
-        sqlx::query(
-            "INSERT OR IGNORE INTO messages \
-             (id, pid, subj, prev, body, tm, st, ac, bucket, unread, labels_json, attachments_json, trackers_json, thread_id) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'imbox', 1, '[]', '[]', '[]', $9)"
-        )
-        .bind(&mid)
-        .bind(&contact_id)
-        .bind(&parsed.subject)
-        .bind(&prev_excerpt)
-        .bind(&parsed.body_text)
-        .bind(parsed.date.format("%Y-%m-%d %H:%M").to_string())
-        .bind(parsed.date.to_rfc3339())
-        .bind(&account.account_id)
-        .bind(parsed.thread_id.as_deref().unwrap_or(""))
-        .execute(pool)
-        .await
-        .map_err(|e| format!("insert message uid={uid}: {e}"))?;
-
-        // Only notify for genuinely new mail (skip the historic backlog on
-        // the first sync). previous_last_uid == 0 means this is the initial
-        // backfill.
-        if previous_last_uid > 0 && uid > &previous_last_uid {
-            let sender = parsed.sender_name.as_deref().unwrap_or(&parsed.sender_email);
-            let title = if parsed.subject.is_empty() {
-                format!("New message from {sender}")
-            } else {
-                parsed.subject.clone()
-            };
-            sqlx::query(
-                "INSERT OR IGNORE INTO notifications (id, type, title, body, ref_json, read, created_at) \
-                 VALUES ($1, 'mail', $2, $3, $4, 0, datetime('now'))"
-            )
-            .bind(format!("nt_{mid}"))
-            .bind(&title)
-            .bind(format!("From {sender}"))
-            .bind(format!("{{\"type\":\"message\",\"id\":\"{mid}\"}}"))
-            .execute(pool)
-            .await
-            .map_err(|e| format!("insert notification uid={uid}: {e}"))?;
+    // Walk forward in chunks so the initial backfill pulls more than the
+    // single-tick cap. We stop when a chunk returns no messages.
+    loop {
+        let bundle = client.sync(&mailbox, cursor).await?;
+        uid_validity = bundle.uid_validity;
+        if bundle.messages.is_empty() {
+            // Even on an empty chunk, remember the highest_uid the server
+            // reported so we don't re-fetch it next time.
+            cursor = bundle.highest_uid;
+            break;
         }
-
-        inserted += 1;
+        let chunk_highest = bundle.highest_uid;
+        for (uid, parsed) in &bundle.messages {
+            insert_message(pool, account, *uid, parsed, previous_last_uid).await?;
+            inserted += 1;
+        }
+        if bundle.highest_uid <= cursor {
+            // No progress — avoid an infinite loop.
+            cursor = chunk_highest;
+            break;
+        }
+        cursor = chunk_highest;
+        // If the chunk wasn't full, the mailbox is caught up for now.
+        if (bundle.messages.len() as u32) < crate::services::imap::MAX_PER_TICK {
+            break;
+        }
     }
 
     // Persist sync state
     let json = serde_json::json!({
-        "uid_validity": bundle.uid_validity,
-        "last_uid": bundle.highest_uid,
+        "uid_validity": uid_validity,
+        "last_uid": cursor,
         "last_synced_at": chrono::Utc::now().to_rfc3339(),
     });
     let json_str = json.to_string();
@@ -468,16 +450,77 @@ async fn sync_one(
     // Notify the frontend so it can refresh Imbox / Notifications in real time.
     let report = crate::services::SyncReport {
         account_id: account.account_id.clone(),
-        mailbox: bundle.mailbox.clone(),
+        mailbox: mailbox.clone(),
         new_messages: inserted as usize,
-        skipped: bundle.messages.len().saturating_sub(inserted as usize),
-        uid_validity: bundle.uid_validity as u64,
-        last_uid: bundle.highest_uid as u64,
+        skipped: 0,
+        uid_validity: uid_validity as u64,
+        last_uid: cursor as u64,
         error: None,
     };
     let _ = app.emit("sync:new-messages", report);
 
-    Ok((inserted, bundle.highest_uid, bundle.uid_validity))
+    Ok((inserted, cursor, uid_validity))
+}
+
+async fn insert_message(
+    pool: &SqlitePool,
+    account: &SyncAccount,
+    uid: u32,
+    parsed: &crate::services::parser::ParsedMessage,
+    previous_last_uid: u32,
+) -> Result<(), String> {
+    let contact_id = upsert_contact(pool, &parsed.sender_email, parsed.sender_name.as_deref()).await?;
+    let mid = format!("imap_{uid}");
+
+    let prev_excerpt = parsed
+        .body_text
+        .split('\n')
+        .next()
+        .unwrap_or("")
+        .chars()
+        .take(140)
+        .collect::<String>();
+    sqlx::query(
+        "INSERT OR IGNORE INTO messages \
+         (id, pid, subj, prev, body, tm, st, ac, bucket, unread, labels_json, attachments_json, trackers_json, thread_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'imbox', 1, '[]', '[]', '[]', $9)"
+    )
+    .bind(&mid)
+    .bind(&contact_id)
+    .bind(&parsed.subject)
+    .bind(&prev_excerpt)
+    .bind(&parsed.body_text)
+    .bind(parsed.date.format("%Y-%m-%d %H:%M").to_string())
+    .bind(parsed.date.to_rfc3339())
+    .bind(&account.account_id)
+    .bind(parsed.thread_id.as_deref().unwrap_or(""))
+    .execute(pool)
+    .await
+    .map_err(|e| format!("insert message uid={uid}: {e}"))?;
+
+    // Only notify for genuinely new mail (skip the historic backlog on
+    // the first sync). previous_last_uid == 0 means this is the initial
+    // backfill.
+    if previous_last_uid > 0 && uid > previous_last_uid {
+        let sender = parsed.sender_name.as_deref().unwrap_or(&parsed.sender_email);
+        let title = if parsed.subject.is_empty() {
+            format!("New message from {sender}")
+        } else {
+            parsed.subject.clone()
+        };
+        sqlx::query(
+            "INSERT OR IGNORE INTO notifications (id, type, title, body, ref_json, read, created_at) \
+             VALUES ($1, 'mail', $2, $3, $4, 0, datetime('now'))"
+        )
+        .bind(format!("nt_{mid}"))
+        .bind(&title)
+        .bind(format!("From {sender}"))
+        .bind(format!("{{\"type\":\"message\",\"id\":\"{mid}\"}}"))
+        .execute(pool)
+        .await
+        .map_err(|e| format!("insert notification uid={uid}: {e}"))?;
+    }
+    Ok(())
 }
 
 async fn upsert_account(pool: &SqlitePool, account: &SyncAccount) -> Result<(), String> {
@@ -531,8 +574,8 @@ async fn upsert_contact(
         None => (display_name.clone(), "".to_string()),
     };
     sqlx::query(
-        "INSERT INTO contacts (id, first_name, last_name, nickname, name, emails_json, stage, health, first_contact) \
-         VALUES ($1, $2, $3, '', $4, $5, 'active', 50, datetime('now')) \
+        "INSERT INTO contacts (id, first_name, last_name, nickname, name, emails_json, stage, health, first_contact, first_seen, screened) \
+         VALUES ($1, $2, $3, '', $4, $5, 'active', 50, datetime('now'), 1, 0) \
          ON CONFLICT(id) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name, name = excluded.name"
     )
     .bind(&id)
