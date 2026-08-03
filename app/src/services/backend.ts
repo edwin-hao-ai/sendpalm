@@ -78,6 +78,7 @@ export async function getSyncState(accountId: string): Promise<SyncStateDto> {
       uid_validity: 0,
       last_uid: 0,
       last_synced_at: "未配置（无 Tauri runtime）",
+      busy: false,
     }
   );
 }
