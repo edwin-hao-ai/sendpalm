@@ -63,3 +63,59 @@ fn outlook_uses_starttls_on_587() {
     assert_eq!(p.smtp_port, 587);
     assert!(!p.smtp_implicit_tls, "outlook uses STARTTLS on 587");
 }
+
+/// Every provider must carry IMAP/SMTP hosts so the sync loop can resolve
+/// credentials from the keyring without the user re-entering hostnames.
+#[test]
+fn all_preset_providers_have_imap_and_smtp_hosts() {
+    for p in list() {
+        if p.id == "custom" {
+            continue;
+        }
+        assert!(
+            !p.imap_host.is_empty(),
+            "provider {} missing imap_host",
+            p.id
+        );
+        assert!(
+            !p.smtp_host.is_empty(),
+            "provider {} missing smtp_host",
+            p.id
+        );
+    }
+}
+
+/// Known provider-specific invariants. These lock the user-visible experience:
+/// wrong ports = connections fail; wrong auth mode = user can't log in.
+#[test]
+fn per_provider_invariants() {
+    let cases: &[(&str, u16, u16, bool, &str)] = &[
+        ("gmail", 993, 465, true, "app-password"),
+        ("outlook", 993, 587, false, "app-password"),
+        ("icloud", 993, 587, false, "app-password"),
+        ("yahoo", 993, 465, true, "app-password"),
+        ("qq", 993, 465, true, "password-with-auth-code"),
+        ("netease-163", 993, 465, true, "password-with-auth-code"),
+        ("netease-126", 993, 465, true, "password-with-auth-code"),
+        ("feishu", 993, 465, true, "app-password"),
+        ("fastmail", 993, 465, true, "app-password"),
+    ];
+    for (id, imap_port, smtp_port, implicit_tls, auth_mode) in cases {
+        let p = by_id(id).unwrap_or_else(|| panic!("missing provider {id}"));
+        assert_eq!(p.imap_port, *imap_port, "{id} imap_port changed");
+        assert_eq!(p.smtp_port, *smtp_port, "{id} smtp_port changed");
+        assert_eq!(
+            p.smtp_implicit_tls, *implicit_tls,
+            "{id} smtp_implicit_tls changed"
+        );
+        assert_eq!(p.auth_mode, *auth_mode, "{id} auth_mode changed");
+    }
+}
+
+/// Custom provider should leave hosts/ports empty so the user fills them in.
+#[test]
+fn custom_provider_is_a_blank_template() {
+    let p = by_id("custom").expect("custom provider registered");
+    assert!(p.imap_host.is_empty());
+    assert!(p.smtp_host.is_empty());
+}
