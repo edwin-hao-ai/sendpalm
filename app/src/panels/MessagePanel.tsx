@@ -24,6 +24,7 @@ import { uid } from "../utils/id";
 import { addDays, isoNow, relativeTime } from "../utils/date";
 import { trackerSummary } from "../utils/trackers";
 import type { Clip, FollowUp, Sticky } from "../types";
+import { addCalendarEvent } from "../services/backend";
 
 export function MessagePanel(props: { messageId: string }) {
   const [message, { refetch: refetchMessage }] = createResource(() => props.messageId, getMessage);
@@ -414,6 +415,94 @@ const [trackerExpanded, setTrackerExpanded] = createSignal(false);
             {message()!.body}
           </p>
 
+          {/* Calendar invite */}
+          <Show when={message()!.calendarInvite}>
+            <div
+              data-calendar-invite
+              style={{
+                "margin-top": "var(--space-4)",
+                padding: "var(--space-4)",
+                background: "linear-gradient(135deg, var(--palm-soft) 0%, rgba(10,143,99,0.06) 100%)",
+                border: "1px solid var(--palm)",
+                "border-radius": "var(--radius-md)",
+                "animation": "message-detail-enter 0.32s var(--ease-out) both",
+              }}
+            >
+              <div style={{ display: "flex", "align-items": "center", gap: "var(--space-2)", "margin-bottom": "var(--space-2)" }}>
+                <Icon name="ph-calendar-plus" size={18} style={{ color: "var(--palm)" }} />
+                <strong style={{ "font-family": "var(--font-display)", "font-weight": "700" }}>
+                  日历邀请
+                </strong>
+              </div>
+              <div style={{ "font-size": "var(--text-body-sm)", "margin-bottom": "var(--space-1)" }}>
+                <strong style={{ "font-weight": "700" }}>
+                  {message()!.calendarInvite!.summary || "(无标题)"}
+                </strong>
+              </div>
+              <div style={{ "font-size": "var(--text-caption)", color: "var(--text-secondary)", display: "flex", "flex-direction": "column", gap: "4px" }}>
+                <Show when={message()!.calendarInvite!.dtstart}>
+                  <span>
+                    <Icon name="ph-clock" size={12} />{" "}
+                    {formatIcalDate(message()!.calendarInvite!.dtstart)}
+                    <Show when={message()!.calendarInvite!.dtend}>
+                      {" → "}
+                      {formatIcalDate(message()!.calendarInvite!.dtend, true)}
+                    </Show>
+                  </span>
+                </Show>
+                <Show when={message()!.calendarInvite!.location}>
+                  <span><Icon name="ph-map-pin" size={12} /> {message()!.calendarInvite!.location}</span>
+                </Show>
+                <Show when={message()!.calendarInvite!.description}>
+                  <p style={{ margin: "4px 0 0", "white-space": "pre-wrap", "max-height": "120px", overflow: "hidden", "text-overflow": "ellipsis" }}>
+                    {message()!.calendarInvite!.description}
+                  </p>
+                </Show>
+              </div>
+              <button
+                onClick={async () => {
+                  const invite = message()!.calendarInvite!;
+                  if (!invite.summary) {
+                    showToast({ message: "邀请缺少标题", kind: "warning" });
+                    return;
+                  }
+                  try {
+                    const id = await addCalendarEvent(invite);
+                    if (id) {
+                      showToast({ message: "已添加到日历", kind: "success" });
+                    } else {
+                      showToast({ message: "未配置 Tauri 运行时，无法添加", kind: "info" });
+                    }
+                  } catch (e) {
+                    const msg = e instanceof Error ? e.message : String(e);
+                    showToast({ message: `添加失败：${msg}`, kind: "error" });
+                  }
+                }}
+                style={{
+                  "margin-top": "var(--space-3)",
+                  padding: "8px 16px",
+                  background: "var(--palm)",
+                  color: "white",
+                  "border-radius": "var(--radius-pill)",
+                  "font-size": "var(--text-caption)",
+                  "font-weight": "700",
+                  "box-shadow": "0 4px 12px rgba(10,143,99,0.25)",
+                  transition: "transform 0.18s var(--ease-out), box-shadow 0.18s var(--ease-out)",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = "translateY(-1px)";
+                  e.currentTarget.style.boxShadow = "0 6px 16px rgba(10,143,99,0.35)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "translateY(0)";
+                  e.currentTarget.style.boxShadow = "0 4px 12px rgba(10,143,99,0.25)";
+                }}
+              >
+                <Icon name="ph-calendar-plus" size={14} /> 添加到日历
+              </button>
+            </div>
+          </Show>
+
           {/* Stickies */}
           <Show when={stickyForMsg().length > 0 || true}>
             <SectionHeader title="Sticky notes" icon="ph-note" />
@@ -586,6 +675,21 @@ function SectionHeader(props: { title: string; icon: string }) {
       {props.title}
     </h4>
   );
+}
+
+function formatIcalDate(iso: string | undefined, endOnly = false): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  if (endOnly) {
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  return d.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function ActionBtn(props: { icon: string; label: string; onClick: () => void; active?: boolean }) {
