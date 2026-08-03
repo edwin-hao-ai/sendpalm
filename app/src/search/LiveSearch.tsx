@@ -14,6 +14,7 @@ import {
 
 export function LiveSearch() {
   const [query, setQuery] = createSignal("");
+  const [cursor, setCursor] = createSignal(0);
   const [contacts] = createResource(listContacts);
   const [messages] = createResource(listMessages);
   const [files] = createResource(listFiles);
@@ -33,6 +34,70 @@ export function LiveSearch() {
       files: (files() ?? []).filter((f) => f.name.toLowerCase().includes(q)).slice(0, 5),
     };
   });
+
+  // Flatten all results into a single list with their callbacks so keyboard
+  // navigation can move through them in order.
+  const flatResults = createMemo<
+    Array<{ kind: "contact" | "message" | "file"; run: () => void; label: string }>
+  >(() => {
+    const out: Array<{ kind: "contact" | "message" | "file"; run: () => void; label: string }> = [];
+    for (const c of matches().contacts) {
+      out.push({
+        kind: "contact",
+        label: c.name,
+        run: () => {
+          setView("contacts");
+          setSelectedContactId(c.id);
+          setDetailOpen(true);
+        },
+      });
+    }
+    for (const m of matches().messages) {
+      out.push({
+        kind: "message",
+        label: m.subj,
+        run: () => {
+          setSelectedMessageId(m.id);
+          setDetailOpen(true);
+        },
+      });
+    }
+    for (const f of matches().files) {
+      out.push({
+        kind: "file",
+        label: f.name,
+        run: () => {
+          setSelectedFileId(f.id);
+          setDetailOpen(true);
+        },
+      });
+    }
+    return out;
+  });
+
+  const resetCursor = () => setCursor(0);
+  const onKey = (e: KeyboardEvent) => {
+    const total = flatResults().length;
+    if (total === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setCursor((c) => (c + 1) % total);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setCursor((c) => (c - 1 + total) % total);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const r = flatResults()[cursor()];
+      if (r) {
+        r.run();
+        setSearchOpen(false);
+        setQuery("");
+      }
+    } else if (e.key === "Escape") {
+      setSearchOpen(false);
+      setQuery("");
+    }
+  };
 
   return (
     <div
@@ -65,8 +130,12 @@ export function LiveSearch() {
         <input
           autofocus
           value={query()}
-          onInput={(e) => setQuery(e.currentTarget.value)}
-          placeholder="Search…"
+          onInput={(e) => {
+            setQuery(e.currentTarget.value);
+            resetCursor();
+          }}
+          onKeyDown={onKey}
+          placeholder="Search…  ⏎ 选择  ↑↓ 导航"
           style={{
             flex: 1,
             border: "none",
@@ -87,11 +156,12 @@ export function LiveSearch() {
       <Show when={matches().contacts.length > 0}>
         <Group title="People">
           <For each={matches().contacts}>
-            {(c) => (
+            {(c, i) => (
               <Result
                 icon="ph-user"
                 title={c.name}
                 hint={c.company}
+                active={cursor() === i()}
                 onClick={() => {
                   setView("contacts");
                   setSelectedContactId(c.id);
@@ -107,11 +177,12 @@ export function LiveSearch() {
       <Show when={matches().messages.length > 0}>
         <Group title="Messages">
           <For each={matches().messages}>
-            {(m) => (
+            {(m, i) => (
               <Result
                 icon="ph-envelope"
                 title={m.subj}
                 hint={m.prev}
+                active={cursor() === matches().contacts.length + i()}
                 onClick={() => {
                   setSelectedMessageId(m.id);
                   setDetailOpen(true);
@@ -126,11 +197,15 @@ export function LiveSearch() {
       <Show when={matches().files.length > 0}>
         <Group title="Files">
           <For each={matches().files}>
-            {(f) => (
+            {(f, i) => (
               <Result
                 icon="ph-paperclip"
                 title={f.name}
                 hint={f.type}
+                active={
+                  cursor() ===
+                  matches().contacts.length + matches().messages.length + i()
+                }
                 onClick={() => {
                   setSelectedFileId(f.id);
                   setDetailOpen(true);
@@ -140,6 +215,57 @@ export function LiveSearch() {
             )}
           </For>
         </Group>
+      </Show>
+
+      <Show
+        when={
+          matches().contacts.length +
+            matches().messages.length +
+            matches().files.length >
+          0
+        }
+      >
+        <div />
+      </Show>
+      <Show
+        when={
+          matches().contacts.length +
+            matches().messages.length +
+            matches().files.length ===
+            0 &&
+          query().length > 0
+        }
+      >
+        <div
+          style={{
+            padding: "var(--space-6) var(--space-5)",
+            "text-align": "center",
+            color: "var(--text-muted)",
+            "font-size": "var(--text-caption)",
+          }}
+        >
+          没有匹配 “{query()}” 的结果
+        </div>
+      </Show>
+
+      <Show
+        when={
+          query().length === 0 &&
+          matches().contacts.length === 0 &&
+          matches().messages.length === 0 &&
+          matches().files.length === 0
+        }
+      >
+        <div
+          style={{
+            padding: "var(--space-6) var(--space-5)",
+            "text-align": "center",
+            color: "var(--text-muted)",
+            "font-size": "var(--text-caption)",
+          }}
+        >
+          输入联系人、邮件主题或文件名搜索
+        </div>
       </Show>
     </div>
   );
@@ -165,7 +291,13 @@ function Group(props: { title: string; children: unknown }) {
   );
 }
 
-function Result(props: { icon: string; title: string; hint?: string; onClick: () => void }) {
+function Result(props: {
+  icon: string;
+  title: string;
+  hint?: string;
+  onClick: () => void;
+  active?: boolean;
+}) {
   return (
     <button
       onClick={props.onClick}
@@ -177,16 +309,49 @@ function Result(props: { icon: string; title: string; hint?: string; onClick: ()
         padding: "var(--space-2) var(--space-3)",
         "border-radius": "var(--radius-md)",
         "text-align": "left",
+        background: props.active ? "var(--palm-soft)" : "transparent",
+        "border-left": props.active ? "2px solid var(--palm)" : "2px solid transparent",
+        transition:
+          "background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out)",
       }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--paper-mid)")}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      onMouseEnter={(e) => {
+        if (!props.active) e.currentTarget.style.background = "var(--paper-mid)";
+      }}
+      onMouseLeave={(e) => {
+        if (!props.active) e.currentTarget.style.background = "transparent";
+      }}
     >
-      <Icon name={props.icon} size={16} />
-      <span style={{ flex: 1, "white-space": "nowrap", overflow: "hidden", "text-overflow": "ellipsis" }}>
+      <Icon
+        name={props.icon}
+        size={16}
+        style={{
+          color: props.active ? "var(--palm)" : "var(--text-secondary)",
+          "flex-shrink": 0,
+        }}
+      />
+      <span
+        style={{
+          flex: 1,
+          "white-space": "nowrap",
+          overflow: "hidden",
+          "text-overflow": "ellipsis",
+          "font-weight": props.active ? "700" : "600",
+          color: props.active ? "var(--text-primary)" : "var(--text-primary)",
+        }}
+      >
         {props.title}
       </span>
       <Show when={props.hint}>
-        <span style={{ "font-size": "var(--text-micro)", color: "var(--text-muted)", "white-space": "nowrap" }}>
+        <span
+          style={{
+            "font-size": "var(--text-micro)",
+            color: "var(--text-muted)",
+            "white-space": "nowrap",
+            "max-width": "180px",
+            overflow: "hidden",
+            "text-overflow": "ellipsis",
+          }}
+        >
           {props.hint}
         </span>
       </Show>
