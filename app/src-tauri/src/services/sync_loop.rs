@@ -1,7 +1,13 @@
 //! Background sync loop — uses IMAP IDLE for INBOX when possible, falling
 //! back to a short poll sleep if the server doesn't support IDLE.
+//!
+//! v2: supports multiple email accounts. Each account gets its own spawned
+//! task and IMAP session. Accounts are loaded once at startup from the
+//! `accounts` table; newly added accounts require an app restart for now.
 
 use crate::services::imap::{ImapClient, IDLE_TIMEOUT};
+use crate::services::providers;
+use crate::services::vault;
 use crate::services::{EmailCredentials, load_test_credentials};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
 use std::path::PathBuf;
@@ -14,6 +20,10 @@ use tauri::{AppHandle, Emitter, Manager};
 /// this long before the next sync attempt.
 const IDLE_ERROR_BACKOFF: Duration = Duration::from_secs(60);
 
+/// If the database has no configured email accounts, fall back to the
+/// `SENDPALM_TEST_*` credentials so `pnpm tauri dev` still syncs mail.
+const TEST_FALLBACK_ENABLED: bool = true;
+
 #[derive(Debug, Clone)]
 pub struct SyncAccount {
     pub account_id: String,
@@ -23,7 +33,7 @@ pub struct SyncAccount {
     pub enabled: bool,
 }
 
-/// Start the periodic sync loop.
+/// Start the background sync loop for every configured email account.
 pub fn start(app: AppHandle) {
     spawn(async move {
         if let Err(e) = run_loop(app).await {
@@ -33,32 +43,45 @@ pub fn start(app: AppHandle) {
 }
 
 async fn run_loop(app: AppHandle) -> Result<(), String> {
-    let creds = load_test_credentials()
-        .map_err(|e| format!("no credentials: {e}"))?;
-    let account_id = format!("acct_{}", creds.email);
-
     let pool = open_pool().await?;
     ensure_schema(&pool).await?;
 
-    let client = ImapClient::new(creds.clone());
-
-    let mut account = SyncAccount {
-        account_id: account_id.clone(),
-        creds,
-        last_uid: 0,
-        uid_validity: 0,
-        enabled: true,
+    let accounts = load_accounts(&pool).await?;
+    let accounts: Vec<SyncAccount> = if accounts.is_empty() && TEST_FALLBACK_ENABLED {
+        match build_test_fallback_account().await {
+            Ok(a) => vec![a],
+            Err(e) => {
+                eprintln!("[sync] no accounts configured and test fallback unavailable: {e}");
+                Vec::new()
+            }
+        }
+    } else {
+        accounts
     };
 
-    // Restore last_uid from sync_state:: table
-    if let Ok(v) = sqlx::query_as::<_, (String,)>(
-        "SELECT value FROM app_kv WHERE key = $1"
-    )
-    .bind(format!("sync_state::{}", account.account_id))
-    .fetch_optional(&pool)
-    .await
-    {
-        if let Some((json,)) = v {
+    if accounts.is_empty() {
+        eprintln!("[sync] no email accounts configured; background loop is idle");
+        // Keep the function alive so the app doesn't repeatedly respawn. In a
+        // future iteration we'll reload the account list dynamically.
+        loop {
+            tokio::time::sleep(Duration::from_secs(300)).await;
+        }
+    }
+
+    eprintln!("[sync] starting background loops for {} account(s)", accounts.len());
+    for account in accounts {
+        spawn_account_loop(app.clone(), pool.clone(), account);
+    }
+
+    Ok(())
+}
+
+/// Spawn a dedicated per-account task. The task owns its own IMAP session and
+/// loops forever (initial sync → IDLE → sync on trigger).
+fn spawn_account_loop(app: AppHandle, pool: SqlitePool, mut account: SyncAccount) {
+    spawn(async move {
+        // Restore last_uid/uid_validity from app_kv.
+        if let Ok(Some(json)) = load_sync_state(&pool, &account.account_id).await {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) {
                 if let Some(uid) = v.get("last_uid").and_then(|x| x.as_u64()) {
                     account.last_uid = uid as u32;
@@ -68,41 +91,164 @@ async fn run_loop(app: AppHandle) -> Result<(), String> {
                 }
             }
         }
-    }
 
-    eprintln!(
-        "[sync] starting background loop, account={} last_uid={}",
-        account.account_id, account.last_uid
-    );
+        eprintln!(
+            "[sync] starting account loop, account={} email={} last_uid={}",
+            account.account_id, account.creds.email, account.last_uid
+        );
 
-    // Do an initial sync so the UI is populated on first launch, then keep
-    // the connection parked in IMAP IDLE for instant new-mail delivery.
-    if let Err(e) = sync_and_notify(&app, &pool, &client, &mut account).await {
-        eprintln!("[sync] initial sync failed for {}: {e}", account.account_id);
-        tokio::time::sleep(IDLE_ERROR_BACKOFF).await;
-    }
+        let client = ImapClient::new(account.creds.clone());
 
-    loop {
-        match client.idle_wait("INBOX", IDLE_TIMEOUT).await {
-            Ok(()) => {
-                eprintln!("[sync] IDLE triggered for {}, syncing", account.account_id);
-                if let Err(e) = sync_and_notify(&app, &pool, &client, &mut account).await {
-                    eprintln!("[sync] sync failed for {}: {e}", account.account_id);
+        if let Err(e) = sync_and_notify(&app, &pool, &client, &mut account).await {
+            eprintln!("[sync] initial sync failed for {}: {e}", account.account_id);
+            tokio::time::sleep(IDLE_ERROR_BACKOFF).await;
+        }
+
+        loop {
+            match client.idle_wait("INBOX", IDLE_TIMEOUT).await {
+                Ok(()) => {
+                    eprintln!("[sync] IDLE triggered for {}, syncing", account.account_id);
+                    if let Err(e) = sync_and_notify(&app, &pool, &client, &mut account).await {
+                        eprintln!("[sync] sync failed for {}: {e}", account.account_id);
+                        tokio::time::sleep(IDLE_ERROR_BACKOFF).await;
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[sync] IDLE failed for {}: {e}; falling back to poll",
+                        account.account_id
+                    );
+                    if let Err(e) = sync_and_notify(&app, &pool, &client, &mut account).await {
+                        eprintln!("[sync] fallback sync failed for {}: {e}", account.account_id);
+                    }
                     tokio::time::sleep(IDLE_ERROR_BACKOFF).await;
                 }
             }
-            Err(e) => {
-                eprintln!(
-                    "[sync] IDLE failed for {}: {e}; falling back to poll",
-                    account.account_id
-                );
-                if let Err(e) = sync_and_notify(&app, &pool, &client, &mut account).await {
-                    eprintln!("[sync] fallback sync failed for {}: {e}", account.account_id);
-                }
-                tokio::time::sleep(IDLE_ERROR_BACKOFF).await;
-            }
+        }
+    });
+}
+
+async fn build_test_fallback_account() -> Result<SyncAccount, String> {
+    let creds = load_test_credentials()
+        .map_err(|e| format!("no test credentials: {e}"))?;
+    let account_id = format!("acct_{}", creds.email);
+    Ok(SyncAccount {
+        account_id,
+        creds,
+        last_uid: 0,
+        uid_validity: 0,
+        enabled: true,
+    })
+}
+
+async fn load_accounts(pool: &SqlitePool) -> Result<Vec<SyncAccount>, String> {
+    let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
+        "SELECT id, provider, email, settings_json FROM accounts WHERE type = 'email'"
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("load accounts: {e}"))?;
+
+    let mut accounts = Vec::with_capacity(rows.len());
+    for (id, provider, email, settings_json) in rows {
+        let email = email.unwrap_or_default();
+        if email.is_empty() {
+            eprintln!("[sync] skipping account {id}: no email");
+            continue;
+        }
+        match resolve_credentials(&id, &provider, &email, settings_json.as_deref()).await {
+            Ok(creds) => accounts.push(SyncAccount {
+                account_id: id,
+                creds,
+                last_uid: 0,
+                uid_validity: 0,
+                enabled: true,
+            }),
+            Err(e) => eprintln!("[sync] skipping account {id}: {e}"),
         }
     }
+    Ok(accounts)
+}
+
+async fn resolve_credentials(
+    account_id: &str,
+    provider_id: &str,
+    email: &str,
+    settings_json: Option<&str>,
+) -> Result<EmailCredentials, String> {
+    let provider = providers::by_id(provider_id)
+        .ok_or_else(|| format!("unknown provider '{provider_id}'"))?;
+
+    // 1. Prefer the OS keyring.
+    let password = match vault::get_password(account_id) {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            // 2. Dev convenience: if no keyring entry, fall back to the test
+            //    account password when the email matches.
+            let test_email = std::env::var("SENDPALM_TEST_EMAIL").unwrap_or_default();
+            if email == test_email {
+                std::env::var("SENDPALM_TEST_PASSWORD")
+                    .map_err(|e| format!("keyring empty and test password unavailable: {e}"))?
+            } else {
+                return Err("no password in keyring".into());
+            }
+        }
+        Err(e) => return Err(format!("keyring error: {e}")),
+    };
+
+    let settings: serde_json::Value = settings_json
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+
+    let imap_host = pick_host(&provider.imap_host, &settings, "imap_host");
+    let smtp_host = pick_host(&provider.smtp_host, &settings, "smtp_host");
+
+    if imap_host.is_empty() {
+        return Err("missing IMAP host".into());
+    }
+    if smtp_host.is_empty() {
+        return Err("missing SMTP host".into());
+    }
+
+    let imap_port = pick_port(provider.imap_port, &settings, "imap_port");
+    let smtp_port = pick_port(provider.smtp_port, &settings, "smtp_port");
+
+    Ok(EmailCredentials {
+        email: email.to_string(),
+        password,
+        imap_host,
+        imap_port,
+        smtp_host,
+        smtp_port,
+    })
+}
+
+fn pick_host(template_host: &str, settings: &serde_json::Value, key: &str) -> String {
+    if !template_host.is_empty() {
+        return template_host.to_string();
+    }
+    settings
+        .get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn pick_port(template_port: u16, settings: &serde_json::Value, key: &str) -> u16 {
+    settings
+        .get(key)
+        .and_then(|v| v.as_u64())
+        .and_then(|n| u16::try_from(n).ok())
+        .unwrap_or(template_port)
+}
+
+async fn load_sync_state(pool: &SqlitePool, account_id: &str) -> Result<Option<String>, String> {
+    sqlx::query_as::<_, (String,)>("SELECT value FROM app_kv WHERE key = $1")
+        .bind(format!("sync_state::{account_id}"))
+        .fetch_optional(pool)
+        .await
+        .map(|opt| opt.map(|(json,)| json))
+        .map_err(|e| e.to_string())
 }
 
 async fn sync_and_notify(
@@ -170,7 +316,8 @@ async fn sync_one(
     let bundle = client.sync("INBOX", account.last_uid).await?;
 
     // Ensure the account row exists in the accounts table so the foreign
-    // key on messages.ac is satisfied.
+    // key on messages.ac is satisfied. For DB-configured accounts this is a
+    // no-op update; for the test fallback it creates the row.
     upsert_account(pool, account).await?;
 
     let mut inserted = 0u32;
