@@ -665,5 +665,18 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<(), String> {
     .execute(pool)
     .await
     .map_err(|e| format!("ensure app_kv: {e}"))?;
+
+    // Backfill: queue any unscreened, unblocked contacts into the Gate
+    // screener. Older builds (before first_seen was set on insert) left every
+    // contact at first_seen=0, so Gate would never surface them. This is
+    // idempotent — once a contact has first_seen=1 or screened=1, it's a
+    // no-op.
+    sqlx::query(
+        "UPDATE contacts SET first_seen = 1 \
+         WHERE first_seen = 0 AND screened = 0 AND blocked = 0"
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| format!("backfill gate queue: {e}"))?;
     Ok(())
 }
