@@ -480,10 +480,14 @@ async fn insert_message(
         .chars()
         .take(140)
         .collect::<String>();
+    let calendar_json = parsed
+        .calendar_invite
+        .as_ref()
+        .and_then(|e| serde_json::to_string(e).ok());
     sqlx::query(
         "INSERT OR IGNORE INTO messages \
-         (id, pid, subj, prev, body, tm, st, ac, bucket, unread, labels_json, attachments_json, trackers_json, thread_id) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'imbox', 1, '[]', '[]', '[]', $9)"
+         (id, pid, subj, prev, body, tm, st, ac, bucket, unread, labels_json, attachments_json, trackers_json, thread_id, calendar_json) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'imbox', 1, '[]', '[]', '[]', $9, $10)"
     )
     .bind(&mid)
     .bind(&contact_id)
@@ -494,6 +498,7 @@ async fn insert_message(
     .bind(parsed.date.to_rfc3339())
     .bind(&account.account_id)
     .bind(parsed.thread_id.as_deref().unwrap_or(""))
+    .bind(calendar_json.as_deref())
     .execute(pool)
     .await
     .map_err(|e| format!("insert message uid={uid}: {e}"))?;
