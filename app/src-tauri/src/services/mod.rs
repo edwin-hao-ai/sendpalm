@@ -10,6 +10,7 @@ pub mod state;
 pub mod providers;
 pub mod sync_loop;
 pub mod vault;
+pub mod ical;
 
 use serde::{Deserialize, Serialize};
 

@@ -2,6 +2,7 @@
 //! Wraps `mailparse` and maps parsed RFC822 messages into our
 //! `Message` and `Contact` shapes that the SQL store expects.
 
+use crate::services::ical::{self, IcalEvent};
 use chrono::{DateTime, Utc};
 use mailparse::{ParsedMail, parse_mail};
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,12 @@ pub struct ParsedMessage {
     pub body_html: Option<String>,
     pub date: DateTime<Utc>,
     pub attachments: Vec<ParsedAttachment>,
+    /// Parsed iCalendar VEVENT, if the message carries a `text/calendar`
+    /// invitation. Serialized to JSON and persisted alongside the message
+    /// so the detail panel can render an "Add to calendar" action without
+    /// re-fetching the raw email.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calendar_invite: Option<IcalEvent>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +56,7 @@ pub fn parse_email(raw: &[u8]) -> Result<ParsedMessage, String> {
     let body_text = extract_text(&parsed).unwrap_or_default();
     let body_html = extract_html(&parsed);
     let attachments = collect_attachments(&parsed);
+    let calendar_invite = extract_calendar(&parsed);
 
     Ok(ParsedMessage {
         message_id,
@@ -60,6 +68,7 @@ pub fn parse_email(raw: &[u8]) -> Result<ParsedMessage, String> {
         body_html,
         date,
         attachments,
+        calendar_invite,
     })
 }
 
@@ -144,6 +153,34 @@ fn collect_attachments(parsed: &ParsedMail<'_>) -> Vec<ParsedAttachment> {
     let mut out = Vec::new();
     walk_attachments(parsed, &mut out);
     out
+}
+
+/// Walk the MIME tree looking for the first `text/calendar` part with a
+/// `method` of REQUEST (or no method, which is the common single-invite case).
+/// Returns the parsed VEVENT, or `None` if the message has no invite.
+fn extract_calendar(parsed: &ParsedMail<'_>) -> Option<IcalEvent> {
+    let mut buf: Option<String> = None;
+    walk_calendar(parsed, &mut buf);
+    buf.and_then(|ics| ical::parse_vevent(&ics))
+}
+
+fn walk_calendar(m: &ParsedMail<'_>, out: &mut Option<String>) {
+    if out.is_some() {
+        return;
+    }
+    let ctype = m.ctype.mimetype.to_lowercase();
+    if ctype == "text/calendar" {
+        if let Ok(body) = m.get_body() {
+            *out = Some(body);
+            return;
+        }
+    }
+    for part in &m.subparts {
+        walk_calendar(part, out);
+        if out.is_some() {
+            return;
+        }
+    }
 }
 
 fn header_is(headers: &[mailparse::MailHeader<'_>], name: &str) -> bool {

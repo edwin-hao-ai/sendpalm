@@ -17,7 +17,7 @@
 //! - Multiple VEVENTs in one ICS body
 //! - VTIMEZONE blocks (we attach the TZID as opaque metadata)
 
-use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use chrono::{NaiveDate, NaiveDateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -38,22 +38,23 @@ pub fn parse_vevent(ics: &str) -> Option<IcalEvent> {
     // Unfold continuation lines (RFC 5545 §3.1).
     let unfolded = unfold(ics);
 
-    // Collect the content between the first BEGIN:VEVENT and matching END:VEVENT.
+// Collect the content between the first BEGIN:VEVENT and matching END:VEVENT.
     let mut in_event = false;
     let mut depth = 0u32;
     let mut lines: Vec<&str> = Vec::new();
     for raw in unfolded.lines() {
         let line = raw.trim_end_matches('\r');
-        let upper = line.split(':').next().unwrap_or("").to_uppercase();
-        if upper.starts_with("BEGIN") && upper.contains("VEVENT") && !in_event {
+        let upper_full = line.to_uppercase();
+        let upper_name = line.split(':').next().unwrap_or("").to_uppercase();
+        if upper_name.starts_with("BEGIN") && upper_full.contains("VEVENT") && !in_event {
             in_event = true;
             depth = 1;
             continue;
         }
         if in_event {
-            if upper.starts_with("BEGIN") {
+            if upper_name.starts_with("BEGIN") {
                 depth += 1;
-            } else if upper.starts_with("END") {
+            } else if upper_name.starts_with("END") {
                 depth -= 1;
                 if depth == 0 {
                     break;
@@ -118,44 +119,29 @@ pub fn parse_vevent(ics: &str) -> Option<IcalEvent> {
     })
 }
 
-/// RFC 5545 §3.1 line unfolding: a CRLF followed by a single linear
-/// white-space character is removed (the continuation joins the prior line).
+/// RFC 5545 §3.1 line unfolding: a CRLF (or LF) followed by a single
+/// linear white-space character (SPACE or HTAB) is removed — the continuation
+/// line joins the prior content line.
 fn unfold(input: &str) -> String {
+    let bytes = input.as_bytes();
     let mut out = String::with_capacity(input.len());
-    let mut prev_ended_cr_lf = false;
-    for c in input.chars() {
-        if prev_ended_cr_lf && (c == ' ' || c == '\t') {
-            prev_ended_cr_lf = false;
-            continue;
-        }
-        prev_ended_cr_lf = c == '\r' || (prev_ended_cr_lf && c == '\n');
-        // Note: this is a simplified unfolding that handles "\r\n " / "\n ".
-        if c == '\n' {
-            prev_ended_cr_lf = true;
-            // but we just consumed the \n; the next char check handles space
-        }
-        out.push(c);
-    }
-    // Re-scan to actually drop the space after CRLF.
-    let bytes = out.as_bytes();
-    let mut cleaned = String::with_capacity(out.len());
     let mut i = 0;
     while i < bytes.len() {
-        if i + 2 < bytes.len() && bytes[i] == b'\r' && bytes[i + 1] == b'\n' && (bytes[i + 2] == b' ' || bytes[i + 2] == b'\t') {
-            cleaned.push('\r');
-            cleaned.push('\n');
+        let b = bytes[i];
+        // CRLF + WSP — drop the CRLF and the WSP, joining the lines.
+        if b == b'\r' && i + 2 < bytes.len() && bytes[i + 1] == b'\n' && (bytes[i + 2] == b' ' || bytes[i + 2] == b'\t') {
             i += 3;
             continue;
         }
-        if i + 1 < bytes.len() && bytes[i] == b'\n' && (bytes[i + 1] == b' ' || bytes[i + 1] == b'\t') {
-            cleaned.push('\n');
+        // LF + WSP
+        if b == b'\n' && i + 1 < bytes.len() && (bytes[i + 1] == b' ' || bytes[i + 1] == b'\t') {
             i += 2;
             continue;
         }
-        cleaned.push(bytes[i] as char);
+        out.push(b as char);
         i += 1;
     }
-    cleaned
+    out
 }
 
 fn split_property(line: &str) -> Option<(String, String)> {
@@ -247,7 +233,7 @@ mod tests {
     fn unfolds_continuation_lines() {
         let ics = "BEGIN:VEVENT\r\nSUMMARY:This is a long\r\n  summary that spans\r\n  multiple lines\r\nDTSTART:20260101T100000Z\r\nEND:VEVENT\r\n";
         let ev = parse_vevent(ics).unwrap();
-        assert_eq!(ev.summary, "This is a longsummary that spansmultiple lines");
+        assert_eq!(ev.summary, "This is a long summary that spans multiple lines");
     }
 
     #[test]
