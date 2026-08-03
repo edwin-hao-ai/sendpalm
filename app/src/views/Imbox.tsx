@@ -3,7 +3,7 @@
  */
 
 import { For, Show, createMemo, createResource, createSignal, createEffect } from "solid-js";
-import { listMessages, listContacts, upsertMessage, listBundleConfigs } from "../stores/data";
+import { listMessages, listContacts, upsertMessage, listBundleConfigs, listAccounts } from "../stores/data";
 import type { Contact, Message, BundleConfig } from "../types";
 import {
   setDetailOpen,
@@ -20,6 +20,7 @@ import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { Empty } from "../components/Empty";
 import { Modal } from "../components/Modal";
+import { syncNow } from "../services/backend";
 
 interface Bundle {
   contactId: string;
@@ -207,7 +208,49 @@ export function Imbox() {
 
   return (
     <div style={{ padding: "0", animation: "view-enter 0.3s var(--ease-out) both" }}>
-      <SectionHeader title="New for you" count={newForYou().length} />
+      <div
+        style={{
+          display: "flex",
+          "align-items": "center",
+          gap: "var(--space-2)",
+          padding: "var(--space-4) var(--space-5) var(--space-2)",
+        }}
+      >
+        <SectionHeader title="New for you" count={newForYou().length} />
+        <div style={{ flex: 1 }} />
+        <button
+          onClick={async () => {
+            const list = (await listAccounts()) ?? [];
+            const emailAccounts = list.filter((a) => a.type === "email");
+            if (emailAccounts.length === 0) {
+              showToast({ message: "请先到 Settings → Accounts 添加邮箱账户", kind: "info" });
+              return;
+            }
+            showToast({ message: `正在从 IMAP 同步 ${emailAccounts.length} 个账户…`, kind: "info", ttlMs: 2000 });
+            await Promise.all(
+              emailAccounts.map((a) => syncNow(a.id, "INBOX")),
+            );
+            await refetchMessages();
+            showToast({ message: "同步完成", kind: "success" });
+          }}
+          title="立即从 IMAP 同步所有账户"
+          aria-label="同步所有账户"
+          data-sync-now
+          style={{
+            display: "inline-flex",
+            "align-items": "center",
+            gap: "4px",
+            padding: "4px 10px",
+            background: "var(--palm-soft)",
+            color: "var(--palm)",
+            "border-radius": "var(--radius-pill)",
+            "font-size": "var(--text-micro)",
+            "font-weight": "700",
+          }}
+        >
+          <Icon name="arrows-clockwise" size={12} /> 同步
+        </button>
+      </div>
       <Show when={newForYou().length > 0} fallback={<InboxZero />}>
         <ul
           style={{
