@@ -2,7 +2,7 @@
  * #root contains the titlebar + sidebar + topbar + main + detail + agent + toasts.
  */
 
-import { Show, createSignal, onMount } from "solid-js";
+import { Show, createSignal, onMount, onCleanup } from "solid-js";
 import { Titlebar } from "./components/Titlebar";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
@@ -17,6 +17,7 @@ import { NotificationPanel } from "./notifications/NotificationPanel";
 import { DropBar } from "./components/DropBar";
 import { Compose } from "./compose/Compose";
 import { ResurfaceLoop } from "./services/reminder";
+import { startSyncEventBridge } from "./services/sync-events";
 import { ShortcutHelp } from "./components/ShortcutHelp";
 import { initApp } from "./bootstrap";
 import {
@@ -36,6 +37,7 @@ export default function App() {
   const [initError, setInitError] = createSignal<string | null>(null);
 
   useGlobalShortcuts();
+  onCleanup(startSyncEventBridge());
 
   onMount(async () => {
     try {
@@ -78,9 +80,7 @@ export default function App() {
         <Compose />
         <ResurfaceLoop />
         <ShortcutHelp />
-        <Show
-          when={!onboardingCompleted() && onboardingStep() !== null}
-        >
+        <Show when={!onboardingCompleted() && onboardingStep() !== null}>
           <Onboarding />
         </Show>
       </Show>

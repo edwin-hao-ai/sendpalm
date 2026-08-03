@@ -44,8 +44,20 @@ if (!IS_TAURI && typeof window !== "undefined") {
         case "list_shortcuts":
         case "list_bundle_configs":
         case "list_mailboxes":
-        case "list_email_providers":
           return [];
+        case "list_email_providers":
+          return [
+            { id: "feishu", label: "飞书邮箱", icon: "feather", credentials_hint: "Feishu Mail · 用 app-specific password", imap_host: "imap.feishu.cn", imap_port: 993, smtp_host: "smtp.feishu.cn", smtp_port: 465, auth_mode: "app-password", smtp_implicit_tls: true },
+            { id: "gmail", label: "Gmail", icon: "google-logo", credentials_hint: "Gmail · 需在 Google 账号启用 IMAP 并用 app password", imap_host: "imap.gmail.com", imap_port: 993, smtp_host: "smtp.gmail.com", smtp_port: 465, auth_mode: "app-password", smtp_implicit_tls: true },
+            { id: "outlook", label: "Outlook / Microsoft 365", icon: "microsoft-outlook-logo", credentials_hint: "Outlook · 用 Microsoft account password 或 app password", imap_host: "outlook.office365.com", imap_port: 993, smtp_host: "smtp.office365.com", smtp_port: 587, auth_mode: "app-password", smtp_implicit_tls: false },
+            { id: "icloud", label: "iCloud", icon: "apple-logo", credentials_hint: "iCloud · 需在 appleid.apple.com 生成 app-specific password", imap_host: "imap.mail.me.com", imap_port: 993, smtp_host: "smtp.mail.me.com", smtp_port: 587, auth_mode: "app-password", smtp_implicit_tls: false },
+            { id: "yahoo", label: "Yahoo Mail", icon: "yahoo-logo", credentials_hint: "Yahoo · 用 account password 或 app password", imap_host: "imap.mail.yahoo.com", imap_port: 993, smtp_host: "smtp.mail.yahoo.com", smtp_port: 465, auth_mode: "app-password", smtp_implicit_tls: true },
+            { id: "qq", label: "QQ 邮箱", icon: "chat-circle", credentials_hint: "QQ · 授权码 (不是 QQ 密码)；在网页版 QQ 邮箱设置 → 账户 → 开启 IMAP/SMTP", imap_host: "imap.qq.com", imap_port: 993, smtp_host: "smtp.qq.com", smtp_port: 465, auth_mode: "password-with-auth-code", smtp_implicit_tls: true },
+            { id: "netease-163", label: "网易 163 邮箱", icon: "envelope-simple", credentials_hint: "163 · 授权码；在 mail.163.com 设置 → POP3/SMTP/IMAP 开启", imap_host: "imap.163.com", imap_port: 993, smtp_host: "smtp.163.com", smtp_port: 465, auth_mode: "password-with-auth-code", smtp_implicit_tls: true },
+            { id: "netease-126", label: "网易 126 邮箱", icon: "envelope-simple", credentials_hint: "126 · 授权码", imap_host: "imap.126.com", imap_port: 993, smtp_host: "smtp.126.com", smtp_port: 465, auth_mode: "password-with-auth-code", smtp_implicit_tls: true },
+            { id: "fastmail", label: "Fastmail", icon: "envelope-open", credentials_hint: "Fastmail · app password 在 settings → passwords", imap_host: "imap.fastmail.com", imap_port: 993, smtp_host: "smtp.fastmail.com", smtp_port: 465, auth_mode: "app-password", smtp_implicit_tls: true },
+            { id: "custom", label: "自定义 IMAP/SMTP", icon: "wrench", credentials_hint: "填入任意 IMAP/SMTP host:port", imap_host: "", imap_port: 993, smtp_host: "", smtp_port: 465, auth_mode: "app-password", smtp_implicit_tls: true },
+          ];
         case "get_sync_state":
           return {
             account_id: "",

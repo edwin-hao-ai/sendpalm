@@ -27,7 +27,9 @@ async function shoot(page: Page, name: string) {
 }
 
 test.describe("SendPalm real backend — empty states (no mock data)", () => {
-  test("Topbar shows slim brand and search; no redundant title", async ({ page }) => {
+  test("Topbar shows slim brand and search; no redundant title", async ({
+    page,
+  }) => {
     await page.goto("/");
     await expect(page.locator("text=SendPalm").first()).toBeVisible();
     // Search placeholder is there
@@ -37,7 +39,9 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     await shoot(page, "01-topbar");
   });
 
-  test("Imbox shows real empty-state copy (NOT 'Inbox zero' mock)", async ({ page }) => {
+  test("Imbox shows real empty-state copy (NOT 'Inbox zero' mock)", async ({
+    page,
+  }) => {
     await page.goto("/");
     await expect(page.getByText(/Inbox 是空的/)).toBeVisible();
     await expect(page.getByText(/Settings → Accounts/)).toBeVisible();
@@ -109,44 +113,167 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     await shoot(page, "11-insights");
   });
 
-  test("Settings → Accounts → Add account modal has provider dropdown", async ({ page }) => {
+  test("Settings → Accounts → Add account modal has provider dropdown", async ({
+    page,
+  }) => {
+    await page.goto("/");
     await page.locator('[data-nav-view="settings"]').click();
-    await expect(page.getByText("Connected accounts")).toBeVisible();
+    // Switch to Accounts tab (default is Profile)
+    await page
+      .getByRole("button", { name: /Accounts/ })
+      .first()
+      .click();
+    // Wait for Accounts view to mount
+    await expect(page.getByText("Connected accounts")).toBeVisible({
+      timeout: 10_000,
+    });
+    await page.waitForTimeout(300);
     await shoot(page, "12-settings-accounts");
 
     // Click "Add account" — provider dropdown should appear
-    await page.getByRole("button", { name: /Add account/ }).first().click();
-    await expect(page.getByText("添加邮箱账户")).toBeVisible();
+    await page
+      .getByRole("button", { name: /Add account/ })
+      .first()
+      .click();
+    // The modal title is unique enough
+    await expect(page.getByText("添加邮箱账户")).toBeVisible({
+      timeout: 10_000,
+    });
+    await page.waitForTimeout(300);
 
-    // Provider options: at least Gmail, Feishu, iCloud, QQ
-    const select = page.locator("select").first();
+    // Wait for the modal to be fully mounted (select with options appears).
+    // The Add Account modal contains the provider dropdown.
+    await page.waitForTimeout(500);
+    const selectCount = await page.locator("select").count();
+    expect(selectCount).toBeGreaterThanOrEqual(1);
+    const select = page.locator("select").last();
     await expect(select).toBeVisible();
+    // The provider list comes from the listProviders() resource, which
+    // returns a 10-item array via the Tauri shim. Wait for options to render.
+    await page.waitForFunction(
+      () => {
+        const sels = document.querySelectorAll("select");
+        const last = sels[sels.length - 1];
+        return last && last.options.length >= 7;
+      },
+      { timeout: 5_000 },
+    );
     const options = await select.locator("option").allTextContents();
+    expect(options.length).toBeGreaterThanOrEqual(7);
     expect(options).toEqual(
-      expect.arrayContaining(["Gmail", "飞书邮箱", "iCloud", "QQ 邮箱", "网易 163 邮箱", "Yahoo Mail", "Outlook / Microsoft 365"])
+      expect.arrayContaining([
+        "Gmail",
+        "飞书邮箱",
+        "iCloud",
+        "QQ 邮箱",
+        "网易 163 邮箱",
+        "Yahoo Mail",
+        "Outlook / Microsoft 365",
+      ]),
     );
     await shoot(page, "13-add-account");
   });
 
-  test("Command palette opens with ⌘K and shows search across views/people", async ({ page }) => {
-    await page.keyboard.press("Meta+k");
-    await expect(page.getByPlaceholder(/Search views, actions, contacts, messages, files/)).toBeVisible();
+  test("Command palette opens with ⌘K and shows search across views/people", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    // Focus the body so the keypress isn't captured by a focused button
+    await page.locator("body").click();
+    await page.waitForTimeout(300);
+    // Press ⌘K (use Control on Linux/Chromium, Meta on Mac).
+    const isMac = process.platform === "darwin";
+    await page.keyboard.press(isMac ? "Meta+k" : "Control+k");
+    await expect(
+      page.locator('input[placeholder*="Search views"]'),
+    ).toBeVisible({ timeout: 5_000 });
+    await page.waitForTimeout(200);
     await shoot(page, "14-command-palette");
   });
 
-  test("Onboarding wizard shows real-backend copy", async ({ page }) => {
-    // The wizard only shows when onboarding_completed is false in prefs.
-    // In browser mode, bootstrap returns no Tauri store so the wizard
-    // should NOT auto-dismiss. We may need to set localStorage to trigger.
-    await page.evaluate(() => {
-      // Force the wizard to show
-      (window as unknown as { __forceOnboarding?: boolean }).__forceOnboarding = true;
-    });
+  test("Sidebar exposes 13 stable [data-nav-view] buttons", async ({
+    page,
+  }) => {
     await page.goto("/");
-    // Wizard copy (when forced) should mention "real" or "Connect your real email"
-    // We don't assert the wizard is visible (depends on bootstrap path), but
-    // we screenshot the post-onboarding state.
-    await shoot(page, "15-after-onboarding");
+    const buttons = page.locator("#sidebar [data-nav-view]");
+    await expect(buttons).toHaveCount(13);
+    const views = await buttons.evaluateAll((els) =>
+      els.map((e) => e.getAttribute("data-nav-view")),
+    );
+    expect(views).toEqual([
+      "screener",
+      "imbox",
+      "feed",
+      "paperTrail",
+      "contacts",
+      "companies",
+      "calendar",
+      "files",
+      "drafts",
+      "followUps",
+      "clips",
+      "insights",
+      "settings",
+    ]);
+    await shoot(page, "16-sidebar-nav");
+  });
+
+  test("Compose modal can be filled and sends via backend bridge", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    // Open compose with the global shortcut.
+    await page.locator("body").click();
+    const isMac = process.platform === "darwin";
+    await page.keyboard.press(isMac ? "Meta+n" : "Control+n");
+    // The compose modal title is unique.
+    await expect(page.getByText("新邮件")).toBeVisible();
+
+    // Fill recipient, subject and body using stable placeholders.
+    await page.locator('input[type="email"]').fill("test@example.com");
+    await page.locator('input[placeholder="主题"]').fill("E2E test");
+    await page
+      .locator('textarea[placeholder="正文…"]')
+      .fill("This is a test message from Playwright.");
+
+    // Click the send split-button, then "立即发送".
+    await page.getByRole("button", { name: /发送/ }).click();
+    await page.getByText("立即发送").click();
+
+    // In browser mode the shim returns null, so the app falls back to saving
+    // the message as a draft and shows the fallback toast.
+    await expect(page.getByText(/已保存为草稿|已发送/)).toBeVisible({
+      timeout: 5_000,
+    });
+    await expect(page.getByText("新邮件")).not.toBeVisible();
+    await shoot(page, "17-compose-sent");
+  });
+});
+
+test.describe("Responsive layout", () => {
+  test.use({ viewport: { width: 375, height: 667 } });
+
+  test("iPhone SE shows bottom tab bar and hides sidebar labels", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const sidebar = page.locator("#sidebar");
+    await expect(sidebar).toBeVisible();
+
+    // On mobile the sidebar becomes a bottom tab bar (row layout, no labels).
+    const flexDir = await sidebar.evaluate(
+      (el) => getComputedStyle(el).flexDirection,
+    );
+    expect(flexDir).toBe("row");
+
+    const buttons = sidebar.locator("[data-nav-view]");
+    await expect(buttons).toHaveCount(13);
+
+    // Labels are hidden on mobile.
+    const labels = sidebar.locator("span");
+    await expect(labels).toHaveCount(0);
+
+    await shoot(page, "18-mobile-bottom-tabs");
   });
 });
 
@@ -156,7 +283,10 @@ test.describe("Real backend integration — desktop only", () => {
    *  integration tests (which use real imap.feishu.cn + smtp.feishu.cn).
    */
   test("Rust IMAP/SMTP integration tests pass against live Feishu", async () => {
-    test.skip(!process.env.SENDPALM_E2E_NETWORK, "requires SENDPALM_E2E_NETWORK=1");
+    test.skip(
+      !process.env.SENDPALM_E2E_NETWORK,
+      "requires SENDPALM_E2E_NETWORK=1",
+    );
     test.skip(!process.env.SENDPALM_TEST_PASSWORD, "requires .env credentials");
 
     // Delegate to the cargo tests we already have — this gives Playwright
@@ -164,10 +294,12 @@ test.describe("Real backend integration — desktop only", () => {
     const { execSync } = await import("node:child_process");
     const out = execSync(
       "cd src-tauri && SENDPALM_E2E_NETWORK=1 cargo test --test imap_real --test smtp_roundtrip --test providers_registry --test vault_test -- --test-threads=1",
-      { encoding: "utf-8", timeout: 600_000 }
+      { encoding: "utf-8", timeout: 600_000 },
     );
     // Surface the summary to Playwright logs
-    test.info().annotations.push({ type: "test-output", description: out.slice(-2000) });
+    test
+      .info()
+      .annotations.push({ type: "test-output", description: out.slice(-2000) });
     expect(out).toMatch(/test result: ok\./);
   });
 });

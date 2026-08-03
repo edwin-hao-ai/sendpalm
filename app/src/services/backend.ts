@@ -6,14 +6,18 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+// Importing the shim guarantees `window.__TAURI_INTERNALS__` is installed
+// before this module evaluates, even in browser-only Playwright runs.
+import "./tauri-shim";
 
-const IS_TAURI = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-
-// Wrap invoke in a try/catch so missing Tauri runtime doesn't crash the
-// frontend in browser mode. In the Tauri build, IS_TAURI is true and the
-// shim returns `null` for unknown commands, so we return that gracefully.
-async function safeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> {
-  if (!IS_TAURI) return null;
+// Call the Tauri invoke bridge. In the real Tauri shell this hits Rust
+// commands; in browser mode the shim above answers known commands and the
+// catch block turns any remaining failures (e.g. unknown commands or a missing
+// runtime) into `null` so the UI can render its empty/fallback state.
+async function safeInvoke<T>(
+  cmd: string,
+  args?: Record<string, unknown>,
+): Promise<T | null> {
   try {
     return await invoke<T>(cmd, args);
   } catch {
@@ -44,9 +48,13 @@ export interface EmailProvider {
 export async function sendEmailViaBackend(
   to: string,
   subject: string,
-  body: string
+  body: string,
 ): Promise<{ message_id: string } | null> {
-  return safeInvoke<{ message_id: string }>("send_message", { to, subject, body });
+  return safeInvoke<{ message_id: string }>("send_message", {
+    to,
+    subject,
+    body,
+  });
 }
 
 export async function fetchMailboxes(): Promise<string[]> {
@@ -56,21 +64,21 @@ export async function fetchMailboxes(): Promise<string[]> {
 
 export async function syncNow(
   accountId: string,
-  mailbox: string = "INBOX"
+  mailbox: string = "INBOX",
 ): Promise<{ new_messages: number; last_uid: number } | null> {
   return safeInvoke("sync_now", { accountId, mailbox });
 }
 
-export async function getSyncState(
-  accountId: string
-): Promise<SyncStateDto> {
+export async function getSyncState(accountId: string): Promise<SyncStateDto> {
   const r = await safeInvoke<SyncStateDto>("get_sync_state", { accountId });
-  return r ?? {
-    account_id: accountId,
-    uid_validity: 0,
-    last_uid: 0,
-    last_synced_at: "未配置（无 Tauri runtime）",
-  };
+  return (
+    r ?? {
+      account_id: accountId,
+      uid_validity: 0,
+      last_uid: 0,
+      last_synced_at: "未配置（无 Tauri runtime）",
+    }
+  );
 }
 
 export async function listProviders(): Promise<EmailProvider[]> {
@@ -82,15 +90,13 @@ export async function listProviders(): Promise<EmailProvider[]> {
 
 export async function vaultSave(
   accountId: string,
-  password: string
+  password: string,
 ): Promise<boolean> {
   const r = await safeInvoke<void>("vault_save", { accountId, password });
   return r !== null;
 }
 
-export async function vaultLoad(
-  accountId: string
-): Promise<string | null> {
+export async function vaultLoad(accountId: string): Promise<string | null> {
   return safeInvoke<string | null>("vault_load", { accountId });
 }
 

@@ -16,8 +16,10 @@ qa-tmp/*
 # Subagent-driven development scratch files
 .superpowers/sdd/
 
-# QA scratch screenshots / headed browser dumps
-.qa/
+# Playwright / Vitest artifacts
+app/test-results/
+app/e2e-report/
+app/coverage/
 
 # Tauri build artifacts
 app/src-tauri/target/

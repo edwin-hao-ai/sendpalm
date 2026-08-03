@@ -26,10 +26,26 @@ import {
   helpOpen,
 } from "../stores/ui";
 
-function matches(e: KeyboardEvent, combo: string): boolean {
-  const parts = combo.split("+").map((p) => p.trim().toLowerCase());
+function normalizeCombo(combo: string): string[] {
+  return (
+    combo
+      // Insert explicit '+' around unicode modifier symbols and words so that
+      // both "⌘k" and "⌘+k" parse to ["⌘", "k"].
+      .replace(/(⌘|⇧|ctrl|cmd|meta)(?![+])/gi, "$1+")
+      .split("+")
+      .map((p) => p.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
+export function matches(e: KeyboardEvent, combo: string): boolean {
+  const parts = normalizeCombo(combo);
   const key = parts[parts.length - 1];
-  const needMeta = parts.includes("cmd") || parts.includes("⌘") || parts.includes("meta");
+  const needMeta =
+    parts.includes("cmd") ||
+    parts.includes("⌘") ||
+    parts.includes("meta") ||
+    parts.includes("ctrl");
   const needShift = parts.includes("shift") || parts.includes("⇧");
   if (needMeta !== (e.metaKey || e.ctrlKey)) return false;
   if (needShift !== e.shiftKey) return false;
@@ -39,7 +55,10 @@ function matches(e: KeyboardEvent, combo: string): boolean {
 export function useGlobalShortcuts() {
   const handler = (e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-    const inField = tag === "input" || tag === "textarea" || (e.target as HTMLElement)?.isContentEditable;
+    const inField =
+      tag === "input" ||
+      tag === "textarea" ||
+      (e.target as HTMLElement)?.isContentEditable;
 
     // Always-on
     if (matches(e, "⌘k") || matches(e, "ctrl+k")) {
