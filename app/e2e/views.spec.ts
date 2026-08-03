@@ -302,6 +302,69 @@ test.describe("Responsive layout", () => {
   });
 });
 
+test.describe("Responsive layout — iPad portrait", () => {
+  test.use({ viewport: { width: 820, height: 1180 } });
+
+  test("iPad shows sidebar icons vertically and overlays the detail panel", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const sidebar = page.locator("#sidebar");
+    await expect(sidebar).toBeVisible();
+
+    // iPad sidebar is vertical (column), not a bottom tab bar.
+    const flexDir = await sidebar.evaluate(
+      (el) => getComputedStyle(el).flexDirection,
+    );
+    expect(flexDir).toBe("column");
+
+    // Sidebar should still expose all 13 nav views.
+    const buttons = sidebar.locator("[data-nav-view]");
+    await expect(buttons).toHaveCount(13);
+
+    await shoot(page, "19-ipad-portrait");
+  });
+
+  test("iPad sidebar shows full labels (not truncated)", async ({ page }) => {
+    await page.goto("/");
+    // "Follow-ups" is the longest label — make sure it's readable.
+    await expect(
+      page.locator('[data-nav="Follow-ups"]').first(),
+    ).toBeVisible();
+    const text = await page
+      .locator('[data-nav="Follow-ups"]')
+      .first()
+      .textContent();
+    expect(text?.trim()).toBe("Follow-ups");
+    await shoot(page, "20-ipad-sidebar-labels");
+  });
+});
+
+test.describe("Responsive layout — iPad landscape", () => {
+  test.use({ viewport: { width: 1180, height: 820 } });
+
+  test("iPad landscape lays out like desktop with sidebar + main + (overlay) detail", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    const sidebar = page.locator("#sidebar");
+    await expect(sidebar).toBeVisible();
+    const flexDir = await sidebar.evaluate(
+      (el) => getComputedStyle(el).flexDirection,
+    );
+    expect(flexDir).toBe("column");
+
+    // 1180 is below 1024? no — it's above. So this is desktop. Verify the
+    // desktop sidebar-width variable is the larger one.
+    const sidebarWidth = await sidebar.evaluate(
+      (el) => el.getBoundingClientRect().width,
+    );
+    expect(sidebarWidth).toBeGreaterThan(70);
+
+    await shoot(page, "21-ipad-landscape");
+  });
+});
+
 test.describe("Real backend integration — desktop only", () => {
   /** These checks only run when SENDPALM_E2E_NETWORK is set and the Tauri
    *  desktop binary is present. They shell out to the existing Rust

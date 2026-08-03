@@ -199,9 +199,20 @@ hr {
     grid-template-columns: var(--sidebar-width-tablet) 1fr;
     grid-template-rows: var(--titlebar-height) var(--topbar-height) 1fr;
   }
+  /* On iPad, the detail panel overlays main instead of squeezing it.
+     This preserves the full message-list width while still showing the
+     selected item beside it. */
   #app.detail-open {
-    grid-template-columns:
-      var(--sidebar-width-tablet) 1fr var(--detail-panel-width);
+    grid-template-columns: var(--sidebar-width-tablet) 1fr;
+  }
+  #app.detail-open #detail-panel {
+    position: fixed;
+    top: var(--titlebar-height);
+    bottom: 0;
+    right: 0;
+    width: min(420px, 60vw);
+    z-index: var(--z-detail);
+    animation: "panel-slide 0.28s var(--ease-out) both";
   }
 }
 
