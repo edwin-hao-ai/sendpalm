@@ -9,6 +9,7 @@ pub struct AccountSyncState {
     pub uid_validity: u32,
     pub last_uid: u32,
     pub last_synced_at: chrono::DateTime<chrono::Utc>,
+    pub busy: bool,
 }
 
 impl Default for AccountSyncState {
@@ -17,6 +18,7 @@ impl Default for AccountSyncState {
             uid_validity: 0,
             last_uid: 0,
             last_synced_at: chrono::DateTime::from_timestamp(0, 0).unwrap().with_timezone(&chrono::Utc),
+            busy: false,
         }
     }
 }

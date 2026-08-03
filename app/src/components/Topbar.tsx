@@ -13,7 +13,8 @@ import {
 import { NAV_SECTIONS } from "../utils/labels";
 import { Avatar } from "./Avatar";
 import { getSyncState, syncNow } from "../services/backend";
-import { createSignal, onCleanup } from "solid-js";
+import { createSignal, onCleanup, createResource } from "solid-js";
+import { listAccounts } from "../stores/data";
 
 export function Topbar() {
   const currentTitle = () => {
@@ -126,39 +127,65 @@ const iconButtonStyle = {
 };
 /**
  * Tiny badge in the topbar showing the last IMAP sync time + a manual
- * "Sync now" button. Auto-refreshes every 60 s. Shows a dot when
- * no sync has happened yet.
+ * "Sync now" button. Auto-refreshes every 10 s. Shows a spinner while syncing.
  */
 function SyncBadge() {
-  const DEFAULT_ACCT = "acct_edwinhao@sendpalm.com";
-  const [state, setState] = createSignal<{ last: string; uid: number; busy: boolean }>({
+  const [accounts] = createResource(listAccounts);
+  const [state, setState] = createSignal<{
+    last: string;
+    uid: number;
+    busy: boolean;
+    connected: boolean;
+  }>({
     last: "—",
     uid: 0,
     busy: false,
+    connected: false,
   });
 
+  const accountId = () => {
+    const list = accounts() ?? [];
+    const firstEmail = list.find((a) => a.type === "email");
+    return firstEmail?.id;
+  };
+
   const refresh = async () => {
+    const id = accountId();
+    if (!id) {
+      setState({ last: "未连接", uid: 0, busy: false, connected: false });
+      return;
+    }
     try {
-      const s = await getSyncState(DEFAULT_ACCT);
-      setState((p) => ({
-        ...p,
-        last: s.last_uid > 0 ? `${s.last_uid} 封 · ${s.last_synced_at.slice(11, 16)}` : "未连接",
+      const s = await getSyncState(id);
+      const syncedAt = s.last_synced_at
+        ? new Date(s.last_synced_at).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : "—";
+      setState({
+        last: s.last_uid > 0 ? `${s.last_uid} 封 · ${syncedAt}` : "已连接",
         uid: s.last_uid,
-      }));
+        busy: s.busy,
+        connected: true,
+      });
     } catch {
-      // ignore
+      setState({ last: "未连接", uid: 0, busy: false, connected: false });
     }
   };
 
+  createResource(() => accountId(), refresh);
+
   refresh();
-  const interval = window.setInterval(refresh, 60_000);
+  const interval = window.setInterval(refresh, 10_000);
   onCleanup(() => clearInterval(interval));
 
   const manual = async () => {
-    if (state().busy) return;
+    const id = accountId();
+    if (!id || state().busy) return;
     setState((p) => ({ ...p, busy: true }));
     try {
-      await syncNow(DEFAULT_ACCT);
+      await syncNow(id);
       showToast({ message: "正在从 IMAP 同步…", kind: "info", ttlMs: 2000 });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -172,17 +199,18 @@ function SyncBadge() {
   return (
     <button
       onClick={manual}
-      title={`IMAP · 账户 ${DEFAULT_ACCT} · 点击手动同步`}
+      title={`IMAP · ${accountId() ?? "无账户"} · 点击手动同步`}
       style={{
         display: "flex",
         "align-items": "center",
         gap: "var(--space-1)",
         padding: "4px 10px",
         "border-radius": "var(--radius-pill)",
-        background: "var(--paper-mid)",
-        color: "var(--text-secondary)",
+        background: state().connected ? "var(--palm-soft)" : "var(--paper-mid)",
+        color: state().connected ? "var(--palm)" : "var(--text-secondary)",
         "font-size": "var(--text-micro)",
         "font-weight": "600",
+        transition: "background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out)",
       }}
     >
       <Icon name={state().busy ? "spinner" : "arrows-clockwise"} size={11} />

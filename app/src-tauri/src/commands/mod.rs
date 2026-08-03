@@ -28,13 +28,36 @@ pub async fn sync_now(
     let client = ImapClient::new(creds);
     let state = app.state::<crate::services::state::SyncStateStore>();
     let prev = state.get(&account_id);
-    let bundle = client.sync(&mailbox, prev.last_uid).await?;
+    state.put(
+        &account_id,
+        crate::services::state::AccountSyncState {
+            uid_validity: prev.uid_validity,
+            last_uid: prev.last_uid,
+            last_synced_at: prev.last_synced_at,
+            busy: true,
+        },
+    );
+    let result = client.sync(&mailbox, prev.last_uid).await;
+    let bundle = match result {
+        Ok(b) => b,
+        Err(e) => {
+            state.put(
+                &account_id,
+                crate::services::state::AccountSyncState {
+                    busy: false,
+                    ..prev
+                },
+            );
+            return Err(e);
+        }
+    };
     state.put(
         &account_id,
         crate::services::state::AccountSyncState {
             uid_validity: bundle.uid_validity,
             last_uid: bundle.highest_uid,
             last_synced_at: chrono::Utc::now(),
+            busy: false,
         },
     );
     Ok(bundle.report(&account_id, bundle.messages.len(), 0))
@@ -71,6 +94,7 @@ pub async fn get_sync_state(
         uid_validity: s.uid_validity,
         last_uid: s.last_uid,
         last_synced_at: s.last_synced_at.to_rfc3339(),
+        busy: s.busy,
     })
 }
 
@@ -110,4 +134,5 @@ pub struct SyncStateDto {
     pub uid_validity: u32,
     pub last_uid: u32,
     pub last_synced_at: String,
+    pub busy: bool,
 }

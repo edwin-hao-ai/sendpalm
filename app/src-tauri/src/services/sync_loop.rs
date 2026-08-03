@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 use tauri::async_runtime::spawn;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// When IDLE fails (server doesn't support it, connection drop, etc.), wait
 /// this long before the next sync attempt.
@@ -111,10 +111,49 @@ async fn sync_and_notify(
     client: &ImapClient,
     account: &mut SyncAccount,
 ) -> Result<(), String> {
+    let store = app.state::<crate::services::state::SyncStateStore>();
+    store.put(
+        &account.account_id,
+        crate::services::state::AccountSyncState {
+            uid_validity: account.uid_validity,
+            last_uid: account.last_uid,
+            last_synced_at: chrono::Utc::now(),
+            busy: true,
+        },
+    );
+
     let previous_last_uid = account.last_uid;
-    let (n, new_last_uid, new_uv) = sync_one(app, pool, client, account, previous_last_uid).await?;
+    let result = sync_one(app, pool, client, account, previous_last_uid).await;
+
+    let (n, new_last_uid, new_uv) = match result {
+        Ok(r) => r,
+        Err(e) => {
+            store.put(
+                &account.account_id,
+                crate::services::state::AccountSyncState {
+                    uid_validity: account.uid_validity,
+                    last_uid: account.last_uid,
+                    last_synced_at: chrono::Utc::now(),
+                    busy: false,
+                },
+            );
+            return Err(e);
+        }
+    };
+
     account.last_uid = new_last_uid;
     account.uid_validity = new_uv;
+
+    store.put(
+        &account.account_id,
+        crate::services::state::AccountSyncState {
+            uid_validity: new_uv,
+            last_uid: new_last_uid,
+            last_synced_at: chrono::Utc::now(),
+            busy: false,
+        },
+    );
+
     if n > 0 {
         eprintln!("[sync] inserted {} new message(s) for {}", n, account.account_id);
     }

@@ -30,6 +30,7 @@ export interface SyncStateDto {
   uid_validity: number;
   last_uid: number;
   last_synced_at: string;
+  busy: boolean;
 }
 
 export interface EmailProvider {
