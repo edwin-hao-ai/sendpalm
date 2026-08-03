@@ -1,5 +1,6 @@
 /** Topbar — search, view title, notification bell, avatar. */
 
+import { Show } from "solid-js";
 import { Icon } from "./Icon";
 import {
   commandPaletteOpen,
@@ -14,7 +15,7 @@ import { NAV_SECTIONS } from "../utils/labels";
 import { Avatar } from "./Avatar";
 import { getSyncState, syncNow } from "../services/backend";
 import { createSignal, onCleanup, createResource } from "solid-js";
-import { listAccounts } from "../stores/data";
+import { listAccounts, countUnreadNotifications } from "../stores/data";
 
 export function Topbar() {
   const currentTitle = () => {
@@ -101,14 +102,7 @@ export function Topbar() {
         >
           <Icon name="ph-lightning" size={18} />
         </button>
-        <button
-          onClick={() => setNotificationsOpen(!notificationsOpen())}
-          title="Notifications"
-          aria-label="Notifications"
-          style={iconButtonStyle}
-        >
-          <Icon name="ph-bell" size={18} />
-        </button>
+        <NotificationBell onClick={() => setNotificationsOpen(!notificationsOpen())} />
         <Avatar name="Edwin Hao" size={28} />
       </div>
     </header>
@@ -126,9 +120,55 @@ const iconButtonStyle = {
   transition: "background var(--duration-fast) var(--ease-out)",
 };
 /**
- * Tiny badge in the topbar showing the last IMAP sync time + a manual
- * "Sync now" button. Auto-refreshes every 10 s. Shows a spinner while syncing.
+ * Bell icon with unread count badge, auto-refreshed every 10 s and
+ * refetched when the panel is opened/closed.
  */
+function NotificationBell(props: { onClick: () => void }) {
+  const [count, { refetch }] = createResource(countUnreadNotifications);
+
+  // Keep badge fresh while the app is running.
+  const interval = window.setInterval(() => refetch(), 10_000);
+  onCleanup(() => clearInterval(interval));
+
+  const n = () => count() ?? 0;
+
+  return (
+    <button
+      onClick={() => {
+        props.onClick();
+        refetch();
+      }}
+      title="Notifications"
+      aria-label="Notifications"
+      style={{ ...iconButtonStyle, position: "relative" }}
+    >
+      <Icon name="ph-bell" size={18} />
+      <Show when={n() > 0}>
+        <span
+          style={{
+            position: "absolute",
+            top: "4px",
+            right: "4px",
+            "min-width": "14px",
+            height: "14px",
+            padding: "0 4px",
+            "border-radius": "var(--radius-pill)",
+            background: "var(--palm)",
+            color: "#fff",
+            "font-size": "9px",
+            "font-weight": "700",
+            display: "flex",
+            "align-items": "center",
+            "justify-content": "center",
+          }}
+        >
+          {n() > 99 ? "99+" : n()}
+        </span>
+      </Show>
+    </button>
+  );
+}
+
 function SyncBadge() {
   const [accounts] = createResource(listAccounts);
   const [state, setState] = createSignal<{

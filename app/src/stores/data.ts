@@ -938,6 +938,14 @@ export async function listNotifications(): Promise<Notification[]> {
   return rows.map(rowToNotification);
 }
 
+export async function countUnreadNotifications(): Promise<number> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    "SELECT COUNT(*) AS cnt FROM notifications WHERE read = 0"
+  );
+  return Number(rows[0]?.cnt ?? 0);
+}
+
 export async function upsertNotification(n: Notification): Promise<void> {
   const db = await getDb();
   await db.execute(
