@@ -364,6 +364,7 @@ function SyncBadge() {
       </Show>
       <Show when={open()}>
         <div
+          data-sync-overlay
           onClick={() => setOpen(false)}
           style={{
             position: "fixed",

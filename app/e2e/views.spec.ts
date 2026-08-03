@@ -174,6 +174,31 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     await shoot(page, "13-add-account");
   });
 
+  test("Topbar sync badge opens multi-account popover with empty-state hint", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    // The badge reads "未连接" when no accounts are configured.
+    await expect(page.getByText("未连接")).toBeVisible({ timeout: 5_000 });
+    await shoot(page, "14a-sync-badge-closed");
+
+    // Click the badge to open the popover.
+    await page.locator("[data-sync-badge]").click();
+    await expect(page.locator("[data-sync-popover]")).toBeVisible({
+      timeout: 3_000,
+    });
+    // Empty-state copy is shown.
+    await expect(
+      page.getByText(/请到 Settings → Accounts 添加邮箱账户/),
+    ).toBeVisible();
+    await shoot(page, "14b-sync-badge-popover");
+
+    // Click the backdrop overlay to close.
+    await page.locator("[data-sync-popover]").waitFor();
+    await page.locator("[data-sync-overlay]").click();
+    await expect(page.locator("[data-sync-popover]")).toHaveCount(0);
+  });
+
   test("Command palette opens with ⌘K and shows search across views/people", async ({
     page,
   }) => {
