@@ -4,7 +4,7 @@
 
 import { For, Show, createResource, createSignal } from "solid-js";
 import {
-  listAccounts, upsertAccount,
+  listAccounts, upsertAccount, deleteAccount,
   listLabels, upsertLabel, deleteLabel,
   listShortcuts, upsertShortcut,
   listContacts,
@@ -19,7 +19,7 @@ import type { Account, AccountSettings, Label, Shortcut } from "../types";
 import { isoNow } from "../utils/date";
 import { load, STORE_PATH } from "../bootstrap";
 import { listSnippets } from "../stores/data";
-import { listProviders as fetchProviders, vaultSave } from "../services/backend";
+import { listProviders as fetchProviders, vaultSave, vaultDelete, getSyncState } from "../services/backend";
 
 const TABS = [
   { id: "profile", label: "Profile", icon: "ph-user-circle" },
@@ -152,6 +152,44 @@ function ProfileTab() {
   );
 }
 
+function SyncStatus(props: { accountId: string }) {
+  const [state] = createResource(
+    () => props.accountId,
+    (id) => getSyncState(id),
+  );
+  return (
+    <span
+      style={{
+        "font-size": "var(--text-micro)",
+        color: state()?.busy ? "var(--palm)" : "var(--text-muted)",
+        "margin-left": "var(--space-2)",
+      }}
+    >
+      <Show when={state()} fallback="—">
+        {(s) => (
+          <>
+            <Show when={s().busy}>同步中 · </Show>
+            {s().last_synced_at === "未配置（无 Tauri runtime）"
+              ? "未配置"
+              : `最近同步 ${formatRelative(s().last_synced_at)}`}
+          </>
+        )}
+      </Show>
+    </span>
+  );
+}
+
+function formatRelative(iso: string): string {
+  if (!iso) return "—";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso;
+  const diff = Date.now() - t;
+  if (diff < 60_000) return "刚刚";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
+  return `${Math.floor(diff / 86_400_000)} 天前`;
+}
+
 function AccountsTab() {
   const [accounts, { refetch }] = createResource(listAccounts);
   const [editing, setEditing] = createSignal<Account | null>(null);
@@ -202,6 +240,7 @@ function AccountsTab() {
               <strong>{a.label}</strong>
               <p style={{ margin: "2px 0 0", "font-size": "var(--text-caption)", color: "var(--text-muted)" }}>
                 {a.email ?? `${a.type} · ${a.workspace ?? ""}`} · {a.status}
+                <SyncStatus accountId={a.id} />
               </p>
             </div>
             <button onClick={() => setEditing(a)} style={{ color: "var(--blurple)", "font-size": "var(--text-caption)", "font-weight": "700" }}>
@@ -212,7 +251,20 @@ function AccountsTab() {
       </For>
 
       <Show when={editing()}>
-        {(a) => <AccountEditModal account={a()} onClose={() => setEditing(null)} onSave={onSave} />}
+        {(a) => (
+          <AccountEditModal
+            account={a()}
+            onClose={() => setEditing(null)}
+            onSave={onSave}
+            onDelete={async (deleted) => {
+              await deleteAccount(deleted.id);
+              await vaultDelete(deleted.id).catch(() => undefined);
+              await refetch();
+              setEditing(null);
+              showToast({ message: `已删除账户 ${deleted.label}`, kind: "success" });
+            }}
+          />
+        )}
       </Show>
       <Show when={adding()}>
         <AddAccountModal onClose={() => setAdding(false)} />
@@ -365,7 +417,7 @@ function AddAccountModal(props: { onClose: () => void }) {
   );
 }
 
-function AccountEditModal(props: { account: Account; onClose: () => void; onSave: (a: Account) => void }) {
+function AccountEditModal(props: { account: Account; onClose: () => void; onSave: (a: Account) => void; onDelete: (a: Account) => Promise<void> }) {
   const [draft, setDraft] = createSignal<Account>(JSON.parse(JSON.stringify(props.account)));
   const d = () => draft();
 
@@ -377,6 +429,16 @@ function AccountEditModal(props: { account: Account; onClose: () => void; onSave
       width="640px"
       footer={
         <>
+          <button
+            onClick={async () => {
+              if (!confirm(`确定删除账户 ${d().label}？这将同时清除 Keychain 密码。`)) return;
+              await props.onDelete(d());
+            }}
+            style={{ padding: "8px 16px", "font-size": "var(--text-caption)", color: "var(--danger, #c33)", "font-weight": "700" }}
+          >
+            删除账户
+          </button>
+          <div style={{ flex: 1 }} />
           <button onClick={props.onClose} style={{ padding: "8px 16px", "font-size": "var(--text-caption)", color: "var(--text-secondary)" }}>
             取消
           </button>
