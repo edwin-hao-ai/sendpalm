@@ -74,8 +74,16 @@ pub async fn send_message(
     to: String,
     subject: String,
     body: String,
+    account_id: Option<String>,
 ) -> Result<SendResult, String> {
-    let creds = get_creds().await?;
+    // Resolve credentials: prefer the explicit account_id from the From selector;
+    // fall back to the test credentials when no account is selected (dev only).
+    let creds = match account_id.as_deref() {
+        Some(id) if !id.is_empty() => {
+            crate::services::sync_loop::resolve_account_credentials(id).await?
+        }
+        _ => get_creds().await?,
+    };
     let smtp = SmtpClient::new(creds);
     let from = smtp.creds().email.clone();
     let id = smtp.send(&from, &to, &subject, &body).await?;

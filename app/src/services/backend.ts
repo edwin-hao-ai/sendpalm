@@ -50,11 +50,13 @@ export async function sendEmailViaBackend(
   to: string,
   subject: string,
   body: string,
+  accountId?: string,
 ): Promise<{ message_id: string } | null> {
   return safeInvoke<{ message_id: string }>("send_message", {
     to,
     subject,
     body,
+    accountId,
   });
 }
 

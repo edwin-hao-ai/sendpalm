@@ -532,7 +532,38 @@ async fn upsert_contact(
     Ok(id)
 }
 
-async fn open_pool() -> Result<SqlitePool, String> {
+/// Resolve credentials for a single account by id, opening a fresh SQL pool.
+/// Used by Tauri commands (e.g. SMTP send) that need to authenticate without
+/// the background sync loop's pool.
+pub async fn resolve_account_credentials(
+    account_id: &str,
+) -> Result<EmailCredentials, String> {
+    let pool = open_pool().await?;
+    resolve_account_credentials_with_pool(&pool, account_id).await
+}
+
+pub async fn resolve_account_credentials_with_pool(
+    pool: &SqlitePool,
+    account_id: &str,
+) -> Result<EmailCredentials, String> {
+    let row = sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
+        "SELECT id, provider, email, settings_json FROM accounts WHERE id = $1"
+    )
+    .bind(account_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("load account {account_id}: {e}"))?;
+
+    let (id, provider, email, settings_json) = row
+        .ok_or_else(|| format!("account {account_id} not found"))?;
+    let email = email.unwrap_or_default();
+    if email.is_empty() {
+        return Err(format!("account {account_id} has no email"));
+    }
+    resolve_credentials(&id, &provider, &email, settings_json.as_deref()).await
+}
+
+pub async fn open_pool() -> Result<SqlitePool, String> {
     let path = db_path();
     let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", path.display()))
         .map_err(|e| format!("parse db url: {e}"))?

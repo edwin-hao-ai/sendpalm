@@ -120,7 +120,7 @@ export function Compose() {
     setSendMenuOpen(false);
     showToast({ message: "正在通过 SMTP 发送…", kind: "info", ttlMs: 2000 });
     try {
-      const result = await sendEmailViaBackend(recipient, subject, d.body);
+      const result = await sendEmailViaBackend(recipient, subject, d.body, d.accountId);
       await persistDraft("sent");
       setComposeOpen(false);
       if (result) {
