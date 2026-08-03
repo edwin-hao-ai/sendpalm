@@ -281,11 +281,14 @@ export function Imbox() {
                     display: "flex",
                     gap: "var(--space-3)",
                     padding: "var(--space-3)",
+                    "padding-left": cursorHere() ? "calc(var(--space-3) - 2px)" : "var(--space-3)",
                     "border-bottom": "0.5px solid var(--border)",
+                    "border-left": cursorHere() ? "2px solid var(--palm)" : "2px solid transparent",
                     cursor: "pointer",
                     position: "relative",
                     background: cursorHere() ? "var(--palm-soft)" : "transparent",
-                    transition: "background var(--duration-fast) var(--ease-out), transform 0.18s var(--ease-out)",
+                    "box-shadow": cursorHere() ? "inset 2px 0 0 var(--palm)" : "none",
+                    transition: "background var(--duration-fast) var(--ease-out), transform 0.18s var(--ease-out), box-shadow var(--duration-fast) var(--ease-out)",
                     animation: i() < 12
                       ? `list-item-enter 0.34s var(--ease-out) both`
                       : undefined,
@@ -536,11 +539,20 @@ function BundleSummary(props: { bundle: Bundle; onOpen: (id: string) => void }) 
           "margin-top": "2px",
         }}
       >
-        <strong style={{ "font-weight": "700" }}>{last()?.subj}</strong>
+        <span
+          style={{
+            "font-family": "var(--font-display)",
+            "font-weight": "650",
+            "letter-spacing": "-0.012em",
+            color: "var(--text-primary)",
+          }}
+        >
+          {last()?.subj}
+        </span>
         <span style={{ color: "var(--text-muted)", "margin-left": "6px" }}>— {last()?.prev}</span>
       </div>
       <Show when={expanded()}>
-        <div style={{ "margin-top": "var(--space-3)", "padding-top": "var(--space-3)", "border-top": "0.5px dashed var(--border)" }}>
+        <div style={{ "margin-top": "var(--space-3)", "padding-top": "var(--space-3)", "border-top": "0.5px dashed var(--border)", animation: "list-item-enter 0.3s var(--ease-out) both" }}>
           <For each={props.bundle.messages}>
             {(m) => (
               <button

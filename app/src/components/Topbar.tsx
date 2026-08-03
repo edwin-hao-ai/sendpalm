@@ -160,6 +160,7 @@ function NotificationBell(props: { onClick: () => void }) {
             display: "flex",
             "align-items": "center",
             "justify-content": "center",
+            animation: "pulse-soft 1.8s ease-in-out infinite",
           }}
         >
           {n() > 99 ? "99+" : n()}
@@ -247,6 +248,7 @@ function SyncBadge() {
           color: aggregateConnected() ? "var(--palm)" : "var(--text-secondary)",
           "font-size": "var(--text-micro)",
           "font-weight": "600",
+          animation: aggregateBusy() ? "pulse-soft 1.6s ease-in-out infinite" : undefined,
           transition: "background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out)",
         }}
       >
