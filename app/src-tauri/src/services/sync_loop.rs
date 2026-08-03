@@ -2,23 +2,30 @@
 //! back to a short poll sleep if the server doesn't support IDLE.
 //!
 //! v2: supports multiple email accounts. Each account gets its own spawned
-//! task and IMAP session. Accounts are loaded once at startup from the
-//! `accounts` table; newly added accounts require an app restart for now.
+//! task and IMAP session. The account list is reloaded every minute so
+//! accounts added in Settings start syncing without an app restart.
 
 use crate::services::imap::{ImapClient, IDLE_TIMEOUT};
 use crate::services::providers;
 use crate::services::vault;
 use crate::services::{EmailCredentials, load_test_credentials};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
-use tauri::async_runtime::spawn;
+use tauri::async_runtime::{spawn, JoinHandle};
 use tauri::{AppHandle, Emitter, Manager};
 
 /// When IDLE fails (server doesn't support it, connection drop, etc.), wait
 /// this long before the next sync attempt.
 const IDLE_ERROR_BACKOFF: Duration = Duration::from_secs(60);
+
+/// How often we reload the `accounts` table to pick up newly added/removed
+/// accounts.
+const ACCOUNT_RELOAD_INTERVAL: Duration = Duration::from_secs(60);
 
 /// If the database has no configured email accounts, fall back to the
 /// `SENDPALM_TEST_*` credentials so `pnpm tauri dev` still syncs mail.
@@ -46,39 +53,61 @@ async fn run_loop(app: AppHandle) -> Result<(), String> {
     let pool = open_pool().await?;
     ensure_schema(&pool).await?;
 
-    let accounts = load_accounts(&pool).await?;
-    let accounts: Vec<SyncAccount> = if accounts.is_empty() && TEST_FALLBACK_ENABLED {
-        match build_test_fallback_account().await {
-            Ok(a) => vec![a],
-            Err(e) => {
-                eprintln!("[sync] no accounts configured and test fallback unavailable: {e}");
-                Vec::new()
+    // Per-account stop flags and join handles. The reload loop reconciles the
+    // DB account list against this map: starts missing accounts and signals
+    // removed/disabled accounts to stop.
+    let mut handles: std::collections::HashMap<String, (Arc<AtomicBool>, JoinHandle<()>)> =
+        std::collections::HashMap::new();
+
+    loop {
+        let desired = load_sync_accounts(&pool).await?;
+
+        // Start any account that isn't already running.
+        for account in &desired {
+            if !handles.contains_key(&account.account_id) {
+                let stop = Arc::new(AtomicBool::new(false));
+                let handle = spawn_account_loop(
+                    app.clone(),
+                    pool.clone(),
+                    account.clone(),
+                    stop.clone(),
+                );
+                handles.insert(account.account_id.clone(), (stop, handle));
             }
         }
-    } else {
-        accounts
-    };
 
-    if accounts.is_empty() {
-        eprintln!("[sync] no email accounts configured; background loop is idle");
-        // Keep the function alive so the app doesn't repeatedly respawn. In a
-        // future iteration we'll reload the account list dynamically.
-        loop {
-            tokio::time::sleep(Duration::from_secs(300)).await;
+        // Signal removed/disabled accounts to stop, then drop their handles.
+        let desired_ids: HashSet<String> =
+            desired.iter().map(|a| a.account_id.clone()).collect();
+        let to_remove: Vec<String> = handles
+            .keys()
+            .filter(|k| !desired_ids.contains(*k))
+            .cloned()
+            .collect();
+        for id in to_remove {
+            if let Some((stop, handle)) = handles.remove(&id) {
+                stop.store(true, Ordering::Relaxed);
+                handle.abort();
+                eprintln!("[sync] stopped account loop for {id}");
+            }
         }
-    }
 
-    eprintln!("[sync] starting background loops for {} account(s)", accounts.len());
-    for account in accounts {
-        spawn_account_loop(app.clone(), pool.clone(), account);
-    }
+        if desired.is_empty() && !handles.is_empty() {
+            eprintln!("[sync] no email accounts configured; loops are idle");
+        }
 
-    Ok(())
+        tokio::time::sleep(ACCOUNT_RELOAD_INTERVAL).await;
+    }
 }
 
 /// Spawn a dedicated per-account task. The task owns its own IMAP session and
-/// loops forever (initial sync → IDLE → sync on trigger).
-fn spawn_account_loop(app: AppHandle, pool: SqlitePool, mut account: SyncAccount) {
+/// loops forever (initial sync → IDLE → sync on trigger) until `stop` is set.
+fn spawn_account_loop(
+    app: AppHandle,
+    pool: SqlitePool,
+    mut account: SyncAccount,
+    stop: Arc<AtomicBool>,
+) -> JoinHandle<()> {
     spawn(async move {
         // Restore last_uid/uid_validity from app_kv.
         if let Ok(Some(json)) = load_sync_state(&pool, &account.account_id).await {
@@ -99,14 +128,24 @@ fn spawn_account_loop(app: AppHandle, pool: SqlitePool, mut account: SyncAccount
 
         let client = ImapClient::new(account.creds.clone());
 
-        if let Err(e) = sync_and_notify(&app, &pool, &client, &mut account).await {
-            eprintln!("[sync] initial sync failed for {}: {e}", account.account_id);
-            tokio::time::sleep(IDLE_ERROR_BACKOFF).await;
+        if !stop.load(Ordering::Relaxed) {
+            if let Err(e) = sync_and_notify(&app, &pool, &client, &mut account).await {
+                eprintln!("[sync] initial sync failed for {}: {e}", account.account_id);
+                tokio::time::sleep(IDLE_ERROR_BACKOFF).await;
+            }
         }
 
         loop {
+            if stop.load(Ordering::Relaxed) {
+                eprintln!("[sync] stopping account loop for {}", account.account_id);
+                break;
+            }
+
             match client.idle_wait("INBOX", IDLE_TIMEOUT).await {
                 Ok(()) => {
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
                     eprintln!("[sync] IDLE triggered for {}, syncing", account.account_id);
                     if let Err(e) = sync_and_notify(&app, &pool, &client, &mut account).await {
                         eprintln!("[sync] sync failed for {}: {e}", account.account_id);
@@ -118,6 +157,9 @@ fn spawn_account_loop(app: AppHandle, pool: SqlitePool, mut account: SyncAccount
                         "[sync] IDLE failed for {}: {e}; falling back to poll",
                         account.account_id
                     );
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
                     if let Err(e) = sync_and_notify(&app, &pool, &client, &mut account).await {
                         eprintln!("[sync] fallback sync failed for {}: {e}", account.account_id);
                     }
@@ -125,7 +167,7 @@ fn spawn_account_loop(app: AppHandle, pool: SqlitePool, mut account: SyncAccount
                 }
             }
         }
-    });
+    })
 }
 
 async fn build_test_fallback_account() -> Result<SyncAccount, String> {
@@ -139,6 +181,24 @@ async fn build_test_fallback_account() -> Result<SyncAccount, String> {
         uid_validity: 0,
         enabled: true,
     })
+}
+
+async fn load_sync_accounts(pool: &SqlitePool) -> Result<Vec<SyncAccount>, String> {
+    let db_accounts = load_accounts(pool).await?;
+    if !db_accounts.is_empty() {
+        return Ok(db_accounts);
+    }
+    if TEST_FALLBACK_ENABLED {
+        match build_test_fallback_account().await {
+            Ok(a) => Ok(vec![a]),
+            Err(e) => {
+                eprintln!("[sync] no accounts configured and test fallback unavailable: {e}");
+                Ok(Vec::new())
+            }
+        }
+    } else {
+        Ok(Vec::new())
+    }
 }
 
 async fn load_accounts(pool: &SqlitePool) -> Result<Vec<SyncAccount>, String> {
