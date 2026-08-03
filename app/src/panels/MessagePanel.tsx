@@ -94,6 +94,8 @@ const [trackerExpanded, setTrackerExpanded] = createSignal(false);
   let pullStartY = 0;
   let pullActivePointer: number | null = null;
 
+  let heroEl: HTMLDivElement | undefined;
+
   // Sorted message list used to determine next/previous neighbours.
   const sortedMessages = createMemo(() => {
     const list = allMessages() ?? [];
@@ -119,14 +121,20 @@ const [trackerExpanded, setTrackerExpanded] = createSignal(false);
     if (m) setSelectedMessageId(m.id);
   }
 
-  // Auto-scroll to top whenever the displayed message changes.
+  // Auto-scroll to top and replay the entry animation whenever the
+  // displayed message changes.
   createEffect(() => {
     // Track message id.
     props.messageId;
-    // Defer to next frame so the new content has rendered before we
-    // measure; otherwise the previous message's scrollTop sticks around.
+    // Replay the entry animation by clearing it and forcing reflow.
     queueMicrotask(() => {
       if (scrollEl) scrollEl.scrollTo({ top: 0, behavior: "smooth" });
+      if (heroEl) {
+        heroEl.style.animation = "none";
+        // Force reflow so the browser registers the reset.
+        void heroEl.offsetHeight;
+        heroEl.style.animation = "message-detail-enter 0.28s var(--ease-out) both";
+      }
     });
   });
 
@@ -382,7 +390,16 @@ const [trackerExpanded, setTrackerExpanded] = createSignal(false);
           }}
         >
           {/* Hero */}
-          <div style={{ display: "flex", "align-items": "center", gap: "var(--space-3)", "margin-bottom": "var(--space-4)", animation: "message-detail-enter 0.28s var(--ease-out) both" }}>
+          <div
+            ref={(el) => (heroEl = el)}
+            style={{
+              display: "flex",
+              "align-items": "center",
+              gap: "var(--space-3)",
+              "margin-bottom": "var(--space-4)",
+              animation: "message-detail-enter 0.28s var(--ease-out) both",
+            }}
+          >
             <Avatar name={contact()!.name} src={contact()!.avatar} size={40} />
             <div>
               <strong>{contact()!.name}</strong>
