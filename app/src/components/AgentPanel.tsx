@@ -11,6 +11,7 @@ import {
 import { Icon } from "../components/Icon";
 import { Empty } from "../components/Empty";
 import { setAgentPanelOpen, setDetailOpen, setSelectedDraftId, showToast } from "../stores/ui";
+import { PanelResizeHandle } from "./PanelResizeHandle";
 import { uid } from "../utils/id";
 import { isoNow, relativeTime } from "../utils/date";
 import type { AgentSession, AgentTask, AgentDraft, AgentSessionKind } from "../types";
@@ -129,8 +130,10 @@ export function AgentPanel() {
         display: "flex",
         "flex-direction": "column",
         height: "100%",
+        position: "relative",
       }}
     >
+      <PanelResizeHandle panel="agent" side="left" />
       {/* Header */}
       <div
         style={{

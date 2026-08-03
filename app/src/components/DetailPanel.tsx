@@ -17,6 +17,7 @@ import { MeetingPanel } from "../panels/MeetingPanel";
 import { FilePanel } from "../panels/FilePanel";
 import { TaskPanel } from "../panels/TaskPanel";
 import { DraftPanel } from "../panels/DraftPanel";
+import { PanelResizeHandle, initializePanelWidths } from "./PanelResizeHandle";
 
 export function DetailPanel() {
   return (
@@ -26,7 +27,9 @@ export function DetailPanel() {
         classList={{
           open: detailOpen(),
         }}
+        style={{ position: "relative" }}
       >
+        <PanelResizeHandle panel="detail" side="left" />
         <Switch fallback={<Empty />}>
           <Match when={selectedContactId()}>{(id) => <ContactPanel contactId={id()} />}</Match>
           <Match when={selectedMessageId()}>{(id) => <MessagePanel messageId={id()} />}</Match>
@@ -42,6 +45,9 @@ export function DetailPanel() {
     </Show>
   );
 }
+
+// Ensure CSS variables match stored widths when this module loads.
+initializePanelWidths();
 
 function Empty() {
   return (

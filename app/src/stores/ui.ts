@@ -4,7 +4,7 @@
  * Persistent state lives in the tauri-plugin-store (see data.ts APP_SETTINGS_KEY).
  */
 
-import { createSignal, createMemo } from "solid-js";
+import { createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 import type {
   AgentMemory,
@@ -62,6 +62,9 @@ export const [peopleGroupBy, setPeopleGroupBy] = createSignal<PeopleGroupBy>("al
 
 export const [detailOpen, setDetailOpen] = createSignal(false);
 export const [agentPanelOpen, setAgentPanelOpen] = createSignal(false);
+
+export const [detailPanelWidth, setDetailPanelWidth] = createSignal(380);
+export const [agentPanelWidth, setAgentPanelWidth] = createSignal(340);
 
 export const [composeOpen, setComposeOpen] = createSignal(false);
 export const [composeMinimized, setComposeMinimized] = createSignal(false);
@@ -166,4 +169,4 @@ export function dismissToast(id: ID) {
   setToasts((xs) => xs.filter((t) => t.id !== id));
 }
 
-export const unreadNotificationCount = createMemo(() => 0); // wired in M4
+export const [unreadNotificationCount, setUnreadNotificationCount] = createSignal(0);
