@@ -2,7 +2,7 @@
  * Spec: prototype-v11 §3.3 + P4 features.
  */
 
-import { Show, For, createMemo, createResource, createSignal } from "solid-js";
+import { Show, For, createMemo, createResource, createSignal, createEffect } from "solid-js";
 import {
   getContact,
   getMessage,
@@ -31,7 +31,7 @@ export function MessagePanel(props: { messageId: string }) {
     () => message()?.pid ?? "",
     (pid) => getContact(pid)
   );
-  const [, { refetch: refetchAll }] = createResource(listMessages);
+  const [allMessages, { refetch: refetchAll }] = createResource(listMessages);
   const [stickies, { refetch: refetchStickies }] = createResource(listStickies);
   const [followUps, { refetch: refetchFU }] = createResource(listFollowUps);
 
@@ -76,6 +76,136 @@ const trackerTypes = () => {
 };
 
 const [trackerExpanded, setTrackerExpanded] = createSignal(false);
+
+  /* ── Pull-to-navigate (iOS-Mail style) ─────────────────────────
+   * At the top of a message, pulling DOWN advances to the next (newer)
+   * message. At the bottom, pulling UP returns to the previous one.
+   * The gesture only fires when the scroll container is already at the
+   * edge, so normal reading is never interrupted.
+   */
+  let scrollEl: HTMLDivElement | undefined;
+  const PULL_THRESHOLD = 90; // px of overscroll needed to commit
+  const PULL_MAX = 140;      // clamp visual stretch
+  type PullKind = "down-next" | "up-prev" | null;
+  const [pullKind, setPullKind] = createSignal<PullKind>(null);
+  const [pullDist, setPullDist] = createSignal(0);
+  let pullOrigin: "top" | "bottom" | null = null;
+  let pullStartY = 0;
+  let pullActivePointer: number | null = null;
+
+  // Sorted message list used to determine next/previous neighbours.
+  const sortedMessages = createMemo(() => {
+    const list = allMessages() ?? [];
+    return [...list].sort((a, b) => (b.st ?? "").localeCompare(a.st ?? ""));
+  });
+
+  const currentIndex = createMemo(() => {
+    const id = props.messageId;
+    return sortedMessages().findIndex((m) => m.id === id);
+  });
+
+  const nextMessage = () => sortedMessages()[currentIndex() + 1] ?? null;
+  const prevMessage = () => sortedMessages()[currentIndex() - 1] ?? null;
+
+  // We need `allMessages` from the resource created above. Hoist a local
+  // alias so the createMemo below can read it.
+  function goNext() {
+    const m = nextMessage();
+    if (m) setSelectedMessageId(m.id);
+  }
+  function goPrev() {
+    const m = prevMessage();
+    if (m) setSelectedMessageId(m.id);
+  }
+
+  // Auto-scroll to top whenever the displayed message changes.
+  createEffect(() => {
+    // Track message id.
+    props.messageId;
+    // Defer to next frame so the new content has rendered before we
+    // measure; otherwise the previous message's scrollTop sticks around.
+    queueMicrotask(() => {
+      if (scrollEl) scrollEl.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  });
+
+  function atTop() {
+    return !scrollEl || scrollEl.scrollTop <= 0;
+  }
+  function atBottom() {
+    if (!scrollEl) return false;
+    return scrollEl.scrollTop + scrollEl.clientHeight >= scrollEl.scrollHeight - 1;
+  }
+
+  function onPullPointerDown(e: PointerEvent) {
+    if (e.pointerType === "mouse") return; // mouse scroll wheel already works
+    if (e.button !== 0) return;
+    if (!atTop() && !atBottom()) return;
+    pullStartY = e.clientY;
+    pullActivePointer = e.pointerId;
+    pullOrigin = atTop() ? "top" : "bottom";
+    setPullKind(pullOrigin === "top" ? "down-next" : "up-prev");
+    setPullDist(0);
+    try {
+      (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function onPullPointerMove(e: PointerEvent) {
+    if (pullActivePointer !== e.pointerId) return;
+    if (!pullOrigin) return;
+    // Bail out the moment the user scrolls inward past the edge — the
+    // gesture was a mistake (probably a swipe-into-content).
+    if (pullOrigin === "top" && scrollEl && scrollEl.scrollTop > 0) {
+      resetPull();
+      return;
+    }
+    if (pullOrigin === "bottom" && !atBottom()) {
+      resetPull();
+      return;
+    }
+    const dy = e.clientY - pullStartY;
+    let distance = 0;
+    if (pullOrigin === "top" && dy > 0) distance = Math.min(dy, PULL_MAX);
+    else if (pullOrigin === "bottom" && dy < 0) distance = Math.min(-dy, PULL_MAX);
+    setPullDist(distance);
+  }
+
+  function onPullPointerUp(e: PointerEvent) {
+    if (pullActivePointer !== e.pointerId) return;
+    const distance = pullDist();
+    const kind = pullKind();
+    pullActivePointer = null;
+    pullOrigin = null;
+    if (distance >= PULL_THRESHOLD && kind) {
+      // Commit the navigation with a spring snap.
+      setPullDist(PULL_MAX);
+      setTimeout(() => {
+        if (kind === "down-next") goNext();
+        else goPrev();
+        setPullKind(null);
+        setPullDist(0);
+      }, 160);
+    } else {
+      // Spring back to the resting position.
+      setPullDist(0);
+      setPullKind(null);
+    }
+    try {
+      (e.currentTarget as Element).releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function resetPull() {
+    pullActivePointer = null;
+    pullOrigin = null;
+    setPullKind(null);
+    setPullDist(0);
+  }
 
   const stickyForMsg = createMemo<Sticky[]>(() =>
     (stickies() ?? []).filter((s) => s.msgId === props.messageId)
@@ -146,6 +276,7 @@ const [trackerExpanded, setTrackerExpanded] = createSignal(false);
         display: "flex",
         "flex-direction": "column",
         height: "100%",
+        position: "relative",
         animation: "panel-slide 0.28s var(--ease-out) both",
       }}
     >
@@ -227,9 +358,30 @@ const [trackerExpanded, setTrackerExpanded] = createSignal(false);
       </Show>
 
       <Show when={message() && contact()}>
-        <div style={{ padding: "var(--space-5)", flex: 1, "overflow-y": "auto" }}>
+        <div
+          ref={(el) => (scrollEl = el)}
+          onPointerDown={onPullPointerDown}
+          onPointerMove={onPullPointerMove}
+          onPointerUp={onPullPointerUp}
+          onPointerCancel={onPullPointerUp}
+          style={{
+            padding: "var(--space-5)",
+            flex: 1,
+            "overflow-y": "auto",
+            "overscroll-behavior": "contain",
+            transform: pullKind() === "down-next"
+              ? `translateY(${pullDist() * 0.55}px)`
+              : pullKind() === "up-prev"
+                ? `translateY(-${pullDist() * 0.55}px)`
+                : "translateY(0)",
+            transition: pullActivePointer === null
+              ? "transform 0.42s cubic-bezier(0.175, 0.885, 0.32, 1.275)"
+              : "none",
+            "touch-action": "pan-y",
+          }}
+        >
           {/* Hero */}
-          <div style={{ display: "flex", "align-items": "center", gap: "var(--space-3)", "margin-bottom": "var(--space-4)" }}>
+          <div style={{ display: "flex", "align-items": "center", gap: "var(--space-3)", "margin-bottom": "var(--space-4)", animation: "message-detail-enter 0.28s var(--ease-out) both" }}>
             <Avatar name={contact()!.name} src={contact()!.avatar} size={40} />
             <div>
               <strong>{contact()!.name}</strong>
@@ -255,6 +407,8 @@ const [trackerExpanded, setTrackerExpanded] = createSignal(false);
               "font-size": "var(--text-body-sm)",
               color: "var(--text-secondary)",
               "line-height": 1.6,
+              "overflow-wrap": "anywhere",
+              "word-break": "break-word",
             }}
           >
             {message()!.body}
@@ -338,6 +492,56 @@ const [trackerExpanded, setTrackerExpanded] = createSignal(false);
             </For>
           </Show>
         </div>
+
+        {/* Pull-to-navigate indicator */}
+        <Show when={pullKind() && pullDist() > 0}>
+          <div
+            data-pull-indicator
+            style={{
+              position: "absolute",
+              left: "50%",
+              transform: `translateX(-50%) translateY(${pullKind() === "down-next" ? -pullDist() : pullDist()}px)`,
+              padding: "10px 16px",
+              background: "var(--surface-elevated)",
+              border: "0.5px solid var(--border)",
+              "border-radius": "var(--radius-pill)",
+              "box-shadow": "0 6px 18px rgba(0,0,0,0.12)",
+              display: "flex",
+              "align-items": "center",
+              gap: "8px",
+              "font-size": "var(--text-caption)",
+              "font-weight": "600",
+              color: "var(--text-primary)",
+              "z-index": "var(--z-popover)",
+              top: pullKind() === "down-next" ? "0" : "auto",
+              bottom: pullKind() === "up-prev" ? "0" : "auto",
+              opacity: Math.min(1, pullDist() / 60),
+              transition: pullActivePointer === null
+                ? "transform 0.42s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.2s ease-out"
+                : "none",
+              "white-space": "nowrap",
+              "max-width": "calc(100% - 32px)",
+              overflow: "hidden",
+              "text-overflow": "ellipsis",
+              "pointer-events": "none",
+            }}
+          >
+            <Icon
+              name={pullKind() === "down-next" ? "ph-arrow-down" : "ph-arrow-up"}
+              size={14}
+            />
+            <span style={{
+              overflow: "hidden",
+              "text-overflow": "ellipsis",
+              "white-space": "nowrap",
+            }}>
+              {pullKind() === "down-next" ? "下一封: " : "上一封: "}
+              <Show when={pullKind() === "down-next" ? nextMessage() : prevMessage()} fallback="（已是最后一封）">
+                {(m) => m().subj}
+              </Show>
+            </span>
+          </div>
+        </Show>
 
         {/* Bottom action bar */}
         <div

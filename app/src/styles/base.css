@@ -47,6 +47,7 @@ h6 {
 
 p {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 a {

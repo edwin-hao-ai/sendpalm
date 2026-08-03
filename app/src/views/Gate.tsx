@@ -198,6 +198,8 @@ export function Gate() {
                     color: "var(--text-secondary)",
                     "line-height": 1.5,
                     "white-space": "pre-wrap",
+                    "overflow-wrap": "anywhere",
+                    "word-break": "break-word",
                   }}
                 >
                   {m().body}
