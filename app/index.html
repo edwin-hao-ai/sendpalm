@@ -2,14 +2,77 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0A8F63" />
+    <meta name="color-scheme" content="light" />
+    <meta name="description" content="SendPalm — 一个安静的、HEY 风格的邮件 + 日历 + IM + Agent 工作区。100% 本地、端到端。" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="SendPalm" />
+
     <link rel="icon" type="image/svg+xml" href="/src/assets/favicon.svg" />
+    <link rel="apple-touch-icon" href="/src/assets/logo.svg" />
+
     <title>SendPalm</title>
+
+    <style>
+      /* Render the splash screen instantly, before the JS bundle loads.
+         Hidden the moment SolidJS mounts and shows its own UI. */
+      :root { color-scheme: light; }
+      html, body { margin: 0; padding: 0; height: 100%; }
+      body {
+        font-family: -apple-system, "SF Pro Text", "Segoe UI", Roboto,
+                     "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+        background: #0a8f63;
+        color: #fff;
+        overflow: hidden;
+      }
+      #splash {
+        position: fixed; inset: 0;
+        display: flex; align-items: center; justify-content: center;
+        flex-direction: column; gap: 18px;
+        background: radial-gradient(120% 80% at 50% 0%, #0cb87d 0%, #0a8f63 55%, #087f56 100%);
+        z-index: 9999;
+        animation: splash-fade 0.45s ease-out 0s 1 both,
+                   splash-out 0.55s ease-in 0.45s 1 forwards;
+      }
+      #splash .logo {
+        width: 112px; height: 112px;
+        animation: splash-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+        filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.18));
+      }
+      #splash .word {
+        font-size: 26px; font-weight: 800; letter-spacing: -0.02em;
+        opacity: 0; animation: splash-rise 0.5s ease-out 0.18s forwards;
+      }
+      #splash .word .accent { color: #c8f6dd; }
+      #splash .dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: rgba(255, 255, 255, 0.7);
+        opacity: 0; animation: splash-rise 0.5s ease-out 0.32s forwards,
+                            splash-pulse 1.4s ease-in-out 0.5s infinite;
+      }
+      @keyframes splash-fade { from { opacity: 0 } to { opacity: 1 } }
+      @keyframes splash-out  { to { opacity: 0; visibility: hidden; } }
+      @keyframes splash-pop  { 0% { transform: scale(0.7); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+      @keyframes splash-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+      @keyframes splash-pulse { 0%, 100% { opacity: 0.4 } 50% { opacity: 1 } }
+
+      /* Hide the splash the moment React/Solid mounts. */
+      body.app-ready #splash { display: none; }
+    </style>
+
     <script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run SendPalm.</noscript>
+
+    <div id="splash" aria-hidden="true">
+      <img class="logo" src="/src/assets/logo.svg" alt="" />
+      <div class="word">Send<span class="accent">Palm</span></div>
+      <div class="dot"></div>
+    </div>
+
     <div id="root"></div>
     <script src="/src/index.tsx" type="module"></script>
   </body>

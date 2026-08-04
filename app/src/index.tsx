@@ -12,3 +12,10 @@ import "./styles/base.css";
 import "./styles/animations.css";
 
 render(() => <App />, document.getElementById("root") as HTMLElement);
+
+// Once SolidJS has mounted, dismiss the pre-JS splash overlay declared in
+// index.html. Using a class (not `display:none` directly) so the splash's
+// own fade-out keyframes can play first.
+requestAnimationFrame(() => {
+  document.body.classList.add("app-ready");
+});
