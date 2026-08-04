@@ -16,7 +16,8 @@
 | **M7** | Settings + Onboarding | ✅ Done | 7 tabs (Profile/Accounts/Preferences/Agent/Labels/Data/Shortcuts) with live save to tauri-plugin-store, replay onboarding button, 4-step onboarding wizard |
 | **M8** | Mobile + Tablet responsive | ✅ Done | 3-tier CSS breakpoints (mobile <768 / tablet 768-1023 / desktop ≥1024), bottom-tab bar on mobile, full-screen modals on mobile, gesture helpers (useSwipe, useLongPress) |
 | **M9** | Polish + Accessibility | ✅ Done | Full keyboard shortcut system (PRD §3.17), ?-help modal, focus rings, semantic role attributes, keyboard nav (j/k/Enter/x in Imbox) |
-| **M10** | Real backend integration (IMAP / SMTP / vault / sync) | ✅ Done | `async-imap` + `lettre` + `keyring`, 10 provider registry, IMAP IDLE loop, real-time frontend event bridge, OS Keychain credential vault, 21 Rust integration tests (real Feishu), 17 Playwright E2E |
+| **M10** | Real backend integration (IMAP / SMTP / vault / sync) | ✅ Done | `async-imap` + `lettre` + `keyring`, 10 provider registry, IMAP IDLE loop, real-time frontend event bridge, OS Keychain credential vault, multi-account sync loop with hot-reload, iCal VEVENT extraction + "Add to calendar" Tauri command, 29 Rust tests (incl. per-provider invariants + ical parser), 20 Playwright E2E |
+| **M11** | Brand + splash + iOS verification | ✅ Done | Custom SendPalm logo (full / mark / wordmark SVGs), palm-green gradient splash with logo + wordmark + pulse dot, regenerated Tauri bundle icons (macOS / iOS / Android), `scripts/verify-ios.sh` smoke test, iPhone 17 + iPad overlays + iPad portrait/landscape E2E |
 
 ## Definition-of-Done status
 
@@ -59,4 +60,11 @@ Bundle:
 
 ```bash
 pnpm tauri build
+```
+
+iOS Simulator verification (requires Xcode + `aarch64-apple-ios-sim` target):
+
+```bash
+scripts/verify-ios.sh                # boots iPhone 17, builds, installs, screenshots
+scripts/verify-ios.sh "iPad Pro"     # boot iPad Pro 11-inch instead
 ```

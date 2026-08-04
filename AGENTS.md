@@ -305,7 +305,7 @@ When **everything** in PRD-v1.md is implemented and the user signs off, the goal
 
 ---
 
-## 10. Real backend integration (M10 — currently active)
+## 10. Real backend integration (M10 — done for v2; ongoing maintenance)
 
 SendPalm is **local-first**, but the user wants the email client to talk to **real IMAP/SMTP** servers so messages persist across devices.
 
@@ -356,3 +356,43 @@ Network tests are **gated** behind `if std::env::var("SENDPALM_E2E_NETWORK").is_
 - The app-specific password in `.env` is **read-only for app source**. Never log it.
 - IMAP/SMTP connections use TLS (`SslTunnel` for IMAP, `SmtpTransport::relay` over rustls for SMTP).
 - Sync metadata (UID, UIDVALIDITY) is persisted locally; message bodies pass through memory only.
+- **Auth mode per provider** (locked by `tests/providers_registry.rs`):
+  - `app-password` — Gmail, Outlook, iCloud, Yahoo, Fastmail, Feishu (requires the user to generate an app-specific password from the provider's security page).
+  - `password-with-auth-code` — QQ, 网易 163, 网易 126 (the login password does NOT work for SMTP/IMAP; the user must enable IMAP/SMTP in the webmail settings and copy the authorization code).
+- **Initial IMAP backfill walks chunks**, not a single page. `client.sync("INBOX", last_uid)` returns up to `MAX_PER_TICK = 200`; loop until a chunk isn't full. Without this, a mailbox with thousands of messages never gets fully backfilled.
+- **`.env` must be loaded before reading `SENDPALM_TEST_*`** in `sync_loop::resolve_credentials`. `load_test_credentials()` calls `dotenvy::dotenv()`; `resolve_credentials` re-calls it explicitly so the test-account fallback works when called before any `load_test_credentials`.
+- **Multi-account sync**: the background loop reads `accounts` every 60s (configurable via `ACCOUNT_RELOAD_INTERVAL`), spawns a per-account task, and signals existing tasks to stop via an `AtomicBool` + `JoinHandle::abort()`. New accounts added in Settings start syncing within ~60s without an app restart.
+- **Calendar invites (iCal)**: minimal in-tree parser in `services/ical.rs` (no `icalendar` crate dep). RFC 5545 line unfolding: drop `\r?\n[ \t]` and the leading whitespace of the continuation. VEVENT detection must check the **full line** for `VEVENT`, not just the name before `:` — `split(':').next()` returns `BEGIN` for both `BEGIN:VEVENT` and `BEGIN:VCALENDAR`. Cover with `tests/ical.rs`.
+- **First-seen contacts for Gate**: when `upsert_contact` runs from a brand-new IMAP sender, set `first_seen=1, screened=0` on insert (do NOT reset on `ON CONFLICT`). Backfill migration ensures legacy contacts also appear in the Gate screener.
+
+### 10.6 iOS Simulator verification (mobile smoke test)
+
+`scripts/verify-ios.sh` builds a debug bundle, installs it to a booted simulator, launches the app, and captures a screenshot into `docs/ios-screenshots/`. Pair with `pnpm e2e` (desktop Playwright viewport tests) — the two together cover both the responsive layouts and the real Tauri WKWebView boot.
+
+Prerequisites:
+
+- Xcode + iOS SDK (`xcodebuild -version`).
+- `rustup target add aarch64-apple-ios-sim`.
+- `pnpm` + `@tauri-apps/cli`.
+
+Pitfalls hit during mobile verification:
+
+- **`devUrl` hash/query don't survive into the WKWebView**: the iOS bundle's webview ignores `#onboard-skip` or `?foo=bar` appended to `tauri.conf.json`'s `devUrl`. Don't rely on URL params to drive JS behavior on iOS — use `tauri-plugin-deep-link` for real URL schemes or store flags via `tauri-plugin-store`.
+- **AppleScript / `osascript` clicks don't reach the Simulator's WKWebView** under macOS Accessibility permissions without an interactive prompt. The workaround is to bake the desired UI state into the build (e.g., the bootstrap's `IS_BROWSER()` fallback) or to dispatch via `xcrun simctl ui` (limited) / `xcrun simctl openurl <scheme>` (only works once a deep-link scheme is registered).
+- **`xcrun simctl` has no `tap` subcommand**. Use `cliclick` (Homebrew) or a registered deep-link scheme to drive UI in CI.
+- **Bundle rebuild drops cached outputs**: when iterating on `index.html` or icons, `rm -rf src-tauri/gen/apple/build` before the next `pnpm tauri ios build` to avoid "Directory not empty" rename errors.
+
+---
+
+## 11. Lessons learned (Session 2026-08-04)
+
+Captures the recurring traps the next agent should avoid. Detailed explanations live in `docs/lessons.md`.
+
+- **Animations**: `transform: translateY(0)` is what you animate, not `top`/`bottom` (GPU-accelerated). For spring physics use `cubic-bezier(0.175, 0.885, 0.32, 1.275)` (easeOutBack). Replay a CSS animation on prop change by setting `el.style.animation = 'none'; void el.offsetHeight; el.style.animation = '…'` — SolidJS doesn't reapply animation style changes otherwise.
+- **Long unbroken strings (URLs)**: any paragraph that may contain mailto:, https URLs, or tracking-pixel paths needs `overflow-wrap: anywhere` (modern; supersedes `word-break: break-all` for non-CJK text). Set this on a global `p { }` rule in `base.css` so it covers all current and future views.
+- **iCal parsing**: `split(':').next()` returns the *name* half (`BEGIN` for both `BEGIN:VEVENT` and `BEGIN:VCALENDAR`). To detect a specific block, check the **uppercased full line** for the block keyword, not the split-off name. Same gotcha for `split_property`.
+- **Sidebar**: don't pre-truncate labels (the original `slice(0, 5)` is hostile to long words like "Companies" or "Follow-ups"). Use the full label with `text-overflow: ellipsis` and `white-space: nowrap` and let the sidebar expand.
+- **Toast "View" action**: a toast with an action that navigates somewhere needs to also `setCalendarJumpTo`/`setView`/etc. — the action callback must be self-contained and idempotent because toasts are dismissable.
+- **Playwright on Tauri builds**: the splash overlay declared in `index.html` blocks Playwright from finding topbar text. Either dismiss the splash explicitly in tests (`await page.locator('body.app-ready').waitFor()`) or scope selectors to `#titlebar`.
+- **`cli.send_email_via_backend`** signature changes are silently breaking: the frontend shim returns `null` for unknown commands, so a renamed parameter produces no error — just a Compose that "sends" nothing. Always keep `safeInvoke<…>` parameter names in sync with the Rust `#[tauri::command]` argument names.
+- **Tauri store plugin**: the `sendpalm.prefs.json` file is written only after `store.save()`. If a view reads via `store.get(...)` and never calls `set+save`, the file does not exist on disk and any FS-level test will see `null`. In `bootstrap.ts`, always set `onboarding_completed=true; store.save()` so the file materializes.
