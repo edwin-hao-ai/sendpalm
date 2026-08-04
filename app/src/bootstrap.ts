@@ -54,6 +54,16 @@ export async function initApp() {
     if (IS_BROWSER()) {
       setOnboardingCompleted(true);
       setOnboardingStep(null);
+    } else if (
+      typeof window !== "undefined" &&
+      (window.location.hash.includes("onboard-skip") ||
+        window.location.search.includes("onboard-skip") ||
+        window.location.search.includes("sendpalm_dev_onboard_skip") ||
+        localStorage.getItem("sendpalm_dev_onboard_skip") === "1")
+    ) {
+      // Dev-only URL hash override for end-to-end mobile verification.
+      setOnboardingCompleted(true);
+      setOnboardingStep(null);
     } else {
       try {
         const store = await load(STORE_PATH);
