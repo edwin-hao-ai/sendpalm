@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="SendPalm mark">
+  <!-- Compact mark for use inside headers / chrome.
+       Same paper-plane + palm-leaf composition as the full logo,
+       transparent background so it inherits the surrounding surface color. -->
+
+  <!-- paper plane -->
+  <g transform="translate(64 70)">
+    <path d="M-38 -3 L46 -28 L20 18 L6 4 L-38 -3 Z M6 4 L20 18"
+          fill="#0a8f63" stroke="#0a8f63" stroke-width="1.6"
+          stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="M-50 10 L-32 10 M-50 18 L-38 18 M-50 26 L-44 26"
+          stroke="#0a8f63" stroke-width="2.2" stroke-linecap="round" stroke-opacity="0.55"/>
+  </g>
+
+  <!-- palm leaf -->
+  <g transform="translate(96 32) rotate(22)">
+    <path d="M0 22 Q14 8 36 -8" stroke="#0cb87d" stroke-width="2"
+          stroke-linecap="round" fill="none"/>
+    <path d="M36 -8 Q28 -18 20 -12 Q28 -8 36 -8 Z" fill="#0cb87d"/>
+    <path d="M28 -2 Q18 -10 14 -2 Q24 -2 28 -2 Z" fill="#0cb87d" transform="translate(0 4)"/>
+    <path d="M20 6 Q10 0 8 8 Q18 8 20 6 Z" fill="#0cb87d" transform="translate(0 8)"/>
+  </g>
+</svg>

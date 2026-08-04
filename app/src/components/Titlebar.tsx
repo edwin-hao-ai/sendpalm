@@ -34,13 +34,28 @@ export function Titlebar() {
     >
       <span
         style={{
-          "font-size": "11px",
-          "font-weight": "600",
+          display: "inline-flex",
+          "align-items": "center",
+          gap: "6px",
           color: "var(--text-muted)",
-          "letter-spacing": "0.04em",
         }}
       >
-        SendPalm
+        <img
+          src="/src/assets/logo-mark.svg"
+          alt=""
+          width="16"
+          height="16"
+          style={{ display: "block" }}
+        />
+        <span
+          style={{
+            "font-size": "11px",
+            "font-weight": "700",
+            "letter-spacing": "0.02em",
+          }}
+        >
+          SendPalm
+        </span>
       </span>
     </header>
   );

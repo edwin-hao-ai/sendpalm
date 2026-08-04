@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 96" role="img" aria-label="SendPalm">
+  <g transform="translate(8 8)">
+    <!-- mark -->
+    <g transform="translate(40 40)">
+      <path d="M-26 -2 L32 -20 L14 12 L4 3 L-26 -2 Z M4 3 L14 12"
+            fill="#0a8f63" stroke="#0a8f63" stroke-width="1.2"
+            stroke-linejoin="round" stroke-linecap="round"/>
+      <path d="M-34 6 L-22 6 M-34 12 L-26 12"
+            stroke="#0a8f63" stroke-width="1.6" stroke-linecap="round" stroke-opacity="0.55"/>
+    </g>
+    <g transform="translate(60 14) rotate(22)">
+      <path d="M0 16 Q10 6 26 -6" stroke="#0cb87d" stroke-width="1.6"
+            stroke-linecap="round" fill="none"/>
+      <path d="M26 -6 Q20 -12 14 -8 Q20 -6 26 -6 Z" fill="#0cb87d"/>
+      <path d="M20 -2 Q12 -8 10 -2 Q16 -2 20 -2 Z" fill="#0cb87d"/>
+    </g>
+  </g>
+
+  <!-- wordmark -->
+  <g transform="translate(108 64)" font-family="-apple-system, 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-weight="800" letter-spacing="-0.04em">
+    <text font-size="40" fill="#0a8f63">Send</text>
+    <text font-size="40" fill="#231c33" x="86">Palm</text>
+    <!-- subtle underscore dot to suggest "send" arrow -->
+    <circle cx="178" cy="48" r="3.5" fill="#0cb87d"/>
+  </g>
+</svg>
