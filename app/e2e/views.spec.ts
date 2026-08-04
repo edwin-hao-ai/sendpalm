@@ -31,7 +31,9 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     page,
   }) => {
     await page.goto("/");
-    await expect(page.locator("text=SendPalm").first()).toBeVisible();
+    // Wait for the splash overlay to fade and SolidJS to mount.
+    await page.locator("body.app-ready").waitFor({ timeout: 5_000 });
+    await expect(page.locator("#titlebar")).toContainText("SendPalm");
     // Search placeholder is there
     await expect(page.getByPlaceholder(/Search contacts/)).toBeVisible();
     // Sync badge is "未连接" because no real account in browser mode
