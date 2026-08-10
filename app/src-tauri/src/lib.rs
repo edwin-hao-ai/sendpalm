@@ -98,6 +98,12 @@ pub fn run() {
             sql: include_str!("../migrations/0013_event_all_day.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 14,
+            description: "normalize_gate_screened_state",
+            sql: include_str!("../migrations/0014_gate_screened_backfill.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     eprintln!("[sendpalm] starting tauri builder");
