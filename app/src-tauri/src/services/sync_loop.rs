@@ -692,7 +692,8 @@ async fn sync_folder(
         // we deliberately stay below bundle.highest_uid so the next tick retries the rest.
         cursor = chunk_last_ok;
         if !chunk_outcomes.iter().all(|(_, ok)| *ok) {
-            // Don't skip past failures within a chunk.
+            // Short-circuit: don't fetch another chunk after a partial failure
+            // (the cursor is already pinned to the last successful UID above).
             break;
         }
         if (bundle.messages.len() as u32) < crate::services::imap::MAX_PER_TICK {
