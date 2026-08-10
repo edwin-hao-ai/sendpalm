@@ -6,9 +6,10 @@
 import { For, Show, createSignal } from "solid-js";
 import { Portal } from "solid-js/web";
 import { Icon } from "./Icon";
+import { SidebarTooltip } from "./SidebarTooltip";
 import { setView, view } from "../stores/ui";
 import { NAV_SECTIONS, type NavSection } from "../utils/labels";
-import { useViewport } from "../utils/gestures";
+import { useLongPress, useViewport } from "../utils/gestures";
 
 const MOBILE_PRIMARY_VIEWS = new Set([
   "imbox",
@@ -98,102 +99,136 @@ function NavItem(props: {
   onClick: () => void;
 }) {
   const { isMobile } = useViewport();
+  let buttonRef: HTMLButtonElement | undefined;
+  const [tooltipAnchor, setTooltipAnchor] = createSignal<{
+    top: number;
+    left: number;
+    right: number;
+    bottom: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  let showTimer: number | undefined;
+
+  const showTooltip = () => {
+    if (!buttonRef) return;
+    setTooltipAnchor(buttonRef.getBoundingClientRect());
+  };
+  const hideTooltip = () => setTooltipAnchor(null);
+  const scheduleShow = () => {
+    if (showTimer) window.clearTimeout(showTimer);
+    showTimer = window.setTimeout(showTooltip, 120);
+  };
+  const cancelShow = () => {
+    if (showTimer) window.clearTimeout(showTimer);
+    hideTooltip();
+  };
+
+  // Touch / long-press support for tablet.
+  useLongPress(buttonRef, { delay: 600, onLongPress: showTooltip });
+
   return (
-    <button
-      onClick={props.onClick}
-      title={props.label}
-      aria-label={props.label}
-      data-nav={props.label}
-      data-nav-view={props.view}
-      data-active={props.active}
-      style={{
-        position: "relative",
-        display: "flex",
-        "flex-direction": "column",
-        "align-items": "center",
-        "justify-content": "center",
-        width: isMobile() ? "auto" : "48px",
-        "min-width": isMobile() ? "44px" : undefined,
-        height: isMobile() ? "auto" : "46px",
-        "min-height": isMobile() ? "44px" : undefined,
-        padding: isMobile() ? "0" : "4px 4px",
-        "border-radius": isMobile() ? "8px" : "var(--radius-md)",
-        background: props.active ? "var(--palm-soft)" : "transparent",
-        color: props.active ? "var(--palm)" : "var(--text-secondary)",
-        "margin-bottom": isMobile() ? "0" : "2px",
-        flex: isMobile() ? "1" : undefined,
-        transition:
-          "background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out), transform 0.12s var(--ease-out)",
-        transform: props.active ? "scale(1)" : undefined,
-      }}
-      onMouseEnter={(e) => {
-        if (!props.active) {
-          e.currentTarget.style.background = "rgba(35,28,51,0.04)";
+    <>
+      <button
+        ref={(el) => (buttonRef = el)}
+        onClick={props.onClick}
+        title={props.label}
+        aria-label={
+          props.hint
+            ? `${props.label}, 快捷键 ${props.hint}`
+            : props.label
         }
-      }}
-      onMouseLeave={(e) => {
-        if (!props.active) {
-          e.currentTarget.style.background = "transparent";
-        }
-      }}
-    >
-      <Show when={props.active && !isMobile()}>
-        <div
-          style={{
-            position: "absolute",
-            left: "-1px",
-            top: "8px",
-            bottom: "8px",
-            width: "2px",
-            "border-radius": "0 2px 2px 0",
-            background: "var(--palm)",
-          }}
+        aria-current={props.active ? "page" : undefined}
+        data-nav={props.label}
+        data-nav-view={props.view}
+        data-active={props.active}
+        onMouseEnter={scheduleShow}
+        onMouseLeave={cancelShow}
+        onFocus={showTooltip}
+        onBlur={hideTooltip}
+        style={{
+          position: "relative",
+          display: "flex",
+          "flex-direction": "column",
+          "align-items": "center",
+          "justify-content": "center",
+          width: isMobile() ? "auto" : "100%",
+          "max-width": isMobile() ? undefined : "64px",
+          height: isMobile() ? "auto" : "56px",
+          "min-width": isMobile() ? "44px" : undefined,
+          "min-height": isMobile() ? "44px" : undefined,
+          padding: isMobile() ? "0" : "4px",
+          "border-radius": isMobile() ? "8px" : "var(--radius-md)",
+          background: props.active ? "var(--palm-soft)" : "transparent",
+          color: props.active ? "var(--palm)" : "var(--text-secondary)",
+          "margin-bottom": isMobile() ? "0" : "2px",
+          flex: isMobile() ? "1" : undefined,
+          transition:
+            "background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out), transform 0.12s var(--ease-out)",
+        }}
+      >
+        <Show when={props.active && !isMobile()}>
+          <div
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              left: "-1px",
+              top: "8px",
+              bottom: "8px",
+              width: "2px",
+              "border-radius": "0 2px 2px 0",
+              background: "var(--palm)",
+            }}
+          />
+        </Show>
+        <Icon
+          name={props.icon}
+          size={isMobile() ? 20 : 22}
+          style={
+            props.active && !isMobile() ? { transform: "scale(1.08)" } : undefined
+          }
         />
-      </Show>
-      <Icon
-        name={props.icon}
-        size={isMobile() ? 20 : 19}
-        style={
-          props.active && !isMobile() ? { transform: "scale(1.08)" } : undefined
-        }
-      />
-      <Show when={!isMobile()}>
-        <div
-          style={{
-            display: "flex",
-            "align-items": "center",
-            gap: "3px",
-            "margin-top": "3px",
-            "max-width": "100%",
-          }}
-        >
+        {/* Mobile: keep the label visible (10px). Desktop: hide it. */}
+        <Show when={isMobile()}>
           <span
             style={{
-              "font-size": "9.5px",
+              "font-size": "10px",
               "font-weight": "600",
-              "letter-spacing": "0.005em",
+              "margin-top": "2px",
               "white-space": "nowrap",
-              overflow: "hidden",
-              "text-overflow": "ellipsis",
             }}
           >
             {props.label}
           </span>
-          <Show when={props.hint}>
-            <span
-              style={{
-                "font-size": "9px",
-                "font-weight": "700",
-                color: props.active ? "var(--palm)" : "var(--text-muted)",
-                opacity: 0.7,
-              }}
-            >
-              {props.hint}
-            </span>
-          </Show>
-        </div>
+        </Show>
+        {/* ⌘N chip — only on desktop/tablet when present. */}
+        <Show when={props.hint && !isMobile()}>
+          <span
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              right: "4px",
+              bottom: "2px",
+              "font-size": "9px",
+              "font-weight": "700",
+              color: props.active ? "var(--palm)" : "var(--text-muted)",
+              opacity: 0.7,
+            }}
+          >
+            {props.hint}
+          </span>
+        </Show>
+      </button>
+      <Show when={!isMobile() && tooltipAnchor()}>
+        <Portal>
+          <SidebarTooltip
+            anchor={tooltipAnchor() as never}
+            label={props.label}
+            hint={props.hint}
+          />
+        </Portal>
       </Show>
-    </button>
+    </>
   );
 }
 
