@@ -3,6 +3,8 @@
 //! See AGENTS.md §10 "Real backend integration" for the design and
 //! `docs/CREDENTIALS.md` for the test account.
 
+pub mod db;
+pub mod desktop_notifier;
 pub mod ical;
 pub mod imap;
 pub mod mailbox_resolver;
@@ -12,7 +14,6 @@ pub mod scheduled_send;
 pub mod smtp;
 pub mod state;
 pub mod sync_loop;
-pub mod desktop_notifier;
 pub mod vault;
 
 use serde::{Deserialize, Serialize};
