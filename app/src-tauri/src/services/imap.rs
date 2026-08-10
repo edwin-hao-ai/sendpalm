@@ -143,17 +143,58 @@ impl ImapClient {
             Err(e) => Err(format!("idle wait: {e}")),
         }
     }
+}
 
+/// Encode a folder name to IMAP modified UTF-7 (RFC 3501 §5.1.3) so
+/// non-ASCII folder names like Feishu's `&XfJT0ZAB-` are accepted by
+/// `session.select`. ASCII names are returned unchanged.
+pub fn encode_utf7_imap(name: &str) -> String {
+    if name.is_ascii() {
+        return name.to_string();
+    }
+    let mut out = String::with_capacity(name.len());
+    let mut buf: Vec<u16> = Vec::new();
+    for ch in name.chars() {
+        if ch.is_ascii() && ch != '&' {
+            if !buf.is_empty() {
+                out.push_str(&encode_utf7_shift(&buf));
+                buf.clear();
+            }
+            out.push(ch);
+        } else {
+            buf.push(ch as u16);
+        }
+    }
+    if !buf.is_empty() {
+        out.push_str(&encode_utf7_shift(&buf));
+    }
+    out
+}
+
+fn encode_utf7_shift(codes: &[u16]) -> String {
+    // RFC 3501: shift from U+0000 to U+FFFF using big-endian 16-bit units,
+    // base64-encoded with "," replaced by "/".
+    let bytes: Vec<u8> = codes
+        .iter()
+        .flat_map(|c| c.to_be_bytes())
+        .collect();
+    let mut s = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+    s = s.replace('=', "").replace('/', ",");
+    format!("&{}-", s)
+}
+
+impl ImapClient {
     /// Sync a single mailbox, returning parsed messages and the highest UID seen.
     /// Caller persists `last_uid` and `uid_validity` on `accounts` row.
     /// Uses small chunks so a 4k-message mailbox completes in seconds,
     /// not 5 minutes.
     pub async fn sync(&self, mailbox_name: &str, last_uid: u32) -> Result<SyncBundle, String> {
         let mut session = self.connect().await?;
+        let wire_name = encode_utf7_imap(mailbox_name);
         let mailbox = session
-            .select(mailbox_name)
+            .select(&wire_name)
             .await
-            .map_err(|e| format!("select {mailbox_name}: {e}"))?;
+            .map_err(|e| format!("select {mailbox_name} ({wire_name}): {e}"))?;
 
         let uid_validity = mailbox.uid_validity.unwrap_or(0);
 
