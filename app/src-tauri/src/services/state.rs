@@ -4,6 +4,8 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use crate::services::desktop_notifier::NotificationPrefs;
+
 #[derive(Debug, Clone)]
 pub struct AccountSyncState {
     pub uid_validity: u32,
@@ -28,12 +30,14 @@ impl Default for AccountSyncState {
 /// Process-global sync state. Persisted via `tauri-plugin-store` separately.
 pub struct SyncStateStore {
     inner: Mutex<HashMap<String, AccountSyncState>>,
+    notif: Mutex<NotificationPrefs>,
 }
 
 impl SyncStateStore {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
+            notif: Mutex::new(NotificationPrefs::default()),
         }
     }
 
@@ -51,6 +55,14 @@ impl SyncStateStore {
             .lock()
             .unwrap()
             .insert(account_id.to_string(), state);
+    }
+
+    pub fn notification_prefs(&self) -> NotificationPrefs {
+        self.notif.lock().unwrap().clone()
+    }
+
+    pub fn set_notification_prefs(&self, prefs: NotificationPrefs) {
+        *self.notif.lock().unwrap() = prefs;
     }
 }
 
