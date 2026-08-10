@@ -1487,3 +1487,22 @@ Second focused pass after the user asked to log in to `edwinhao@sendpalm.com` on
 - Net effect: real mail now appears in the Inbox within IDLE latency
   (~5 s) for any provider whose Sent folder is one of the candidate
   table entries; the Inbox empty-state copy is now truthful.
+
+## 2026-08-10 — Inbox data chain revamp (Phase 2)
+
+### Phase 2 — Desktop notifications (2026-08-10)
+
+- New `services::desktop_notifier` with `should_notify` (quiet-hours
+  helper) and `notify_new_mail` (calls `tauri-plugin-notification`).
+- `SyncStateStore` now caches a `NotificationPrefs` that the JS side
+  keeps in sync via the new `notify_settings_changed` Tauri command.
+- `insert_message` triggers a notification per genuinely new mail,
+  subject to the user's desktop toggle and quiet-hours window.
+- JS-side `services/notifications.ts` runs from `bootstrap.ts` after
+  settings load, requests permission if needed, and mirrors the new
+  preference to Rust.
+- New `PreferencesNotificationsTab` in `views/Settings.tsx` exposes the
+  toggle and quiet-hours start/end.
+- Tests added: `desktop_notifier_test` (6), `notifications.test.ts` (2).
+- Net effect: leaving the app unfocused surfaces macOS notifications for
+  every new mail, in line with the user's quiet-hours preference.
