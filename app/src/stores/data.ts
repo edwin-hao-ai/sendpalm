@@ -568,6 +568,25 @@ export async function listContacts(): Promise<Contact[]> {
   return rows.map(rowToContact);
 }
 
+/** Count of contacts that still need screening at the Gate.
+ *
+ * Returns the number of rows in `contacts` where `first_seen=1 AND screened=0`.
+ * This drives the Inbox empty-state copy: if there are no accounts we say
+ * "add an account"; if there are unscreened contacts we say "open Gate";
+ * otherwise we say "inbox is empty".
+ */
+export async function countGateCandidates(): Promise<number> {
+  const db = await getDb();
+  // Select id only — the MockDb that backs browser-mode tests does not
+  // recognize `SELECT COUNT(*) AS cnt` (its tokenizer splits `(` so the
+  // column is just `count` and the rows return `{ cnt: undefined }`).
+  // Counting the returned ids is cheap and works on both SQLite and MockDb.
+  const rows = await db.select<Array<{ id: ID }>>(
+    "SELECT id FROM contacts WHERE first_seen = 1 AND screened = 0",
+  );
+  return rows.length;
+}
+
 export async function getContact(id: ID): Promise<Contact | null> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
