@@ -5,6 +5,7 @@
 
 pub mod ical;
 pub mod imap;
+pub mod mailbox_resolver;
 pub mod parser;
 pub mod providers;
 pub mod scheduled_send;
