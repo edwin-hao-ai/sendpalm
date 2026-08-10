@@ -85,6 +85,13 @@ export function bumpRefreshTick(): void {
   setRefreshTick((n) => n + 1);
 }
 
+/** Live count of contacts that still need Gate screening.
+ * Populated by `InboxEmptyState` from the `countGateCandidates` resource
+ * (re-fetched on every `refreshTick`). Exposed so other surfaces — topbar
+ * Gate badge, sidebar counter, notification sheet — can read the value
+ * without spinning up their own resource. */
+export const [gateCandidateCount, setGateCandidateCount] = createSignal(0);
+
 export const [contactTab, setContactTab] = createSignal<ContactTab>("Timeline");
 export const [settingsTab, setSettingsTab] =
   createSignal<SettingsTab>("profile");

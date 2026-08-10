@@ -18,6 +18,7 @@ import {
   moveMessageToBucket,
   listBundleConfigs,
   listAccounts,
+  countGateCandidates,
 } from "../stores/data";
 import type { Contact, Message, BundleConfig } from "../types";
 import {
@@ -31,6 +32,9 @@ import {
   setComposeContext,
   setView,
   showToast,
+  gateCandidateCount,
+  setGateCandidateCount,
+  refreshTick,
 } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
@@ -393,7 +397,7 @@ export function Imbox() {
       >
         <Show
           when={newForYou().length > 0 || previouslySeen().length > 0}
-          fallback={<InboxZero />}
+          fallback={<InboxEmptyState />}
         >
           <ul
             style={{
@@ -1704,16 +1708,56 @@ function BulkActionBar(props: {
   );
 }
 
-function InboxZero() {
+function InboxEmptyState() {
+  const [accounts] = createResource(listAccounts);
+  const [gate, { refetch: refetchGate }] = createResource(countGateCandidates);
+
+  // Re-fetch the unscreened count on every backend sync event so the copy
+  // stays accurate as new senders arrive via IMAP. We mirror the latest
+  // resource value into the `gateCandidateCount` UI signal so other surfaces
+  // (topbar Gate badge, sidebar counter) can subscribe to a single source
+  // instead of each spinning up its own resource.
+  createEffect(() => {
+    refreshTick();
+    void refetchGate();
+  });
+  createEffect(() => {
+    const v = gate();
+    if (v !== undefined) setGateCandidateCount(v);
+  });
+
+  const emailAccountCount = createMemo(
+    () => (accounts() ?? []).filter((a) => a.type === "email").length,
+  );
+  const unscreened = createMemo(() => gateCandidateCount());
+
   return (
-    <Empty
-      icon="ph-tray"
-      title="Inbox 是空的"
-      description={
-        "请到 Settings → Accounts → Add account 接入真实邮箱。背景同步会从 IMAP 拉取最近的邮件。"
-      }
-      action={{ label: "打开 Settings", onClick: () => setView("settings") }}
-    />
+    <Show when={emailAccountCount() === 0} fallback={
+      <Show when={unscreened() > 0} fallback={
+        <Empty
+          icon="ph-tray"
+          title="Inbox 是空的"
+          description="新邮件到达时会自动显示在此处。试着给自己发一封测试邮件吧。"
+        />
+      }>
+        <Empty
+          icon="ph-shield-check"
+          title={`${unscreened()} 个发件人待 Gate 筛选`}
+          description="这些发件人的邮件会先沉淀在 Gate，直到你决定是收进 Inbox 还是 Block。"
+          action={{
+            label: "打开 Gate",
+            onClick: () => setView("screener"),
+          }}
+        />
+      </Show>
+    }>
+      <Empty
+        icon="ph-tray"
+        title="Inbox 是空的"
+        description="请到 Settings → Accounts → Add account 接入真实邮箱。背景同步会从 IMAP 拉取最近的邮件。"
+        action={{ label: "打开 Settings", onClick: () => setView("settings") }}
+      />
+    </Show>
   );
 }
 
