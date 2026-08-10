@@ -199,12 +199,17 @@ fn spawn_account_loop(
                     "[mailbox] resolved folders for {}: {:?}",
                     account.account_id, resolved
                 );
-                let resolved_json = serde_json::json!({
-                    "folders": resolved.iter().map(|n| serde_json::json!({
-                        "name": n,
-                        "enabled": true,
-                    })).collect::<Vec<_>>()
-                });
+                let resolved_json = serde_json::Value::Array(
+                    resolved
+                        .iter()
+                        .map(|n| {
+                            serde_json::json!({
+                                "name": n,
+                                "enabled": true,
+                            })
+                        })
+                        .collect(),
+                );
                 let mut updated_settings: serde_json::Value = serde_json::from_str(
                     account.settings_json.as_deref().unwrap_or("{}"),
                 )
@@ -1183,7 +1188,7 @@ async fn upsert_account(pool: &SqlitePool, account: &SyncAccount) -> Result<(), 
     sqlx::query(
         "INSERT INTO accounts (id, type, provider, email, label, display_name, status, synced, total, privacy, color, avatar, last_sync, settings_json) \
          VALUES ($1, 'email', 'feishu', $2, $3, $4, 'connected', 0, 0, 'unified', '#0A8F63', substr($4, 1, 1), datetime('now'), $5) \
-         ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, last_sync = excluded.last_sync"
+         ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, last_sync = excluded.last_sync, settings_json = excluded.settings_json"
     )
     .bind(&account.account_id)
     .bind(&account.creds.email)

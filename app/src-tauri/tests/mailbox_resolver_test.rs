@@ -1,4 +1,4 @@
-use sendpalm_app_lib::services::mailbox_resolver::{resolve_folder_name, FolderKind};
+use sendpalm_app_lib::services::mailbox_resolver::{resolve_all, resolve_folder_name, FolderKind};
 
 #[test]
 fn feishu_sent_resolves_to_utf7_name() {
@@ -53,4 +53,29 @@ fn case_insensitive_match_for_inbox() {
         resolve_folder_name(&mailboxes, FolderKind::Inbox),
         Some("inbox".to_string())
     );
+}
+
+#[test]
+fn resolve_all_returns_inbox_then_sent() {
+    let mailboxes = vec![
+        "&XfJT0ZAB-".to_string(),
+        "INBOX".to_string(),
+        "&XfJ8T-".to_string(),
+    ];
+    let resolved = resolve_all(&mailboxes);
+    assert_eq!(
+        resolved,
+        vec![
+            "INBOX".to_string(),
+            "&XfJT0ZAB-".to_string(),
+            "&XfJ8T-".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn resolve_all_skips_missing_kinds() {
+    let mailboxes = vec!["INBOX".to_string(), "Sent".to_string()];
+    let resolved = resolve_all(&mailboxes);
+    assert_eq!(resolved, vec!["INBOX".to_string(), "Sent".to_string()]);
 }
