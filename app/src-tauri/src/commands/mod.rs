@@ -1,5 +1,7 @@
 //! Tauri commands exposing real IMAP/SMTP services to JS.
 
+pub mod notification_settings;
+
 use crate::services::providers::{list as provider_list, EmailProvider};
 use crate::services::{
     imap::ImapClient, load_test_credentials, smtp::SmtpClient, EmailCredentials, SyncReport,

@@ -147,6 +147,7 @@ pub fn run() {
             commands::add_calendar_event,
             commands::get_attachment_content,
             commands::get_attachment_path,
+            commands::notification_settings::notify_settings_changed,
         ])
         .run(tauri::generate_context!());
     if let Err(e) = result {
