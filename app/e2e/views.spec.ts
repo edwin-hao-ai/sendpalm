@@ -287,14 +287,14 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
 test.describe("Responsive layout", () => {
   test.use({ viewport: { width: 375, height: 667 } });
 
-  test("iPhone SE shows bottom tab bar and hides sidebar labels", async ({
+  test("iPhone SE shows bottom tab bar with per-icon labels", async ({
     page,
   }) => {
     await page.goto("/");
     const sidebar = page.locator("#sidebar");
     await expect(sidebar).toBeVisible();
 
-    // On mobile the sidebar becomes a bottom tab bar (row layout, no labels).
+    // On mobile the sidebar becomes a bottom tab bar (row layout).
     const flexDir = await sidebar.evaluate(
       (el) => getComputedStyle(el).flexDirection,
     );
@@ -304,9 +304,10 @@ test.describe("Responsive layout", () => {
     // Mobile collapses 15 entries into 6 primary tabs + a "More" sheet.
     await expect(buttons).toHaveCount(7);
 
-    // Labels are hidden on mobile.
+    // Mobile bottom-tab bar shows a label span under each icon (6 primary + "More").
     const labels = sidebar.locator("span");
-    await expect(labels).toHaveCount(0);
+    await expect(labels).toHaveCount(7);
+    await expect(labels.first()).toBeVisible();
 
     await shoot(page, "18-mobile-bottom-tabs");
 
