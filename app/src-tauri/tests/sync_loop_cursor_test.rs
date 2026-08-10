@@ -10,6 +10,12 @@ fn cursor_does_not_advance_past_failed_uid() {
 }
 
 #[test]
+fn cursor_stops_at_first_failure_even_if_later_uid_succeeds() {
+    let (inserted, cursor) = advance_cursor(0, &[(100, true), (101, false), (102, true)]);
+    assert_eq!((inserted, cursor), (1, 100));
+}
+
+#[test]
 fn cursor_advances_past_full_chunk() {
     let (inserted, cursor) = advance_cursor(0, &[(200, true), (201, true), (202, true)]);
     assert_eq!(inserted, 3);

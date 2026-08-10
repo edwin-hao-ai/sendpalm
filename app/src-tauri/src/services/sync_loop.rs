@@ -640,6 +640,8 @@ pub fn advance_cursor(
             cursor = cursor.max(uid);
             inserted += 1;
         } else {
+            // Stop at the first failed UID so the cursor never advances past
+            // a failure (even if later UIDs in the chunk succeed).
             break;
         }
     }
@@ -686,8 +688,9 @@ async fn sync_folder(
         }
         let (chunk_inserted, chunk_last_ok) = advance_cursor(cursor, &chunk_outcomes);
         inserted += chunk_inserted;
-        let next_cursor = chunk_last_ok.max(bundle.highest_uid);
-        cursor = next_cursor;
+        // advance_cursor already returns the highest successful UID; on a partial chunk
+        // we deliberately stay below bundle.highest_uid so the next tick retries the rest.
+        cursor = chunk_last_ok;
         if !chunk_outcomes.iter().all(|(_, ok)| *ok) {
             // Don't skip past failures within a chunk.
             break;
