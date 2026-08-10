@@ -59,6 +59,7 @@ import {
   getSyncState,
   syncNow,
 } from "../services/backend";
+import { ensureNotificationPermission } from "../services/notifications";
 
 const TABS = [
   { id: "profile", label: "Profile", icon: "ph-user-circle" },
@@ -1215,13 +1216,7 @@ function PreferencesTab() {
   return (
     <div>
       <SectionTitle>Notifications</SectionTitle>
-      <Toggle
-        label="桌面通知"
-        checked={s.preferences.notifications.desktop}
-        onChange={(v) =>
-          setAppSettings("preferences", "notifications", "desktop", v)
-        }
-      />
+      <PreferencesNotificationsTab />
       <Toggle
         label="每日摘要邮件"
         checked={s.preferences.notifications.digest}
@@ -1229,46 +1224,6 @@ function PreferencesTab() {
           setAppSettings("preferences", "notifications", "digest", v)
         }
       />
-      <Toggle
-        label="勿扰时段"
-        checked={s.preferences.notifications.quietHoursEnabled}
-        onChange={(v) =>
-          setAppSettings("preferences", "notifications", "quietHoursEnabled", v)
-        }
-      />
-      <Show when={s.preferences.notifications.quietHoursEnabled}>
-        <div style={{ display: "flex", gap: "var(--space-2)" }}>
-          <input
-            type="time"
-            value={s.preferences.notifications.quietHoursStart}
-            onInput={(e) =>
-              setAppSettings(
-                "preferences",
-                "notifications",
-                "quietHoursStart",
-                e.currentTarget.value,
-              )
-            }
-            style={inputStyle}
-          />
-          <span style={{ "align-self": "center", color: "var(--text-muted)" }}>
-            到
-          </span>
-          <input
-            type="time"
-            value={s.preferences.notifications.quietHoursEnd}
-            onInput={(e) =>
-              setAppSettings(
-                "preferences",
-                "notifications",
-                "quietHoursEnd",
-                e.currentTarget.value,
-              )
-            }
-            style={inputStyle}
-          />
-        </div>
-      </Show>
 
       <SectionTitle>Security</SectionTitle>
       <Toggle
@@ -2022,4 +1977,104 @@ function download(name: string, content: string, mime: string) {
   a.download = name;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function PreferencesNotificationsTab() {
+  const prefs = () => appSettings.preferences.notifications;
+  return (
+    <div style={{ display: "grid", gap: "var(--space-3)", "max-width": "520px" }}>
+      <ToggleRow
+        label="桌面通知"
+        description="收到新邮件时在 macOS 通知中心弹出。"
+        checked={prefs().desktop}
+        onChange={async (v) => {
+          setAppSettings("preferences", "notifications", {
+            ...prefs(),
+            desktop: v,
+          });
+          await ensureNotificationPermission();
+        }}
+      />
+      <ToggleRow
+        label="静默时段"
+        description="在指定时段内只显示应用内红点，不弹系统通知。"
+        checked={prefs().quietHoursEnabled}
+        onChange={(v) =>
+          setAppSettings("preferences", "notifications", {
+            ...prefs(),
+            quietHoursEnabled: v,
+          })
+        }
+      />
+      <Show when={prefs().quietHoursEnabled}>
+        <div style={{ display: "flex", gap: "var(--space-2)" }}>
+          <label>
+            <span>开始</span>
+            <input
+              type="time"
+              value={prefs().quietHoursStart}
+              onInput={(e) =>
+                setAppSettings("preferences", "notifications", {
+                  ...prefs(),
+                  quietHoursStart: e.currentTarget.value,
+                })
+              }
+            />
+          </label>
+          <label>
+            <span>结束</span>
+            <input
+              type="time"
+              value={prefs().quietHoursEnd}
+              onInput={(e) =>
+                setAppSettings("preferences", "notifications", {
+                  ...prefs(),
+                  quietHoursEnd: e.currentTarget.value,
+                })
+              }
+            />
+          </label>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+function ToggleRow(props: {
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label
+      style={{
+        display: "grid",
+        "grid-template-columns": "1fr auto",
+        gap: "var(--space-2)",
+        "align-items": "center",
+        padding: "var(--space-3)",
+        "border-radius": "var(--radius-md)",
+        background: "var(--surface-elevated)",
+        border: "0.5px solid var(--border)",
+      }}
+    >
+      <span>
+        <strong style={{ display: "block" }}>{props.label}</strong>
+        <span
+          style={{
+            color: "var(--text-secondary)",
+            "font-size": "var(--text-caption)",
+          }}
+        >
+          {props.description}
+        </span>
+      </span>
+      <input
+        type="checkbox"
+        checked={props.checked}
+        onChange={(e) => props.onChange(e.currentTarget.checked)}
+      />
+    </label>
+  );
 }
