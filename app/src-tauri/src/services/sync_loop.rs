@@ -690,7 +690,7 @@ pub fn advance_cursor(
 
 #[allow(clippy::too_many_arguments)]
 async fn sync_folder(
-    _app: &AppHandle,
+    app: &AppHandle,
     data_dir: &std::path::Path,
     pool: &SqlitePool,
     client: &ImapClient,
@@ -714,6 +714,7 @@ async fn sync_folder(
         let mut chunk_outcomes: Vec<(u32, bool)> = Vec::with_capacity(bundle.messages.len());
         for (uid, parsed) in &bundle.messages {
             let ok = insert_message(
+                app,
                 data_dir,
                 pool,
                 account,
@@ -745,7 +746,9 @@ async fn sync_folder(
     Ok((inserted, cursor, uid_validity))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn insert_message(
+    app: &AppHandle,
     data_dir: &std::path::Path,
     pool: &SqlitePool,
     account: &SyncAccount,
@@ -852,6 +855,19 @@ async fn insert_message(
         .execute(pool)
         .await
         .map_err(|e| format!("insert notification uid={uid}: {e}"))?;
+
+        // OS-level desktop notification. Skipped automatically when
+        // desktop_enabled is false or during quiet hours.
+        let store = app.state::<crate::services::state::SyncStateStore>();
+        let prefs = store.notification_prefs();
+        let _ = crate::services::desktop_notifier::notify_new_mail(
+            app,
+            &prefs,
+            &account.account_id,
+            &title,
+            sender,
+        )
+        .await;
 
         // Trigger vacation auto-responder for new mail.
         let _ = maybe_send_vacation_reply(pool, &account.account_id, &account.creds, parsed).await;
