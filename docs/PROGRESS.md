@@ -1458,3 +1458,32 @@ Second focused pass after the user asked to log in to `edwinhao@sendpalm.com` on
 - Playwright mobile screenshots: `/tmp/sendpalm-screenshots/e2e/mobile-*.png`
 
 ---
+
+## 2026-08-10 — Inbox data chain revamp (Phase 1)
+
+### Phase 1 — Inbox data chain (2026-08-10)
+
+- Added `services::mailbox_resolver` with provider-aware candidate table
+  (Feishu `&XfJT0ZAB-`, Gmail `[Gmail]/Sent Mail`, Outlook `Sent Items`,
+  Chinese labels). Replaces the hard-coded `"Sent"` folder name.
+- `ImapClient::sync` now encodes folder names to modified UTF-7 before
+  `session.select` (RFC 3501 §5.1.3).
+- `sync_one` no longer aborts on a single failed folder; failed folders
+  are logged and the next folder continues. `sync:new-messages` always
+  fires when at least one folder inserted messages.
+- `sync_folder` only advances the persisted cursor past UIDs that were
+  successfully inserted. Parse failures and DB-insert failures keep the
+  cursor below their UID, so the next tick retries them.
+- `spawn_account_loop` calls `client.list_mailboxes` once per boot and
+  persists the resolved names into `accounts.settings_json.syncFolders`.
+- New `0014_gate_screened_backfill.sql` defensively normalizes the rare
+  inconsistent contact state.
+- `countGateCandidates` added to `stores/data.ts`; `InboxEmptyState` in
+  `views/Imbox.tsx` now branches three ways (no account / unscreened /
+  empty) instead of always saying "add an account".
+- Tests added: `mailbox_resolver_test` (6), `imap_utf7_test` (2),
+  `sync_loop_isolation_test` (1), `sync_loop_cursor_test` (2),
+  `empty-state.test.ts` (5).
+- Net effect: real mail now appears in the Inbox within IDLE latency
+  (~5 s) for any provider whose Sent folder is one of the candidate
+  table entries; the Inbox empty-state copy is now truthful.
