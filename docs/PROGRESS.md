@@ -1506,3 +1506,13 @@ Second focused pass after the user asked to log in to `edwinhao@sendpalm.com` on
 - Tests added: `desktop_notifier_test` (6), `notifications.test.ts` (2).
 - Net effect: leaving the app unfocused surfaces macOS notifications for
   every new mail, in line with the user's quiet-hours preference.
+
+## 2026-08-10 — Inbox data chain revamp (Phase 3)
+
+### Phase 3 — Gate backlog surfacing (2026-08-10)
+
+- No new code; this phase is fully covered by Phase 1's
+  `countGateCandidates` helper, `InboxEmptyState` branch 2, and the
+  `0014_gate_screened_backfill.sql` migration.
+- Confirmed via `pnpm test -- empty-state.test.ts` (5 tests) and
+  `cd app/src-tauri && cargo check --tests`.
