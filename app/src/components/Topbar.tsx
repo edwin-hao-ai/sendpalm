@@ -25,7 +25,7 @@ export function Topbar() {
   const { isMobile } = useViewport();
   const currentTitle = () => {
     const sec = NAV_SECTIONS.find((s) => s.view === view());
-    return sec?.label ?? "SendPalm";
+    return sec?.label ?? "";
   };
 
   return (
@@ -46,16 +46,16 @@ export function Topbar() {
         "-webkit-app-region": "drag",
       }}
     >
-      <BrandMark />
       <div
         style={{
           display: "flex",
           "align-items": "center",
-          gap: "var(--space-2)",
+          gap: "var(--space-3)",
           "min-width": "0",
           "-webkit-app-region": "no-drag",
         }}
       >
+        <BrandMark />
         <span
           style={{
             "font-family": "var(--font-display)",
@@ -64,6 +64,8 @@ export function Topbar() {
             color: "var(--text-primary)",
             "letter-spacing": "-0.01em",
             "white-space": "nowrap",
+            "overflow": "hidden",
+            "text-overflow": "ellipsis",
           }}
         >
           {currentTitle()}
