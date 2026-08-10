@@ -12,6 +12,7 @@ pub mod scheduled_send;
 pub mod smtp;
 pub mod state;
 pub mod sync_loop;
+pub mod desktop_notifier;
 pub mod vault;
 
 use serde::{Deserialize, Serialize};
