@@ -7,6 +7,7 @@
 
 import { load } from "@tauri-apps/plugin-store";
 import { IS_BROWSER } from "./services/tauri-shim";
+import { ensureNotificationPermission } from "./services/notifications";
 import {
   listAccounts,
   listAgentAudit,
@@ -72,6 +73,10 @@ export async function initApp() {
 
         const settings = await loadAppSettings(store);
         setAppSettings(settings);
+
+        // Fire-and-forget: request OS permission and push prefs to Rust. Doesn't
+        // block the initial paint.
+        void ensureNotificationPermission();
 
         const memory = await loadAgentMemory(store);
         setAgentMemory(memory);
