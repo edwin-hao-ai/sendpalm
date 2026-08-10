@@ -4,7 +4,10 @@
 
 const TRACKER_PATTERNS: { name: string; regex: RegExp }[] = [
   { name: "utm_", regex: /[?&](utm_[a-z]+)=/gi },
-  { name: "tracking pixel", regex: /\/(track|pixel|open|click)\.(gif|png|jpg)/gi },
+  {
+    name: "tracking pixel",
+    regex: /\/(track|pixel|open|click)\.(gif|png|jpg)/gi,
+  },
   { name: "mailchimp", regex: /list-manage[123]\.com/gi },
   { name: "sendgrid", regex: /(?:url\d+|sg-)\.sendgrid\.net/gi },
   { name: "mailgun", regex: /mailgun\.org\/v\d+/gi },
@@ -32,7 +35,10 @@ export function detectTrackers(text: string): Tracker[] {
   return out;
 }
 
-export function trackerSummary(text: string): { count: number; types: string[] } {
+export function trackerSummary(text: string): {
+  count: number;
+  types: string[];
+} {
   const trackers = detectTrackers(text);
   const types = [...new Set(trackers.map((t) => t.type))];
   return { count: trackers.length, types };

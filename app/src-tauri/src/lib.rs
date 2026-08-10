@@ -10,6 +10,15 @@ use tauri_plugin_sql::{Migration, MigrationKind};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // iOS/Tauri swallows panics behind stop_unwind and aborts without a message.
+    // Write any panic to a temp file so we can read it back after a crash.
+    std::panic::set_hook(Box::new(|info| {
+        let msg = format!("SendPalm panic: {}\n", info);
+        let tmp = std::env::temp_dir().join("sendpalm-panic.log");
+        let _ = std::fs::write(&tmp, &msg);
+        eprintln!("{}", msg);
+    }));
+
     let migrations = vec![
         Migration {
             version: 1,
@@ -23,18 +32,89 @@ pub fn run() {
             sql: include_str!("../migrations/0002_calendar.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 3,
+            description: "add_drafts_attachments_column",
+            sql: include_str!("../migrations/0003_drafts_attachments.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 4,
+            description: "add_message_body_html_column",
+            sql: include_str!("../migrations/0004_body_html.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 5,
+            description: "add_follow_up_surfaced_at_column",
+            sql: include_str!("../migrations/0005_follow_up_surfaced.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 6,
+            description: "add_message_direction_column",
+            sql: include_str!("../migrations/0006_message_direction.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 7,
+            description: "add_event_end_dt_column",
+            sql: include_str!("../migrations/0007_event_end_dt.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 8,
+            description: "add_drafts_from_alias_column",
+            sql: include_str!("../migrations/0008_drafts_from_alias.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 9,
+            description: "add_full_text_search_index",
+            sql: include_str!("../migrations/0009_search_index.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 10,
+            description: "add_trash_spam_expiry",
+            sql: include_str!("../migrations/0010_trash_expiry.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 11,
+            description: "add_vacation_replies_table",
+            sql: include_str!("../migrations/0011_vacation_replies.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 12,
+            description: "fix_fts_tokenizer_for_cjk",
+            sql: include_str!("../migrations/0012_fix_fts_tokenizer.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 13,
+            description: "add_event_all_day_column",
+            sql: include_str!("../migrations/0013_event_all_day.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
-    tauri::Builder::default()
+    eprintln!("[sendpalm] starting tauri builder");
+    let result = tauri::Builder::default()
         .setup(|app| {
+            eprintln!("[sendpalm] setup begin");
             app.manage(SyncStateStore::new());
             let disable = std::env::var("SENDPALM_DISABLE_BACKGROUND_SYNC")
                 .ok()
                 .map(|v| v == "1")
                 .unwrap_or(false);
+            eprintln!("[sendpalm] background sync disabled={}", disable);
             if !disable {
                 services::sync_loop::start(app.handle().clone());
+                services::scheduled_send::start(app.handle().clone());
             }
+            eprintln!("[sendpalm] setup done");
             Ok(())
         })
         .plugin(
@@ -59,7 +139,16 @@ pub fn run() {
             commands::vault_load,
             commands::vault_delete,
             commands::add_calendar_event,
+            commands::get_attachment_content,
+            commands::get_attachment_path,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running SendPalm");
+        .run(tauri::generate_context!());
+    if let Err(e) = result {
+        let msg = format!("[sendpalm] tauri run error: {:?}", e);
+        let tmp = std::env::temp_dir().join("sendpalm-run-error.log");
+        let _ = std::fs::write(&tmp, &msg);
+        eprintln!("{}", msg);
+        std::process::exit(1);
+    }
+    eprintln!("[sendpalm] tauri run returned");
 }

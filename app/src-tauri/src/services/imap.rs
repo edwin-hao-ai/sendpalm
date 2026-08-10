@@ -2,7 +2,7 @@
 //! Walks the configured mailbox's UIDs in order, fetches new messages,
 //! parses them, and returns `SyncBundle`s the caller can apply to SQL.
 
-use super::{EmailCredentials, SyncReport, parser};
+use super::{parser, EmailCredentials, SyncReport};
 use async_imap::{Client, Session};
 use async_native_tls::{TlsConnector, TlsStream};
 use futures::StreamExt;
@@ -34,15 +34,59 @@ impl ImapClient {
         &self.creds
     }
 
+    /// Resolve the TCP endpoint for the IMAP server.
+    ///
+    /// Some networks (notably those running Clash fake-ip/TUN mode) return
+    /// RFC 5735 test-net addresses (198.18.0.0/15) from the system resolver.
+    /// Those addresses do not reach the real mail server, so we provide two
+    /// escape hatches:
+    ///   1. `SENDPALM_IMAP_IP` / `SENDPALM_SMTP_IP` env vars for manual override.
+    ///   2. Automatic DoH fallback to Cloudflare when only fake IPs are returned.
+    async fn resolve_endpoint(&self) -> Result<(String, u16), String> {
+        let port = self.creds.imap_port;
+
+        // 1. Explicit override wins.
+        if let Ok(override_ip) = std::env::var("SENDPALM_IMAP_IP") {
+            if !override_ip.is_empty() {
+                return Ok((override_ip, port));
+            }
+        }
+
+        // 2. Try system resolver.
+        let addrs: Vec<std::net::SocketAddr> =
+            match tokio::net::lookup_host((&self.creds.imap_host[..], port)).await {
+                Ok(iter) => iter.collect(),
+                Err(_) => Vec::new(),
+            };
+
+        let has_real = addrs.iter().any(|a| !is_fake_ip(&a.ip()));
+        if has_real {
+            // System resolver gave at least one real address; use the hostname.
+            return Ok((self.creds.imap_host.clone(), port));
+        }
+
+        // 3. All system results are fake IPs (or lookup failed). Fall back to DoH.
+        if let Some(ip) = doh_resolve_ipv4(&self.creds.imap_host).await {
+            eprintln!("[imap] fake-ip detected; using DoH fallback {} for {}", ip, self.creds.imap_host);
+            return Ok((ip, port));
+        }
+
+        // Last resort: return the hostname and let the underlying connector fail
+        // with a clear message rather than hiding the issue.
+        Ok((self.creds.imap_host.clone(), port))
+    }
+
     /// Open a fresh authenticated IMAP session over TLS.
     pub async fn connect(&self) -> Result<ImapSession, String> {
-        let connect_fut = TcpStream::connect((&self.creds.imap_host[..], self.creds.imap_port));
+        let (endpoint, port) = self.resolve_endpoint().await?;
+        let connect_fut = TcpStream::connect((&endpoint[..], port));
         let tcp = timeout(std::time::Duration::from_secs(15), connect_fut)
             .await
-            .map_err(|_| format!("tcp connect {}/{}: timeout", self.creds.imap_host, self.creds.imap_port))?
-            .map_err(|e| format!("tcp connect {}/{}: {e}", self.creds.imap_host, self.creds.imap_port))?;
+            .map_err(|_| format!("tcp connect {}/{port}: timeout", self.creds.imap_host))?
+            .map_err(|e| format!("tcp connect {}/{port}: {e}", self.creds.imap_host))?;
 
         let tcp_compat = tcp.compat();
+        // Always use the real hostname for SNI / certificate validation.
         let tls = TlsConnector::new()
             .connect(&self.creds.imap_host, tcp_compat)
             .await
@@ -76,11 +120,7 @@ impl ImapClient {
     /// Block on IMAP IDLE for `timeout`, returning Ok when the server reports
     /// new mailbox activity or when the timeout fires. This lets us react to
     /// new mail in seconds instead of polling every 60 s.
-    pub async fn idle_wait(
-        &self,
-        mailbox_name: &str,
-        timeout: Duration,
-    ) -> Result<(), String> {
+    pub async fn idle_wait(&self, mailbox_name: &str, timeout: Duration) -> Result<(), String> {
         let mut session = self.connect().await?;
         session
             .select(mailbox_name)
@@ -88,10 +128,7 @@ impl ImapClient {
             .map_err(|e| format!("select {mailbox_name}: {e}"))?;
 
         let mut handle = session.idle();
-        handle
-            .init()
-            .await
-            .map_err(|e| format!("idle init: {e}"))?;
+        handle.init().await.map_err(|e| format!("idle init: {e}"))?;
 
         let (wait_fut, _stop) = handle.wait_with_timeout(timeout);
         let result = wait_fut.await;
@@ -111,11 +148,7 @@ impl ImapClient {
     /// Caller persists `last_uid` and `uid_validity` on `accounts` row.
     /// Uses small chunks so a 4k-message mailbox completes in seconds,
     /// not 5 minutes.
-    pub async fn sync(
-        &self,
-        mailbox_name: &str,
-        last_uid: u32,
-    ) -> Result<SyncBundle, String> {
+    pub async fn sync(&self, mailbox_name: &str, last_uid: u32) -> Result<SyncBundle, String> {
         let mut session = self.connect().await?;
         let mailbox = session
             .select(mailbox_name)
@@ -195,3 +228,121 @@ impl SyncBundle {
 }
 
 type ImapSession = Session<TlsStream<Compat<TcpStream>>>;
+
+/// RFC 5735 TEST-NET-2 range used by Clash fake-ip/TUN mode.
+fn is_fake_ip(ip: &std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            let octets = v4.octets();
+            // 198.18.0.0/15
+            octets[0] == 198 && octets[1] >= 18 && octets[1] <= 19
+        }
+        _ => false,
+    }
+}
+
+/// Minimal DNS-over-HTTPS (DoH) fallback using Cloudflare's JSON API.
+///
+/// We avoid adding a heavy HTTP client dependency; `tokio-rustls` is already
+/// pulled in by the lettre/sqlx stack, so we open one short HTTPS connection
+/// to 1.1.1.1, request the A record, and parse the JSON response.
+async fn doh_resolve_ipv4(hostname: &str) -> Option<String> {
+    const DOH_HOST: &str = "1.1.1.1";
+    const DOH_PATH: &str = "/dns-query";
+
+    let mut root_store = rustls::RootCertStore::empty();
+    let native = rustls_native_certs::load_native_certs();
+    if native.certs.is_empty() {
+        // If the platform cert store is empty/unreadable, fall back to webpki roots.
+        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    } else {
+        for c in native.certs {
+            let _ = root_store.add(c);
+        }
+    }
+
+    let config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+    let connector = std::sync::Arc::new(config);
+    let connector = tokio_rustls::TlsConnector::from(connector);
+
+    let server_name = match rustls_pki_types::ServerName::try_from(DOH_HOST) {
+        Ok(n) => n,
+        Err(_) => return None,
+    };
+
+    let tcp = match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        tokio::net::TcpStream::connect((DOH_HOST, 443)),
+    )
+    .await
+    {
+        Ok(Ok(s)) => s,
+        _ => return None,
+    };
+
+    let mut tls = match connector.connect(server_name, tcp).await {
+        Ok(s) => s,
+        Err(_) => return None,
+    };
+
+    let query = percent_encode(hostname);
+    let request = format!(
+        "GET {DOH_PATH}?name={query}&type=A HTTP/1.1\r\n\
+         Host: {DOH_HOST}\r\n\
+         Accept: application/dns-json\r\n\
+         Connection: close\r\n\r\n"
+    );
+    if tokio::io::AsyncWriteExt::write_all(&mut tls, request.as_bytes())
+        .await
+        .is_err()
+    {
+        return None;
+    }
+    if tokio::io::AsyncWriteExt::flush(&mut tls).await.is_err() {
+        return None;
+    }
+
+    let mut buf = Vec::new();
+    if tokio::io::AsyncReadExt::read_to_end(&mut tls, &mut buf)
+        .await
+        .is_err()
+    {
+        return None;
+    }
+
+    let text = String::from_utf8_lossy(&buf);
+    // Parse the first IPv4 address out of Cloudflare's JSON response.
+    // Example: "Answer":[{"name":"x","type":1,"TTL":60,"data":"1.2.3.4"}]
+    for line in text.lines() {
+        if !line.contains("\"type\":1") {
+            continue;
+        }
+        if let Some(start) = line.find("\"data\":\"") {
+            let rest = &line[start + 8..];
+            if let Some(end) = rest.find('"') {
+                let ip = &rest[..end];
+                if ip.parse::<std::net::Ipv4Addr>().is_ok() {
+                    return Some(ip.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Percent-encode a hostname for a query string. DNS hostnames are mostly
+/// alphanumeric plus '.' and '-'; we only encode the truly unsafe characters.
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}

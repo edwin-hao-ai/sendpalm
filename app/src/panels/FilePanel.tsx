@@ -5,19 +5,53 @@
 import { Show, createResource } from "solid-js";
 import { getFile, getContact } from "../stores/data";
 import { setDetailOpen, setSelectedFileId, showToast } from "../stores/ui";
+import type { FileItem } from "../types";
 import { Icon } from "../components/Icon";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openPath } from "@tauri-apps/plugin-opener";
+import { getAttachmentContent, getAttachmentPath } from "../services/backend";
+import { useRefreshEffect } from "../utils/gestures";
 
 export function FilePanel(props: { fileId: string }) {
-  const [file] = createResource(() => props.fileId, getFile);
-  const [contact] = createResource(
+  const [file, { refetch: refetchFile }] = createResource(
+    () => props.fileId,
+    getFile,
+  );
+  const [contact, { refetch: refetchContact }] = createResource(
     () => file()?.pid ?? "",
-    (pid) => getContact(pid)
+    (pid) => getContact(pid),
+  );
+  const [contentUrl, { refetch: refetchContentUrl }] = createResource(
+    () => file()?.id,
+    async (id) => {
+      const url = await getAttachmentContent(id);
+      return url ?? null;
+    },
   );
 
+  useRefreshEffect(() => {
+    void refetchFile();
+    void refetchContact();
+    void refetchContentUrl();
+  });
+
+  const downloadFile = async (f: FileItem) => {
+    const dataUrl = await getAttachmentContent(f.id);
+    if (dataUrl) {
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = f.name;
+      a.click();
+      showToast({ message: "开始下载", kind: "success" });
+    } else {
+      showToast({ message: "无法读取附件（浏览器模式不支持）", kind: "info" });
+    }
+  };
+
   return (
-    <div style={{ display: "flex", "flex-direction": "column", height: "100%" }}>
+    <div
+      style={{ display: "flex", "flex-direction": "column", height: "100%" }}
+    >
       <header
         style={{
           padding: "var(--space-3) var(--space-5)",
@@ -29,13 +63,20 @@ export function FilePanel(props: { fileId: string }) {
         }}
       >
         <button
-          onClick={() => { setSelectedFileId(null); setDetailOpen(false); }}
+          onClick={() => {
+            setSelectedFileId(null);
+            setDetailOpen(false);
+          }}
           aria-label="Close"
           style={{ color: "var(--text-muted)" }}
         >
           <Icon name="ph-arrow-left" size={18} />
         </button>
-        <strong style={{ "font-size": "var(--text-body-sm)", "font-weight": "700" }}>File</strong>
+        <strong
+          style={{ "font-size": "var(--text-body-sm)", "font-weight": "700" }}
+        >
+          File
+        </strong>
       </header>
 
       <Show when={file()}>
@@ -43,7 +84,12 @@ export function FilePanel(props: { fileId: string }) {
           const f = () => getF()!;
           return (
             <>
-              <div style={{ padding: "var(--space-5)", "border-bottom": "0.5px solid var(--border)" }}>
+              <div
+                style={{
+                  padding: "var(--space-5)",
+                  "border-bottom": "0.5px solid var(--border)",
+                }}
+              >
                 <h3
                   style={{
                     "font-family": "var(--font-display)",
@@ -56,16 +102,31 @@ export function FilePanel(props: { fileId: string }) {
                 >
                   {f().name}
                 </h3>
-                <p style={{ "font-size": "var(--text-caption)", color: "var(--text-muted)", margin: 0 }}>
+                <p
+                  style={{
+                    "font-size": "var(--text-caption)",
+                    color: "var(--text-muted)",
+                    margin: 0,
+                  }}
+                >
                   {(f().size / 1024).toFixed(1)} KB · {f().mime || f().type} ·{" "}
                   from {contact()?.name ?? "—"}
                 </p>
-                <div style={{ display: "flex", gap: "var(--space-2)", "margin-top": "var(--space-3)" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "var(--space-2)",
+                    "margin-top": "var(--space-3)",
+                  }}
+                >
                   <button
                     onClick={async () => {
                       try {
                         await writeText(f().md ?? f().content ?? f().name);
-                        showToast({ message: "Markdown 已复制", kind: "success" });
+                        showToast({
+                          message: "Markdown 已复制",
+                          kind: "success",
+                        });
                       } catch {
                         showToast({ message: "复制失败", kind: "error" });
                       }
@@ -85,14 +146,15 @@ export function FilePanel(props: { fileId: string }) {
                   </button>
                   <button
                     onClick={async () => {
-                      if (f().url) {
+                      const path = await getAttachmentPath(f().id);
+                      if (path) {
                         try {
-                          if (f().url) await openUrl(f().url!);
+                          await openPath(path);
                         } catch {
                           showToast({ message: "打开失败", kind: "error" });
                         }
                       } else {
-                        showToast({ message: "无可打开的 URL", kind: "info" });
+                        await downloadFile(f());
                       }
                     }}
                     style={{
@@ -108,10 +170,32 @@ export function FilePanel(props: { fileId: string }) {
                   >
                     <Icon name="ph-arrow-square-out" size={12} /> Open
                   </button>
+                  <button
+                    onClick={() => downloadFile(f())}
+                    style={{
+                      display: "flex",
+                      "align-items": "center",
+                      gap: "var(--space-1)",
+                      padding: "6px 12px",
+                      background: "var(--palm-soft)",
+                      color: "var(--palm)",
+                      "border-radius": "var(--radius-pill)",
+                      "font-size": "var(--text-caption)",
+                      "font-weight": "600",
+                    }}
+                  >
+                    <Icon name="ph-download-simple" size={12} /> Download
+                  </button>
                 </div>
               </div>
 
-              <div style={{ flex: 1, "overflow-y": "auto", padding: "var(--space-5)" }}>
+              <div
+                style={{
+                  flex: 1,
+                  "overflow-y": "auto",
+                  padding: "var(--space-5)",
+                }}
+              >
                 {/* Image */}
                 <Show when={f().type === "image"}>
                   <div
@@ -121,14 +205,23 @@ export function FilePanel(props: { fileId: string }) {
                       background: "var(--paper-mid)",
                     }}
                   >
-                    <Show when={f().url} fallback={
-                      <div style={{ padding: "var(--space-5)", color: "var(--text-muted)", "text-align": "center" }}>
-                        <Icon name="ph-image" size={32} />
-                        <p>无图片预览（附件 URL 缺失）</p>
-                      </div>
-                    }>
+                    <Show
+                      when={contentUrl()}
+                      fallback={
+                        <div
+                          style={{
+                            padding: "var(--space-5)",
+                            color: "var(--text-muted)",
+                            "text-align": "center",
+                          }}
+                        >
+                          <Icon name="ph-image" size={32} />
+                          <p>无图片预览（附件 URL 缺失）</p>
+                        </div>
+                      }
+                    >
                       <img
-                        src={f().url}
+                        src={contentUrl()!}
                         alt={f().name}
                         style={{ display: "block", width: "100%" }}
                       />
@@ -144,27 +237,65 @@ export function FilePanel(props: { fileId: string }) {
                       color: "var(--text-primary)",
                     }}
                   >
-                    <Icon name="ph-shield-check" size={12} /> Tracking pixels stripped.
+                    <Icon name="ph-shield-check" size={12} /> Tracking pixels
+                    stripped.
                   </div>
                 </Show>
 
                 {/* PDF */}
                 <Show when={f().type === "pdf"}>
-                  <div
-                    style={{
-                      padding: "var(--space-5)",
-                      background: "var(--paper-mid)",
-                      "border-radius": "var(--radius-md)",
-                      "text-align": "center",
-                      color: "var(--text-secondary)",
-                    }}
+                  <Show
+                    when={contentUrl()}
+                    fallback={
+                      <div
+                        style={{
+                          padding: "var(--space-5)",
+                          background: "var(--paper-mid)",
+                          "border-radius": "var(--radius-md)",
+                          "text-align": "center",
+                          color: "var(--text-secondary)",
+                        }}
+                      >
+                        <Icon name="ph-file-pdf" size={48} />
+                        <p style={{ "margin-top": "var(--space-2)" }}>
+                          PDF 预览需下载后打开
+                        </p>
+                        <button
+                          onClick={() => downloadFile(f())}
+                          style={{
+                            "margin-top": "var(--space-3)",
+                            padding: "6px 14px",
+                            background: "var(--palm-soft)",
+                            color: "var(--palm)",
+                            "border-radius": "var(--radius-pill)",
+                            "font-size": "var(--text-caption)",
+                            "font-weight": "600",
+                          }}
+                        >
+                          <Icon name="ph-download-simple" size={12} /> 下载
+                        </button>
+                      </div>
+                    }
                   >
-                    <Icon name="ph-file-pdf" size={48} />
-                    <p style={{ "margin-top": "var(--space-2)" }}>PDF 预览占位</p>
-                    <p style={{ "font-size": "var(--text-caption)", color: "var(--text-muted)" }}>
-                      实际渲染由 webview 原生 PDF viewer 处理。
-                    </p>
-                  </div>
+                    <div
+                      style={{
+                        "border-radius": "var(--radius-md)",
+                        overflow: "hidden",
+                        background: "var(--paper-mid)",
+                        height: "60vh",
+                      }}
+                    >
+                      <iframe
+                        src={contentUrl()!}
+                        title={f().name}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          border: "none",
+                        }}
+                      />
+                    </div>
+                  </Show>
                   <div
                     style={{
                       "margin-top": "var(--space-3)",
@@ -217,9 +348,29 @@ export function FilePanel(props: { fileId: string }) {
 
                 {/* Other */}
                 <Show when={f().type === "other"}>
-                  <div style={{ "text-align": "center", color: "var(--text-muted)", padding: "var(--space-8)" }}>
+                  <div
+                    style={{
+                      "text-align": "center",
+                      color: "var(--text-muted)",
+                      padding: "var(--space-8)",
+                    }}
+                  >
                     <Icon name="ph-file" size={48} />
                     <p>无法预览</p>
+                    <button
+                      onClick={() => downloadFile(f())}
+                      style={{
+                        "margin-top": "var(--space-3)",
+                        padding: "6px 14px",
+                        background: "var(--palm-soft)",
+                        color: "var(--palm)",
+                        "border-radius": "var(--radius-pill)",
+                        "font-size": "var(--text-caption)",
+                        "font-weight": "600",
+                      }}
+                    >
+                      <Icon name="ph-download-simple" size={12} /> 下载
+                    </button>
                   </div>
                 </Show>
               </div>

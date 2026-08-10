@@ -83,7 +83,8 @@ const TEMPLATES: &[ProviderTemplate] = &[
         id: "qq",
         label: "QQ 邮箱",
         icon: "chat-circle",
-        credentials_hint: "QQ · 授权码 (不是 QQ 密码)；在网页版 QQ 邮箱设置 → 账户 → 开启 IMAP/SMTP",
+        credentials_hint:
+            "QQ · 授权码 (不是 QQ 密码)；在网页版 QQ 邮箱设置 → 账户 → 开启 IMAP/SMTP",
         imap_host: "imap.qq.com",
         imap_port: 993,
         smtp_host: "smtp.qq.com",

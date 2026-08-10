@@ -7,6 +7,8 @@ import {
   setCommandPaletteOpen,
   notificationsOpen,
   setNotificationsOpen,
+  searchQuery,
+  setSearchQuery,
   setSearchOpen,
   view,
   showToast,
@@ -30,7 +32,6 @@ export function Topbar() {
         display: "flex",
         "align-items": "center",
         "justify-content": "space-between",
-        height: "var(--topbar-height)",
         padding: "0 var(--space-5)",
         background: "var(--surface)",
         "border-bottom": "0.5px solid var(--border)",
@@ -66,24 +67,36 @@ export function Topbar() {
         </span>
       </div>
 
-      <div style={{ display: "flex", "align-items": "center", gap: "var(--space-3)", flex: 1, "min-width": "0", "max-width": "560px" }}>
+      <div
+        style={{
+          display: "flex",
+          "align-items": "center",
+          gap: "var(--space-3)",
+          flex: 1,
+          "min-width": "0",
+          "max-width": "560px",
+        }}
+      >
         <input
           type="text"
+          value={searchQuery()}
+          onInput={(e) => {
+            setSearchQuery(e.currentTarget.value);
+            setSearchOpen(true);
+          }}
           onFocus={() => setSearchOpen(true)}
-          onClick={() => setSearchOpen(true)}
           placeholder="Search contacts, messages, files… (⌘K)"
           aria-label="Search"
-          readOnly
           style={{
             display: "block",
             width: "100%",
             padding: "8px 14px",
             background: "var(--paper-mid)",
             "border-radius": "var(--radius-pill)",
-            color: "var(--text-muted)",
+            color: "var(--text-primary)",
             "font-size": "var(--text-caption)",
             border: "0.5px solid var(--border)",
-            cursor: "pointer",
+            cursor: "text",
             "min-width": "0",
             "font-family": "var(--font-body)",
             outline: "none",
@@ -93,7 +106,13 @@ export function Topbar() {
 
       <SyncBadge />
 
-      <div style={{ display: "flex", "align-items": "center", gap: "var(--space-2)" }}>
+      <div
+        style={{
+          display: "flex",
+          "align-items": "center",
+          gap: "var(--space-2)",
+        }}
+      >
         <button
           onClick={() => setCommandPaletteOpen(!commandPaletteOpen())}
           title="Command palette (⌘K)"
@@ -102,7 +121,9 @@ export function Topbar() {
         >
           <Icon name="ph-lightning" size={18} />
         </button>
-        <NotificationBell onClick={() => setNotificationsOpen(!notificationsOpen())} />
+        <NotificationBell
+          onClick={() => setNotificationsOpen(!notificationsOpen())}
+        />
         <Avatar name="Edwin Hao" size={28} />
       </div>
     </header>
@@ -174,13 +195,19 @@ function SyncBadge() {
   const [accounts] = createResource(listAccounts);
   const [open, setOpen] = createSignal(false);
   const [busyIds, setBusyIds] = createSignal<Set<string>>(new Set());
-  const [states, setStates] = createSignal<Record<string, { last_uid: number; last_synced_at: string; busy: boolean }>>({});
+  const [states, setStates] = createSignal<
+    Record<string, { last_uid: number; last_synced_at: string; busy: boolean }>
+  >({});
 
-  const emailAccounts = () => (accounts() ?? []).filter((a) => a.type === "email");
+  const emailAccounts = () =>
+    (accounts() ?? []).filter((a) => a.type === "email");
 
   const refreshAll = async () => {
     const list = emailAccounts();
-    const next: Record<string, { last_uid: number; last_synced_at: string; busy: boolean }> = {};
+    const next: Record<
+      string,
+      { last_uid: number; last_synced_at: string; busy: boolean }
+    > = {};
     await Promise.all(
       list.map(async (a) => {
         try {
@@ -198,10 +225,13 @@ function SyncBadge() {
     setStates(next);
   };
 
-  createResource(() => emailAccounts().length, () => {
-    refreshAll();
-    return null;
-  });
+  createResource(
+    () => emailAccounts().length,
+    () => {
+      refreshAll();
+      return null;
+    },
+  );
   refreshAll();
   const interval = window.setInterval(refreshAll, 10_000);
   onCleanup(() => clearInterval(interval));
@@ -244,15 +274,23 @@ function SyncBadge() {
           gap: "var(--space-1)",
           padding: "4px 10px",
           "border-radius": "var(--radius-pill)",
-          background: aggregateConnected() ? "var(--palm-soft)" : "var(--paper-mid)",
+          background: aggregateConnected()
+            ? "var(--palm-soft)"
+            : "var(--paper-mid)",
           color: aggregateConnected() ? "var(--palm)" : "var(--text-secondary)",
           "font-size": "var(--text-micro)",
           "font-weight": "600",
-          animation: aggregateBusy() ? "pulse-soft 1.6s ease-in-out infinite" : undefined,
-          transition: "background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out)",
+          animation: aggregateBusy()
+            ? "pulse-soft 1.6s ease-in-out infinite"
+            : undefined,
+          transition:
+            "background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out)",
         }}
       >
-        <Icon name={aggregateBusy() ? "spinner" : "arrows-clockwise"} size={11} />
+        <Icon
+          name={aggregateBusy() ? "spinner" : "arrows-clockwise"}
+          size={11}
+        />
         <span>
           {emailAccounts().length === 0
             ? "未连接"
@@ -281,22 +319,26 @@ function SyncBadge() {
             "z-index": "var(--z-popover)",
           }}
         >
-          <p style={{
-            margin: "var(--space-1) var(--space-2)",
-            "font-size": "var(--text-micro)",
-            "font-weight": "700",
-            color: "var(--text-muted)",
-            "text-transform": "uppercase",
-            "letter-spacing": "0.04em",
-          }}>
+          <p
+            style={{
+              margin: "var(--space-1) var(--space-2)",
+              "font-size": "var(--text-micro)",
+              "font-weight": "700",
+              color: "var(--text-muted)",
+              "text-transform": "uppercase",
+              "letter-spacing": "0.04em",
+            }}
+          >
             IMAP 同步 · {emailAccounts().length} 账户
           </p>
           <Show when={emailAccounts().length === 0}>
-            <p style={{
-              margin: "var(--space-2)",
-              "font-size": "var(--text-caption)",
-              color: "var(--text-muted)",
-            }}>
+            <p
+              style={{
+                margin: "var(--space-2)",
+                "font-size": "var(--text-caption)",
+                color: "var(--text-muted)",
+              }}
+            >
               请到 Settings → Accounts 添加邮箱账户
             </p>
           </Show>
@@ -309,7 +351,10 @@ function SyncBadge() {
                 if (!t || t === "未配置（无 Tauri runtime）") return "—";
                 const d = new Date(t);
                 if (Number.isNaN(d.getTime())) return "—";
-                return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                return d.toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
               };
               return (
                 <div
@@ -322,21 +367,25 @@ function SyncBadge() {
                   }}
                 >
                   <div style={{ flex: 1, "min-width": "0" }}>
-                    <p style={{
-                      margin: 0,
-                      "font-size": "var(--text-caption)",
-                      "font-weight": "600",
-                      "white-space": "nowrap",
-                      overflow: "hidden",
-                      "text-overflow": "ellipsis",
-                    }}>
+                    <p
+                      style={{
+                        margin: 0,
+                        "font-size": "var(--text-caption)",
+                        "font-weight": "600",
+                        "white-space": "nowrap",
+                        overflow: "hidden",
+                        "text-overflow": "ellipsis",
+                      }}
+                    >
                       {a.label}
                     </p>
-                    <p style={{
-                      margin: 0,
-                      "font-size": "var(--text-micro)",
-                      color: busy() ? "var(--palm)" : "var(--text-muted)",
-                    }}>
+                    <p
+                      style={{
+                        margin: 0,
+                        "font-size": "var(--text-micro)",
+                        color: busy() ? "var(--palm)" : "var(--text-muted)",
+                      }}
+                    >
                       <Show when={busy()} fallback={<>最近同步 {syncedAt()}</>}>
                         正在同步…
                       </Show>
@@ -349,7 +398,9 @@ function SyncBadge() {
                     style={{
                       padding: "4px 10px",
                       "border-radius": "var(--radius-pill)",
-                      background: busy() ? "var(--paper-mid)" : "var(--palm-soft)",
+                      background: busy()
+                        ? "var(--paper-mid)"
+                        : "var(--palm-soft)",
                       color: busy() ? "var(--text-muted)" : "var(--palm)",
                       "font-size": "var(--text-micro)",
                       "font-weight": "700",

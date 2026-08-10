@@ -3,14 +3,15 @@
 //! See AGENTS.md §10 "Real backend integration" for the design and
 //! `docs/CREDENTIALS.md` for the test account.
 
+pub mod ical;
 pub mod imap;
-pub mod smtp;
 pub mod parser;
-pub mod state;
 pub mod providers;
+pub mod scheduled_send;
+pub mod smtp;
+pub mod state;
 pub mod sync_loop;
 pub mod vault;
-pub mod ical;
 
 use serde::{Deserialize, Serialize};
 
@@ -25,12 +26,19 @@ pub struct EmailCredentials {
     pub imap_port: u16,
     pub smtp_host: String,
     pub smtp_port: u16,
+    /// `true` for SMTPS (TLS wrapper, usually port 465); `false` for STARTTLS
+    /// (usually port 587).
+    pub smtp_implicit_tls: bool,
 }
 
 /// Load credentials from environment variables.
 /// Reads `SENDPALM_TEST_*` set in `.env` (dev) or process env (release).
 pub fn load_test_credentials() -> Result<EmailCredentials, String> {
     let _ = dotenvy::dotenv();
+    let smtp_port = std::env::var("SENDPALM_TEST_SMTP_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(465);
     Ok(EmailCredentials {
         email: std::env::var("SENDPALM_TEST_EMAIL")
             .map_err(|e| format!("SENDPALM_TEST_EMAIL missing: {e}"))?,
@@ -44,10 +52,8 @@ pub fn load_test_credentials() -> Result<EmailCredentials, String> {
             .unwrap_or(993),
         smtp_host: std::env::var("SENDPALM_TEST_SMTP_HOST")
             .unwrap_or_else(|_| "smtp.feishu.cn".to_string()),
-        smtp_port: std::env::var("SENDPALM_TEST_SMTP_PORT")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(465),
+        smtp_port,
+        smtp_implicit_tls: smtp_port == 465,
     })
 }
 

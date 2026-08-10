@@ -14,7 +14,7 @@ interface Bundle {
 /** Extract the pure renderList logic for testability. */
 function renderImboxList(
   imboxMsgs: Message[],
-  bundles: BundleConfig[]
+  bundles: BundleConfig[],
 ): (Message | Bundle)[] {
   const out: (Message | Bundle)[] = [];
   const bundledIds = new Set<string>();
@@ -34,9 +34,7 @@ function renderImboxList(
   for (const m of imboxMsgs) {
     const cfg = bundlesEnabled.get(m.pid);
     const enabled =
-      cfg !== undefined
-        ? cfg.enabled
-        : detectedBundleSenders.has(m.pid);
+      cfg !== undefined ? cfg.enabled : detectedBundleSenders.has(m.pid);
     if (!enabled || !m.unread) continue;
     bundledIds.add(m.id);
     const arr = bundlesByContact.get(m.pid) ?? [];
@@ -60,7 +58,12 @@ function renderImboxList(
   return out;
 }
 
-const mkMsg = (id: string, pid: string, unread: boolean, bucket: Message["bucket"] = "imbox"): Message => ({
+const mkMsg = (
+  id: string,
+  pid: string,
+  unread: boolean,
+  bucket: Message["bucket"] = "imbox",
+): Message => ({
   id,
   pid,
   subj: id,
@@ -77,18 +80,12 @@ const mkMsg = (id: string, pid: string, unread: boolean, bucket: Message["bucket
 
 describe("Imbox renderList (New for you section)", () => {
   it("returns empty when no unread messages", () => {
-    const msgs = [
-      mkMsg("m1", "a", false),
-      mkMsg("m2", "b", false),
-    ];
+    const msgs = [mkMsg("m1", "a", false), mkMsg("m2", "b", false)];
     expect(renderImboxList(msgs, [])).toEqual([]);
   });
 
   it("returns unread individually when no bundles", () => {
-    const msgs = [
-      mkMsg("m1", "a", true),
-      mkMsg("m2", "b", true),
-    ];
+    const msgs = [mkMsg("m1", "a", true), mkMsg("m2", "b", true)];
     const out = renderImboxList(msgs, []);
     expect(out).toHaveLength(2);
     expect(out.every((x) => "subj" in x)).toBe(true);
@@ -109,10 +106,7 @@ describe("Imbox renderList (New for you section)", () => {
   });
 
   it("respects explicit bundle config even with <3 unread", () => {
-    const msgs = [
-      mkMsg("m1", "a", true),
-      mkMsg("m2", "b", true),
-    ];
+    const msgs = [mkMsg("m1", "a", true), mkMsg("m2", "b", true)];
     const out = renderImboxList(msgs, [
       { contactId: "b", enabled: true, label: "B" },
     ]);
@@ -137,9 +131,7 @@ describe("Imbox renderList (New for you section)", () => {
 
   it("excludes non-imbox bucket", () => {
     // Caller pre-filters to imbox bucket only — renderImboxList assumes that
-    const msgs = [
-      mkMsg("m1", "a", true),
-    ];
+    const msgs = [mkMsg("m1", "a", true)];
     expect(renderImboxList(msgs, [])).toHaveLength(1);
   });
 });

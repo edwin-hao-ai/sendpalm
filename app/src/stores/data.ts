@@ -7,13 +7,15 @@
 import Database from "@tauri-apps/plugin-sql";
 import { IS_BROWSER } from "../services/tauri-shim";
 
-// Browser-mode guard. When running outside Tauri (pnpm dev alone, Playwright),
-// the SQL plugin can't open the SQLite file. We expose a getter that returns
-// a stub DB in that case so the UI renders its empty states instead of crashing.
+// Browser-mode guard. When running outside Tauri in dev (pnpm dev / Playwright),
+// the SQL plugin can't open the SQLite file. We lazily load a lightweight
+// in-memory MockDb so tests can seed contacts/messages/events and observe UI
+// changes. The dynamic import + DEV guard keeps the shim out of the production
+// Tauri bundle.
 
-class StubDb {
-  async select<T>(): Promise<T> { return [] as unknown as T; }
-  async execute(): Promise<void> { /* no-op */ }
+async function loadMockDb(): Promise<Database> {
+  const { MockDb } = await import("../services/mock-db");
+  return new MockDb() as unknown as Database;
 }
 import type {
   Account,
@@ -42,17 +44,102 @@ import type {
   Task,
 } from "../types";
 import { safeParse, safeStringify } from "../utils/id";
+import { DEFAULT_SHORTCUTS } from "../utils/shortcut-defaults";
 
 const DB_URL = "sqlite:sendpalm.db";
 
 let dbPromise: Promise<Database> | null = null;
 
 export function getDb(): Promise<Database> {
-  if (IS_BROWSER()) {
-    return Promise.resolve(new StubDb() as unknown as Database);
+  if (IS_BROWSER() && import.meta.env.DEV) {
+    return loadMockDb();
   }
   if (!dbPromise) dbPromise = Database.load(DB_URL);
   return dbPromise;
+}
+
+/* ── Full-text search index ───────────────────────────── */
+
+export interface SearchResult {
+  id: ID;
+  kind: "message" | "contact" | "file" | "event";
+  title: string;
+  body: string;
+}
+
+async function indexEntity(
+  id: ID,
+  kind: SearchResult["kind"],
+  title: string,
+  body: string,
+  date?: string,
+): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM search_index WHERE id = $1", [id]);
+  // Events encode their start date in the first line of body so LiveSearch
+  // can jump to the right calendar day without an extra query.
+  const storedBody = date ? `${date}\n${body}` : body;
+  await db.execute(
+    "INSERT INTO search_index (id, kind, title, body) VALUES ($1, $2, $3, $4)",
+    [id, kind, title, storedBody],
+  );
+}
+
+async function removeFromSearchIndex(id: ID): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM search_index WHERE id = $1", [id]);
+}
+
+export async function backfillSearchIndex(): Promise<void> {
+  const contacts = await listContacts();
+  for (const c of contacts) {
+    const emails = c.emails.map((e) => e.value).join(" ");
+    await indexEntity(
+      c.id,
+      "contact",
+      c.name,
+      `${c.company} ${c.title} ${emails} ${c.notes}`,
+    );
+  }
+  const messages = await listMessages();
+  for (const m of messages) {
+    await indexEntity(m.id, "message", m.subj, m.body);
+  }
+  const files = await listFiles();
+  for (const f of files) {
+    await indexEntity(
+      f.id,
+      "file",
+      f.name,
+      `${f.type} ${f.mime} ${f.sender ?? ""}`,
+    );
+  }
+  const events = await listEvents();
+  for (const e of events) {
+    await indexEntity(
+      e.id,
+      "event",
+      e.title,
+      `${e.notes} ${e.brief} ${e.location ?? ""}`,
+      e.dt,
+    );
+  }
+}
+
+export async function searchIndex(query: string): Promise<SearchResult[]> {
+  const db = await getDb();
+  const q = query.trim();
+  if (!q) return [];
+  const rows = await db.select<Record<string, unknown>[]>(
+    "SELECT id, kind, title, body FROM search_index WHERE search_index MATCH $1 ORDER BY rank LIMIT 50",
+    [q],
+  );
+  return rows.map((r) => ({
+    id: r.id as string,
+    kind: r.kind as SearchResult["kind"],
+    title: r.title as string,
+    body: r.body as string,
+  }));
 }
 
 /* ── Helpers ──────────────────────────────────────────── */
@@ -64,10 +151,12 @@ function rowToMessage(r: Record<string, unknown>): Message {
     subj: r.subj as string,
     prev: r.prev as string,
     body: r.body as string,
+    bodyHtml: (r.body_html as string | null) ?? null,
     tm: r.tm as string,
     st: r.st as string,
     ac: r.ac as string,
     bucket: r.bucket as Message["bucket"],
+    direction: (r.direction as Message["direction"]) ?? "in",
     unread: !!r.unread,
     labels: safeParse<ID[]>(r.labels_json as string, []),
     attachments: safeParse<ID[]>(r.attachments_json as string, []),
@@ -76,6 +165,7 @@ function rowToMessage(r: Record<string, unknown>): Message {
     setAside: !!r.set_aside,
     bubbleUpAt: (r.bubble_up_at as string | null) ?? null,
     remindAt: (r.remind_at as string | null) ?? null,
+    deletedAt: (r.deleted_at as string | null) ?? null,
     to: (r.to_addr as string | undefined) ?? undefined,
     cc: safeParse<string[]>(r.cc_json as string, []),
     bcc: safeParse<string[]>(r.bcc_json as string, []),
@@ -114,7 +204,7 @@ function rowToContact(r: Record<string, unknown>): Contact {
     accounts: safeParse<ID[]>(r.accounts_json as string, []),
     stageHistory: safeParse<Contact["stageHistory"]>(
       r.stage_history_json as string,
-      []
+      [],
     ),
     firstContact: r.first_contact as string,
     milestones: safeParse<string[]>(r.milestones_json as string, []),
@@ -155,7 +245,7 @@ function rowToAccount(r: Record<string, unknown>): Account {
       email: r.email as string,
       settings: safeParse<Account["settings"] & object>(
         r.settings_json as string,
-        {} as Account["settings"] & object
+        {} as Account["settings"] & object,
       ),
     } as Account;
   }
@@ -195,6 +285,8 @@ function rowToEvent(r: Record<string, unknown>): CalendarEvent {
     id: r.id as string,
     title: r.title as string,
     dt: r.dt as string,
+    endDt: (r.end_dt as string | undefined) ?? undefined,
+    allDay: Boolean(r.all_day as number | undefined),
     tm: r.tm as string,
     dur: (r.dur as number | undefined) ?? undefined,
     pids: safeParse<ID[]>(r.pids_json as string, []),
@@ -207,16 +299,17 @@ function rowToEvent(r: Record<string, unknown>): CalendarEvent {
     brief: r.brief as string,
     actionItems: safeParse<CalendarEvent["actionItems"]>(
       r.action_items_json as string,
-      []
+      [],
     ),
     materials: safeParse<CalendarEvent["materials"]>(
       r.materials_json as string,
-      []
+      [],
     ),
     transcriptUrl: (r.transcript_url as string | undefined) ?? undefined,
     recordingUrl: (r.recording_url as string | undefined) ?? undefined,
     habit: !!r.habit,
-    sometimeBucket: (r.sometime_bucket as CalendarEvent["sometimeBucket"]) ?? undefined,
+    sometimeBucket:
+      (r.sometime_bucket as CalendarEvent["sometimeBucket"]) ?? undefined,
     timeTrackingMs: (r.time_tracking_ms as number | undefined) ?? 0,
     photoUrl: (r.photo_url as string | undefined) ?? undefined,
     circled: !!r.circled,
@@ -247,8 +340,13 @@ function rowToDraft(r: Record<string, unknown>): Draft {
     lastEdited: r.last_edited as string,
     status: r.status as Draft["status"],
     accountId: r.account_id as string,
+    fromAlias: (r.from_alias as string | undefined) || undefined,
     cc: safeParse<string[]>(r.cc_json as string, []),
     bcc: safeParse<string[]>(r.bcc_json as string, []),
+    attachments: safeParse<Draft["attachments"]>(
+      r.attachments_json as string,
+      [],
+    ),
   };
 }
 
@@ -362,6 +460,7 @@ function rowToFollowUp(r: Record<string, unknown>): FollowUp {
     dueAt: r.due_at as string,
     status: r.status as FollowUp["status"],
     note: (r.note as string | undefined) ?? undefined,
+    surfacedAt: (r.surfaced_at as string | null) ?? null,
   };
 }
 
@@ -406,7 +505,7 @@ function rowToBundleConfig(r: Record<string, unknown>): BundleConfig {
 export async function listAccounts(): Promise<Account[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM accounts ORDER BY label"
+    "SELECT * FROM accounts ORDER BY label",
   );
   return rows.map(rowToAccount);
 }
@@ -415,7 +514,7 @@ export async function getAccount(id: ID): Promise<Account | null> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
     "SELECT * FROM accounts WHERE id = $1",
-    [id]
+    [id],
   );
   return rows[0] ? rowToAccount(rows[0]) : null;
 }
@@ -450,7 +549,7 @@ export async function upsertAccount(a: Account): Promise<void> {
       a.error ?? null,
       a.workspace ?? null,
       a.type === "email" ? safeStringify(a.settings) : null,
-    ]
+    ],
   );
 }
 
@@ -464,7 +563,7 @@ export async function deleteAccount(id: ID): Promise<void> {
 export async function listContacts(): Promise<Contact[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM contacts ORDER BY name"
+    "SELECT * FROM contacts ORDER BY name",
   );
   return rows.map(rowToContact);
 }
@@ -473,7 +572,7 @@ export async function getContact(id: ID): Promise<Contact | null> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
     "SELECT * FROM contacts WHERE id = $1",
-    [id]
+    [id],
   );
   return rows[0] ? rowToContact(rows[0]) : null;
 }
@@ -546,13 +645,21 @@ export async function upsertContact(c: Contact): Promise<void> {
       safeStringify(c.autoLabel),
       c.recycling ? 1 : 0,
       safeStringify(c.ch),
-    ]
+    ],
+  );
+  const emails = c.emails.map((e) => e.value).join(" ");
+  await indexEntity(
+    c.id,
+    "contact",
+    c.name,
+    `${c.company} ${c.title} ${emails} ${c.notes}`,
   );
 }
 
 export async function deleteContact(id: ID): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM contacts WHERE id = $1", [id]);
+  await removeFromSearchIndex(id);
 }
 
 /* ── Message CRUD ──────────────────────────────────────────── */
@@ -560,7 +667,7 @@ export async function deleteContact(id: ID): Promise<void> {
 export async function listMessages(): Promise<Message[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM messages ORDER BY st DESC"
+    "SELECT * FROM messages ORDER BY st DESC",
   );
   return rows.map(rowToMessage);
 }
@@ -569,7 +676,7 @@ export async function getMessage(id: ID): Promise<Message | null> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
     "SELECT * FROM messages WHERE id = $1",
-    [id]
+    [id],
   );
   return rows[0] ? rowToMessage(rows[0]) : null;
 }
@@ -578,31 +685,34 @@ export async function upsertMessage(m: Message): Promise<void> {
   const db = await getDb();
   await db.execute(
     `INSERT INTO messages (
-      id, pid, subj, prev, body, tm, st, ac, bucket, unread,
+      id, pid, subj, prev, body, body_html, tm, st, ac, bucket, direction, unread,
       labels_json, attachments_json, trackers_json,
-      reply_later, set_aside, bubble_up_at, remind_at,
-      to_addr, cc_json, bcc_json, thread_id
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+      reply_later, set_aside, bubble_up_at, remind_at, deleted_at,
+      to_addr, cc_json, bcc_json, thread_id, calendar_json
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
     ON CONFLICT(id) DO UPDATE SET
       pid=excluded.pid, subj=excluded.subj, prev=excluded.prev,
-      body=excluded.body, tm=excluded.tm, st=excluded.st, ac=excluded.ac,
-      bucket=excluded.bucket, unread=excluded.unread,
+      body=excluded.body, body_html=excluded.body_html, tm=excluded.tm, st=excluded.st,
+      ac=excluded.ac, bucket=excluded.bucket, direction=excluded.direction, unread=excluded.unread,
       labels_json=excluded.labels_json, attachments_json=excluded.attachments_json,
       trackers_json=excluded.trackers_json,
       reply_later=excluded.reply_later, set_aside=excluded.set_aside,
       bubble_up_at=excluded.bubble_up_at, remind_at=excluded.remind_at,
+      deleted_at=excluded.deleted_at,
       to_addr=excluded.to_addr, cc_json=excluded.cc_json, bcc_json=excluded.bcc_json,
-      thread_id=excluded.thread_id`,
+      thread_id=excluded.thread_id, calendar_json=excluded.calendar_json`,
     [
       m.id,
       m.pid,
       m.subj,
       m.prev,
       m.body,
+      m.bodyHtml ?? null,
       m.tm,
       m.st,
       m.ac,
       m.bucket,
+      m.direction ?? "in",
       m.unread ? 1 : 0,
       safeStringify(m.labels),
       safeStringify(m.attachments),
@@ -611,17 +721,71 @@ export async function upsertMessage(m: Message): Promise<void> {
       m.setAside ? 1 : 0,
       m.bubbleUpAt ?? null,
       m.remindAt ?? null,
+      m.deletedAt ?? null,
       m.to ?? null,
       safeStringify(m.cc ?? []),
       safeStringify(m.bcc ?? []),
       m.threadId ?? null,
-    ]
+      safeStringify(m.calendarInvite),
+    ],
   );
+  await indexEntity(m.id, "message", m.subj, m.body);
 }
 
 export async function deleteMessage(id: ID): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM messages WHERE id = $1", [id]);
+  await removeFromSearchIndex(id);
+}
+
+/** Move a message to a bucket and manage the trash/spam expiry timestamp.
+ *  Clears workflow flags so a moved/archived message leaves triage piles. */
+export async function moveMessageToBucket(
+  id: ID,
+  bucket: Message["bucket"],
+): Promise<void> {
+  const db = await getDb();
+  if (bucket === "trash" || bucket === "spam") {
+    await db.execute(
+      "UPDATE messages SET bucket = $1, deleted_at = datetime('now'), reply_later = 0, set_aside = 0, bubble_up_at = NULL, remind_at = NULL WHERE id = $2",
+      [bucket, id],
+    );
+  } else {
+    await db.execute(
+      "UPDATE messages SET bucket = $1, deleted_at = NULL, reply_later = 0, set_aside = 0, bubble_up_at = NULL, remind_at = NULL WHERE id = $2",
+      [bucket, id],
+    );
+  }
+}
+
+export async function emptyTrash(): Promise<number> {
+  const db = await getDb();
+  // Keep the full-text index in sync before the rows disappear.
+  await db.execute(
+    "DELETE FROM search_index WHERE id IN (SELECT id FROM messages WHERE bucket = 'trash')",
+  );
+  const result = await db.execute(
+    "DELETE FROM messages WHERE bucket = 'trash'",
+  );
+  return (result as unknown as { rowsAffected?: number }).rowsAffected ?? 0;
+}
+
+export async function updateMessagesBucketByContact(
+  contactId: ID,
+  bucket: Message["bucket"],
+): Promise<number> {
+  const db = await getDb();
+  const result =
+    bucket === "trash" || bucket === "spam"
+      ? await db.execute(
+          "UPDATE messages SET bucket = $1, deleted_at = datetime('now') WHERE pid = $2",
+          [bucket, contactId],
+        )
+      : await db.execute(
+          "UPDATE messages SET bucket = $1, deleted_at = NULL WHERE pid = $2",
+          [bucket, contactId],
+        );
+  return (result as unknown as { rowsAffected?: number }).rowsAffected ?? 0;
 }
 
 /* ── Per-entity single-row getters ─────────────────────────── */
@@ -630,7 +794,7 @@ export async function getEvent(id: ID): Promise<CalendarEvent | null> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
     "SELECT * FROM events WHERE id = $1",
-    [id]
+    [id],
   );
   return rows[0] ? rowToEvent(rows[0]) : null;
 }
@@ -639,7 +803,7 @@ export async function getFile(id: ID): Promise<FileItem | null> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
     "SELECT * FROM files WHERE id = $1",
-    [id]
+    [id],
   );
   return rows[0] ? rowToFile(rows[0]) : null;
 }
@@ -648,7 +812,7 @@ export async function getTask(id: ID): Promise<Task | null> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
     "SELECT * FROM tasks WHERE id = $1",
-    [id]
+    [id],
   );
   return rows[0] ? rowToTask(rows[0]) : null;
 }
@@ -657,7 +821,7 @@ export async function getDraft(id: ID): Promise<Draft | null> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
     "SELECT * FROM drafts WHERE id = $1",
-    [id]
+    [id],
   );
   return rows[0] ? rowToDraft(rows[0]) : null;
 }
@@ -667,7 +831,7 @@ export async function getDraft(id: ID): Promise<Draft | null> {
 export async function listFiles(): Promise<FileItem[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM files ORDER BY st DESC"
+    "SELECT * FROM files ORDER BY st DESC",
   );
   return rows.map(rowToFile);
 }
@@ -683,16 +847,32 @@ export async function upsertFile(f: FileItem): Promise<void> {
        content=excluded.content,st=excluded.st,sender=excluded.sender,
        thumb_url=excluded.thumb_url,md=excluded.md`,
     [
-      f.id, f.pid, f.name, f.type, f.mime, f.size,
-      f.url ?? null, f.content ?? null, f.st, f.sender ?? null,
-      f.thumbUrl ?? null, f.md ?? null,
-    ]
+      f.id,
+      f.pid,
+      f.name,
+      f.type,
+      f.mime,
+      f.size,
+      f.url ?? null,
+      f.content ?? null,
+      f.st,
+      f.sender ?? null,
+      f.thumbUrl ?? null,
+      f.md ?? null,
+    ],
+  );
+  await indexEntity(
+    f.id,
+    "file",
+    f.name,
+    `${f.type} ${f.mime} ${f.sender ?? ""}`,
   );
 }
 
 export async function deleteFile(id: ID): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM files WHERE id = $1", [id]);
+  await removeFromSearchIndex(id);
 }
 
 /* ── Event CRUD ──────────────────────────────────────────── */
@@ -700,7 +880,7 @@ export async function deleteFile(id: ID): Promise<void> {
 export async function listEvents(): Promise<CalendarEvent[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM events ORDER BY dt ASC"
+    "SELECT * FROM events ORDER BY dt ASC",
   );
   return rows.map(rowToEvent);
 }
@@ -709,13 +889,14 @@ export async function upsertEvent(e: CalendarEvent): Promise<void> {
   const db = await getDb();
   await db.execute(
     `INSERT INTO events (
-      id, title, dt, tm, dur, pids_json, color, location, video_link, reminder,
+      id, title, dt, end_dt, all_day, tm, dur, pids_json, color, location, video_link, reminder,
       agenda_json, notes, brief, action_items_json, materials_json,
       transcript_url, recording_url, habit, sometime_bucket, time_tracking_ms,
       photo_url, circled, day_note
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
     ON CONFLICT(id) DO UPDATE SET
-      title=excluded.title, dt=excluded.dt, tm=excluded.tm, dur=excluded.dur,
+      title=excluded.title, dt=excluded.dt, end_dt=excluded.end_dt, all_day=excluded.all_day,
+      tm=excluded.tm, dur=excluded.dur,
       pids_json=excluded.pids_json, color=excluded.color, location=excluded.location,
       video_link=excluded.video_link, reminder=excluded.reminder,
       agenda_json=excluded.agenda_json, notes=excluded.notes, brief=excluded.brief,
@@ -725,22 +906,46 @@ export async function upsertEvent(e: CalendarEvent): Promise<void> {
       time_tracking_ms=excluded.time_tracking_ms, photo_url=excluded.photo_url,
       circled=excluded.circled, day_note=excluded.day_note`,
     [
-      e.id, e.title, e.dt, e.tm, e.dur ?? null,
-      safeStringify(e.pids), e.color, e.location ?? null,
-      e.videoLink ?? null, e.reminder ?? null,
-      safeStringify(e.agenda), e.notes, e.brief,
-      safeStringify(e.actionItems), safeStringify(e.materials),
-      e.transcriptUrl ?? null, e.recordingUrl ?? null,
-      e.habit ? 1 : 0, e.sometimeBucket ?? null,
-      e.timeTrackingMs ?? 0, e.photoUrl ?? null,
-      e.circled ? 1 : 0, e.dayNote ?? null,
-    ]
+      e.id,
+      e.title,
+      e.dt,
+      e.endDt ?? null,
+      e.allDay ? 1 : 0,
+      e.tm,
+      e.dur ?? null,
+      safeStringify(e.pids),
+      e.color,
+      e.location ?? null,
+      e.videoLink ?? null,
+      e.reminder ?? null,
+      safeStringify(e.agenda),
+      e.notes,
+      e.brief,
+      safeStringify(e.actionItems),
+      safeStringify(e.materials),
+      e.transcriptUrl ?? null,
+      e.recordingUrl ?? null,
+      e.habit ? 1 : 0,
+      e.sometimeBucket ?? null,
+      e.timeTrackingMs ?? 0,
+      e.photoUrl ?? null,
+      e.circled ? 1 : 0,
+      e.dayNote ?? null,
+    ],
+  );
+  await indexEntity(
+    e.id,
+    "event",
+    e.title,
+    `${e.notes} ${e.brief} ${e.location ?? ""}`,
+    e.dt,
   );
 }
 
 export async function deleteEvent(id: ID): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM events WHERE id = $1", [id]);
+  await removeFromSearchIndex(id);
 }
 
 /* ── Task CRUD ──────────────────────────────────────────── */
@@ -748,7 +953,7 @@ export async function deleteEvent(id: ID): Promise<void> {
 export async function listTasks(): Promise<Task[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM tasks ORDER BY created_at DESC"
+    "SELECT * FROM tasks ORDER BY created_at DESC",
   );
   return rows.map(rowToTask);
 }
@@ -763,10 +968,16 @@ export async function upsertTask(t: Task): Promise<void> {
        priority=excluded.priority, related_contact_id=excluded.related_contact_id,
        related_event_id=excluded.related_event_id, notes=excluded.notes`,
     [
-      t.id, t.title, t.due ?? null, t.status, t.priority,
-      t.relatedContactId ?? null, t.relatedEventId ?? null,
-      t.notes, t.createdAt,
-    ]
+      t.id,
+      t.title,
+      t.due ?? null,
+      t.status,
+      t.priority,
+      t.relatedContactId ?? null,
+      t.relatedEventId ?? null,
+      t.notes,
+      t.createdAt,
+    ],
   );
 }
 
@@ -780,7 +991,7 @@ export async function deleteTask(id: ID): Promise<void> {
 export async function listDrafts(): Promise<Draft[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM drafts ORDER BY last_edited DESC"
+    "SELECT * FROM drafts ORDER BY last_edited DESC",
   );
   return rows.map(rowToDraft);
 }
@@ -788,16 +999,27 @@ export async function listDrafts(): Promise<Draft[]> {
 export async function upsertDraft(d: Draft): Promise<void> {
   const db = await getDb();
   await db.execute(
-    `INSERT INTO drafts (id,recipient,subject,body,last_edited,status,account_id,cc_json,bcc_json)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    `INSERT INTO drafts (id,recipient,subject,body,last_edited,status,account_id,from_alias,cc_json,bcc_json,attachments_json)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      ON CONFLICT(id) DO UPDATE SET
        recipient=excluded.recipient, subject=excluded.subject, body=excluded.body,
        last_edited=excluded.last_edited, status=excluded.status,
-       account_id=excluded.account_id, cc_json=excluded.cc_json, bcc_json=excluded.bcc_json`,
+       account_id=excluded.account_id, from_alias=excluded.from_alias,
+       cc_json=excluded.cc_json, bcc_json=excluded.bcc_json,
+       attachments_json=excluded.attachments_json`,
     [
-      d.id, d.recipient, d.subject, d.body, d.lastEdited, d.status, d.accountId,
-      safeStringify(d.cc ?? []), safeStringify(d.bcc ?? []),
-    ]
+      d.id,
+      d.recipient,
+      d.subject,
+      d.body,
+      d.lastEdited,
+      d.status,
+      d.accountId,
+      d.fromAlias ?? null,
+      safeStringify(d.cc ?? []),
+      safeStringify(d.bcc ?? []),
+      safeStringify(d.attachments ?? []),
+    ],
   );
 }
 
@@ -811,7 +1033,7 @@ export async function deleteDraft(id: ID): Promise<void> {
 export async function listAgentSessions(): Promise<AgentSession[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM agent_sessions ORDER BY created_at DESC"
+    "SELECT * FROM agent_sessions ORDER BY created_at DESC",
   );
   return rows.map(rowToAgentSession);
 }
@@ -822,7 +1044,13 @@ export async function upsertAgentSession(s: AgentSession): Promise<void> {
     `INSERT INTO agent_sessions (id,kind,title,context_json,created_at)
      VALUES ($1,$2,$3,$4,$5)
      ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, title=excluded.title, context_json=excluded.context_json`,
-    [s.id, s.kind, s.title, s.context ? safeStringify(s.context) : null, s.createdAt]
+    [
+      s.id,
+      s.kind,
+      s.title,
+      s.context ? safeStringify(s.context) : null,
+      s.createdAt,
+    ],
   );
 }
 
@@ -836,10 +1064,10 @@ export async function listAgentTasks(sessionId?: ID): Promise<AgentTask[]> {
   const rows = sessionId
     ? await db.select<Record<string, unknown>[]>(
         "SELECT * FROM agent_tasks WHERE session_id = $1 ORDER BY created_at DESC",
-        [sessionId]
+        [sessionId],
       )
     : await db.select<Record<string, unknown>[]>(
-        "SELECT * FROM agent_tasks ORDER BY created_at DESC"
+        "SELECT * FROM agent_tasks ORDER BY created_at DESC",
       );
   return rows.map(rowToAgentTask);
 }
@@ -854,10 +1082,17 @@ export async function upsertAgentTask(t: AgentTask): Promise<void> {
        status=excluded.status, steps_json=excluded.steps_json, eta_ms=excluded.eta_ms,
        confidence=excluded.confidence, trigger=excluded.trigger`,
     [
-      t.id, t.sessionId, t.title, t.description, t.status,
-      safeStringify(t.steps), t.etaMs ?? null, t.confidence ?? null,
-      t.trigger ?? null, t.createdAt,
-    ]
+      t.id,
+      t.sessionId,
+      t.title,
+      t.description,
+      t.status,
+      safeStringify(t.steps),
+      t.etaMs ?? null,
+      t.confidence ?? null,
+      t.trigger ?? null,
+      t.createdAt,
+    ],
   );
 }
 
@@ -871,10 +1106,10 @@ export async function listAgentDrafts(sessionId?: ID): Promise<AgentDraft[]> {
   const rows = sessionId
     ? await db.select<Record<string, unknown>[]>(
         "SELECT * FROM agent_drafts WHERE session_id = $1 ORDER BY created_at DESC",
-        [sessionId]
+        [sessionId],
       )
     : await db.select<Record<string, unknown>[]>(
-        "SELECT * FROM agent_drafts ORDER BY created_at DESC"
+        "SELECT * FROM agent_drafts ORDER BY created_at DESC",
       );
   return rows.map(rowToAgentDraft);
 }
@@ -887,7 +1122,7 @@ export async function upsertAgentDraft(d: AgentDraft): Promise<void> {
      ON CONFLICT(id) DO UPDATE SET
        session_id=excluded.session_id, recipient=excluded.recipient,
        subject=excluded.subject, body=excluded.body, status=excluded.status`,
-    [d.id, d.sessionId, d.recipient, d.subject, d.body, d.status, d.createdAt]
+    [d.id, d.sessionId, d.recipient, d.subject, d.body, d.status, d.createdAt],
   );
 }
 
@@ -899,7 +1134,7 @@ export async function deleteAgentDraft(id: ID): Promise<void> {
 export async function listAgentAudit(): Promise<AgentAuditEntry[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM agent_audit ORDER BY created_at DESC"
+    "SELECT * FROM agent_audit ORDER BY created_at DESC",
   );
   return rows.map(rowToAgentAudit);
 }
@@ -914,9 +1149,14 @@ export async function appendAgentAudit(entry: AgentAuditEntry): Promise<void> {
        message=excluded.message, payload=excluded.payload,
        undoable=excluded.undoable`,
     [
-      entry.id, entry.sessionId ?? null, entry.kind, entry.message,
-      entry.payload ?? null, entry.createdAt, entry.undoable ? 1 : 0,
-    ]
+      entry.id,
+      entry.sessionId ?? null,
+      entry.kind,
+      entry.message,
+      entry.payload ?? null,
+      entry.createdAt,
+      entry.undoable ? 1 : 0,
+    ],
   );
 }
 
@@ -936,7 +1176,7 @@ export async function clearAgentAudit(): Promise<void> {
 export async function listNotifications(): Promise<Notification[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM notifications ORDER BY created_at DESC"
+    "SELECT * FROM notifications ORDER BY created_at DESC",
   );
   return rows.map(rowToNotification);
 }
@@ -944,7 +1184,7 @@ export async function listNotifications(): Promise<Notification[]> {
 export async function countUnreadNotifications(): Promise<number> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT COUNT(*) AS cnt FROM notifications WHERE read = 0"
+    "SELECT COUNT(*) AS cnt FROM notifications WHERE read = 0",
   );
   return Number(rows[0]?.cnt ?? 0);
 }
@@ -958,9 +1198,14 @@ export async function upsertNotification(n: Notification): Promise<void> {
        type=excluded.type, title=excluded.title, body=excluded.body,
        ref_json=excluded.ref_json, read=excluded.read`,
     [
-      n.id, n.type, n.title, n.body, n.ref ? safeStringify(n.ref) : null,
-      n.read ? 1 : 0, n.createdAt,
-    ]
+      n.id,
+      n.type,
+      n.title,
+      n.body,
+      n.ref ? safeStringify(n.ref) : null,
+      n.read ? 1 : 0,
+      n.createdAt,
+    ],
   );
 }
 
@@ -979,7 +1224,7 @@ export async function deleteNotification(id: ID): Promise<void> {
 export async function listSnippets(): Promise<Snippet[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM snippets ORDER BY label"
+    "SELECT * FROM snippets ORDER BY label",
   );
   return rows.map(rowToSnippet);
 }
@@ -990,7 +1235,7 @@ export async function upsertSnippet(s: Snippet): Promise<void> {
     `INSERT INTO snippets (id,label,body,shortcut)
      VALUES ($1,$2,$3,$4)
      ON CONFLICT(id) DO UPDATE SET label=excluded.label, body=excluded.body, shortcut=excluded.shortcut`,
-    [s.id, s.label, s.body, s.shortcut ?? null]
+    [s.id, s.label, s.body, s.shortcut ?? null],
   );
 }
 
@@ -1004,7 +1249,7 @@ export async function deleteSnippet(id: ID): Promise<void> {
 export async function listStickies(): Promise<Sticky[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM stickies ORDER BY created_at DESC"
+    "SELECT * FROM stickies ORDER BY created_at DESC",
   );
   return rows.map(rowToSticky);
 }
@@ -1015,7 +1260,7 @@ export async function upsertSticky(s: Sticky): Promise<void> {
     `INSERT INTO stickies (id,msg_id,body,created_at)
      VALUES ($1,$2,$3,$4)
      ON CONFLICT(id) DO UPDATE SET msg_id=excluded.msg_id, body=excluded.body`,
-    [s.id, s.msgId, s.body, s.createdAt]
+    [s.id, s.msgId, s.body, s.createdAt],
   );
 }
 
@@ -1031,10 +1276,10 @@ export async function listContactNotes(contactId?: ID): Promise<ContactNote[]> {
   const rows = contactId
     ? await db.select<Record<string, unknown>[]>(
         "SELECT * FROM contact_notes WHERE contact_id = $1 ORDER BY pinned DESC, created_at DESC",
-        [contactId]
+        [contactId],
       )
     : await db.select<Record<string, unknown>[]>(
-        "SELECT * FROM contact_notes ORDER BY created_at DESC"
+        "SELECT * FROM contact_notes ORDER BY created_at DESC",
       );
   return rows.map(rowToContactNote);
 }
@@ -1046,7 +1291,7 @@ export async function upsertContactNote(n: ContactNote): Promise<void> {
      VALUES ($1,$2,$3,$4,$5)
      ON CONFLICT(id) DO UPDATE SET
        contact_id=excluded.contact_id, body=excluded.body, pinned=excluded.pinned`,
-    [n.id, n.contactId, n.body, n.pinned ? 1 : 0, n.createdAt]
+    [n.id, n.contactId, n.body, n.pinned ? 1 : 0, n.createdAt],
   );
 }
 
@@ -1060,7 +1305,7 @@ export async function deleteContactNote(id: ID): Promise<void> {
 export async function listClips(): Promise<Clip[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM clips ORDER BY created_at DESC"
+    "SELECT * FROM clips ORDER BY created_at DESC",
   );
   return rows.map(rowToClip);
 }
@@ -1071,7 +1316,7 @@ export async function upsertClip(c: Clip): Promise<void> {
     `INSERT INTO clips (id,text,msg_id,contact_id,created_at)
      VALUES ($1,$2,$3,$4,$5)
      ON CONFLICT(id) DO UPDATE SET text=excluded.text, msg_id=excluded.msg_id, contact_id=excluded.contact_id`,
-    [c.id, c.text, c.msgId ?? null, c.contactId ?? null, c.createdAt]
+    [c.id, c.text, c.msgId ?? null, c.contactId ?? null, c.createdAt],
   );
 }
 
@@ -1085,7 +1330,7 @@ export async function deleteClip(id: ID): Promise<void> {
 export async function listFollowUps(): Promise<FollowUp[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM follow_ups ORDER BY due_at ASC"
+    "SELECT * FROM follow_ups ORDER BY due_at ASC",
   );
   return rows.map(rowToFollowUp);
 }
@@ -1093,11 +1338,12 @@ export async function listFollowUps(): Promise<FollowUp[]> {
 export async function upsertFollowUp(f: FollowUp): Promise<void> {
   const db = await getDb();
   await db.execute(
-    `INSERT INTO follow_ups (id,msg_id,due_at,status,note)
-     VALUES ($1,$2,$3,$4,$5)
+    `INSERT INTO follow_ups (id,msg_id,due_at,status,note,surfaced_at)
+     VALUES ($1,$2,$3,$4,$5,$6)
      ON CONFLICT(id) DO UPDATE SET
-       msg_id=excluded.msg_id, due_at=excluded.due_at, status=excluded.status, note=excluded.note`,
-    [f.id, f.msgId, f.dueAt, f.status, f.note ?? null]
+       msg_id=excluded.msg_id, due_at=excluded.due_at, status=excluded.status,
+       note=excluded.note, surfaced_at=excluded.surfaced_at`,
+    [f.id, f.msgId, f.dueAt, f.status, f.note ?? null, f.surfacedAt ?? null],
   );
 }
 
@@ -1111,7 +1357,7 @@ export async function deleteFollowUp(id: ID): Promise<void> {
 export async function listScheduledSends(): Promise<ScheduledSend[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM scheduled_sends ORDER BY scheduled_at ASC"
+    "SELECT * FROM scheduled_sends ORDER BY scheduled_at ASC",
   );
   return rows.map(rowToScheduledSend);
 }
@@ -1124,7 +1370,7 @@ export async function upsertScheduledSend(s: ScheduledSend): Promise<void> {
      ON CONFLICT(id) DO UPDATE SET
        draft_id=excluded.draft_id, account_id=excluded.account_id,
        scheduled_at=excluded.scheduled_at, status=excluded.status`,
-    [s.id, s.draftId, s.accountId, s.scheduledAt, s.status]
+    [s.id, s.draftId, s.accountId, s.scheduledAt, s.status],
   );
 }
 
@@ -1138,7 +1384,7 @@ export async function deleteScheduledSend(id: ID): Promise<void> {
 export async function listLabels(): Promise<Label[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM labels ORDER BY name"
+    "SELECT * FROM labels ORDER BY name",
   );
   return rows.map(rowToLabel);
 }
@@ -1149,7 +1395,7 @@ export async function upsertLabel(l: Label): Promise<void> {
     `INSERT INTO labels (id,name,color)
      VALUES ($1,$2,$3)
      ON CONFLICT(id) DO UPDATE SET name=excluded.name, color=excluded.color`,
-    [l.id, l.name, l.color]
+    [l.id, l.name, l.color],
   );
 }
 
@@ -1163,7 +1409,7 @@ export async function deleteLabel(id: ID): Promise<void> {
 export async function listShortcuts(): Promise<Shortcut[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM shortcuts ORDER BY action"
+    "SELECT * FROM shortcuts ORDER BY action",
   );
   return rows.map(rowToShortcut);
 }
@@ -1175,8 +1421,26 @@ export async function upsertShortcut(s: Shortcut): Promise<void> {
      VALUES ($1,$2,$3,$4,$5)
      ON CONFLICT(id) DO UPDATE SET
        combo=excluded.combo, label=excluded.label, action=excluded.action, editable=excluded.editable`,
-    [s.id, s.combo, s.label, s.action, s.editable ? 1 : 0]
+    [s.id, s.combo, s.label, s.action, s.editable ? 1 : 0],
   );
+}
+
+export async function ensureDefaultShortcuts(): Promise<void> {
+  const db = await getDb();
+  const row = await db.select<Record<string, unknown>[]>(
+    "SELECT COUNT(*) as cnt FROM shortcuts",
+  );
+  const cnt = (row[0]?.cnt as number) ?? 0;
+  if (cnt > 0) return;
+  await resetShortcuts();
+}
+
+export async function resetShortcuts(): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM shortcuts");
+  for (const s of DEFAULT_SHORTCUTS) {
+    await upsertShortcut(s);
+  }
 }
 
 /* ── Bundle configs ──────────────────────────────────────────── */
@@ -1184,7 +1448,7 @@ export async function upsertShortcut(s: Shortcut): Promise<void> {
 export async function listBundleConfigs(): Promise<BundleConfig[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM bundle_configs"
+    "SELECT * FROM bundle_configs",
   );
   return rows.map(rowToBundleConfig);
 }
@@ -1195,13 +1459,15 @@ export async function upsertBundleConfig(b: BundleConfig): Promise<void> {
     `INSERT INTO bundle_configs (contact_id,enabled,label)
      VALUES ($1,$2,$3)
      ON CONFLICT(contact_id) DO UPDATE SET enabled=excluded.enabled, label=excluded.label`,
-    [b.contactId, b.enabled ? 1 : 0, b.label ?? null]
+    [b.contactId, b.enabled ? 1 : 0, b.label ?? null],
   );
 }
 
 export async function deleteBundleConfig(contactId: ID): Promise<void> {
   const db = await getDb();
-  await db.execute("DELETE FROM bundle_configs WHERE contact_id = $1", [contactId]);
+  await db.execute("DELETE FROM bundle_configs WHERE contact_id = $1", [
+    contactId,
+  ]);
 }
 
 /* ── Reset all data (Settings → Data) ────────────────────── */
@@ -1241,7 +1507,7 @@ export async function resetAllData(): Promise<void> {
 export const AGENT_MEMORY_KEY = "agent_memory";
 
 export async function loadAgentMemory(
-  store: import("@tauri-apps/plugin-store").Store
+  store: import("@tauri-apps/plugin-store").Store,
 ): Promise<AgentMemory> {
   const v = await store.get<AgentMemory>(AGENT_MEMORY_KEY);
   return v ?? { global: {}, contacts: {} };
@@ -1249,7 +1515,7 @@ export async function loadAgentMemory(
 
 export async function saveAgentMemory(
   store: import("@tauri-apps/plugin-store").Store,
-  memory: AgentMemory
+  memory: AgentMemory,
 ): Promise<void> {
   await store.set(AGENT_MEMORY_KEY, memory);
   await store.save();
@@ -1260,7 +1526,7 @@ export async function saveAgentMemory(
 export const APP_SETTINGS_KEY = "app_settings";
 
 export async function loadAppSettings(
-  store: import("@tauri-apps/plugin-store").Store
+  store: import("@tauri-apps/plugin-store").Store,
 ): Promise<AppSettings> {
   const v = await store.get<AppSettings>(APP_SETTINGS_KEY);
   return (
@@ -1302,7 +1568,7 @@ export async function loadAppSettings(
 
 export async function saveAppSettings(
   store: import("@tauri-apps/plugin-store").Store,
-  s: AppSettings
+  s: AppSettings,
 ): Promise<void> {
   await store.set(APP_SETTINGS_KEY, s);
   await store.save();

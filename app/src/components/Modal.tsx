@@ -71,7 +71,13 @@ export function Modal(props: ModalProps) {
                 "border-bottom": "0.5px solid var(--border)",
               }}
             >
-              <strong style={{ flex: 1, "font-size": "var(--text-body-sm)", "font-weight": "700" }}>
+              <strong
+                style={{
+                  flex: 1,
+                  "font-size": "var(--text-body-sm)",
+                  "font-weight": "700",
+                }}
+              >
                 {props.title}
               </strong>
               <button
@@ -86,13 +92,23 @@ export function Modal(props: ModalProps) {
                   "align-items": "center",
                   "justify-content": "center",
                 }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--paper-mid)")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.background = "var(--paper-mid)")
+                }
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.background = "transparent")
+                }
               >
                 <Icon name="ph-x" size={14} />
               </button>
             </header>
-            <div style={{ flex: 1, "overflow-y": "auto", padding: "var(--space-5)" }}>
+            <div
+              style={{
+                flex: 1,
+                "overflow-y": "auto",
+                padding: "var(--space-5)",
+              }}
+            >
               {props.children}
             </div>
             <Show when={props.footer}>
@@ -118,4 +134,7 @@ export function Modal(props: ModalProps) {
 
 /** Hook for opening the compose modal from anywhere. */
 const [_composeOpen, _setComposeOpen] = createSignal(false);
-export { _composeOpen as composeModalOpen, _setComposeOpen as setComposeModalOpen };
+export {
+  _composeOpen as composeModalOpen,
+  _setComposeOpen as setComposeModalOpen,
+};

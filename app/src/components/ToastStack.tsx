@@ -5,10 +5,26 @@ import { toasts, dismissToast, ToastKind } from "../stores/ui";
 import { Icon } from "./Icon";
 
 const COLOR: Record<ToastKind, { bg: string; border: string; icon: string }> = {
-  info: { bg: "var(--paper-light)", border: "var(--border-strong)", icon: "ph-info" },
-  success: { bg: "var(--mint)", border: "rgba(10,143,99,0.3)", icon: "ph-check-circle" },
-  warning: { bg: "var(--canary)", border: "rgba(245,214,82,0.5)", icon: "ph-warning" },
-  error: { bg: "rgba(255,59,48,0.08)", border: "rgba(255,59,48,0.3)", icon: "ph-x-circle" },
+  info: {
+    bg: "var(--paper-light)",
+    border: "var(--border-strong)",
+    icon: "ph-info",
+  },
+  success: {
+    bg: "var(--mint)",
+    border: "rgba(10,143,99,0.3)",
+    icon: "ph-check-circle",
+  },
+  warning: {
+    bg: "var(--canary)",
+    border: "rgba(245,214,82,0.5)",
+    icon: "ph-warning",
+  },
+  error: {
+    bg: "rgba(255,59,48,0.08)",
+    border: "rgba(255,59,48,0.3)",
+    icon: "ph-x-circle",
+  },
 };
 
 export function ToastStack() {
@@ -29,6 +45,7 @@ export function ToastStack() {
       <For each={toasts()}>
         {(t) => (
           <div
+            data-testid={`toast-${t.kind}`}
             style={{
               padding: "var(--space-3) var(--space-4)",
               background: COLOR[t.kind].bg,
@@ -46,8 +63,9 @@ export function ToastStack() {
             <span style={{ flex: 1 }}>{t.message}</span>
             {t.action && (
               <button
-                onClick={() => {
-                  t.action!.run();
+                data-testid="toast-action"
+                onClick={async () => {
+                  await t.action!.run();
                   dismissToast(t.id);
                 }}
                 style={{

@@ -8,6 +8,7 @@ import {
   listMessages,
   listFollowUps,
   upsertMessage,
+  upsertFollowUp,
   appendAgentAudit,
   upsertNotification,
 } from "../stores/data";
@@ -24,7 +25,11 @@ export function startResurfaceLoop(): () => void {
   const tick = async () => {
     const now = new Date();
     const msgs = (await listMessages()).filter(
-      (m: Message) => m.bubbleUpAt && new Date(m.bubbleUpAt) <= now && !m.unread && m.bucket === "imbox"
+      (m: Message) =>
+        m.bubbleUpAt &&
+        new Date(m.bubbleUpAt) <= now &&
+        !m.unread &&
+        m.bucket === "imbox",
     );
     for (const m of msgs) {
       await upsertMessage({ ...m, unread: true });
@@ -50,25 +55,61 @@ export function startResurfaceLoop(): () => void {
         kind: "info",
         action: {
           label: "打开 Imbox",
-          run: () => setView("imbox"),
+          run: () => {
+            setView("imbox");
+          },
         },
         ttlMs: 6000,
       });
     }
 
-    // Follow-ups that are due
+    // Follow-ups that are due — resurface the message in Imbox.
     const fus = (await listFollowUps()).filter(
-      (f: FollowUp) => f.status === "pending" && new Date(f.dueAt) <= now
+      (f: FollowUp) =>
+        f.status === "pending" && new Date(f.dueAt) <= now && !f.surfacedAt,
     );
+    const allMsgs = await listMessages();
     for (const f of fus) {
+      const m = allMsgs.find((x: Message) => x.id === f.msgId);
+      if (!m) continue;
+      const needsMove = m.bucket !== "imbox";
+      const needsUnread = !m.unread;
+      if (needsMove || needsUnread) {
+        await upsertMessage({
+          ...m,
+          bucket: "imbox",
+          unread: true,
+        });
+      }
+      await upsertFollowUp({ ...f, surfacedAt: isoNow() });
       await appendAgentAudit({
         id: uid("aa"),
         sessionId: undefined,
         kind: "followup_due",
-        message: `跟进到期`,
+        message: `跟进到期：${m.subj}`,
         payload: f.id,
         createdAt: isoNow(),
         undoable: false,
+      });
+      await upsertNotification({
+        id: uid("nt"),
+        type: "followup",
+        title: "跟进到期",
+        body: m.subj || "有一封邮件需要跟进",
+        ref: { type: "message", id: m.id },
+        read: false,
+        createdAt: isoNow(),
+      });
+      showToast({
+        message: `跟进到期：${m.subj}`,
+        kind: "info",
+        action: {
+          label: "打开 Imbox",
+          run: () => {
+            setView("imbox");
+          },
+        },
+        ttlMs: 8000,
       });
     }
   };

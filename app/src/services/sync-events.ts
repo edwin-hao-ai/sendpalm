@@ -7,7 +7,7 @@
  */
 import { listen } from "@tauri-apps/api/event";
 import { IS_BROWSER } from "./tauri-shim";
-import { listMessages, listNotifications } from "../stores/data";
+import { bumpRefreshTick } from "../stores/ui";
 
 export interface SyncReport {
   account_id: string;
@@ -26,8 +26,10 @@ export function startSyncEventBridge(): () => void {
 
   let unlisten: (() => void) | undefined;
 
-  listen<SyncReport>("sync:new-messages", async (_event) => {
-    await Promise.all([listMessages(), listNotifications()]);
+  listen<SyncReport>("sync:new-messages", (_event) => {
+    // Bump the global refresh tick so every list view re-fetches its
+    // createResource and surfaces the new mail immediately.
+    bumpRefreshTick();
   })
     .then((fn) => {
       unlisten = fn;

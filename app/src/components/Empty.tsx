@@ -84,7 +84,11 @@ export function Empty(props: EmptyProps) {
   );
 }
 
-export function Skeleton(props: { height?: string; width?: string; radius?: string }) {
+export function Skeleton(props: {
+  height?: string;
+  width?: string;
+  radius?: string;
+}) {
   return (
     <div
       style={{
@@ -100,7 +104,11 @@ export function Skeleton(props: { height?: string; width?: string; radius?: stri
   );
 }
 
-export function ErrorState(props: { title?: string; message?: string; retry?: () => void }) {
+export function ErrorState(props: {
+  title?: string;
+  message?: string;
+  retry?: () => void;
+}) {
   return (
     <Empty
       icon="ph-warning-circle"

@@ -23,7 +23,14 @@ describe("date utils", () => {
 
 describe("label maps", () => {
   it("STAGE_COLOR has every stage", () => {
-    for (const stage of ["explore", "build", "active", "maintain", "cold", "rekindle"] as const) {
+    for (const stage of [
+      "explore",
+      "build",
+      "active",
+      "maintain",
+      "cold",
+      "rekindle",
+    ] as const) {
       expect(STAGE_COLOR[stage]).toMatch(/^#[0-9A-Fa-f]{6}$/);
     }
   });

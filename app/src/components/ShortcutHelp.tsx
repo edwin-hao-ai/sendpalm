@@ -35,8 +35,6 @@ const SHORTCUTS: { group: string; items: Shortcut[] }[] = [
       { combo: "⌘ 6", label: "Calendar" },
       { combo: "⌘ 7", label: "Files" },
       { combo: "⌘ 8", label: "Insights" },
-      { combo: "⌘ 0", label: "Drafts" },
-      { combo: "⌘ 9", label: "Settings" },
     ],
   },
   {
@@ -46,16 +44,22 @@ const SHORTCUTS: { group: string; items: Shortcut[] }[] = [
       { combo: "k / ↑", label: "上一条" },
       { combo: "x", label: "选择/取消" },
       { combo: "Enter", label: "打开消息详情" },
+      { combo: "r", label: "回复" },
+      { combo: "e", label: "归档" },
       { combo: "l", label: "Reply Later" },
-      { combo: "a", label: "Set Aside" },
-      { combo: "z", label: "Bubble Up" },
+      { combo: "s", label: "Set Aside" },
+      { combo: "b", label: "Bubble Up" },
       { combo: "u", label: "标为未读" },
+      { combo: "#", label: "移至 Trash" },
+      { combo: "!", label: "标记 Spam" },
+      { combo: ";", label: "批量菜单" },
     ],
   },
   {
     group: "日历",
     items: [
       { combo: "d / w / y", label: "Day / Week / Year" },
+      { combo: "t", label: "回到今天" },
       { combo: "← / →", label: "上一/下一 周期" },
     ],
   },
@@ -63,36 +67,54 @@ const SHORTCUTS: { group: string; items: Shortcut[] }[] = [
 
 export function ShortcutHelp() {
   return (
-    <Modal open={helpOpen()} onClose={() => setHelpOpen(false)} title="键盘快捷键" width="600px">
+    <Modal
+      open={helpOpen()}
+      onClose={() => setHelpOpen(false)}
+      title="键盘快捷键"
+      width="600px"
+    >
       <Show when={true}>
         <div style={{ display: "grid", gap: "var(--space-4)" }}>
           {SHORTCUTS.map((s) => (
             <section>
-              <h4 style={{
-                "font-family": "var(--font-display)",
-                "font-size": "var(--text-micro)",
-                "font-weight": "700",
-                "letter-spacing": "0.04em",
-                "text-transform": "uppercase",
-                color: "var(--text-muted)",
-                margin: "0 0 var(--space-2)",
-              }}>
+              <h4
+                style={{
+                  "font-family": "var(--font-display)",
+                  "font-size": "var(--text-micro)",
+                  "font-weight": "700",
+                  "letter-spacing": "0.04em",
+                  "text-transform": "uppercase",
+                  color: "var(--text-muted)",
+                  margin: "0 0 var(--space-2)",
+                }}
+              >
                 {s.group}
               </h4>
-              <div style={{ display: "grid", "grid-template-columns": "120px 1fr", gap: "var(--space-1) var(--space-3)", "font-size": "var(--text-body-sm)" }}>
+              <div
+                style={{
+                  display: "grid",
+                  "grid-template-columns": "120px 1fr",
+                  gap: "var(--space-1) var(--space-3)",
+                  "font-size": "var(--text-body-sm)",
+                }}
+              >
                 {s.items.map((it) => (
                   <>
-                    <kbd style={{
-                      padding: "3px 10px",
-                      background: "var(--paper-mid)",
-                      "border-radius": "var(--radius-sm)",
-                      "font-family": "var(--font-mono)",
-                      "font-size": "11px",
-                      "font-weight": "700",
-                      color: "var(--text-primary)",
-                      "text-align": "center",
-                      "align-self": "center",
-                    }}>{it.combo}</kbd>
+                    <kbd
+                      style={{
+                        padding: "3px 10px",
+                        background: "var(--paper-mid)",
+                        "border-radius": "var(--radius-sm)",
+                        "font-family": "var(--font-mono)",
+                        "font-size": "11px",
+                        "font-weight": "700",
+                        color: "var(--text-primary)",
+                        "text-align": "center",
+                        "align-self": "center",
+                      }}
+                    >
+                      {it.combo}
+                    </kbd>
                     <span style={{ "align-self": "center" }}>{it.label}</span>
                   </>
                 ))}

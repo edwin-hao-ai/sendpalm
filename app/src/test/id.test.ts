@@ -1,7 +1,13 @@
 /** ID + JSON helpers tests. */
 
 import { describe, expect, it } from "vitest";
-import { uid, safeParse, safeStringify, clone } from "../utils/id";
+import {
+  uid,
+  safeParse,
+  safeStringify,
+  clone,
+  arrayBufferToBase64,
+} from "../utils/id";
 
 describe("uid", () => {
   it("returns unique values", () => {
@@ -53,5 +59,19 @@ describe("clone", () => {
     const b = clone(a);
     b[2] = [99];
     expect(a[2]).toEqual([3, 4]);
+  });
+});
+
+describe("arrayBufferToBase64", () => {
+  it("encodes text to base64", () => {
+    const buf = new TextEncoder().encode("hello").buffer;
+    expect(arrayBufferToBase64(buf)).toBe("aGVsbG8=");
+  });
+
+  it("encodes binary larger than the chunk size", () => {
+    const bytes = new Uint8Array(3000).map((_, i) => i % 256);
+    const encoded = arrayBufferToBase64(bytes.buffer);
+    expect(encoded).toMatch(/^[A-Za-z0-9+/]+=*$/);
+    expect(atob(encoded).length).toBe(3000);
   });
 });

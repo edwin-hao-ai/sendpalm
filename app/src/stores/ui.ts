@@ -6,14 +6,11 @@
 
 import { createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
-import type {
-  AgentMemory,
-  AppSettings,
-  ID,
-} from "../types";
+import type { AgentMemory, AppSettings, Draft, ID, Message } from "../types";
 
 export type ViewName =
   | "screener"
+  | "screenerHistory"
   | "imbox"
   | "feed"
   | "paperTrail"
@@ -30,15 +27,27 @@ export type ViewName =
   | "search"
   | "settings"
   | "agent"
+  | "focusReply"
+  | "readTogether"
   | "onboarding";
 
-export type ContactTab = "Timeline" | "Notes" | "Files" | "Insights" | "Network" | "Calendar";
+export type ContactTab =
+  | "Timeline"
+  | "Notes"
+  | "Files"
+  | "Tasks"
+  | "Follow-ups"
+  | "Clips"
+  | "Insights"
+  | "Network"
+  | "Calendar";
 export type SettingsTab =
   | "profile"
   | "accounts"
   | "preferences"
   | "agent"
   | "labels"
+  | "snippets"
   | "data"
   | "shortcuts";
 
@@ -46,19 +55,43 @@ export type PeopleFilter = "all" | "active" | "followup" | "cold";
 export type PeopleGroupBy = "all" | "company";
 
 export const [view, setView] = createSignal<ViewName>("imbox");
-export const [previousView, setPreviousView] = createSignal<ViewName | null>(null);
+export const [previousView, setPreviousView] = createSignal<ViewName | null>(
+  null,
+);
 
-export const [selectedContactId, setSelectedContactId] = createSignal<ID | null>(null);
-export const [selectedMessageId, setSelectedMessageId] = createSignal<ID | null>(null);
-export const [selectedMeetingId, setSelectedMeetingId] = createSignal<ID | null>(null);
-export const [selectedFileId, setSelectedFileId] = createSignal<ID | null>(null);
-export const [selectedTaskId, setSelectedTaskId] = createSignal<ID | null>(null);
-export const [selectedDraftId, setSelectedDraftId] = createSignal<ID | null>(null);
+export const [selectedContactId, setSelectedContactId] =
+  createSignal<ID | null>(null);
+export const [selectedMessageId, setSelectedMessageId] =
+  createSignal<ID | null>(null);
+export const [selectedMeetingId, setSelectedMeetingId] =
+  createSignal<ID | null>(null);
+export const [selectedFileId, setSelectedFileId] = createSignal<ID | null>(
+  null,
+);
+export const [selectedTaskId, setSelectedTaskId] = createSignal<ID | null>(
+  null,
+);
+export const [selectedDraftId, setSelectedDraftId] = createSignal<ID | null>(
+  null,
+);
+export const [selectedCompanyName, setSelectedCompanyName] = createSignal<
+  string | null
+>(null);
+
+/** Global refresh counter. Backend sync events bump this so list views can
+ * re-fetch their resources and show new mail immediately. */
+export const [refreshTick, setRefreshTick] = createSignal(0);
+export function bumpRefreshTick(): void {
+  setRefreshTick((n) => n + 1);
+}
 
 export const [contactTab, setContactTab] = createSignal<ContactTab>("Timeline");
-export const [settingsTab, setSettingsTab] = createSignal<SettingsTab>("profile");
-export const [peopleFilter, setPeopleFilter] = createSignal<PeopleFilter>("all");
-export const [peopleGroupBy, setPeopleGroupBy] = createSignal<PeopleGroupBy>("all");
+export const [settingsTab, setSettingsTab] =
+  createSignal<SettingsTab>("profile");
+export const [peopleFilter, setPeopleFilter] =
+  createSignal<PeopleFilter>("all");
+export const [peopleGroupBy, setPeopleGroupBy] =
+  createSignal<PeopleGroupBy>("all");
 
 export const [detailOpen, setDetailOpen] = createSignal(false);
 export const [agentPanelOpen, setAgentPanelOpen] = createSignal(false);
@@ -66,19 +99,38 @@ export const [agentPanelOpen, setAgentPanelOpen] = createSignal(false);
 export const [detailPanelWidth, setDetailPanelWidth] = createSignal(380);
 export const [agentPanelWidth, setAgentPanelWidth] = createSignal(340);
 
+export interface ComposeContext {
+  mode: "new" | "reply" | "replyAll" | "forward";
+  originalMsg?: Message;
+  draft?: Draft;
+  to?: string;
+  subject?: string;
+}
+export const [composeContext, setComposeContext] = createSignal<ComposeContext>(
+  {
+    mode: "new",
+  },
+);
 export const [composeOpen, setComposeOpen] = createSignal(false);
 export const [composeMinimized, setComposeMinimized] = createSignal(false);
 
 export const [searchOpen, setSearchOpen] = createSignal(false);
 export const [searchQuery, setSearchQuery] = createSignal("");
-export const [searchFilter, setSearchFilter] = createSignal<"all" | "people" | "messages" | "files" | "views">("all");
+export const [searchFilter, setSearchFilter] = createSignal<
+  "all" | "people" | "messages" | "files" | "views"
+>("all");
 
 export const [commandPaletteOpen, setCommandPaletteOpen] = createSignal(false);
 export const [commandPaletteQuery, setCommandPaletteQuery] = createSignal("");
 
 export const [notificationsOpen, setNotificationsOpen] = createSignal(false);
 
-export const [calendarView, setCalendarView] = createSignal<"day" | "week" | "year">("day");
+export const [calendarView, setCalendarView] = createSignal<
+  "day" | "week" | "year"
+>("day");
+export const [calendarFilter, setCalendarFilter] = createSignal<
+  "all" | "meetings" | "sometime" | "habits" | "tracking"
+>("all");
 export const [calendarSelected, setCalendarSelected] = createSignal(new Date());
 // A timestamp that, when set, asks the Calendar view to recenter on this date
 // (e.g. after adding an event from a meeting-invite email).
@@ -90,12 +142,17 @@ export const [calendarWeekStart, setCalendarWeekStart] = createSignal<Date>(
     d.setDate(d.getDate() - day);
     d.setHours(0, 0, 0, 0);
     return d;
-  })()
+  })(),
 );
-export const [calendarYearAnchor, setCalendarYearAnchor] = createSignal(new Date());
+export const [calendarYearAnchor, setCalendarYearAnchor] = createSignal(
+  new Date(),
+);
 
-export const [onboardingStep, setOnboardingStep] = createSignal<number | null>(null);
-export const [onboardingCompleted, setOnboardingCompleted] = createSignal(false);
+export const [onboardingStep, setOnboardingStep] = createSignal<number | null>(
+  null,
+);
+export const [onboardingCompleted, setOnboardingCompleted] =
+  createSignal(false);
 
 export const [helpOpen, setHelpOpen] = createSignal(false);
 
@@ -153,7 +210,7 @@ export interface Toast {
   id: ID;
   message: string;
   kind: ToastKind;
-  action?: { label: string; run: () => void };
+  action?: { label: string; run: () => void | Promise<void> };
   ttlMs?: number;
 }
 export const [toasts, setToasts] = createSignal<Toast[]>([]);
@@ -172,4 +229,17 @@ export function dismissToast(id: ID) {
   setToasts((xs) => xs.filter((t) => t.id !== id));
 }
 
-export const [unreadNotificationCount, setUnreadNotificationCount] = createSignal(0);
+export const [unreadNotificationCount, setUnreadNotificationCount] =
+  createSignal(0);
+
+/** Open the company drill-down panel, clearing any other selected detail. */
+export function openCompanyDetail(name: string) {
+  setSelectedContactId(null);
+  setSelectedMessageId(null);
+  setSelectedMeetingId(null);
+  setSelectedFileId(null);
+  setSelectedTaskId(null);
+  setSelectedDraftId(null);
+  setSelectedCompanyName(name);
+  setDetailOpen(true);
+}

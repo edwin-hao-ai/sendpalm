@@ -1,21 +1,48 @@
 /** Records view — receipts, transactions. Quiet auto-file. */
 
 import { For, Show, createMemo, createResource } from "solid-js";
-import { listContacts, listMessages, listFiles } from "../stores/data";
+import {
+  listContacts,
+  listMessages,
+  listFiles,
+  upsertMessage,
+} from "../stores/data";
 import { Avatar } from "../components/Avatar";
 import { Empty } from "../components/Empty";
 import { Icon } from "../components/Icon";
+import { SkeletonList } from "../components/Skeleton";
 import {
   setDetailOpen,
   setSelectedMessageId,
   setSelectedFileId,
   showToast,
 } from "../stores/ui";
+import { useRefreshEffect, useViewport } from "../utils/gestures";
+import { SwipeActions } from "../components/SwipeActions";
+import type { Message } from "../types";
 
 export function Records() {
   const [contacts] = createResource(listContacts);
-  const [messages] = createResource(listMessages);
-  const [files] = createResource(listFiles);
+  const [messages, { refetch: refetchMessages }] = createResource(listMessages);
+  const [files, { refetch: refetchFiles }] = createResource(listFiles);
+  const { isMobile } = useViewport();
+
+  useRefreshEffect(() => {
+    void refetchMessages();
+    void refetchFiles();
+  });
+
+  const setAside = async (m: Message) => {
+    await upsertMessage({ ...m, setAside: true });
+    await refetchMessages();
+    showToast({ message: "已 Set Aside", kind: "success" });
+  };
+
+  const replyLater = async (m: Message) => {
+    await upsertMessage({ ...m, replyLater: true });
+    await refetchMessages();
+    showToast({ message: "已 Reply Later", kind: "success" });
+  };
 
   const items = createMemo(() => {
     return (messages() ?? [])
@@ -61,32 +88,71 @@ export function Records() {
         >
           Records
         </h2>
-        <p style={{ color: "var(--text-secondary)", margin: 0, "font-size": "var(--text-caption)" }}>
+        <p
+          style={{
+            color: "var(--text-secondary)",
+            margin: 0,
+            "font-size": "var(--text-caption)",
+          }}
+        >
           发票 / 物流 / 系统通知。安静躺着，需要时随时搜。
         </p>
       </header>
 
-      <Show when={items().length > 0} fallback={<EmptyState />}>
-        <div
-          style={{
-            "max-width": "720px",
-            margin: "0 auto",
-            padding: "0 var(--space-5)",
-          }}
-        >
-          <Show when={grouped().today.length > 0}>
-            <GroupHeader title="Today" />
-            <For each={grouped().today}>
-              {(m) => <RecordRow m={m} contact={contactById(m.pid)} attachments={filesByMsg(m)} />}
-            </For>
-          </Show>
-          <Show when={grouped().earlier.length > 0}>
-            <GroupHeader title="Earlier" />
-            <For each={grouped().earlier}>
-              {(m) => <RecordRow m={m} contact={contactById(m.pid)} attachments={filesByMsg(m)} />}
-            </For>
-          </Show>
-        </div>
+      <Show
+        when={messages.state !== "pending"}
+        fallback={
+          <div
+            style={{
+              "max-width": "720px",
+              margin: "var(--space-4) auto",
+              padding: "0 var(--space-5)",
+            }}
+          >
+            <SkeletonList count={8} />
+          </div>
+        }
+      >
+        <Show when={items().length > 0} fallback={<EmptyState />}>
+          <div
+            style={{
+              "max-width": "720px",
+              margin: "0 auto",
+              padding: "0 var(--space-5)",
+            }}
+          >
+            <Show when={grouped().today.length > 0}>
+              <GroupHeader title="Today" />
+              <For each={grouped().today}>
+                {(m) => (
+                  <RecordRow
+                    m={m}
+                    contact={contactById(m.pid)}
+                    attachments={filesByMsg(m)}
+                    isMobile={isMobile()}
+                    onSetAside={() => void setAside(m)}
+                    onReplyLater={() => void replyLater(m)}
+                  />
+                )}
+              </For>
+            </Show>
+            <Show when={grouped().earlier.length > 0}>
+              <GroupHeader title="Earlier" />
+              <For each={grouped().earlier}>
+                {(m) => (
+                  <RecordRow
+                    m={m}
+                    contact={contactById(m.pid)}
+                    attachments={filesByMsg(m)}
+                    isMobile={isMobile()}
+                    onSetAside={() => void setAside(m)}
+                    onReplyLater={() => void replyLater(m)}
+                  />
+                )}
+              </For>
+            </Show>
+          </div>
+        </Show>
       </Show>
     </div>
   );
@@ -110,26 +176,50 @@ function GroupHeader(props: { title: string }) {
 }
 
 function RecordRow(props: {
-  m: { id: string; subj: string; tm: string; body: string; attachments: string[] };
+  m: {
+    id: string;
+    subj: string;
+    tm: string;
+    body: string;
+    attachments: string[];
+  };
   contact?: { name: string; avatar: string };
   attachments: { id: string; name: string; type: string }[];
+  isMobile: boolean;
+  onSetAside: () => void;
+  onReplyLater: () => void;
 }) {
-  return (
+  const content = (
     <div
       onClick={() => setSelectedMessageId(props.m.id) && setDetailOpen(true)}
       style={{
         display: "flex",
         gap: "var(--space-3)",
         padding: "var(--space-3) 0",
-        "border-bottom": "0.5px solid var(--border)",
         cursor: "pointer",
       }}
     >
-      <Avatar name={props.contact?.name ?? "Receipt"} src={props.contact?.avatar} size={32} />
+      <Avatar
+        name={props.contact?.name ?? "Receipt"}
+        src={props.contact?.avatar}
+        size={32}
+      />
       <div style={{ flex: 1, "min-width": 0 }}>
-        <div style={{ display: "flex", "align-items": "baseline", gap: "var(--space-2)" }}>
+        <div
+          style={{
+            display: "flex",
+            "align-items": "baseline",
+            gap: "var(--space-2)",
+          }}
+        >
           <strong style={{ "font-weight": "600" }}>{props.m.subj}</strong>
-          <span style={{ "font-size": "var(--text-micro)", color: "var(--text-muted)", "margin-left": "auto" }}>
+          <span
+            style={{
+              "font-size": "var(--text-micro)",
+              color: "var(--text-muted)",
+              "margin-left": "auto",
+            }}
+          >
             {props.m.tm}
           </span>
         </div>
@@ -146,7 +236,14 @@ function RecordRow(props: {
           {props.m.body}
         </p>
         <Show when={props.attachments.length > 0}>
-          <div style={{ display: "flex", gap: "var(--space-2)", "margin-top": "var(--space-2)", "flex-wrap": "wrap" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: "var(--space-2)",
+              "margin-top": "var(--space-2)",
+              "flex-wrap": "wrap",
+            }}
+          >
             <For each={props.attachments}>
               {(f) => (
                 <button
@@ -186,6 +283,28 @@ function RecordRow(props: {
         <Icon name="ph-download-simple" size={16} />
       </button>
     </div>
+  );
+
+  return (
+    <SwipeActions
+      role="listitem"
+      style={{ "border-bottom": "0.5px solid var(--border)" }}
+      leftAction={{
+        label: "Set Aside",
+        icon: "ph-push-pin",
+        color: "green",
+        onClick: props.onSetAside,
+      }}
+      rightAction={{
+        label: "Reply Later",
+        icon: "ph-clock",
+        color: "yellow",
+        onClick: props.onReplyLater,
+      }}
+      disabled={!props.isMobile}
+    >
+      {content}
+    </SwipeActions>
   );
 }
 

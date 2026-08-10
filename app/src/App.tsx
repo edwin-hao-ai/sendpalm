@@ -2,7 +2,7 @@
  * #root contains the titlebar + sidebar + topbar + main + detail + agent + toasts.
  */
 
-import { Show, createSignal, onMount, onCleanup } from "solid-js";
+import { Show, createSignal, onMount, onCleanup, createEffect } from "solid-js";
 import { Titlebar } from "./components/Titlebar";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
@@ -19,6 +19,7 @@ import { Compose } from "./compose/Compose";
 import { ResurfaceLoop } from "./services/reminder";
 import { startSyncEventBridge } from "./services/sync-events";
 import { ShortcutHelp } from "./components/ShortcutHelp";
+import { BulkActionMenu } from "./components/BulkActionMenu";
 import { initApp } from "./bootstrap";
 import {
   detailOpen,
@@ -29,7 +30,7 @@ import {
   onboardingCompleted,
   notificationsOpen,
 } from "./stores/ui";
-import { formFactor } from "./utils/viewport";
+
 import { useGlobalShortcuts } from "./utils/shortcuts";
 
 export default function App() {
@@ -46,6 +47,19 @@ export default function App() {
     } catch (e) {
       setInitError(String(e));
       setReady(true);
+    }
+  });
+
+  createEffect(() => {
+    if (ready() || initError()) {
+      document.body.classList.add("app-ready");
+      // Remove the splash overlay from the DOM after the CSS fade finishes
+      // so its semi-transparent gradient cannot tint the app during the
+      // transition or after a hot reload.
+      setTimeout(() => {
+        const splash = document.getElementById("splash");
+        if (splash) splash.style.display = "none";
+      }, 600);
     }
   });
 
@@ -82,6 +96,7 @@ export default function App() {
         <Compose />
         <ResurfaceLoop />
         <ShortcutHelp />
+        <BulkActionMenu />
         <Show when={!onboardingCompleted() && onboardingStep() !== null}>
           <Onboarding />
         </Show>
@@ -121,23 +136,6 @@ export default function App() {
       </Show>
 
       {/* Bootstrap decided we're past onboarding but state still loading. */}
-
-      {/* Form factor tag for debugging in DevTools */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: "fixed",
-          bottom: "8px",
-          left: "8px",
-          "font-size": "10px",
-          color: "var(--text-muted)",
-          opacity: 0.5,
-          "pointer-events": "none",
-          "z-index": 9999,
-        }}
-      >
-        form-factor: {formFactor()}
-      </div>
     </>
   );
 }

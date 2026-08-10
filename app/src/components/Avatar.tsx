@@ -42,10 +42,7 @@ export function Avatar(props: AvatarProps) {
         border: "0.5px solid var(--border)",
       }}
     >
-      <Show
-        when={props.src}
-        fallback={<span>{initials(props.name)}</span>}
-      >
+      <Show when={props.src} fallback={<span>{initials(props.name)}</span>}>
         <img
           src={props.src}
           alt={props.name}

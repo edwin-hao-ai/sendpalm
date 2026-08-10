@@ -1,8 +1,25 @@
 /** NotificationPanel — bell dropdown. */
 
-import { For, Show, createMemo, createResource } from "solid-js";
+import {
+  For,
+  Show,
+  createMemo,
+  createResource,
+  onCleanup,
+  onMount,
+} from "solid-js";
 import { listNotifications, markAllNotificationsRead } from "../stores/data";
-import { setNotificationsOpen, setView } from "../stores/ui";
+import {
+  setNotificationsOpen,
+  setView,
+  setSelectedMessageId,
+  setSelectedContactId,
+  setSelectedFileId,
+  setSelectedDraftId,
+  setDetailOpen,
+  setCalendarSelected,
+  setCalendarView,
+} from "../stores/ui";
 import { Icon } from "../components/Icon";
 import { isToday, isYesterday, relativeTime } from "../utils/date";
 
@@ -17,8 +34,20 @@ const ICON_BY_TYPE: Record<string, string> = {
   mail: "ph-envelope",
 };
 
+const TINT_BY_TYPE: Record<string, string> = {
+  followup: "var(--sunset)",
+  agent: "var(--lavender)",
+  draft: "var(--slate)",
+  relationship: "var(--ocean)",
+  schedule: "var(--palm)",
+  system: "var(--slate)",
+  surfaced: "var(--berry)",
+  mail: "var(--palm)",
+};
+
 export function NotificationPanel() {
   const [list, { refetch }] = createResource(listNotifications);
+  let panelRef: HTMLDivElement | undefined;
 
   const grouped = createMemo(() => {
     const items = list() ?? [];
@@ -30,8 +59,22 @@ export function NotificationPanel() {
     return { today, yesterday, earlier };
   });
 
+  onMount(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (!panelRef) return;
+      if (!panelRef.contains(e.target as Node)) {
+        setNotificationsOpen(false);
+      }
+    };
+    document.addEventListener("click", onDocClick);
+    onCleanup(() => document.removeEventListener("click", onDocClick));
+  });
+
   return (
     <div
+      ref={(el) => {
+        panelRef = el;
+      }}
       style={{
         position: "fixed",
         top: "calc(var(--titlebar-height) + var(--topbar-height) + 4px)",
@@ -101,16 +144,6 @@ export function NotificationPanel() {
           when={
             grouped().today.length +
               grouped().yesterday.length +
-              grouped().earlier.length >
-            0
-          }
-        >
-          <div />
-        </Show>
-        <Show
-          when={
-            grouped().today.length +
-              grouped().yesterday.length +
               grouped().earlier.length ===
             0
           }
@@ -172,9 +205,28 @@ function Row(props: {
 }) {
   const n = () => props.n;
   const onClick = () => {
-    if (n().ref?.type === "contact") setView("contacts");
-    if (n().ref?.type === "event") setView("calendar");
-    if (n().ref?.type === "message") setView("imbox");
+    const ref = n().ref;
+    if (ref?.type === "contact") {
+      setView("contacts");
+      setSelectedContactId(ref.id);
+      setDetailOpen(true);
+    } else if (ref?.type === "message") {
+      setView("imbox");
+      setSelectedMessageId(ref.id);
+      setDetailOpen(true);
+    } else if (ref?.type === "file") {
+      setView("files");
+      setSelectedFileId(ref.id);
+      setDetailOpen(true);
+    } else if (ref?.type === "draft") {
+      setView("drafts");
+      setSelectedDraftId(ref.id);
+      setDetailOpen(true);
+    } else if (ref?.type === "event") {
+      setView("calendar");
+      setCalendarView("day");
+      setCalendarSelected(new Date());
+    }
     setNotificationsOpen(false);
   };
   return (
@@ -189,7 +241,8 @@ function Row(props: {
         width: "100%",
         "text-align": "left",
         background: n().read ? "transparent" : "var(--palm-soft)",
-        transition: "background var(--duration-fast) var(--ease-out), transform 0.16s var(--ease-out)",
+        transition:
+          "background var(--duration-fast) var(--ease-out), transform 0.16s var(--ease-out)",
       }}
       onMouseEnter={(ev) => {
         if (n().read) ev.currentTarget.style.background = "var(--paper-mid)";
@@ -213,12 +266,35 @@ function Row(props: {
           }}
         />
       </Show>
-      <div style={{ "margin-left": n().read ? 0 : "var(--space-2)", "flex-shrink": 0 }}>
-        <Icon
-          name={ICON_BY_TYPE[n().type] ?? "ph-info"}
-          size={18}
-          style={{ color: n().read ? "var(--text-muted)" : "var(--palm)" }}
-        />
+      <div
+        style={{
+          "margin-left": n().read ? 0 : "var(--space-2)",
+          "flex-shrink": 0,
+        }}
+      >
+        <div
+          style={{
+            width: "32px",
+            height: "32px",
+            "border-radius": "50%",
+            display: "flex",
+            "align-items": "center",
+            "justify-content": "center",
+            background: n().read
+              ? "var(--paper-mid)"
+              : `${TINT_BY_TYPE[n().type] ?? "var(--palm)"}20`,
+          }}
+        >
+          <Icon
+            name={ICON_BY_TYPE[n().type] ?? "ph-info"}
+            size={18}
+            style={{
+              color: n().read
+                ? "var(--text-muted)"
+                : (TINT_BY_TYPE[n().type] ?? "var(--palm)"),
+            }}
+          />
+        </div>
       </div>
       <div style={{ flex: 1, "min-width": 0 }}>
         <div

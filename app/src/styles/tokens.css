@@ -62,12 +62,14 @@
   --status-info: #5ac8fa;
 
   /* ── Typography ──────────────────────────────────────────────── */
-  --font-display: "Really Sans Large", -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", sans-serif;
-  --font-body: Moniker, -apple-system, BlinkMacSystemFont, "SF Pro Text",
-    "Segoe UI", sans-serif;
-  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas,
-    monospace;
+  --font-display:
+    "Really Sans Large", -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    sans-serif;
+  --font-body:
+    Moniker, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    sans-serif;
+  --font-mono:
+    ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --font-serif: "Playfair Display", "New York", Georgia, serif;
 
   --text-hero: clamp(48px, 6vw, 74px);
@@ -129,11 +131,23 @@
   --duration-toast: 0.4s;
   --duration-modal: 0.5s;
 
+  /* ── Calendar (semantic aliases) ─────────────────────────────── */
+  --cal-bg: var(--paper);
+  --cal-surface: var(--paper-light);
+  --cal-border: var(--border);
+  --cal-ink: var(--text-primary);
+  --cal-ink-soft: var(--text-secondary);
+  --cal-ink-muted: var(--text-muted);
+  --cal-accent: var(--palm);
+  --cal-mint: var(--mint);
+  --cal-sky: var(--sky);
+  --cal-peach: var(--peach);
+
   /* ── Layout ──────────────────────────────────────────────────── */
   --titlebar-height: 32px;
   --topbar-height: 52px;
-  --sidebar-width: 96px;
-  --sidebar-width-tablet: 80px;
+  --sidebar-width: 64px;
+  --sidebar-width-tablet: 64px;
   --bottom-tab-height: 64px;
   --detail-panel-width: 380px;
   --agent-panel-width: 340px;
@@ -142,9 +156,10 @@
   --z-base: 1;
   --z-dropdown: 10;
   --z-sticky: 20;
-  --z-modal: 50;
-  --z-detail: 60;
-  --z-agent: 70;
+  --z-detail: 30;
+  --z-agent: 40;
+  --z-popover: 45;
+  --z-modal: 80;
   --z-toast: 100;
 }
 

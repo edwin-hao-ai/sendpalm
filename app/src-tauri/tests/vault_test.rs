@@ -2,10 +2,8 @@
 //! touching the user's real keychain entries.
 
 use sendpalm_app_lib::services::vault::{
-    CredentialCache, VaultEntry, delete_password, get_password, set_password,
+    delete_password, get_password, set_password, CredentialCache, VaultEntry,
 };
-
-const TEST_ID: &str = "vault_test_account_xxx";
 
 /// Create a unique test id per run to avoid cross-test pollution.
 fn unique_id(suffix: &str) -> String {

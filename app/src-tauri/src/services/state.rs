@@ -17,7 +17,9 @@ impl Default for AccountSyncState {
         Self {
             uid_validity: 0,
             last_uid: 0,
-            last_synced_at: chrono::DateTime::from_timestamp(0, 0).unwrap().with_timezone(&chrono::Utc),
+            last_synced_at: chrono::DateTime::from_timestamp(0, 0)
+                .unwrap()
+                .with_timezone(&chrono::Utc),
             busy: false,
         }
     }
@@ -45,7 +47,10 @@ impl SyncStateStore {
     }
 
     pub fn put(&self, account_id: &str, state: AccountSyncState) {
-        self.inner.lock().unwrap().insert(account_id.to_string(), state);
+        self.inner
+            .lock()
+            .unwrap()
+            .insert(account_id.to_string(), state);
     }
 }
 

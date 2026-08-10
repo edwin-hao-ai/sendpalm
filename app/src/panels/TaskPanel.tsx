@@ -6,10 +6,15 @@ import { setDetailOpen, setSelectedTaskId, showToast } from "../stores/ui";
 import { Icon } from "../components/Icon";
 import type { Task } from "../types";
 import { relativeTime } from "../utils/date";
+import { useRefreshEffect } from "../utils/gestures";
 
 export function TaskPanel(props: { taskId: string }) {
   const [task, { refetch }] = createResource(() => props.taskId, getTask);
   const [draft, setDraft] = createSignal<Task | null>(null);
+
+  useRefreshEffect(() => {
+    void refetch();
+  });
 
   createEffect(() => {
     const t = task();
@@ -33,7 +38,9 @@ export function TaskPanel(props: { taskId: string }) {
   };
 
   return (
-    <div style={{ display: "flex", "flex-direction": "column", height: "100%" }}>
+    <div
+      style={{ display: "flex", "flex-direction": "column", height: "100%" }}
+    >
       <header
         style={{
           padding: "var(--space-3) var(--space-5)",
@@ -45,13 +52,20 @@ export function TaskPanel(props: { taskId: string }) {
         }}
       >
         <button
-          onClick={() => { setSelectedTaskId(null); setDetailOpen(false); }}
+          onClick={() => {
+            setSelectedTaskId(null);
+            setDetailOpen(false);
+          }}
           aria-label="Close"
           style={{ color: "var(--text-muted)" }}
         >
           <Icon name="ph-arrow-left" size={18} />
         </button>
-        <strong style={{ "font-size": "var(--text-body-sm)", "font-weight": "700" }}>Task</strong>
+        <strong
+          style={{ "font-size": "var(--text-body-sm)", "font-weight": "700" }}
+        >
+          Task
+        </strong>
         <div style={{ "margin-left": "auto" }}>
           <button
             onClick={remove}
@@ -67,10 +81,18 @@ export function TaskPanel(props: { taskId: string }) {
         {(d) => {
           const t = d();
           return (
-            <div style={{ padding: "var(--space-5)", flex: 1, "overflow-y": "auto" }}>
+            <div
+              style={{
+                padding: "var(--space-5)",
+                flex: 1,
+                "overflow-y": "auto",
+              }}
+            >
               <input
                 value={t.title}
-                onInput={(e) => setDraft({ ...t, title: e.currentTarget.value })}
+                onInput={(e) =>
+                  setDraft({ ...t, title: e.currentTarget.value })
+                }
                 style={{
                   width: "100%",
                   padding: "var(--space-3)",
@@ -83,11 +105,22 @@ export function TaskPanel(props: { taskId: string }) {
                   "margin-bottom": "var(--space-4)",
                 }}
               />
-              <div style={{ display: "flex", gap: "var(--space-3)", "margin-bottom": "var(--space-3)" }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "var(--space-3)",
+                  "margin-bottom": "var(--space-3)",
+                }}
+              >
                 <Field label="Status">
                   <select
                     value={t.status}
-                    onChange={(e) => setDraft({ ...t, status: e.currentTarget.value as Task["status"] })}
+                    onChange={(e) =>
+                      setDraft({
+                        ...t,
+                        status: e.currentTarget.value as Task["status"],
+                      })
+                    }
                     style={inputStyle}
                   >
                     <option value="todo">Todo</option>
@@ -98,7 +131,12 @@ export function TaskPanel(props: { taskId: string }) {
                 <Field label="Priority">
                   <select
                     value={t.priority}
-                    onChange={(e) => setDraft({ ...t, priority: e.currentTarget.value as Task["priority"] })}
+                    onChange={(e) =>
+                      setDraft({
+                        ...t,
+                        priority: e.currentTarget.value as Task["priority"],
+                      })
+                    }
                     style={inputStyle}
                   >
                     <option value="low">Low</option>
@@ -110,7 +148,14 @@ export function TaskPanel(props: { taskId: string }) {
                   <input
                     type="datetime-local"
                     value={t.due ? t.due.slice(0, 16) : ""}
-                    onInput={(e) => setDraft({ ...t, due: e.currentTarget.value ? new Date(e.currentTarget.value).toISOString() : undefined })}
+                    onInput={(e) =>
+                      setDraft({
+                        ...t,
+                        due: e.currentTarget.value
+                          ? new Date(e.currentTarget.value).toISOString()
+                          : undefined,
+                      })
+                    }
                     style={inputStyle}
                   />
                 </Field>
@@ -118,7 +163,9 @@ export function TaskPanel(props: { taskId: string }) {
               <Field label="Notes">
                 <textarea
                   value={t.notes}
-                  onInput={(e) => setDraft({ ...t, notes: e.currentTarget.value })}
+                  onInput={(e) =>
+                    setDraft({ ...t, notes: e.currentTarget.value })
+                  }
                   rows={4}
                   style={{
                     ...inputStyle,
@@ -128,7 +175,13 @@ export function TaskPanel(props: { taskId: string }) {
                   }}
                 />
               </Field>
-              <p style={{ "font-size": "var(--text-micro)", color: "var(--text-muted)", "margin-top": "var(--space-3)" }}>
+              <p
+                style={{
+                  "font-size": "var(--text-micro)",
+                  color: "var(--text-muted)",
+                  "margin-top": "var(--space-3)",
+                }}
+              >
                 创建于 {relativeTime(t.createdAt)}
               </p>
               <button
@@ -155,8 +208,23 @@ export function TaskPanel(props: { taskId: string }) {
 
 function Field(props: { label: string; children: unknown }) {
   return (
-    <label style={{ display: "flex", "flex-direction": "column", gap: "var(--space-1)", flex: 1 }}>
-      <span style={{ "font-size": "var(--text-micro)", color: "var(--text-muted)", "font-weight": "600" }}>{props.label}</span>
+    <label
+      style={{
+        display: "flex",
+        "flex-direction": "column",
+        gap: "var(--space-1)",
+        flex: 1,
+      }}
+    >
+      <span
+        style={{
+          "font-size": "var(--text-micro)",
+          color: "var(--text-muted)",
+          "font-weight": "600",
+        }}
+      >
+        {props.label}
+      </span>
       {props.children as never}
     </label>
   );

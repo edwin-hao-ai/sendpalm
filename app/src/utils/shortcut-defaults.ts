@@ -1,0 +1,283 @@
+/** Default keyboard shortcuts — PRD §3.17.
+ * Seed into the `shortcuts` table on first boot.
+ */
+
+import type { Shortcut } from "../types";
+
+export const DEFAULT_SHORTCUTS: Shortcut[] = [
+  // App
+  {
+    id: "sc-palette",
+    combo: "⌘K",
+    label: "Command palette",
+    action: "app:command-palette",
+    editable: true,
+  },
+  {
+    id: "sc-search",
+    combo: "⌘/",
+    label: "Search",
+    action: "app:search",
+    editable: true,
+  },
+  {
+    id: "sc-help",
+    combo: "?",
+    label: "Keyboard help",
+    action: "app:help",
+    editable: true,
+  },
+  {
+    id: "sc-compose",
+    combo: "⌘N",
+    label: "New message",
+    action: "app:compose",
+    editable: true,
+  },
+  {
+    id: "sc-agent",
+    combo: "⇧A",
+    label: "Agent panel",
+    action: "app:agent",
+    editable: true,
+  },
+  {
+    id: "sc-notifications",
+    combo: "⇧N",
+    label: "Notifications",
+    action: "app:notifications",
+    editable: true,
+  },
+
+  // Navigation
+  {
+    id: "sc-nav-screener",
+    combo: "⌘1",
+    label: "Gate (Screener)",
+    action: "nav:screener",
+    editable: true,
+  },
+  {
+    id: "sc-nav-imbox",
+    combo: "⌘2",
+    label: "Imbox",
+    action: "nav:imbox",
+    editable: true,
+  },
+  {
+    id: "sc-nav-feed",
+    combo: "⌘3",
+    label: "Stream",
+    action: "nav:feed",
+    editable: true,
+  },
+  {
+    id: "sc-nav-paper",
+    combo: "⌘4",
+    label: "Records",
+    action: "nav:paperTrail",
+    editable: true,
+  },
+  {
+    id: "sc-nav-contacts",
+    combo: "⌘5",
+    label: "Contacts",
+    action: "nav:contacts",
+    editable: true,
+  },
+  {
+    id: "sc-nav-calendar",
+    combo: "⌘6",
+    label: "Calendar",
+    action: "nav:calendar",
+    editable: true,
+  },
+  {
+    id: "sc-nav-files",
+    combo: "⌘7",
+    label: "Files",
+    action: "nav:files",
+    editable: true,
+  },
+  {
+    id: "sc-nav-insights",
+    combo: "⌘8",
+    label: "Insights",
+    action: "nav:insights",
+    editable: true,
+  },
+  {
+    id: "sc-nav-settings",
+    combo: "⌘9",
+    label: "Settings",
+    action: "nav:settings",
+    editable: true,
+  },
+  {
+    id: "sc-nav-drafts",
+    combo: "⌘0",
+    label: "Drafts",
+    action: "nav:drafts",
+    editable: true,
+  },
+
+  // List cursor
+  {
+    id: "sc-cursor-down",
+    combo: "j",
+    label: "Next item",
+    action: "list:cursor-down",
+    editable: true,
+  },
+  {
+    id: "sc-cursor-up",
+    combo: "k",
+    label: "Previous item",
+    action: "list:cursor-up",
+    editable: true,
+  },
+  {
+    id: "sc-select",
+    combo: "x",
+    label: "Select item",
+    action: "list:select",
+    editable: true,
+  },
+  {
+    id: "sc-open",
+    combo: "Enter",
+    label: "Open item",
+    action: "list:open",
+    editable: true,
+  },
+
+  // Message actions
+  {
+    id: "sc-reply",
+    combo: "r",
+    label: "Reply",
+    action: "message:reply",
+    editable: true,
+  },
+  {
+    id: "sc-forward",
+    combo: "f",
+    label: "Forward",
+    action: "message:forward",
+    editable: true,
+  },
+  {
+    id: "sc-reply-later",
+    combo: "l",
+    label: "Reply later",
+    action: "message:reply-later",
+    editable: true,
+  },
+  {
+    id: "sc-set-aside",
+    combo: "a",
+    label: "Set aside",
+    action: "message:set-aside",
+    editable: true,
+  },
+  {
+    id: "sc-bubble-up",
+    combo: "z",
+    label: "Bubble up",
+    action: "message:bubble-up",
+    editable: true,
+  },
+  {
+    id: "sc-archive",
+    combo: "e",
+    label: "Archive",
+    action: "message:archive",
+    editable: true,
+  },
+  {
+    id: "sc-trash",
+    combo: "t",
+    label: "Trash",
+    action: "message:trash",
+    editable: true,
+  },
+  {
+    id: "sc-spam",
+    combo: "!",
+    label: "Spam",
+    action: "message:spam",
+    editable: true,
+  },
+  {
+    id: "sc-unread",
+    combo: "u",
+    label: "Mark unread",
+    action: "message:unread",
+    editable: true,
+  },
+  {
+    id: "sc-label",
+    combo: "b",
+    label: "Label",
+    action: "message:label",
+    editable: true,
+  },
+  {
+    id: "sc-move",
+    combo: "v",
+    label: "Move",
+    action: "message:move",
+    editable: true,
+  },
+  {
+    id: "sc-bulk",
+    combo: ";",
+    label: "Bulk menu",
+    action: "bulk:menu",
+    editable: true,
+  },
+
+  // Calendar
+  {
+    id: "sc-cal-day",
+    combo: "d",
+    label: "Calendar day view",
+    action: "calendar:day",
+    editable: true,
+  },
+  {
+    id: "sc-cal-week",
+    combo: "w",
+    label: "Calendar week view",
+    action: "calendar:week",
+    editable: true,
+  },
+  {
+    id: "sc-cal-year",
+    combo: "y",
+    label: "Calendar year view",
+    action: "calendar:year",
+    editable: true,
+  },
+  {
+    id: "sc-cal-today",
+    combo: "t",
+    label: "Calendar today",
+    action: "calendar:today",
+    editable: true,
+  },
+  {
+    id: "sc-cal-prev",
+    combo: "←",
+    label: "Calendar previous",
+    action: "calendar:prev",
+    editable: true,
+  },
+  {
+    id: "sc-cal-next",
+    combo: "→",
+    label: "Calendar next",
+    action: "calendar:next",
+    editable: true,
+  },
+];

@@ -46,22 +46,43 @@ export interface EmailProvider {
   smtp_implicit_tls: boolean;
 }
 
+export interface OutgoingAttachment {
+  filename: string;
+  mime: string;
+  dataBase64: string;
+}
+
 export async function sendEmailViaBackend(
   to: string,
   subject: string,
   body: string,
   accountId?: string,
-): Promise<{ message_id: string } | null> {
-  return safeInvoke<{ message_id: string }>("send_message", {
-    to,
-    subject,
-    body,
-    accountId,
-  });
+  attachments: OutgoingAttachment[] = [],
+  cc?: string,
+  bcc?: string,
+  fromOverride?: string,
+  htmlBody?: string,
+): Promise<{ message_id: string; local_message_id?: string } | null> {
+  return safeInvoke<{ message_id: string; local_message_id?: string }>(
+    "send_message",
+    {
+      to,
+      subject,
+      body,
+      html_body: htmlBody,
+      account_id: accountId,
+      attachments,
+      cc,
+      bcc,
+      from_override: fromOverride,
+    },
+  );
 }
 
-export async function fetchMailboxes(): Promise<string[]> {
-  const r = await safeInvoke<string[]>("list_mailboxes");
+export async function fetchMailboxes(accountId: string): Promise<string[]> {
+  const r = await safeInvoke<string[]>("list_mailboxes", {
+    account_id: accountId,
+  });
   return r ?? [];
 }
 
@@ -69,7 +90,7 @@ export async function syncNow(
   accountId: string,
   mailbox: string = "INBOX",
 ): Promise<{ new_messages: number; last_uid: number } | null> {
-  return safeInvoke("sync_now", { accountId, mailbox });
+  return safeInvoke("sync_now", { account_id: accountId, mailbox });
 }
 
 export async function getSyncState(accountId: string): Promise<SyncStateDto> {
@@ -124,6 +145,19 @@ export interface IcalEvent {
 
 export async function addCalendarEvent(
   invite: IcalEvent,
+  contactId?: string,
 ): Promise<string | null> {
-  return safeInvoke<string>("add_calendar_event", { invite });
+  return safeInvoke<string>("add_calendar_event", { invite, contactId });
+}
+
+export async function getAttachmentContent(
+  fileId: string,
+): Promise<string | null> {
+  return safeInvoke<string>("get_attachment_content", { fileId });
+}
+
+export async function getAttachmentPath(
+  fileId: string,
+): Promise<string | null> {
+  return safeInvoke<string>("get_attachment_path", { fileId });
 }

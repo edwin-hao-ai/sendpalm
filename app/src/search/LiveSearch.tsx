@@ -1,50 +1,87 @@
 /** LiveSearch — topbar dropdown, debounced. */
 
-import { For, Show, createMemo, createResource, createSignal } from "solid-js";
-import { listContacts, listMessages, listFiles } from "../stores/data";
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createResource,
+  createSignal,
+  onCleanup,
+} from "solid-js";
+import { searchIndex, type SearchResult } from "../stores/data";
 import { Icon } from "../components/Icon";
 import {
+  searchQuery,
+  setSearchQuery,
   setSearchOpen,
   setView,
   setSelectedContactId,
   setSelectedMessageId,
   setSelectedFileId,
   setDetailOpen,
+  setCalendarJumpTo,
 } from "../stores/ui";
 
 export function LiveSearch() {
-  const [query, setQuery] = createSignal("");
+  const [debouncedQuery, setDebouncedQuery] = createSignal("");
   const [cursor, setCursor] = createSignal(0);
-  const [contacts] = createResource(listContacts);
-  const [messages] = createResource(listMessages);
-  const [files] = createResource(listFiles);
+  const [results] = createResource(debouncedQuery, searchIndex);
 
-  const matches = createMemo(() => {
-    const q = query().toLowerCase().trim();
-    if (!q) {
-      return {
-        contacts: (contacts() ?? []).slice(0, 3),
-        messages: (messages() ?? []).slice(0, 3),
-        files: (files() ?? []).slice(0, 3),
-      };
-    }
-    return {
-      contacts: (contacts() ?? []).filter((c) => c.name.toLowerCase().includes(q) || c.company.toLowerCase().includes(q)).slice(0, 5),
-      messages: (messages() ?? []).filter((m) => m.subj.toLowerCase().includes(q) || m.prev.toLowerCase().includes(q)).slice(0, 5),
-      files: (files() ?? []).filter((f) => f.name.toLowerCase().includes(q)).slice(0, 5),
+  createEffect(() => {
+    const q = searchQuery();
+    const id = window.setTimeout(() => setDebouncedQuery(q), 200);
+    onCleanup(() => window.clearTimeout(id));
+  });
+
+  // Reset cursor whenever the query changes.
+  createEffect(() => {
+    searchQuery();
+    setCursor(0);
+  });
+
+  const grouped = createMemo<{
+    contacts: SearchResult[];
+    messages: SearchResult[];
+    files: SearchResult[];
+    events: SearchResult[];
+  }>(() => {
+    const out = { contacts: [], messages: [], files: [], events: [] } as {
+      contacts: SearchResult[];
+      messages: SearchResult[];
+      files: SearchResult[];
+      events: SearchResult[];
     };
+    for (const r of results() ?? []) {
+      const key =
+        r.kind === "message"
+          ? "messages"
+          : r.kind === "event"
+            ? "events"
+            : (`${r.kind}s` as "contacts" | "files");
+      if (out[key].length < 5) out[key].push(r);
+    }
+    return out;
   });
 
   // Flatten all results into a single list with their callbacks so keyboard
   // navigation can move through them in order.
   const flatResults = createMemo<
-    Array<{ kind: "contact" | "message" | "file"; run: () => void; label: string }>
+    Array<{
+      kind: "message" | "contact" | "file" | "event";
+      run: () => void;
+      label: string;
+    }>
   >(() => {
-    const out: Array<{ kind: "contact" | "message" | "file"; run: () => void; label: string }> = [];
-    for (const c of matches().contacts) {
+    const out: Array<{
+      kind: "message" | "contact" | "file" | "event";
+      run: () => void;
+      label: string;
+    }> = [];
+    for (const c of grouped().contacts) {
       out.push({
         kind: "contact",
-        label: c.name,
+        label: c.title,
         run: () => {
           setView("contacts");
           setSelectedContactId(c.id);
@@ -52,55 +89,82 @@ export function LiveSearch() {
         },
       });
     }
-    for (const m of matches().messages) {
+    for (const m of grouped().messages) {
       out.push({
         kind: "message",
-        label: m.subj,
+        label: m.title,
         run: () => {
           setSelectedMessageId(m.id);
           setDetailOpen(true);
         },
       });
     }
-    for (const f of matches().files) {
+    for (const f of grouped().files) {
       out.push({
         kind: "file",
-        label: f.name,
+        label: f.title,
         run: () => {
           setSelectedFileId(f.id);
           setDetailOpen(true);
         },
       });
     }
+    for (const e of grouped().events) {
+      out.push({
+        kind: "event",
+        label: e.title,
+        run: () => {
+          const startAt = e.body.split("\n")[0];
+          const ts = startAt ? Date.parse(startAt) : NaN;
+          if (!Number.isNaN(ts)) setCalendarJumpTo(ts);
+          setView("calendar");
+          setSearchOpen(false);
+          setSearchQuery("");
+        },
+      });
+    }
     return out;
   });
 
-  const resetCursor = () => setCursor(0);
+  const close = () => {
+    setSearchOpen(false);
+    setSearchQuery("");
+  };
+
   const onKey = (e: KeyboardEvent) => {
     const total = flatResults().length;
-    if (total === 0) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setCursor((c) => (c + 1) % total);
+      if (total > 0) setCursor((c) => (c + 1) % total);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setCursor((c) => (c - 1 + total) % total);
+      if (total > 0) setCursor((c) => (c - 1 + total) % total);
     } else if (e.key === "Enter") {
       e.preventDefault();
       const r = flatResults()[cursor()];
       if (r) {
         r.run();
-        setSearchOpen(false);
-        setQuery("");
+        close();
+      } else if (searchQuery().trim()) {
+        setView("search");
+        close();
       }
     } else if (e.key === "Escape") {
-      setSearchOpen(false);
-      setQuery("");
+      close();
     }
   };
 
+  // Listen for navigation keys globally while the dropdown is open. The
+  // topbar input holds focus, so keydown events bubble up to the document.
+  createEffect(() => {
+    if (typeof document === "undefined") return;
+    document.addEventListener("keydown", onKey);
+    onCleanup(() => document.removeEventListener("keydown", onKey));
+  });
+
   return (
     <div
+      data-testid="live-search-dropdown"
       style={{
         position: "fixed",
         top: "calc(var(--titlebar-height) + var(--topbar-height) + 4px)",
@@ -127,25 +191,19 @@ export function LiveSearch() {
         }}
       >
         <Icon name="ph-magnifying-glass" size={16} />
-        <input
-          autofocus
-          value={query()}
-          onInput={(e) => {
-            setQuery(e.currentTarget.value);
-            resetCursor();
-          }}
-          onKeyDown={onKey}
-          placeholder="Search…  ⏎ 选择  ↑↓ 导航"
+        <span
           style={{
             flex: 1,
-            border: "none",
-            outline: "none",
-            background: "transparent",
-            "font-size": "var(--text-body)",
+            color: "var(--text-muted)",
+            "font-size": "var(--text-caption)",
           }}
-        />
+        >
+          {searchQuery().trim()
+            ? `Results for “${searchQuery()}”`
+            : "Type to search… ⏎ select · ↑↓ navigate · Esc close"}
+        </span>
         <button
-          onClick={() => { setSearchOpen(false); setQuery(""); }}
+          onClick={close}
           aria-label="Close search"
           style={{ color: "var(--text-muted)" }}
         >
@@ -153,14 +211,14 @@ export function LiveSearch() {
         </button>
       </div>
 
-      <Show when={matches().contacts.length > 0}>
+      <Show when={grouped().contacts.length > 0}>
         <Group title="People">
-          <For each={matches().contacts}>
+          <For each={grouped().contacts}>
             {(c, i) => (
               <Result
                 icon="ph-user"
-                title={c.name}
-                hint={c.company}
+                title={c.title}
+                hint={c.body.slice(0, 60)}
                 active={cursor() === i()}
                 onClick={() => {
                   setView("contacts");
@@ -174,15 +232,15 @@ export function LiveSearch() {
         </Group>
       </Show>
 
-      <Show when={matches().messages.length > 0}>
+      <Show when={grouped().messages.length > 0}>
         <Group title="Messages">
-          <For each={matches().messages}>
+          <For each={grouped().messages}>
             {(m, i) => (
               <Result
                 icon="ph-envelope"
-                title={m.subj}
-                hint={m.prev}
-                active={cursor() === matches().contacts.length + i()}
+                title={m.title}
+                hint={m.body.slice(0, 80).replace(/\n/g, " ")}
+                active={cursor() === grouped().contacts.length + i()}
                 onClick={() => {
                   setSelectedMessageId(m.id);
                   setDetailOpen(true);
@@ -194,17 +252,17 @@ export function LiveSearch() {
         </Group>
       </Show>
 
-      <Show when={matches().files.length > 0}>
+      <Show when={grouped().files.length > 0}>
         <Group title="Files">
-          <For each={matches().files}>
+          <For each={grouped().files}>
             {(f, i) => (
               <Result
                 icon="ph-paperclip"
-                title={f.name}
-                hint={f.type}
+                title={f.title}
+                hint={f.body}
                 active={
                   cursor() ===
-                  matches().contacts.length + matches().messages.length + i()
+                  grouped().contacts.length + grouped().messages.length + i()
                 }
                 onClick={() => {
                   setSelectedFileId(f.id);
@@ -217,11 +275,52 @@ export function LiveSearch() {
         </Group>
       </Show>
 
+      <Show when={grouped().events.length > 0}>
+        <Group title="Events">
+          <For each={grouped().events}>
+            {(e, i) => {
+              const startAt = e.body.split("\n")[0];
+              const dateHint =
+                startAt && !Number.isNaN(Date.parse(startAt))
+                  ? new Date(startAt).toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                  : undefined;
+              return (
+                <Result
+                  icon="ph-calendar-blank"
+                  title={e.title}
+                  hint={dateHint}
+                  active={
+                    cursor() ===
+                    grouped().contacts.length +
+                      grouped().messages.length +
+                      grouped().files.length +
+                      i()
+                  }
+                  onClick={() => {
+                    const ts = startAt ? Date.parse(startAt) : NaN;
+                    if (!Number.isNaN(ts)) setCalendarJumpTo(ts);
+                    setView("calendar");
+                    setSearchOpen(false);
+                    setSearchQuery("");
+                  }}
+                />
+              );
+            }}
+          </For>
+        </Group>
+      </Show>
+
       <Show
         when={
-          matches().contacts.length +
-            matches().messages.length +
-            matches().files.length >
+          grouped().contacts.length +
+            grouped().messages.length +
+            grouped().files.length +
+            grouped().events.length >
           0
         }
       >
@@ -229,11 +328,11 @@ export function LiveSearch() {
       </Show>
       <Show
         when={
-          matches().contacts.length +
-            matches().messages.length +
-            matches().files.length ===
-            0 &&
-          query().length > 0
+          grouped().contacts.length +
+            grouped().messages.length +
+            grouped().files.length +
+            grouped().events.length ===
+            0 && searchQuery().length > 0
         }
       >
         <div
@@ -244,16 +343,17 @@ export function LiveSearch() {
             "font-size": "var(--text-caption)",
           }}
         >
-          没有匹配 “{query()}” 的结果
+          没有匹配 “{searchQuery()}” 的结果
         </div>
       </Show>
 
       <Show
         when={
-          query().length === 0 &&
-          matches().contacts.length === 0 &&
-          matches().messages.length === 0 &&
-          matches().files.length === 0
+          searchQuery().length === 0 &&
+          grouped().contacts.length === 0 &&
+          grouped().messages.length === 0 &&
+          grouped().files.length === 0 &&
+          grouped().events.length === 0
         }
       >
         <div
@@ -310,12 +410,15 @@ function Result(props: {
         "border-radius": "var(--radius-md)",
         "text-align": "left",
         background: props.active ? "var(--palm-soft)" : "transparent",
-        "border-left": props.active ? "2px solid var(--palm)" : "2px solid transparent",
+        "border-left": props.active
+          ? "2px solid var(--palm)"
+          : "2px solid transparent",
         transition:
           "background var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out)",
       }}
       onMouseEnter={(e) => {
-        if (!props.active) e.currentTarget.style.background = "var(--paper-mid)";
+        if (!props.active)
+          e.currentTarget.style.background = "var(--paper-mid)";
       }}
       onMouseLeave={(e) => {
         if (!props.active) e.currentTarget.style.background = "transparent";

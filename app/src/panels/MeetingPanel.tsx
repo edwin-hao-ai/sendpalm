@@ -2,16 +2,60 @@
  * Spec: prototype-v11 §3.3.
  */
 
-import { Show, For, createResource } from "solid-js";
-import { getEvent, listContacts, upsertEvent } from "../stores/data";
-import { setDetailOpen, setSelectedMeetingId } from "../stores/ui";
+import { Show, For, createResource, createMemo } from "solid-js";
+import {
+  getEvent,
+  listContacts,
+  listMessages,
+  listFiles,
+  upsertEvent,
+} from "../stores/data";
+import {
+  setDetailOpen,
+  setSelectedMeetingId,
+  setSelectedFileId,
+} from "../stores/ui";
 import { Icon } from "../components/Icon";
 import { uid } from "../utils/id";
+import { generateMeetingBrief, linkedMaterialIds } from "../utils/meeting";
+import { fileIconName } from "../utils/labels";
+import { formatBytes } from "../utils/date";
 import type { CalendarEvent, ActionItem, AgendaItem } from "../types";
+import { useRefreshEffect } from "../utils/gestures";
 
 export function MeetingPanel(props: { meetingId: string }) {
-  const [event, { refetch: refetchEvent }] = createResource(() => props.meetingId, getEvent);
-  const [contacts] = createResource(listContacts);
+  const [event, { refetch: refetchEvent }] = createResource(
+    () => props.meetingId,
+    getEvent,
+  );
+  const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
+  const [messages, { refetch: refetchMessages }] = createResource(listMessages);
+  const [files, { refetch: refetchFiles }] = createResource(listFiles);
+
+  useRefreshEffect(() => {
+    void refetchEvent();
+    void refetchContacts();
+    void refetchMessages();
+    void refetchFiles();
+  });
+
+  const brief = createMemo(() => {
+    const ev = event();
+    if (!ev) return [];
+    return generateMeetingBrief(
+      ev,
+      messages() ?? [],
+      files() ?? [],
+      contacts() ?? [],
+    );
+  });
+
+  const materials = createMemo(() => {
+    const ev = event();
+    if (!ev) return [];
+    const ids = new Set(linkedMaterialIds(ev, files() ?? []));
+    return (files() ?? []).filter((f) => ids.has(f.id));
+  });
 
   const save = async (patch: Partial<CalendarEvent>) => {
     const e = event();
@@ -22,17 +66,15 @@ export function MeetingPanel(props: { meetingId: string }) {
 
   const updateAgenda = (agenda: AgendaItem[]) => save({ agenda });
   const updateNotes = (notes: string) => save({ notes });
-  const updateActionItems = (items: ActionItem[]) => save({ actionItems: items });
+  const updateActionItems = (items: ActionItem[]) =>
+    save({ actionItems: items });
 
   const contactById = (id: string) => contacts()?.find((c) => c.id === id);
 
   const newAgendaItem = () => {
     const e = event();
     if (!e) return;
-    const agenda: AgendaItem[] = [
-      ...e.agenda,
-      { id: uid("ag"), body: "" },
-    ];
+    const agenda: AgendaItem[] = [...e.agenda, { id: uid("ag"), body: "" }];
     updateAgenda(agenda);
   };
 
@@ -61,11 +103,15 @@ export function MeetingPanel(props: { meetingId: string }) {
   const toggleActionDone = (id: string) => {
     const e = event();
     if (!e) return;
-    updateActionItems(e.actionItems.map((a) => (a.id === id ? { ...a, done: !a.done } : a)));
+    updateActionItems(
+      e.actionItems.map((a) => (a.id === id ? { ...a, done: !a.done } : a)),
+    );
   };
 
   return (
-    <div style={{ display: "flex", "flex-direction": "column", height: "100%" }}>
+    <div
+      style={{ display: "flex", "flex-direction": "column", height: "100%" }}
+    >
       <header
         style={{
           padding: "var(--space-3) var(--space-5)",
@@ -77,13 +123,20 @@ export function MeetingPanel(props: { meetingId: string }) {
         }}
       >
         <button
-          onClick={() => { setSelectedMeetingId(null); setDetailOpen(false); }}
+          onClick={() => {
+            setSelectedMeetingId(null);
+            setDetailOpen(false);
+          }}
           aria-label="Close"
           style={{ color: "var(--text-muted)" }}
         >
           <Icon name="ph-arrow-left" size={18} />
         </button>
-        <strong style={{ "font-size": "var(--text-body-sm)", "font-weight": "700" }}>Meeting</strong>
+        <strong
+          style={{ "font-size": "var(--text-body-sm)", "font-weight": "700" }}
+        >
+          Meeting
+        </strong>
       </header>
 
       <Show when={event()}>
@@ -91,7 +144,12 @@ export function MeetingPanel(props: { meetingId: string }) {
           const ev = () => getEv() as CalendarEvent | undefined;
           return (
             <>
-              <div style={{ padding: "var(--space-5)", "border-bottom": "0.5px solid var(--border)" }}>
+              <div
+                style={{
+                  padding: "var(--space-5)",
+                  "border-bottom": "0.5px solid var(--border)",
+                }}
+              >
                 <h3
                   style={{
                     "font-family": "var(--font-display)",
@@ -103,14 +161,28 @@ export function MeetingPanel(props: { meetingId: string }) {
                 >
                   {ev()!.title}
                 </h3>
-                <p style={{ "font-size": "var(--text-caption)", color: "var(--text-muted)", margin: 0 }}>
+                <p
+                  style={{
+                    "font-size": "var(--text-caption)",
+                    color: "var(--text-muted)",
+                    margin: 0,
+                  }}
+                >
                   <Icon name="ph-calendar-blank" size={12} />{" "}
                   {new Date(ev()!.dt).toLocaleString()} · {ev()!.tm}
                   <Show when={ev()!.location}>
-                    {" · "}<Icon name="ph-map-pin" size={12} /> {ev()!.location}
+                    {" · "}
+                    <Icon name="ph-map-pin" size={12} /> {ev()!.location}
                   </Show>
                 </p>
-                <div style={{ display: "flex", "flex-wrap": "wrap", gap: "var(--space-2)", "margin-top": "var(--space-3)" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    "flex-wrap": "wrap",
+                    gap: "var(--space-2)",
+                    "margin-top": "var(--space-3)",
+                  }}
+                >
                   <For each={ev()!.pids}>
                     {(pid) => {
                       const c = contactById(pid);
@@ -132,22 +204,122 @@ export function MeetingPanel(props: { meetingId: string }) {
                 </div>
               </div>
 
-              <div style={{ flex: 1, "overflow-y": "auto", padding: "var(--space-5)" }}>
+              <div
+                style={{
+                  flex: 1,
+                  "overflow-y": "auto",
+                  padding: "var(--space-5)",
+                }}
+              >
                 {/* Brief */}
                 <SectionHeader icon="ph-sparkle" title="Brief" />
-                <Show when={ev()!.brief}>
-                  <p
+                <Show
+                  when={brief().length > 0}
+                  fallback={
+                    <p
+                      style={{
+                        padding: "var(--space-3)",
+                        background: "var(--paper-mid)",
+                        "border-radius": "var(--radius-md)",
+                        "font-size": "var(--text-caption)",
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      No prior context found for these attendees.
+                    </p>
+                  }
+                >
+                  <div
                     style={{
-                      padding: "var(--space-3)",
-                      background: "var(--agent-soft)",
-                      "border-radius": "var(--radius-md)",
-                      "font-size": "var(--text-body-sm)",
-                      "line-height": 1.5,
-                      "white-space": "pre-wrap",
+                      display: "flex",
+                      "flex-direction": "column",
+                      gap: "var(--space-2)",
                     }}
                   >
-                    {ev()!.brief}
-                  </p>
+                    <For each={brief()}>
+                      {(item) => (
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "var(--space-2)",
+                            "align-items": "flex-start",
+                            padding: "var(--space-3)",
+                            background: "var(--agent-soft)",
+                            "border-radius": "var(--radius-md)",
+                            "font-size": "var(--text-body-sm)",
+                            "line-height": 1.5,
+                          }}
+                        >
+                          <Icon
+                            name="ph-lightbulb"
+                            size={16}
+                            style={{ "margin-top": "2px", "flex-shrink": 0 }}
+                          />
+                          <span>{item}</span>
+                        </div>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+
+                {/* Materials */}
+                <Show when={materials().length > 0}>
+                  <SectionHeader icon="ph-paperclip" title="Materials" />
+                  <div
+                    style={{
+                      display: "flex",
+                      "flex-direction": "column",
+                      gap: "var(--space-2)",
+                    }}
+                  >
+                    <For each={materials()}>
+                      {(f) => (
+                        <button
+                          onClick={() => {
+                            setSelectedFileId(f.id);
+                            setDetailOpen(true);
+                          }}
+                          style={{
+                            display: "flex",
+                            "align-items": "center",
+                            gap: "var(--space-3)",
+                            padding: "var(--space-3)",
+                            background: "var(--paper-mid)",
+                            "border-radius": "var(--radius-md)",
+                            "text-align": "left",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <Icon
+                            name={fileIconName(f.type)}
+                            size={20}
+                            style={{ color: "var(--text-secondary)" }}
+                          />
+                          <div style={{ flex: 1, "min-width": 0 }}>
+                            <div
+                              style={{
+                                "font-size": "var(--text-body-sm)",
+                                "font-weight": 600,
+                                "white-space": "nowrap",
+                                overflow: "hidden",
+                                "text-overflow": "ellipsis",
+                              }}
+                            >
+                              {f.name}
+                            </div>
+                            <div
+                              style={{
+                                "font-size": "var(--text-micro)",
+                                color: "var(--text-muted)",
+                              }}
+                            >
+                              {formatBytes(f.size)} · {f.mime}
+                            </div>
+                          </div>
+                        </button>
+                      )}
+                    </For>
+                  </div>
                 </Show>
 
                 {/* Agenda */}
@@ -174,7 +346,9 @@ export function MeetingPanel(props: { meetingId: string }) {
                       </span>
                       <input
                         value={a.body}
-                        onChange={(e) => updateAgendaBody(a.id, e.currentTarget.value)}
+                        onChange={(e) =>
+                          updateAgendaBody(a.id, e.currentTarget.value)
+                        }
                         style={{
                           flex: 1,
                           padding: "6px 10px",
@@ -263,18 +437,33 @@ export function MeetingPanel(props: { meetingId: string }) {
                       </button>
                       <input
                         value={ai.title}
-                        onChange={(e) => updateActionItems(ev()!.actionItems.map((x) => (x.id === ai.id ? { ...x, title: e.currentTarget.value } : x)))}
+                        onChange={(e) =>
+                          updateActionItems(
+                            ev()!.actionItems.map((x) =>
+                              x.id === ai.id
+                                ? { ...x, title: e.currentTarget.value }
+                                : x,
+                            ),
+                          )
+                        }
                         style={{
                           flex: 1,
                           border: "none",
                           background: "transparent",
                           "font-size": "var(--text-body-sm)",
                           "text-decoration": ai.done ? "line-through" : "none",
-                          color: ai.done ? "var(--text-muted)" : "var(--text-primary)",
+                          color: ai.done
+                            ? "var(--text-muted)"
+                            : "var(--text-primary)",
                         }}
                       />
                       <Show when={ai.owner}>
-                        <span style={{ "font-size": "var(--text-micro)", color: "var(--text-muted)" }}>
+                        <span
+                          style={{
+                            "font-size": "var(--text-micro)",
+                            color: "var(--text-muted)",
+                          }}
+                        >
                           {contactById(ai.owner!)?.name ?? ai.owner}
                         </span>
                       </Show>

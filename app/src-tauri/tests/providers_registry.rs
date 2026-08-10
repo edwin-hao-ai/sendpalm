@@ -7,9 +7,21 @@ fn registry_has_expected_providers() {
     let providers = list();
     let ids: Vec<_> = providers.iter().map(|p| p.id.as_str()).collect();
     for expected in [
-        "feishu", "gmail", "outlook", "icloud", "yahoo", "qq", "netease-163", "netease-126", "fastmail", "custom",
+        "feishu",
+        "gmail",
+        "outlook",
+        "icloud",
+        "yahoo",
+        "qq",
+        "netease-163",
+        "netease-126",
+        "fastmail",
+        "custom",
     ] {
-        assert!(ids.contains(&expected), "missing provider {expected}; got {ids:?}");
+        assert!(
+            ids.contains(&expected),
+            "missing provider {expected}; got {ids:?}"
+        );
     }
 }
 

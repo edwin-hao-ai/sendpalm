@@ -31,6 +31,8 @@ import {
   listTasks,
   loadAgentMemory,
   loadAppSettings,
+  ensureDefaultShortcuts,
+  backfillSearchIndex,
 } from "./stores/data";
 import {
   setAppSettings,
@@ -79,13 +81,22 @@ export async function initApp() {
           setOnboardingCompleted(true);
           setOnboardingStep(null);
         } else {
-          setOnboardingCompleted(false);
-          setOnboardingStep(0);
+          // Mark onboarding as completed on first successful store load so the
+          // app is immediately usable (especially on iOS, where URL hash
+          // overrides do not survive into the WKWebView). The user can still
+          // replay onboarding from Settings → Profile.
+          setOnboardingCompleted(true);
+          setOnboardingStep(null);
+          await store.set("onboarding_completed", true);
+          await store.save();
         }
       } catch (storeErr) {
         // Don't block the whole app if tauri-plugin-store isn't available
         // (e.g. dev build flakiness). Fall back to in-memory defaults.
-        console.warn("[bootstrap] store load failed, using defaults:", storeErr);
+        console.warn(
+          "[bootstrap] store load failed, using defaults:",
+          storeErr,
+        );
         setOnboardingCompleted(true);
         setOnboardingStep(null);
       }
@@ -96,6 +107,10 @@ export async function initApp() {
     //   - User actions (compose, add account, follow-up, snippet, etc.)
     // The first sync may take 1–2 min on a large mailbox; the UI shows
     // empty states everywhere until that completes.
+
+    // Seed default keyboard shortcuts on first boot.
+    await ensureDefaultShortcuts();
+
     await Promise.all([
       listAccounts(),
       listContacts(),
@@ -119,6 +134,11 @@ export async function initApp() {
       listShortcuts(),
       listBundleConfigs(),
     ]);
+
+    // Backfill the FTS index for contacts/files created before the index
+    // existed. New messages are indexed by the Rust sync loop; existing
+    // messages are backfilled via migration 0009.
+    void backfillSearchIndex();
 
     setLoading(false);
   } catch (e) {

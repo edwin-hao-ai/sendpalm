@@ -1,15 +1,27 @@
 /** Trash — recoverable for 30 days. */
 
 import { For, Show, createMemo, createResource } from "solid-js";
-import { listContacts, listMessages, upsertMessage, deleteMessage } from "../stores/data";
+import {
+  listContacts,
+  listMessages,
+  moveMessageToBucket,
+  deleteMessage,
+  emptyTrash,
+} from "../stores/data";
 import { Avatar } from "../components/Avatar";
 import { Empty } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { setDetailOpen, setSelectedMessageId, showToast } from "../stores/ui";
+import { addDays, daysUntil } from "../utils/date";
+import { useRefreshEffect } from "../utils/gestures";
 
 export function Trash() {
   const [contacts] = createResource(listContacts);
   const [messages, { refetch }] = createResource(listMessages);
+
+  useRefreshEffect(() => {
+    void refetch();
+  });
 
   const items = createMemo(() => {
     return (messages() ?? [])
@@ -20,9 +32,7 @@ export function Trash() {
   const contactById = (id: string) => contacts()?.find((c) => c.id === id);
 
   const restore = async (id: string) => {
-    const m = (messages() ?? []).find((x) => x.id === id);
-    if (!m) return;
-    await upsertMessage({ ...m, bucket: "imbox" });
+    await moveMessageToBucket(id, "imbox");
     await refetch();
     showToast({ message: "已恢复到 Imbox", kind: "success" });
   };
@@ -34,8 +44,15 @@ export function Trash() {
   };
 
   return (
-    <div style={{ padding: "var(--space-5)", animation: "view-enter 0.3s var(--ease-out) both" }}>
-      <header style={{ "text-align": "center", "margin-bottom": "var(--space-5)" }}>
+    <div
+      style={{
+        padding: "var(--space-5)",
+        animation: "view-enter 0.3s var(--ease-out) both",
+      }}
+    >
+      <header
+        style={{ "text-align": "center", "margin-bottom": "var(--space-5)" }}
+      >
         <h2
           style={{
             "font-family": "var(--font-display)",
@@ -47,9 +64,40 @@ export function Trash() {
         >
           Trash
         </h2>
-        <p style={{ color: "var(--text-secondary)", margin: 0, "font-size": "var(--text-caption)" }}>
+        <p
+          style={{
+            color: "var(--text-secondary)",
+            margin: 0,
+            "font-size": "var(--text-caption)",
+          }}
+        >
           删除的邮件 30 天内可恢复。过期后自动清理。
         </p>
+        <Show when={items().length > 0}>
+          <button
+            onClick={async () => {
+              const count = await emptyTrash();
+              await refetch();
+              showToast({
+                message: `已清空 Trash（${count} 封邮件）`,
+                kind: "info",
+              });
+            }}
+            style={{
+              "margin-top": "var(--space-3)",
+              padding: "8px 16px",
+              "border-radius": "var(--radius-pill)",
+              background: "var(--ruby-soft)",
+              color: "var(--ruby)",
+              "font-size": "var(--text-caption)",
+              "font-weight": "700",
+              border: "none",
+              cursor: "pointer",
+            }}
+          >
+            清空 Trash
+          </button>
+        </Show>
       </header>
 
       <Show when={items().length > 0} fallback={<EmptyState />}>
@@ -68,13 +116,35 @@ export function Trash() {
                 >
                   <Avatar name={c?.name ?? "?"} src={c?.avatar} size={32} />
                   <div
-                    onClick={() => { setSelectedMessageId(m.id); setDetailOpen(true); }}
+                    onClick={() => {
+                      setSelectedMessageId(m.id);
+                      setDetailOpen(true);
+                    }}
                     style={{ flex: 1, "min-width": 0, cursor: "pointer" }}
                   >
                     <strong>{c?.name ?? "Unknown"}</strong>
-                    <p style={{ margin: "2px 0 0", color: "var(--text-secondary)", "font-size": "var(--text-caption)" }}>
+                    <p
+                      style={{
+                        margin: "2px 0 0",
+                        color: "var(--text-secondary)",
+                        "font-size": "var(--text-caption)",
+                      }}
+                    >
                       {m.subj}
                     </p>
+                    <Show when={m.deletedAt}>
+                      <span
+                        style={{
+                          "font-size": "var(--text-micro)",
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        {daysUntil(
+                          addDays(new Date(m.deletedAt!), 30).toISOString(),
+                        )}{" "}
+                        天后永久删除
+                      </span>
+                    </Show>
                   </div>
                   <button
                     onClick={() => restore(m.id)}

@@ -1,3 +1,6 @@
+---
+title: HEY-Inspired Relay v8 Design Spec
+---
 # HEY-Inspired Relay v8 Design Spec
 
 ## Objective

@@ -16,6 +16,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+libsqlite3-sys = { version = "0.30", features = ["bundled"] }
 tauri-plugin-store = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
@@ -34,9 +35,15 @@ lettre = { version = "0.11", default-features = false, features = ["tokio1-rustl
 mailparse = "0.16"
 dotenvy = "0.15"
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+tokio-rustls = "0.26"
+rustls-pki-types = "1"
+rustls-native-certs = "0.8"
+webpki-roots = "1"
 futures = "0.3"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 tokio-util = { version = "0.7", features = ["compat"] }
+base64 = "0.22"
+mime_guess = "2"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "macros", "chrono"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }

@@ -29,6 +29,7 @@ pub struct IcalEvent {
     pub dtstart_tzid: Option<String>,
     pub dtend: Option<String>,
     pub dtend_tzid: Option<String>,
+    pub all_day: bool,
     pub location: Option<String>,
     pub description: Option<String>,
 }
@@ -38,7 +39,7 @@ pub fn parse_vevent(ics: &str) -> Option<IcalEvent> {
     // Unfold continuation lines (RFC 5545 §3.1).
     let unfolded = unfold(ics);
 
-// Collect the content between the first BEGIN:VEVENT and matching END:VEVENT.
+    // Collect the content between the first BEGIN:VEVENT and matching END:VEVENT.
     let mut in_event = false;
     let mut depth = 0u32;
     let mut lines: Vec<&str> = Vec::new();
@@ -72,6 +73,7 @@ pub fn parse_vevent(ics: &str) -> Option<IcalEvent> {
     let mut uid = None;
     let mut dtstart = None;
     let mut dtstart_tzid = None;
+    let mut dtstart_value_param: Option<String> = None;
     let mut dtend = None;
     let mut dtend_tzid = None;
     let mut location = None;
@@ -94,6 +96,7 @@ pub fn parse_vevent(ics: &str) -> Option<IcalEvent> {
             "SUMMARY" => summary = value,
             "UID" => uid = Some(value),
             "DTSTART" => {
+                dtstart_value_param = Some(name_and_params.to_uppercase());
                 dtstart = Some(normalize_datetime(&value));
                 dtstart_tzid = tzid;
             }
@@ -107,6 +110,13 @@ pub fn parse_vevent(ics: &str) -> Option<IcalEvent> {
         }
     }
 
+    // An event is all-day when DTSTART uses VALUE=DATE or is a bare date.
+    let all_day = dtstart_value_param
+        .as_deref()
+        .map(|s| s.contains("VALUE=DATE"))
+        .unwrap_or(false)
+        || dtstart.as_deref().map(|s| s.len() == 10).unwrap_or(false);
+
     Some(IcalEvent {
         uid,
         summary,
@@ -114,6 +124,7 @@ pub fn parse_vevent(ics: &str) -> Option<IcalEvent> {
         dtstart_tzid,
         dtend,
         dtend_tzid,
+        all_day,
         location,
         description,
     })
@@ -129,7 +140,11 @@ fn unfold(input: &str) -> String {
     while i < bytes.len() {
         let b = bytes[i];
         // CRLF + WSP — drop the CRLF and the WSP, joining the lines.
-        if b == b'\r' && i + 2 < bytes.len() && bytes[i + 1] == b'\n' && (bytes[i + 2] == b' ' || bytes[i + 2] == b'\t') {
+        if b == b'\r'
+            && i + 2 < bytes.len()
+            && bytes[i + 1] == b'\n'
+            && (bytes[i + 2] == b' ' || bytes[i + 2] == b'\t')
+        {
             i += 3;
             continue;
         }
@@ -186,6 +201,43 @@ fn unescape_text(s: &str) -> String {
     out
 }
 
+/// Split an RFC3339 timestamp into a SQLite-friendly `YYYY-MM-DD` date string
+/// and an `HH:MM` time string. Used when persisting events to the local DB.
+pub fn split_iso_datetime(dt: &str) -> (String, String) {
+    // Accept both full RFC3339 (`2026-01-01T10:00:00Z`) and the compact
+    // `YYYY-MM-DD HH:MM` form already stored in some columns.
+    let parts: Vec<&str> = dt.split(['T', ' ']).collect();
+    let date = parts.first().unwrap_or(&"").to_string();
+    let time = parts
+        .get(1)
+        .map(|t| {
+            let mut iter = t.split(':');
+            let h = iter.next().unwrap_or("00");
+            let m = iter.next().unwrap_or("00");
+            format!("{h}:{m}")
+        })
+        .unwrap_or_else(|| "00:00".to_string());
+    (date, time)
+}
+
+/// Compute event duration in minutes from optional DTSTART/DTEND RFC3339 strings.
+pub fn compute_duration_minutes(start: Option<&str>, end: Option<&str>) -> i64 {
+    let Some(start) = start else { return 0 };
+    let start_dt = match chrono::DateTime::parse_from_rfc3339(start) {
+        Ok(d) => d.with_timezone(&Utc),
+        Err(_) => return 0,
+    };
+    let end_dt = match end {
+        Some(e) => match chrono::DateTime::parse_from_rfc3339(e) {
+            Ok(d) => Some(d.with_timezone(&Utc)),
+            Err(_) => None,
+        },
+        None => None,
+    };
+    let end_dt = end_dt.unwrap_or_else(|| start_dt + chrono::Duration::minutes(30));
+    (end_dt - start_dt).num_minutes()
+}
+
 /// Normalize a DTSTART/DTEND value into an RFC3339 timestamp when possible.
 fn normalize_datetime(value: &str) -> String {
     let v = value.trim();
@@ -233,15 +285,27 @@ mod tests {
     fn unfolds_continuation_lines() {
         let ics = "BEGIN:VEVENT\r\nSUMMARY:This is a long\r\n  summary that spans\r\n  multiple lines\r\nDTSTART:20260101T100000Z\r\nEND:VEVENT\r\n";
         let ev = parse_vevent(ics).unwrap();
-        assert_eq!(ev.summary, "This is a long summary that spans multiple lines");
+        assert_eq!(
+            ev.summary,
+            "This is a long summary that spans multiple lines"
+        );
     }
 
     #[test]
     fn parses_date_only() {
-        let ics = "BEGIN:VEVENT\r\nSUMMARY:All day\r\nDTSTART;VALUE=DATE:20260101\r\nEND:VEVENT\r\n";
+        let ics =
+            "BEGIN:VEVENT\r\nSUMMARY:All day\r\nDTSTART;VALUE=DATE:20260101\r\nEND:VEVENT\r\n";
         let ev = parse_vevent(ics).unwrap();
         assert_eq!(ev.summary, "All day");
         assert!(ev.dtstart.as_deref().unwrap().starts_with("2026-01-01"));
+        assert!(ev.all_day);
+    }
+
+    #[test]
+    fn parses_timed_event_as_not_all_day() {
+        let ics = "BEGIN:VEVENT\r\nSUMMARY:Standup\r\nDTSTART:20260101T100000Z\r\nDTEND:20260101T103000Z\r\nEND:VEVENT\r\n";
+        let ev = parse_vevent(ics).unwrap();
+        assert!(!ev.all_day);
     }
 
     #[test]

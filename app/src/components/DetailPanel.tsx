@@ -9,6 +9,7 @@ import {
   selectedFileId,
   selectedTaskId,
   selectedDraftId,
+  selectedCompanyName,
   setDetailOpen,
 } from "../stores/ui";
 import { ContactPanel } from "../panels/ContactPanel";
@@ -17,6 +18,7 @@ import { MeetingPanel } from "../panels/MeetingPanel";
 import { FilePanel } from "../panels/FilePanel";
 import { TaskPanel } from "../panels/TaskPanel";
 import { DraftPanel } from "../panels/DraftPanel";
+import { CompanyPanel } from "../panels/CompanyPanel";
 import { PanelResizeHandle, initializePanelWidths } from "./PanelResizeHandle";
 
 export function DetailPanel() {
@@ -27,18 +29,42 @@ export function DetailPanel() {
         classList={{
           open: detailOpen(),
         }}
-        style={{ position: "relative" }}
       >
         <PanelResizeHandle panel="detail" side="left" />
         <Switch fallback={<Empty />}>
-          <Match when={selectedContactId()}>{(id) => <ContactPanel contactId={id()} />}</Match>
-          <Match when={selectedMessageId()}>{(id) => <MessagePanel messageId={id()} />}</Match>
-          <Match when={selectedMeetingId()}>{(id) => <MeetingPanel meetingId={id()} />}</Match>
-          <Match when={selectedFileId()}>{(id) => <FilePanel fileId={id()} />}</Match>
-          <Match when={selectedTaskId()}>{(id) => <TaskPanel taskId={id()} />}</Match>
-          <Match when={selectedDraftId()}>{(id) => <DraftPanel draftId={id()} />}</Match>
+          <Match when={selectedCompanyName()}>
+            {(name) => <CompanyPanel companyName={name()} />}
+          </Match>
+          <Match when={selectedContactId()}>
+            {(id) => <ContactPanel contactId={id()} />}
+          </Match>
+          <Match when={selectedMessageId()}>
+            {(id) => <MessagePanel messageId={id()} />}
+          </Match>
+          <Match when={selectedMeetingId()}>
+            {(id) => <MeetingPanel meetingId={id()} />}
+          </Match>
+          <Match when={selectedFileId()}>
+            {(id) => <FilePanel fileId={id()} />}
+          </Match>
+          <Match when={selectedTaskId()}>
+            {(id) => <TaskPanel taskId={id()} />}
+          </Match>
+          <Match when={selectedDraftId()}>
+            {(id) => <DraftPanel draftId={id()} />}
+          </Match>
         </Switch>
-        <Show when={detailOpen() && !selectedContactId() && !selectedMessageId() && !selectedMeetingId() && !selectedFileId() && !selectedTaskId() && !selectedDraftId()}>
+        <Show
+          when={
+            detailOpen() &&
+            !selectedContactId() &&
+            !selectedMessageId() &&
+            !selectedMeetingId() &&
+            !selectedFileId() &&
+            !selectedTaskId() &&
+            !selectedDraftId()
+          }
+        >
           <Empty />
         </Show>
       </aside>

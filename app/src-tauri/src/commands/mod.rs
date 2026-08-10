@@ -1,9 +1,9 @@
 //! Tauri commands exposing real IMAP/SMTP services to JS.
 
+use crate::services::providers::{list as provider_list, EmailProvider};
 use crate::services::{
-    EmailCredentials, SyncReport, imap::ImapClient, load_test_credentials, smtp::SmtpClient,
+    imap::ImapClient, load_test_credentials, smtp::SmtpClient, EmailCredentials, SyncReport,
 };
-use crate::services::providers::{EmailProvider, list as provider_list};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 use tokio::sync::OnceCell;
@@ -24,7 +24,7 @@ pub async fn sync_now(
     account_id: String,
     mailbox: String,
 ) -> Result<SyncReport, String> {
-    let creds = get_creds().await?;
+    let creds = crate::services::sync_loop::resolve_account_credentials(&account_id).await?;
     let client = ImapClient::new(creds);
     let state = app.state::<crate::services::state::SyncStateStore>();
     let prev = state.get(&account_id);
@@ -64,37 +64,159 @@ pub async fn sync_now(
 }
 
 #[tauri::command]
-pub async fn list_mailboxes() -> Result<Vec<String>, String> {
-    let creds = get_creds().await?;
+pub async fn list_mailboxes(account_id: String) -> Result<Vec<String>, String> {
+    let creds = crate::services::sync_loop::resolve_account_credentials(&account_id).await?;
     ImapClient::new(creds).list_mailboxes().await
 }
 
-#[tauri::command]
-pub async fn send_message(
-    to: String,
-    subject: String,
-    body: String,
-    account_id: Option<String>,
-) -> Result<SendResult, String> {
-    // Resolve credentials: prefer the explicit account_id from the From selector;
-    // fall back to the test credentials when no account is selected (dev only).
-    let creds = match account_id.as_deref() {
-        Some(id) if !id.is_empty() => {
-            crate::services::sync_loop::resolve_account_credentials(id).await?
-        }
-        _ => get_creds().await?,
-    };
-    let smtp = SmtpClient::new(creds);
-    let from = smtp.creds().email.clone();
-    let id = smtp.send(&from, &to, &subject, &body).await?;
-    Ok(SendResult { message_id: id })
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutgoingAttachmentDto {
+    filename: String,
+    mime: String,
+    data_base64: String,
 }
 
 #[tauri::command]
-pub async fn get_sync_state(
+#[allow(clippy::too_many_arguments)]
+pub async fn send_message(
     app: AppHandle,
-    account_id: String,
-) -> Result<SyncStateDto, String> {
+    to: String,
+    subject: String,
+    body: String,
+    html_body: Option<String>,
+    account_id: Option<String>,
+    attachments: Vec<OutgoingAttachmentDto>,
+    cc: Option<String>,
+    bcc: Option<String>,
+    from_override: Option<String>,
+) -> Result<SendResult, String> {
+    // Resolve credentials: prefer the explicit account_id from the From selector;
+    // fall back to the test credentials when no account is selected (dev only).
+    let (creds, outgoing_settings, account_email) = match account_id.as_deref() {
+        Some(id) if !id.is_empty() => {
+            let creds = crate::services::sync_loop::resolve_account_credentials(id).await?;
+            let email = creds.email.clone();
+            let settings = crate::services::sync_loop::load_account_settings_json(id).await?;
+            let outgoing =
+                crate::services::sync_loop::outgoing_settings_from_json(&settings, &email);
+            (creds, outgoing, email)
+        }
+        _ => {
+            let creds = get_creds().await?;
+            let email = creds.email.clone();
+            (creds, Default::default(), email)
+        }
+    };
+    let smtp = SmtpClient::new(creds);
+
+    // Determine effective From: explicit alias wins, then account default display name.
+    let from = if let Some(alias) = from_override.filter(|s| !s.trim().is_empty()) {
+        crate::services::sync_loop::build_from_mailbox(&account_email, &alias)?
+    } else {
+        crate::services::sync_loop::build_from_mailbox(
+            &account_email,
+            &outgoing_settings.default_from_name,
+        )?
+    };
+
+    let split_addrs = |s: Option<String>| {
+        s.unwrap_or_default()
+            .split(',')
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty())
+            .collect::<Vec<_>>()
+    };
+    let to_addrs = split_addrs(Some(to));
+    let cc_addrs = split_addrs(cc);
+    let mut bcc_addrs = split_addrs(bcc);
+    if !outgoing_settings.auto_bcc.is_empty() && !bcc_addrs.contains(&outgoing_settings.auto_bcc) {
+        bcc_addrs.push(outgoing_settings.auto_bcc.clone());
+    }
+
+    // Append account signature when configured.
+    let signature_plain = outgoing_settings.signature.as_str();
+    let body = if signature_plain.is_empty() {
+        body
+    } else {
+        format!("{}\n\n--\n{}", body, signature_plain)
+    };
+    let html_body = html_body.map(|html| {
+        if signature_plain.is_empty() {
+            html
+        } else {
+            let signature_html = signature_plain.replace('\n', "<br>");
+            format!("{}<br><br>--<br>{}", html, signature_html)
+        }
+    });
+
+    let attachments = attachments
+        .into_iter()
+        .map(|a| {
+            let bytes = base64::engine::Engine::decode(
+                &base64::engine::general_purpose::STANDARD,
+                &a.data_base64,
+            )
+            .map_err(|e| format!("decode attachment {}: {e}", a.filename))?;
+            Ok(crate::services::smtp::OutgoingAttachment {
+                filename: a.filename,
+                mime: a.mime,
+                bytes,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    // Keep a clone for the local Sent copy before SMTP consumes the attachments.
+    let attachments_for_sent = attachments.clone();
+    let id = smtp
+        .send(
+            &from,
+            &to_addrs,
+            &cc_addrs,
+            &bcc_addrs,
+            Some(&outgoing_settings.reply_to),
+            &subject,
+            &body,
+            html_body,
+            attachments,
+        )
+        .await?;
+
+    // Save a local copy of the sent message so it shows up in the recipient's
+    // contact timeline. We use the first To address as the primary contact.
+    let local_message_id = if let Some(to_email) = to_addrs.first() {
+        if let Ok(pool) = crate::services::sync_loop::open_pool().await {
+            if let Ok(data_dir) = app.path().app_data_dir() {
+                let account_id = account_id.unwrap_or_default();
+                crate::services::sync_loop::save_sent_message(
+                    &pool,
+                    &data_dir,
+                    &account_id,
+                    to_email,
+                    &subject,
+                    &body,
+                    &attachments_for_sent,
+                )
+                .await
+                .ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    Ok(SendResult {
+        message_id: id,
+        local_message_id,
+    })
+}
+
+#[tauri::command]
+pub async fn get_sync_state(app: AppHandle, account_id: String) -> Result<SyncStateDto, String> {
     let state = app.state::<crate::services::state::SyncStateStore>();
     let s = state.get(&account_id);
     Ok(SyncStateDto {
@@ -112,17 +234,12 @@ pub async fn list_email_providers() -> Result<Vec<EmailProvider>, String> {
 }
 
 #[tauri::command]
-pub async fn vault_save(
-    account_id: String,
-    password: String,
-) -> Result<(), String> {
+pub async fn vault_save(account_id: String, password: String) -> Result<(), String> {
     crate::services::vault::set_password(&account_id, &password)
 }
 
 #[tauri::command]
-pub async fn vault_load(
-    account_id: String,
-) -> Result<Option<String>, String> {
+pub async fn vault_load(account_id: String) -> Result<Option<String>, String> {
     crate::services::vault::get_password(&account_id)
 }
 
@@ -133,24 +250,44 @@ pub async fn vault_delete(account_id: String) -> Result<(), String> {
 
 /// Create a calendar event from a parsed iCal VEVENT.
 #[tauri::command]
-pub async fn add_calendar_event(invite: crate::services::ical::IcalEvent) -> Result<String, String> {
-    let pool = open_calendar_pool().await?;
+pub async fn add_calendar_event(
+    invite: crate::services::ical::IcalEvent,
+    contact_id: Option<String>,
+) -> Result<String, String> {
+    let pool = crate::services::sync_loop::open_pool().await?;
     let id = format!("evt_{}", uuid::Uuid::new_v4().simple());
-    let dt = invite.dtstart.clone().unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
-    // Parse the dtstart ISO timestamp and split into date+time for the events table.
-    let (date_str, time_str) = split_iso_datetime(&dt);
-    let dur = compute_duration_minutes(invite.dtstart.as_deref(), invite.dtend.as_deref());
+    let dt = invite
+        .dtstart
+        .clone()
+        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+    let (date_str, time_str) = crate::services::ical::split_iso_datetime(&dt);
+    let dur = crate::services::ical::compute_duration_minutes(
+        invite.dtstart.as_deref(),
+        invite.dtend.as_deref(),
+    );
+    let end_dt_str = invite
+        .dtend
+        .as_deref()
+        .map(crate::services::ical::split_iso_datetime)
+        .map(|(d, _)| d);
+
+    let pids_json = contact_id
+        .map(|cid| format!("[\"{cid}\"]"))
+        .unwrap_or_else(|| "[]".to_string());
 
     sqlx::query(
-        "INSERT INTO events (id, title, dt, tm, dur, location, agenda_json, brief, color) \
-         VALUES ($1, $2, $3, $4, $5, $6, '[]', $7, '#0A8F63')",
+        "INSERT INTO events (id, title, dt, end_dt, all_day, tm, dur, location, agenda_json, pids_json, brief, color) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '[]', $9, $10, '#0A8F63')",
     )
     .bind(&id)
     .bind(&invite.summary)
     .bind(&date_str)
+    .bind(end_dt_str)
+    .bind(if invite.all_day { 1 } else { 0 })
     .bind(&time_str)
     .bind(dur)
     .bind(invite.location.as_deref().unwrap_or(""))
+    .bind(&pids_json)
     .bind(invite.description.as_deref().unwrap_or(""))
     .execute(&pool)
     .await
@@ -159,59 +296,56 @@ pub async fn add_calendar_event(invite: crate::services::ical::IcalEvent) -> Res
     Ok(id)
 }
 
-/// Open the SendPalm SQLite database at the same path the sync loop uses.
-async fn open_calendar_pool() -> Result<sqlx::SqlitePool, String> {
-    use sqlx::sqlite::SqliteConnectOptions;
-    use sqlx::sqlite::SqlitePoolOptions;
-    use std::str::FromStr;
-
-    let dir = if let Some(p) = std::env::var_os("APPDATA") {
-        let mut pb = std::path::PathBuf::from(p);
-        pb.push("com.sendpalm.app");
-        pb
-    } else {
-        let home = std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .unwrap_or_else(|_| ".".to_string());
-        let mut pb = std::path::PathBuf::from(home);
-        pb.push("Library/Application Support/com.sendpalm.app");
-        pb
-    };
-    let db_path = dir.join("sendpalm.db");
-    let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", db_path.display()))
-        .map_err(|e| format!("parse db url: {e}"))?
-        .create_if_missing(true)
-        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
-    SqlitePoolOptions::new()
-        .max_connections(2)
-        .connect_with(opts)
+/// Read an attachment from the app data directory and return it as a base64
+/// data URL so the frontend can display or download it without direct FS access.
+#[tauri::command]
+pub async fn get_attachment_content(app: AppHandle, file_id: String) -> Result<String, String> {
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let file_dir = data_dir.join("attachments").join(&file_id);
+    let mut entries = tokio::fs::read_dir(&file_dir)
         .await
-        .map_err(|e| format!("connect db: {e}"))
-}
-
-fn split_iso_datetime(iso: &str) -> (String, String) {
-    // Best-effort: split "2026-01-01T10:00:00+00:00" into date "2026-01-01" and time "10:00".
-    if let Some(idx) = iso.find('T') {
-        let date = iso[..idx].to_string();
-        let time = iso[idx + 1..].split('+').next().unwrap_or("").split('-').next().unwrap_or("");
-        let time_short = if time.len() >= 5 { time[..5].to_string() } else { time.to_string() };
-        return (date, time_short);
+        .map_err(|e| format!("read attachment dir {file_id}: {e}"))?;
+    let mut path: Option<std::path::PathBuf> = None;
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let p = entry.path();
+        if p.is_file() {
+            path = Some(p);
+            break;
+        }
     }
-    (iso.to_string(), "00:00".to_string())
+    let path = path.ok_or_else(|| format!("attachment file not found: {file_id}"))?;
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|e| format!("read attachment {file_id}: {e}"))?;
+    let b64 = base64::engine::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+    let mime = mime_guess::from_path(&path)
+        .first_or_octet_stream()
+        .to_string();
+    Ok(format!("data:{mime};base64,{b64}"))
 }
 
-fn compute_duration_minutes(start: Option<&str>, end: Option<&str>) -> Option<i32> {
-    let s = start?;
-    let e = end?;
-    let sd = chrono::DateTime::parse_from_rfc3339(s).ok()?;
-    let ed = chrono::DateTime::parse_from_rfc3339(e).ok()?;
-    let mins = (ed - sd).num_minutes();
-    Some(mins as i32)
+/// Return the absolute filesystem path of an attachment so the frontend can
+/// open it with the system default application.
+#[tauri::command]
+pub async fn get_attachment_path(app: AppHandle, file_id: String) -> Result<String, String> {
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let file_dir = data_dir.join("attachments").join(&file_id);
+    let mut entries = tokio::fs::read_dir(&file_dir)
+        .await
+        .map_err(|e| format!("read attachment dir {file_id}: {e}"))?;
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let p = entry.path();
+        if p.is_file() {
+            return Ok(p.to_string_lossy().to_string());
+        }
+    }
+    Err(format!("attachment file not found: {file_id}"))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SendResult {
     pub message_id: String,
+    pub local_message_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

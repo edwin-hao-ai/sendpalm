@@ -2,7 +2,18 @@
  * Spec: prototype-v11 §6 / mobile responsive plan.
  */
 
-import { createSignal, onCleanup, onMount } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { refreshTick } from "../stores/ui";
+
+/** React to a global refresh tick (e.g. backend sync events). */
+export function useRefreshEffect(callback: () => void) {
+  createEffect(() => {
+    // Access the tick so this effect re-runs when it changes.
+    const _ = refreshTick();
+    void _;
+    callback();
+  });
+}
 
 interface SwipeOptions {
   threshold?: number;
@@ -54,7 +65,10 @@ interface LongPressOptions {
   onLongPress: () => void;
 }
 
-export function useLongPress(ref: HTMLElement | undefined, opts: LongPressOptions) {
+export function useLongPress(
+  ref: HTMLElement | undefined,
+  opts: LongPressOptions,
+) {
   let timer: number | undefined;
 
   const start = () => {
@@ -93,14 +107,21 @@ export function useLongPress(ref: HTMLElement | undefined, opts: LongPressOption
 
 /** Reactive viewport helper. */
 export function useViewport() {
-  const [width, setWidth] = createSignal(typeof window !== "undefined" ? window.innerWidth : 1024);
-  const [height, setHeight] = createSignal(typeof window !== "undefined" ? window.innerHeight : 768);
+  const [width, setWidth] = createSignal(
+    typeof window !== "undefined" ? window.innerWidth : 1024,
+  );
+  const [height, setHeight] = createSignal(
+    typeof window !== "undefined" ? window.innerHeight : 768,
+  );
 
   onMount(() => {
     const onResize = () => {
       setWidth(window.innerWidth);
       setHeight(window.innerHeight);
     };
+    // Correct the SSR fallback immediately so the first paint on iOS/WKWebView
+    // already uses the real viewport width instead of the desktop default.
+    onResize();
     window.addEventListener("resize", onResize);
     onCleanup(() => window.removeEventListener("resize", onResize));
   });
@@ -108,8 +129,8 @@ export function useViewport() {
   return {
     width,
     height,
-    isMobile: () => width() < 720,
-    isTablet: () => width() >= 720 && width() < 1024,
+    isMobile: () => width() < 768,
+    isTablet: () => width() >= 768 && width() < 1024,
     isDesktop: () => width() >= 1024,
   };
 }

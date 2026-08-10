@@ -1,15 +1,26 @@
 /** Spam view — filtered. */
 
 import { For, Show, createMemo, createResource } from "solid-js";
-import { listContacts, listMessages, upsertMessage, deleteMessage } from "../stores/data";
+import {
+  listContacts,
+  listMessages,
+  moveMessageToBucket,
+  deleteMessage,
+} from "../stores/data";
 import { Avatar } from "../components/Avatar";
 import { Empty } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { showToast } from "../stores/ui";
+import { addDays, daysUntil } from "../utils/date";
+import { useRefreshEffect } from "../utils/gestures";
 
 export function Spam() {
   const [contacts] = createResource(listContacts);
   const [messages, { refetch }] = createResource(listMessages);
+
+  useRefreshEffect(() => {
+    void refetch();
+  });
 
   const items = createMemo(() => {
     return (messages() ?? [])
@@ -20,9 +31,7 @@ export function Spam() {
   const contactById = (id: string) => contacts()?.find((c) => c.id === id);
 
   const notSpam = async (id: string) => {
-    const m = (messages() ?? []).find((x) => x.id === id);
-    if (!m) return;
-    await upsertMessage({ ...m, bucket: "imbox" });
+    await moveMessageToBucket(id, "imbox");
     await refetch();
     showToast({ message: "已恢复到 Imbox", kind: "success" });
   };
@@ -34,8 +43,15 @@ export function Spam() {
   };
 
   return (
-    <div style={{ padding: "var(--space-5)", animation: "view-enter 0.3s var(--ease-out) both" }}>
-      <header style={{ "text-align": "center", "margin-bottom": "var(--space-5)" }}>
+    <div
+      style={{
+        padding: "var(--space-5)",
+        animation: "view-enter 0.3s var(--ease-out) both",
+      }}
+    >
+      <header
+        style={{ "text-align": "center", "margin-bottom": "var(--space-5)" }}
+      >
         <h2
           style={{
             "font-family": "var(--font-display)",
@@ -47,7 +63,13 @@ export function Spam() {
         >
           Spam
         </h2>
-        <p style={{ color: "var(--text-secondary)", margin: 0, "font-size": "var(--text-caption)" }}>
+        <p
+          style={{
+            color: "var(--text-secondary)",
+            margin: 0,
+            "font-size": "var(--text-caption)",
+          }}
+        >
           系统识别的垃圾邮件。误判可恢复。
         </p>
       </header>
@@ -70,9 +92,28 @@ export function Spam() {
                   <Avatar name={c?.name ?? "?"} src={c?.avatar} size={32} />
                   <div style={{ flex: 1, "min-width": 0 }}>
                     <strong>{c?.name ?? "Unknown"}</strong>
-                    <p style={{ margin: "2px 0 0", color: "var(--text-secondary)", "font-size": "var(--text-caption)" }}>
+                    <p
+                      style={{
+                        margin: "2px 0 0",
+                        color: "var(--text-secondary)",
+                        "font-size": "var(--text-caption)",
+                      }}
+                    >
                       {m.subj}
                     </p>
+                    <Show when={m.deletedAt}>
+                      <span
+                        style={{
+                          "font-size": "var(--text-micro)",
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        {daysUntil(
+                          addDays(new Date(m.deletedAt!), 30).toISOString(),
+                        )}{" "}
+                        天后自动删除
+                      </span>
+                    </Show>
                   </div>
                   <button
                     onClick={() => notSpam(m.id)}

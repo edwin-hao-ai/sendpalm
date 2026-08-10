@@ -230,9 +230,7 @@ export function Onboarding() {
                         height: "8px",
                         "border-radius": "var(--radius-pill)",
                         background:
-                          i <= stepIndex
-                            ? stepColor
-                            : "var(--paper-dark)",
+                          i <= stepIndex ? stepColor : "var(--paper-dark)",
                         transition:
                           "all 0.36s cubic-bezier(0.34, 1.56, 0.64, 1)",
                         opacity: i <= stepIndex ? 1 : 0.4,
@@ -261,8 +259,7 @@ export function Onboarding() {
                         transition: "background 0.18s var(--ease-out)",
                       }}
                       onMouseEnter={(e) =>
-                        (e.currentTarget.style.background =
-                          "var(--paper-mid)")
+                        (e.currentTarget.style.background = "var(--paper-mid)")
                       }
                       onMouseLeave={(e) =>
                         (e.currentTarget.style.background = "transparent")
@@ -310,8 +307,9 @@ export function Onboarding() {
                     }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.boxShadow = `0 6px 18px ${step.color}40`;
-                      e.currentTarget.style.transform =
-                        pressed() ? "scale(0.96)" : "scale(1)";
+                      e.currentTarget.style.transform = pressed()
+                        ? "scale(0.96)"
+                        : "scale(1)";
                     }}
                   >
                     {step.cta}

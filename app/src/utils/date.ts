@@ -87,6 +87,14 @@ export function addDays(d: Date, n: number): Date {
   return x;
 }
 
+/** Days from now until `iso`. Null if `iso` is invalid. */
+export function daysUntil(iso: string, now = new Date()): number | null {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  const ms = t - now.getTime();
+  return Math.max(0, Math.ceil(ms / (24 * 60 * 60 * 1000)));
+}
+
 export function addHours(d: Date, n: number): Date {
   const x = new Date(d);
   x.setHours(x.getHours() + n);
@@ -97,4 +105,63 @@ export function nextWeekday(d: Date, weekday: number): Date {
   const x = new Date(d);
   const diff = (weekday - x.getDay() + 7) % 7 || 7;
   return addDays(x, diff);
+}
+
+export function startOfWeek(d: Date): Date {
+  const x = new Date(d);
+  const day = x.getDay();
+  const offset = (day + 6) % 7; // Monday-start
+  x.setDate(x.getDate() - offset);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+export function endOfWeek(d: Date): Date {
+  const s = startOfWeek(d);
+  const x = new Date(s);
+  x.setDate(x.getDate() + 6);
+  x.setHours(23, 59, 59, 999);
+  return x;
+}
+
+export function startOfMonth(d: Date): Date {
+  const x = new Date(d);
+  x.setDate(1);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+export function daysInMonth(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+}
+
+export function sameDate(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+export function timeToMinutes(tm: string): number {
+  const parts = tm.split(":").map(Number);
+  const h = parts[0] ?? 0;
+  const m = parts[1] ?? 0;
+  if (Number.isNaN(h) || Number.isNaN(m)) return 0;
+  return h * 60 + m;
+}
+
+export function formatMinutes(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const n = parseFloat((bytes / k ** i).toFixed(1));
+  return `${n} ${sizes[i]}`;
 }

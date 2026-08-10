@@ -15,6 +15,7 @@ interface PickerProps {
   open: boolean;
   onClose: () => void;
   msgId: string;
+  onCreated?: () => void;
 }
 
 const PRESETS = [
@@ -37,7 +38,11 @@ export function FollowUpPicker(props: PickerProps) {
       note: note().trim() || undefined,
     };
     await upsertFollowUp(fu);
-    showToast({ message: `跟进已设 · ${dueAt.toLocaleDateString()}`, kind: "success" });
+    showToast({
+      message: `跟进已设 · ${dueAt.toLocaleDateString()}`,
+      kind: "success",
+    });
+    props.onCreated?.();
     props.onClose();
     setNote("");
     setCustom("");
@@ -54,12 +59,30 @@ export function FollowUpPicker(props: PickerProps) {
   };
 
   return (
-    <Modal open={props.open} onClose={props.onClose} title="设置跟进" width="420px">
+    <Modal
+      open={props.open}
+      onClose={props.onClose}
+      title="设置跟进"
+      width="420px"
+    >
       <Show when={true}>
-        <p style={{ "font-size": "var(--text-caption)", color: "var(--text-muted)", "margin-bottom": "var(--space-3)" }}>
+        <p
+          style={{
+            "font-size": "var(--text-caption)",
+            color: "var(--text-muted)",
+            "margin-bottom": "var(--space-3)",
+          }}
+        >
           到期时会在 Imbox 顶部浮起并发出通知。
         </p>
-        <div style={{ display: "grid", "grid-template-columns": "repeat(2, 1fr)", gap: "var(--space-2)", "margin-bottom": "var(--space-4)" }}>
+        <div
+          style={{
+            display: "grid",
+            "grid-template-columns": "repeat(2, 1fr)",
+            gap: "var(--space-2)",
+            "margin-bottom": "var(--space-4)",
+          }}
+        >
           {PRESETS.map((p) => (
             <button
               onClick={() => apply(addDays(new Date(), p.days))}
@@ -73,8 +96,12 @@ export function FollowUpPicker(props: PickerProps) {
                 cursor: "pointer",
                 "font-weight": "600",
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--paper-dark)")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "var(--paper-mid)")}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.background = "var(--paper-dark)")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.background = "var(--paper-mid)")
+              }
             >
               <Icon name="ph-clock" size={14} />
               {p.label} 后
@@ -82,7 +109,17 @@ export function FollowUpPicker(props: PickerProps) {
           ))}
         </div>
         <label style={{ display: "block", "margin-bottom": "var(--space-3)" }}>
-          <span style={{ display: "block", "font-size": "var(--text-micro)", color: "var(--text-muted)", "font-weight": "700", "margin-bottom": "4px" }}>自定义时间</span>
+          <span
+            style={{
+              display: "block",
+              "font-size": "var(--text-micro)",
+              color: "var(--text-muted)",
+              "font-weight": "700",
+              "margin-bottom": "4px",
+            }}
+          >
+            自定义时间
+          </span>
           <input
             type="datetime-local"
             value={custom()}
@@ -113,7 +150,17 @@ export function FollowUpPicker(props: PickerProps) {
           </Show>
         </label>
         <label style={{ display: "block" }}>
-          <span style={{ display: "block", "font-size": "var(--text-micro)", color: "var(--text-muted)", "font-weight": "700", "margin-bottom": "4px" }}>备注（可选）</span>
+          <span
+            style={{
+              display: "block",
+              "font-size": "var(--text-micro)",
+              color: "var(--text-muted)",
+              "font-weight": "700",
+              "margin-bottom": "4px",
+            }}
+          >
+            备注（可选）
+          </span>
           <input
             value={note()}
             onInput={(e) => setNote(e.currentTarget.value)}

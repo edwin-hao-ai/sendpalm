@@ -6,11 +6,15 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 export function Titlebar() {
   const onMouseDown = (e: MouseEvent) => {
     if (e.target instanceof HTMLElement && e.target.closest("button")) return;
-    getCurrentWindow().startDragging().catch(() => {});
+    getCurrentWindow()
+      .startDragging()
+      .catch(() => {});
   };
 
   onMount(() => {
-    const stop = () => { /* no-op; placeholder for future drag tracking */ };
+    const stop = () => {
+      /* no-op; placeholder for future drag tracking */
+    };
     document.addEventListener("mouseup", stop);
     onCleanup(() => document.removeEventListener("mouseup", stop));
   });

@@ -2,7 +2,12 @@
 
 import { describe, expect, it } from "vitest";
 import { initials, hashHue } from "../utils/test-helpers";
-import { STAGE_LABEL, STAGE_COLOR, STAGE_SUGGEST } from "../utils/labels";
+import {
+  STAGE_LABEL,
+  STAGE_COLOR,
+  STAGE_SUGGEST,
+  healthToGroup,
+} from "../utils/labels";
 
 describe("initials", () => {
   it("two-part name", () => {
@@ -43,24 +48,66 @@ describe("hashHue", () => {
 
 describe("STAGE_LABEL", () => {
   it("has all 6 stages", () => {
-    const stages = ["explore", "build", "active", "maintain", "cold", "rekindle"];
+    const stages = [
+      "explore",
+      "build",
+      "active",
+      "maintain",
+      "cold",
+      "rekindle",
+    ];
     for (const s of stages) {
       expect(STAGE_LABEL[s as keyof typeof STAGE_LABEL]).toBeTruthy();
     }
   });
 
   it("all colors are hex strings", () => {
-    const stages = ["explore", "build", "active", "maintain", "cold", "rekindle"];
+    const stages = [
+      "explore",
+      "build",
+      "active",
+      "maintain",
+      "cold",
+      "rekindle",
+    ];
     for (const s of stages) {
-      expect(STAGE_COLOR[s as keyof typeof STAGE_COLOR]).toMatch(/^#[0-9A-Fa-f]{6}$/);
+      expect(STAGE_COLOR[s as keyof typeof STAGE_COLOR]).toMatch(
+        /^#[0-9A-Fa-f]{6}$/,
+      );
     }
   });
 
   it("all suggestions are non-empty strings", () => {
-    const stages = ["explore", "build", "active", "maintain", "cold", "rekindle"];
+    const stages = [
+      "explore",
+      "build",
+      "active",
+      "maintain",
+      "cold",
+      "rekindle",
+    ];
     for (const s of stages) {
       expect(STAGE_SUGGEST[s as keyof typeof STAGE_SUGGEST]).toBeTruthy();
-      expect(typeof STAGE_SUGGEST[s as keyof typeof STAGE_SUGGEST]).toBe("string");
+      expect(typeof STAGE_SUGGEST[s as keyof typeof STAGE_SUGGEST]).toBe(
+        "string",
+      );
     }
+  });
+});
+
+describe("healthToGroup", () => {
+  it("maps high health to active", () => {
+    expect(healthToGroup(70)).toBe("active");
+    expect(healthToGroup(100)).toBe("active");
+  });
+
+  it("maps medium health to risk", () => {
+    expect(healthToGroup(40)).toBe("risk");
+    expect(healthToGroup(69)).toBe("risk");
+  });
+
+  it("maps low health to cold", () => {
+    expect(healthToGroup(0)).toBe("cold");
+    expect(healthToGroup(39)).toBe("cold");
   });
 });

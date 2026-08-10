@@ -7,15 +7,18 @@ import App from "./App";
 // No-op when running inside the real Tauri runtime.
 import "./services/tauri-shim";
 
+// Expose test helpers on `window.__sendpalmE2E` in dev browser mode only.
+// The DEV guard keeps this module out of the production Tauri bundle.
+if (import.meta.env.DEV) {
+  void import("./e2e-test-helpers");
+}
+
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/animations.css";
 
 render(() => <App />, document.getElementById("root") as HTMLElement);
 
-// Once SolidJS has mounted, dismiss the pre-JS splash overlay declared in
-// index.html. Using a class (not `display:none` directly) so the splash's
-// own fade-out keyframes can play first.
-requestAnimationFrame(() => {
-  document.body.classList.add("app-ready");
-});
+// Note: the pre-JS splash overlay in index.html is hidden from App.tsx once
+// the app has finished bootstrapping. Keeping it visible until then avoids a
+// white flash while initApp() loads settings and data.

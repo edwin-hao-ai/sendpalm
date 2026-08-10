@@ -26,19 +26,29 @@ export function DropBar() {
           animation: "toast-enter 0.2s var(--ease-out) both",
         }}
       >
-        {(["imbox", "feed", "paperTrail", "trash", "spam"] as const).map((b) => (
-          <button
-            onClick={() => drag().commit?.(b)}
-            style={{
-              padding: "6px 14px",
-              "border-radius": "var(--radius-pill)",
-              "font-size": "var(--text-caption)",
-              color: "var(--text-secondary)",
-            }}
-          >
-            {b === "imbox" ? "Inbox" : b === "feed" ? "Stream" : b === "paperTrail" ? "Records" : b === "trash" ? "Trash" : "Spam"}
-          </button>
-        ))}
+        {(["imbox", "feed", "paperTrail", "trash", "spam"] as const).map(
+          (b) => (
+            <button
+              onClick={() => drag().commit?.(b)}
+              style={{
+                padding: "6px 14px",
+                "border-radius": "var(--radius-pill)",
+                "font-size": "var(--text-caption)",
+                color: "var(--text-secondary)",
+              }}
+            >
+              {b === "imbox"
+                ? "Inbox"
+                : b === "feed"
+                  ? "Stream"
+                  : b === "paperTrail"
+                    ? "Records"
+                    : b === "trash"
+                      ? "Trash"
+                      : "Spam"}
+            </button>
+          ),
+        )}
       </div>
     </Show>
   );

@@ -218,12 +218,12 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     await shoot(page, "14-command-palette");
   });
 
-  test("Sidebar exposes 13 stable [data-nav-view] buttons", async ({
+  test("Sidebar exposes 15 stable [data-nav-view] buttons", async ({
     page,
   }) => {
     await page.goto("/");
     const buttons = page.locator("#sidebar [data-nav-view]");
-    await expect(buttons).toHaveCount(13);
+    await expect(buttons).toHaveCount(15);
     const views = await buttons.evaluateAll((els) =>
       els.map((e) => e.getAttribute("data-nav-view")),
     );
@@ -240,6 +240,8 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
       "followUps",
       "clips",
       "insights",
+      "trash",
+      "spam",
       "settings",
     ]);
     await shoot(page, "16-sidebar-nav");
@@ -257,15 +259,20 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     await expect(page.getByText("新邮件")).toBeVisible();
 
     // Fill recipient, subject and body using stable placeholders.
-    await page.locator('input[type="email"]').fill("test@example.com");
+    const recipientInput = page.locator(
+      '[data-field="to"] input[placeholder="recipient@example.com"]',
+    );
+    await recipientInput.fill("test@example.com");
+    await recipientInput.press("Enter");
     await page.locator('input[placeholder="主题"]').fill("E2E test");
     await page
       .locator('textarea[placeholder="正文…"]')
       .fill("This is a test message from Playwright.");
 
-    // Click the send split-button, then "立即发送".
-    await page.getByRole("button", { name: /发送/ }).click();
-    await page.getByText("立即发送").click();
+    // Use Cmd/Ctrl+Enter to send (the prototype's keyboard shortcut).
+    await page
+      .locator('textarea[placeholder="正文…"]')
+      .press(isMac ? "Meta+Enter" : "Control+Enter");
 
     // In browser mode the shim returns null, so the app falls back to saving
     // the message as a draft and shows the fallback toast.
@@ -294,13 +301,60 @@ test.describe("Responsive layout", () => {
     expect(flexDir).toBe("row");
 
     const buttons = sidebar.locator("[data-nav-view]");
-    await expect(buttons).toHaveCount(13);
+    // Mobile collapses 15 entries into 6 primary tabs + a "More" sheet.
+    await expect(buttons).toHaveCount(7);
 
     // Labels are hidden on mobile.
     const labels = sidebar.locator("span");
     await expect(labels).toHaveCount(0);
 
     await shoot(page, "18-mobile-bottom-tabs");
+
+    // Open the "More" sheet and verify all remaining views are reachable.
+    await sidebar.locator('[data-nav-view="more"]').click();
+    const sheet = page.locator('[data-testid="mobile-more-sheet"]');
+    await expect(sheet).toBeVisible();
+    const overflowButtons = sheet.locator("[data-nav-view]");
+    await expect(overflowButtons).toHaveCount(9);
+    await sheet.locator('[data-nav-view="feed"]').click();
+    await expect(sheet).not.toBeVisible();
+    await expect(page.locator('#topbar:has-text("Stream")')).toBeVisible();
+  });
+
+  test("Settings page uses iOS-style menu on mobile", async ({ page }) => {
+    await page.goto("/");
+    await page.locator('#sidebar [data-nav-view="settings"]').click();
+    await expect(page.locator('#topbar:has-text("Settings")')).toBeVisible();
+
+    const settingsRoot = page.locator('[data-testid="settings-view"]');
+    await expect(settingsRoot).toBeVisible();
+
+    // Mobile shows a vertical menu first, not the desktop two-pane layout.
+    const menu = page.locator('[data-testid="settings-menu"]');
+    await expect(menu).toBeVisible();
+
+    // Tap into the Shortcuts tab.
+    await page.locator('[data-testid="settings-menu-item-shortcuts"]').click();
+    await expect(
+      page.locator('[data-testid="settings-mobile-header"]'),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Keyboard shortcuts" }),
+    ).toBeVisible();
+
+    await shoot(page, "19-mobile-settings-shortcuts");
+
+    // Back button returns to the menu.
+    await page
+      .locator('[data-testid="settings-mobile-header"] button')
+      .first()
+      .click();
+    await expect(menu).toBeVisible();
+    await expect(
+      page.locator('[data-testid="settings-mobile-header"]'),
+    ).not.toBeVisible();
+
+    await shoot(page, "19-mobile-settings-menu");
   });
 });
 
@@ -320,9 +374,9 @@ test.describe("Responsive layout — iPad portrait", () => {
     );
     expect(flexDir).toBe("column");
 
-    // Sidebar should still expose all 13 nav views.
+    // Sidebar should still expose all 15 nav views.
     const buttons = sidebar.locator("[data-nav-view]");
-    await expect(buttons).toHaveCount(13);
+    await expect(buttons).toHaveCount(15);
 
     await shoot(page, "19-ipad-portrait");
   });
@@ -330,9 +384,7 @@ test.describe("Responsive layout — iPad portrait", () => {
   test("iPad sidebar shows full labels (not truncated)", async ({ page }) => {
     await page.goto("/");
     // "Follow-ups" is the longest label — make sure it's readable.
-    await expect(
-      page.locator('[data-nav="Follow-ups"]').first(),
-    ).toBeVisible();
+    await expect(page.locator('[data-nav="Follow-ups"]').first()).toBeVisible();
     const text = await page
       .locator('[data-nav="Follow-ups"]')
       .first()
@@ -356,12 +408,11 @@ test.describe("Responsive layout — iPad landscape", () => {
     );
     expect(flexDir).toBe("column");
 
-    // 1180 is below 1024? no — it's above. So this is desktop. Verify the
-    // desktop sidebar-width variable is the larger one.
+    // iPad landscape uses the desktop 64 px rail per the prototype.
     const sidebarWidth = await sidebar.evaluate(
       (el) => el.getBoundingClientRect().width,
     );
-    expect(sidebarWidth).toBeGreaterThan(70);
+    expect(sidebarWidth).toBe(64);
 
     await shoot(page, "21-ipad-landscape");
   });

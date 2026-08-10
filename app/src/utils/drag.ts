@@ -17,7 +17,10 @@ export function useDragContext() {
   return drag;
 }
 
-export function startDrag(messageId: string, commit: (target: MessageBucket) => void) {
+export function startDrag(
+  messageId: string,
+  commit: (target: MessageBucket) => void,
+) {
   setDrag({ active: true, messageId, commit });
 }
 

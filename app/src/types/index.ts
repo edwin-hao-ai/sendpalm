@@ -145,10 +145,12 @@ export interface Message {
   subj: string;
   prev: string;
   body: string;
+  bodyHtml?: string | null;
   tm: string; // display timestamp string
   st: ISODate; // ISO timestamp for sorting
   ac: ID; // account id
   bucket: MessageBucket;
+  direction?: "in" | "out";
   unread: boolean;
   labels: ID[];
   attachments: ID[]; // file ids
@@ -163,6 +165,8 @@ export interface Message {
   cc?: string[];
   bcc?: string[];
   threadId?: ID;
+  /** When the message was moved to trash/spam. Used for 30-day expiry. */
+  deletedAt?: ISODate | null;
   /** Parsed iCalendar VEVENT, if this message is a meeting invite. */
   calendarInvite?: IcalEvent | null;
 }
@@ -221,6 +225,8 @@ export interface CalendarEvent {
   id: ID;
   title: string;
   dt: ISODate;
+  endDt?: ISODate; // multi-day events: inclusive end date
+  allDay?: boolean;
   tm: string;
   dur?: number; // minutes
   pids: ID[]; // attendee contact ids
@@ -266,6 +272,14 @@ export interface Task {
 export type DraftStatus =
   "pending" | "approved" | "sent" | "edited" | "discarded";
 
+export interface DraftAttachment {
+  id: ID;
+  name: string;
+  size: number;
+  mime: string;
+  dataBase64: string;
+}
+
 export interface Draft {
   id: ID;
   recipient: string;
@@ -274,8 +288,10 @@ export interface Draft {
   lastEdited: ISODate;
   status: DraftStatus;
   accountId: ID;
+  fromAlias?: string;
   cc?: string[];
   bcc?: string[];
+  attachments?: DraftAttachment[];
 }
 
 /* ── Agent ──────────────────────────────────────────── */
@@ -413,6 +429,7 @@ export interface FollowUp {
   dueAt: ISODate;
   status: FollowUpStatus;
   note?: string;
+  surfacedAt?: ISODate | null;
 }
 
 /* ── ScheduledSend ──────────────────────────────────────────── */

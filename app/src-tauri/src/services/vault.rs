@@ -22,8 +22,7 @@ pub struct VaultEntry {
 
 /// Save or update a password for `account_id`.
 pub fn set_password(account_id: &str, password: &str) -> Result<(), String> {
-    let entry = Entry::new(SERVICE_ID, account_id)
-        .map_err(|e| format!("keyring entry: {e}"))?;
+    let entry = Entry::new(SERVICE_ID, account_id).map_err(|e| format!("keyring entry: {e}"))?;
     entry
         .set_password(password)
         .map_err(|e| format!("keyring set: {e}"))
@@ -31,8 +30,7 @@ pub fn set_password(account_id: &str, password: &str) -> Result<(), String> {
 
 /// Load the password for `account_id`. Returns `Ok(None)` if missing.
 pub fn get_password(account_id: &str) -> Result<Option<String>, String> {
-    let entry = Entry::new(SERVICE_ID, account_id)
-        .map_err(|e| format!("keyring entry: {e}"))?;
+    let entry = Entry::new(SERVICE_ID, account_id).map_err(|e| format!("keyring entry: {e}"))?;
     match entry.get_password() {
         Ok(p) => Ok(Some(p)),
         Err(keyring::Error::NoEntry) => Ok(None),
@@ -42,8 +40,7 @@ pub fn get_password(account_id: &str) -> Result<Option<String>, String> {
 
 /// Delete a password entry.
 pub fn delete_password(account_id: &str) -> Result<(), String> {
-    let entry = Entry::new(SERVICE_ID, account_id)
-        .map_err(|e| format!("keyring entry: {e}"))?;
+    let entry = Entry::new(SERVICE_ID, account_id).map_err(|e| format!("keyring entry: {e}"))?;
     match entry.delete_credential() {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),

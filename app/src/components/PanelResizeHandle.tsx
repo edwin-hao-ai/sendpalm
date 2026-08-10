@@ -45,8 +45,14 @@ export function initializePanelWidths(): void {
 }
 
 function updateRootVars() {
-  document.documentElement.style.setProperty("--detail-panel-width", `${detailPanelWidth()}px`);
-  document.documentElement.style.setProperty("--agent-panel-width", `${agentPanelWidth()}px`);
+  document.documentElement.style.setProperty(
+    "--detail-panel-width",
+    `${detailPanelWidth()}px`,
+  );
+  document.documentElement.style.setProperty(
+    "--agent-panel-width",
+    `${agentPanelWidth()}px`,
+  );
 }
 
 function persist(d: number, a: number) {
@@ -61,8 +67,10 @@ export function PanelResizeHandle(props: Props) {
   const [dragging, setDragging] = createSignal(false);
   const side = props.side ?? (props.panel === "detail" ? "left" : "left");
 
-  const width = () => (props.panel === "detail" ? detailPanelWidth() : agentPanelWidth());
-  const setWidth = props.panel === "detail" ? setDetailPanelWidth : setAgentPanelWidth;
+  const width = () =>
+    props.panel === "detail" ? detailPanelWidth() : agentPanelWidth();
+  const setWidth =
+    props.panel === "detail" ? setDetailPanelWidth : setAgentPanelWidth;
 
   onMount(() => {
     updateRootVars();

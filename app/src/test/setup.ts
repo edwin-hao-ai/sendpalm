@@ -14,14 +14,20 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 vi.mock("@tauri-apps/plugin-sql", () => ({
   default: class FakeDb {
-    async select<T>(): Promise<T> { return [] as T; }
-    async execute(): Promise<void> { /* no-op */ }
+    select<T>(): Promise<T> {
+      return Promise.resolve([] as T);
+    }
+    execute(): Promise<void> {
+      return Promise.resolve();
+    }
   },
 }));
 vi.mock("@tauri-apps/plugin-store", () => ({
-  load: vi.fn(() => Promise.resolve({
-    get: vi.fn(() => Promise.resolve(undefined)),
-    set: vi.fn(() => Promise.resolve()),
-    save: vi.fn(() => Promise.resolve()),
-  })),
+  load: vi.fn(() =>
+    Promise.resolve({
+      get: vi.fn(() => Promise.resolve(undefined)),
+      set: vi.fn(() => Promise.resolve()),
+      save: vi.fn(() => Promise.resolve()),
+    }),
+  ),
 }));

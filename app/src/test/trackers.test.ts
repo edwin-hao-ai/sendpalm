@@ -9,7 +9,9 @@ describe("detectTrackers", () => {
   });
 
   it("detects utm parameters", () => {
-    const r = detectTrackers("Visit https://example.com/?utm_source=newsletter");
+    const r = detectTrackers(
+      "Visit https://example.com/?utm_source=newsletter",
+    );
     expect(r.length).toBeGreaterThan(0);
     expect(r.some((t) => t.type === "utm_")).toBe(true);
   });
@@ -31,12 +33,16 @@ describe("detectTrackers", () => {
   });
 
   it("detects Mixpanel", () => {
-    const r = detectTrackers("https://api.mixpanel.com/track?data=eyJldmVudCI6ImJyb3dzZSJ9");
+    const r = detectTrackers(
+      "https://api.mixpanel.com/track?data=eyJldmVudCI6ImJyb3dzZSJ9",
+    );
     expect(r.some((t) => t.type === "mixpanel")).toBe(true);
   });
 
   it("returns multiple types for mixed payload", () => {
-    const r = detectTrackers("https://x.com/?utm_source=gh<img src='/track.gif'>https://api.mixpanel.com/track");
+    const r = detectTrackers(
+      "https://x.com/?utm_source=gh<img src='/track.gif'>https://api.mixpanel.com/track",
+    );
     const types = new Set(r.map((t) => t.type));
     expect(types.size).toBeGreaterThanOrEqual(3);
   });
@@ -44,7 +50,9 @@ describe("detectTrackers", () => {
 
 describe("trackerSummary", () => {
   it("aggregates count and unique types", () => {
-    const r = trackerSummary("https://x.com/?utm_source=gh<img src='/track.gif'>https://api.mixpanel.com/track");
+    const r = trackerSummary(
+      "https://x.com/?utm_source=gh<img src='/track.gif'>https://api.mixpanel.com/track",
+    );
     expect(r.count).toBeGreaterThan(0);
     expect(r.types.length).toBeGreaterThan(0);
     expect(r.types.length).toBeLessThanOrEqual(r.count);

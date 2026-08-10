@@ -2,24 +2,63 @@
  * Spec: prototype-v11 §3.19.
  */
 
-import { For, Show, createResource, createSignal } from "solid-js";
 import {
-  listAccounts, upsertAccount, deleteAccount,
-  listLabels, upsertLabel, deleteLabel,
-  listShortcuts, upsertShortcut,
+  For,
+  Show,
+  createEffect,
+  createResource,
+  createSignal,
+  onCleanup,
+} from "solid-js";
+import { useViewport } from "../utils/gestures";
+import {
+  listAccounts,
+  upsertAccount,
+  deleteAccount,
+  listLabels,
+  upsertLabel,
+  deleteLabel,
+  listShortcuts,
+  upsertShortcut,
+  resetShortcuts,
   listContacts,
   resetAllData,
+  listSnippets,
+  upsertSnippet,
+  deleteSnippet,
+  listMessages,
+  listTasks,
+  listFiles,
+  emptyTrash,
 } from "../stores/data";
-import { appSettings, setAppSettings, settingsTab, setSettingsTab, showToast, setOnboardingStep } from "../stores/ui";
+import {
+  appSettings,
+  setAppSettings,
+  settingsTab,
+  setSettingsTab,
+  showToast,
+  setOnboardingStep,
+} from "../stores/ui";
 import { Modal } from "../components/Modal";
 import { Icon } from "../components/Icon";
 import { Avatar } from "../components/Avatar";
 import { uid } from "../utils/id";
-import type { Account, AccountSettings, Label, Shortcut } from "../types";
+import type {
+  Account,
+  AccountSettings,
+  Label,
+  Shortcut,
+  Snippet,
+} from "../types";
 import { isoNow } from "../utils/date";
 import { load, STORE_PATH } from "../bootstrap";
-import { listSnippets } from "../stores/data";
-import { listProviders as fetchProviders, vaultSave, vaultDelete, getSyncState, syncNow } from "../services/backend";
+import {
+  listProviders as fetchProviders,
+  vaultSave,
+  vaultDelete,
+  getSyncState,
+  syncNow,
+} from "../services/backend";
 
 const TABS = [
   { id: "profile", label: "Profile", icon: "ph-user-circle" },
@@ -27,63 +66,231 @@ const TABS = [
   { id: "preferences", label: "Preferences", icon: "ph-sliders" },
   { id: "agent", label: "Agent", icon: "ph-sparkle" },
   { id: "labels", label: "Labels", icon: "ph-tag" },
+  { id: "snippets", label: "Snippets", icon: "ph-text-aa" },
   { id: "data", label: "Data", icon: "ph-database" },
   { id: "shortcuts", label: "Shortcuts", icon: "ph-keyboard" },
 ] as const;
 
 export function Settings() {
+  const { isMobile } = useViewport();
+  const [mobileTab, setMobileTab] = createSignal<string | null>(null);
+
+  let saveTimeout: ReturnType<typeof setTimeout> | undefined;
+  createEffect(() => {
+    const settings = appSettings;
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(async () => {
+      const store = await load(STORE_PATH);
+      await store.set("app_settings", settings);
+      await store.save();
+    }, 400);
+  });
+  onCleanup(() => clearTimeout(saveTimeout));
+
+  // Collapse back to the menu when the viewport grows to desktop/tablet.
+  createEffect(() => {
+    if (!isMobile()) setMobileTab(null);
+  });
+
+  const activeTab = () => mobileTab() ?? settingsTab();
+  const showMenu = () => !isMobile() || mobileTab() === null;
+  const showContent = () => !isMobile() || mobileTab() !== null;
+
+  const navigateToTab = (id: string) => {
+    setSettingsTab(id as (typeof TABS)[number]["id"]);
+    if (isMobile()) setMobileTab(id);
+  };
+
   return (
-    <div style={{ animation: "view-enter 0.3s var(--ease-out) both" }}>
-      <header style={{ padding: "var(--space-5) var(--space-5) 0" }}>
-        <h2 style={{ "font-family": "var(--font-display)", "font-size": "var(--text-h3)", "font-weight": "800", margin: 0 }}>
-          Settings
-        </h2>
-      </header>
+    <div
+      data-testid="settings-view"
+      style={{
+        animation: "view-enter 0.3s var(--ease-out) both",
+        display: "flex",
+        "flex-direction": "column",
+      }}
+    >
+      <Show when={showMenu()}>
+        <header style={{ padding: "var(--space-5) var(--space-5) 0" }}>
+          <h2
+            style={{
+              "font-family": "var(--font-display)",
+              "font-size": "var(--text-h3)",
+              "font-weight": "800",
+              margin: 0,
+            }}
+          >
+            Settings
+          </h2>
+        </header>
+        <SettingsMenu onSelect={navigateToTab} />
+      </Show>
 
-      <div style={{ display: "flex", gap: "var(--space-4)", padding: "var(--space-5)", "align-items": "flex-start" }}>
-        {/* Tab nav */}
-        <nav style={{ display: "flex", "flex-direction": "column", gap: "2px", "min-width": "180px" }}>
-          <For each={TABS}>
-            {(t) => (
-              <button
-                onClick={() => setSettingsTab(t.id)}
-                style={{
-                  display: "flex",
-                  "align-items": "center",
-                  gap: "var(--space-2)",
-                  padding: "8px 12px",
-                  "border-radius": "var(--radius-md)",
-                  background: settingsTab() === t.id ? "var(--palm-soft)" : "transparent",
-                  color: settingsTab() === t.id ? "var(--palm)" : "var(--text-primary)",
-                  "font-weight": settingsTab() === t.id ? "700" : "500",
-                  "text-align": "left",
-                }}
-              >
-                <Icon name={t.icon} size={16} />
-                {t.label}
-              </button>
-            )}
-          </For>
-        </nav>
-
-        {/* Tab content */}
-        <main style={{ flex: 1, "min-width": 0, "max-width": "720px" }}>
-          <Show when={settingsTab() === "profile"}><ProfileTab /></Show>
-          <Show when={settingsTab() === "accounts"}><AccountsTab /></Show>
-          <Show when={settingsTab() === "preferences"}><PreferencesTab /></Show>
-          <Show when={settingsTab() === "agent"}><AgentTab /></Show>
-          <Show when={settingsTab() === "labels"}><LabelsTab /></Show>
-          <Show when={settingsTab() === "data"}><DataTab /></Show>
-          <Show when={settingsTab() === "shortcuts"}><ShortcutsTab /></Show>
+      <Show when={showContent()}>
+        <Show when={isMobile() && mobileTab() !== null}>
+          <MobileContentHeader
+            title={TABS.find((t) => t.id === activeTab())?.label ?? activeTab()}
+            onBack={() => setMobileTab(null)}
+          />
+        </Show>
+        <main
+          style={{
+            flex: 1,
+            "min-width": 0,
+            "max-width": isMobile() ? "100%" : "720px",
+            width: "100%",
+            padding:
+              isMobile() && mobileTab() !== null
+                ? "0 var(--space-5) var(--space-5)"
+                : "var(--space-5)",
+          }}
+        >
+          <SettingsContent activeTab={activeTab()} />
         </main>
-      </div>
+      </Show>
     </div>
+  );
+}
+
+function SettingsMenu(props: { onSelect: (id: string) => void }) {
+  return (
+    <nav
+      data-testid="settings-menu"
+      style={{
+        display: "flex",
+        "flex-direction": "column",
+        gap: "var(--space-1)",
+        padding: "var(--space-4) var(--space-5) var(--space-5)",
+      }}
+    >
+      <For each={TABS}>
+        {(t) => (
+          <button
+            data-testid={`settings-menu-item-${t.id}`}
+            onClick={() => props.onSelect(t.id)}
+            style={{
+              display: "flex",
+              "align-items": "center",
+              gap: "var(--space-3)",
+              padding: "12px var(--space-3)",
+              "border-radius": "var(--radius-md)",
+              background: "transparent",
+              color: "var(--text-primary)",
+              "font-weight": "500",
+              "text-align": "left",
+              "border-bottom": "0.5px solid var(--border)",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "var(--paper-mid)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+            }}
+          >
+            <Icon name={t.icon} size={20} style={{ color: "var(--palm)" }} />
+            <span style={{ flex: 1, "font-size": "var(--text-body-sm)" }}>
+              {t.label}
+            </span>
+            <Icon
+              name="ph-caret-right"
+              size={16}
+              style={{ color: "var(--text-muted)", "flex-shrink": 0 }}
+            />
+          </button>
+        )}
+      </For>
+    </nav>
+  );
+}
+
+function MobileContentHeader(props: { title: string; onBack: () => void }) {
+  return (
+    <div
+      data-testid="settings-mobile-header"
+      style={{
+        display: "flex",
+        "align-items": "center",
+        gap: "var(--space-2)",
+        padding: "var(--space-3) var(--space-5)",
+        "border-bottom": "0.5px solid var(--border)",
+        position: "sticky",
+        top: 0,
+        background: "var(--surface)",
+        "z-index": "var(--z-sticky)",
+      }}
+    >
+      <button
+        onClick={props.onBack}
+        style={{
+          display: "flex",
+          "align-items": "center",
+          gap: "2px",
+          color: "var(--palm)",
+          "font-weight": "600",
+          "font-size": "var(--text-body-sm)",
+          padding: "4px 0",
+        }}
+      >
+        <Icon name="ph-caret-left" size={18} />
+        Settings
+      </button>
+      <span
+        style={{
+          flex: 1,
+          "font-family": "var(--font-display)",
+          "font-size": "var(--text-body-sm)",
+          "font-weight": "800",
+          "text-align": "center",
+          "padding-right": "54px",
+        }}
+      >
+        {props.title}
+      </span>
+    </div>
+  );
+}
+
+function SettingsContent(props: { activeTab: string }) {
+  return (
+    <>
+      <Show when={props.activeTab === "profile"}>
+        <ProfileTab />
+      </Show>
+      <Show when={props.activeTab === "accounts"}>
+        <AccountsTab />
+      </Show>
+      <Show when={props.activeTab === "preferences"}>
+        <PreferencesTab />
+      </Show>
+      <Show when={props.activeTab === "agent"}>
+        <AgentTab />
+      </Show>
+      <Show when={props.activeTab === "labels"}>
+        <LabelsTab />
+      </Show>
+      <Show when={props.activeTab === "snippets"}>
+        <SnippetsTab />
+      </Show>
+      <Show when={props.activeTab === "data"}>
+        <DataTab />
+      </Show>
+      <Show when={props.activeTab === "shortcuts"}>
+        <ShortcutsTab />
+      </Show>
+    </>
   );
 }
 
 function SectionTitle(props: { children: string }) {
   return (
-    <h3 style={{ "font-family": "var(--font-display)", "font-size": "var(--text-h4)", "font-weight": "800", margin: "0 0 var(--space-3)" }}>
+    <h3
+      style={{
+        "font-family": "var(--font-display)",
+        "font-size": "var(--text-h4)",
+        "font-weight": "800",
+        margin: "0 0 var(--space-3)",
+      }}
+    >
       {props.children}
     </h3>
   );
@@ -91,12 +298,6 @@ function SectionTitle(props: { children: string }) {
 
 function ProfileTab() {
   const s = appSettings;
-  const save = async () => {
-    const store = await load(STORE_PATH);
-    await store.set("app_settings", appSettings);
-    await store.save();
-    showToast({ message: "已保存", kind: "success" });
-  };
   const replayOnboarding = async () => {
     const store = await load(STORE_PATH);
     await store.set("onboarding_completed", false);
@@ -110,14 +311,18 @@ function ProfileTab() {
       <Field label="Display name">
         <input
           value={s.profile.displayName}
-          onInput={(e) => setAppSettings("profile", "displayName", e.currentTarget.value)}
+          onInput={(e) =>
+            setAppSettings("profile", "displayName", e.currentTarget.value)
+          }
           style={inputStyle}
         />
       </Field>
       <Field label="Timezone">
         <select
           value={s.profile.timezone}
-          onChange={(e) => setAppSettings("profile", "timezone", e.currentTarget.value)}
+          onChange={(e) =>
+            setAppSettings("profile", "timezone", e.currentTarget.value)
+          }
           style={inputStyle}
         >
           <option value="Asia/Shanghai">Asia/Shanghai</option>
@@ -129,7 +334,9 @@ function ProfileTab() {
       <Field label="Language">
         <select
           value={s.profile.language}
-          onChange={(e) => setAppSettings("profile", "language", e.currentTarget.value)}
+          onChange={(e) =>
+            setAppSettings("profile", "language", e.currentTarget.value)
+          }
           style={inputStyle}
         >
           <option value="zh-CN">中文 (zh-CN)</option>
@@ -139,14 +346,22 @@ function ProfileTab() {
       <Field label="Signature">
         <textarea
           value={s.profile.signature}
-          onInput={(e) => setAppSettings("profile", "signature", e.currentTarget.value)}
+          onInput={(e) =>
+            setAppSettings("profile", "signature", e.currentTarget.value)
+          }
           rows={4}
-          style={{ ...inputStyle, "min-height": "100px", "font-family": "var(--font-body)", resize: "vertical" }}
+          style={{
+            ...inputStyle,
+            "min-height": "100px",
+            "font-family": "var(--font-body)",
+            resize: "vertical",
+          }}
         />
       </Field>
       <div style={{ display: "flex", gap: "var(--space-2)" }}>
-        <button onClick={save} style={primaryBtn}>保存</button>
-        <button onClick={replayOnboarding} style={secondaryBtn}>重放 Onboarding</button>
+        <button onClick={replayOnboarding} style={secondaryBtn}>
+          重放 Onboarding
+        </button>
       </div>
     </div>
   );
@@ -204,20 +419,30 @@ function AccountsTab() {
 
   return (
     <div>
-      <div style={{ display: "flex", "align-items": "center", gap: "var(--space-2)", "margin-bottom": "var(--space-3)" }}>
-        <SectionTitle>Connected accounts</SectionTitle>
-        <div style={{ flex: 1 }} />
-        <button onClick={() => setAdding(true)} style={{
+      <div
+        style={{
           display: "flex",
           "align-items": "center",
-          gap: "4px",
-          padding: "6px 14px",
-          background: "var(--palm)",
-          color: "white",
-          "border-radius": "var(--radius-pill)",
-          "font-weight": "700",
-          "font-size": "var(--text-caption)",
-        }}>
+          gap: "var(--space-2)",
+          "margin-bottom": "var(--space-3)",
+        }}
+      >
+        <SectionTitle>Connected accounts</SectionTitle>
+        <div style={{ flex: 1 }} />
+        <button
+          onClick={() => setAdding(true)}
+          style={{
+            display: "flex",
+            "align-items": "center",
+            gap: "4px",
+            padding: "6px 14px",
+            background: "var(--palm)",
+            color: "white",
+            "border-radius": "var(--radius-pill)",
+            "font-weight": "700",
+            "font-size": "var(--text-caption)",
+          }}
+        >
           <Icon name="ph-plus" size={12} /> Add account
         </button>
       </div>
@@ -238,7 +463,13 @@ function AccountsTab() {
             <Avatar name={a.label} color={a.color} size={36} />
             <div style={{ flex: 1, "min-width": 0 }}>
               <strong>{a.label}</strong>
-              <p style={{ margin: "2px 0 0", "font-size": "var(--text-caption)", color: "var(--text-muted)" }}>
+              <p
+                style={{
+                  margin: "2px 0 0",
+                  "font-size": "var(--text-caption)",
+                  color: "var(--text-muted)",
+                }}
+              >
                 {a.email ?? `${a.type} · ${a.workspace ?? ""}`} · {a.status}
                 <SyncStatus accountId={a.id} />
               </p>
@@ -258,11 +489,22 @@ function AccountsTab() {
                   });
                 }
               }}
-              style={{ color: "var(--palm)", "font-size": "var(--text-caption)", "font-weight": "700" }}
+              style={{
+                color: "var(--palm)",
+                "font-size": "var(--text-caption)",
+                "font-weight": "700",
+              }}
             >
               立即同步
             </button>
-            <button onClick={() => setEditing(a)} style={{ color: "var(--blurple)", "font-size": "var(--text-caption)", "font-weight": "700" }}>
+            <button
+              onClick={() => setEditing(a)}
+              style={{
+                color: "var(--blurple)",
+                "font-size": "var(--text-caption)",
+                "font-weight": "700",
+              }}
+            >
               设置
             </button>
           </div>
@@ -280,7 +522,10 @@ function AccountsTab() {
               await vaultDelete(deleted.id).catch(() => undefined);
               await refetch();
               setEditing(null);
-              showToast({ message: `已删除账户 ${deleted.label}`, kind: "success" });
+              showToast({
+                message: `已删除账户 ${deleted.label}`,
+                kind: "success",
+              });
             }}
           />
         )}
@@ -304,7 +549,18 @@ function AddAccountModal(props: { onClose: () => void }) {
   const onSubmit = async () => {
     const rawList = providerList();
     if (!rawList) return;
-    const list = rawList as Array<{ id: string; label: string; icon: string; credentials_hint: string; imap_host: string; imap_port: number; smtp_host: string; smtp_port: number; auth_mode: string; smtp_implicit_tls: boolean }>;
+    const list = rawList as Array<{
+      id: string;
+      label: string;
+      icon: string;
+      credentials_hint: string;
+      imap_host: string;
+      imap_port: number;
+      smtp_host: string;
+      smtp_port: number;
+      auth_mode: string;
+      smtp_implicit_tls: boolean;
+    }>;
     const prov = list.find((p) => p.id === selectedProviderId());
     if (!prov) return;
     const e = accountEmail().trim();
@@ -380,7 +636,14 @@ function AddAccountModal(props: { onClose: () => void }) {
       width="560px"
       footer={
         <>
-          <button onClick={props.onClose} style={{ padding: "8px 16px", color: "var(--text-secondary)", "font-size": "var(--text-caption)" }}>
+          <button
+            onClick={props.onClose}
+            style={{
+              padding: "8px 16px",
+              color: "var(--text-secondary)",
+              "font-size": "var(--text-caption)",
+            }}
+          >
             取消
           </button>
           <button
@@ -429,15 +692,29 @@ function AddAccountModal(props: { onClose: () => void }) {
           style={inputStyle}
         />
       </Field>
-      <p style={{ "font-size": "var(--text-micro)", color: "var(--text-muted)", "margin-top": "var(--space-2)" }}>
-        {providerList()?.find((p) => p.id === selectedProviderId())?.credentials_hint ?? ""}
+      <p
+        style={{
+          "font-size": "var(--text-micro)",
+          color: "var(--text-muted)",
+          "margin-top": "var(--space-2)",
+        }}
+      >
+        {providerList()?.find((p) => p.id === selectedProviderId())
+          ?.credentials_hint ?? ""}
       </p>
     </Modal>
   );
 }
 
-function AccountEditModal(props: { account: Account; onClose: () => void; onSave: (a: Account) => void; onDelete: (a: Account) => Promise<void> }) {
-  const [draft, setDraft] = createSignal<Account>(JSON.parse(JSON.stringify(props.account)));
+function AccountEditModal(props: {
+  account: Account;
+  onClose: () => void;
+  onSave: (a: Account) => void;
+  onDelete: (a: Account) => Promise<void>;
+}) {
+  const [draft, setDraft] = createSignal<Account>(
+    JSON.parse(JSON.stringify(props.account)),
+  );
   const d = () => draft();
 
   return (
@@ -450,18 +727,37 @@ function AccountEditModal(props: { account: Account; onClose: () => void; onSave
         <>
           <button
             onClick={async () => {
-              if (!confirm(`确定删除账户 ${d().label}？这将同时清除 Keychain 密码。`)) return;
+              if (
+                !confirm(
+                  `确定删除账户 ${d().label}？这将同时清除 Keychain 密码。`,
+                )
+              )
+                return;
               await props.onDelete(d());
             }}
-            style={{ padding: "8px 16px", "font-size": "var(--text-caption)", color: "var(--danger, #c33)", "font-weight": "700" }}
+            style={{
+              padding: "8px 16px",
+              "font-size": "var(--text-caption)",
+              color: "var(--danger, #c33)",
+              "font-weight": "700",
+            }}
           >
             删除账户
           </button>
           <div style={{ flex: 1 }} />
-          <button onClick={props.onClose} style={{ padding: "8px 16px", "font-size": "var(--text-caption)", color: "var(--text-secondary)" }}>
+          <button
+            onClick={props.onClose}
+            style={{
+              padding: "8px 16px",
+              "font-size": "var(--text-caption)",
+              color: "var(--text-secondary)",
+            }}
+          >
             取消
           </button>
-          <button onClick={() => props.onSave(d())} style={primaryBtn}>保存</button>
+          <button onClick={() => props.onSave(d())} style={primaryBtn}>
+            保存
+          </button>
         </>
       }
     >
@@ -469,29 +765,186 @@ function AccountEditModal(props: { account: Account; onClose: () => void; onSave
         <Field label="Display name">
           <input
             value={d().displayName}
-            onInput={(e) => setDraft({ ...d(), displayName: e.currentTarget.value })}
+            onInput={(e) =>
+              setDraft({ ...d(), displayName: e.currentTarget.value })
+            }
             style={inputStyle}
           />
         </Field>
         <Field label="Signature">
           <textarea
-            value={d().type === "email" ? d().settings?.signature ?? "" : ""}
-            onInput={(e) => setDraft({ ...d(), settings: { ...(d().type === "email" ? d().settings! : defaultEmailSettings()), signature: e.currentTarget.value } })}
+            value={d().type === "email" ? (d().settings?.signature ?? "") : ""}
+            onInput={(e) =>
+              setDraft({
+                ...d(),
+                settings: {
+                  ...(d().type === "email"
+                    ? d().settings!
+                    : defaultEmailSettings()),
+                  signature: e.currentTarget.value,
+                },
+              })
+            }
             rows={4}
-            style={{ ...inputStyle, "min-height": "100px", "font-family": "var(--font-body)", resize: "vertical" }}
+            style={{
+              ...inputStyle,
+              "min-height": "100px",
+              "font-family": "var(--font-body)",
+              resize: "vertical",
+            }}
           />
         </Field>
         <Field label="Reply-to">
           <input
-            value={d().type === "email" ? d().settings?.replyTo ?? "" : ""}
-            onInput={(e) => setDraft({ ...d(), settings: { ...(d().type === "email" ? d().settings! : defaultEmailSettings()), replyTo: e.currentTarget.value } })}
+            value={d().type === "email" ? (d().settings?.replyTo ?? "") : ""}
+            onInput={(e) =>
+              setDraft({
+                ...d(),
+                settings: {
+                  ...(d().type === "email"
+                    ? d().settings!
+                    : defaultEmailSettings()),
+                  replyTo: e.currentTarget.value,
+                },
+              })
+            }
             style={inputStyle}
           />
         </Field>
+        <Field label="Aliases">
+          <div
+            style={{
+              display: "flex",
+              "flex-direction": "column",
+              gap: "var(--space-2)",
+            }}
+          >
+            <For
+              each={d().type === "email" ? (d().settings?.aliases ?? []) : []}
+            >
+              {(alias, idx) => (
+                <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                  <input
+                    value={alias}
+                    onInput={(e) => {
+                      const next = [
+                        ...(d().type === "email" ? d().settings!.aliases : []),
+                      ];
+                      next[idx()] = e.currentTarget.value;
+                      setDraft({
+                        ...d(),
+                        settings: {
+                          ...(d().type === "email"
+                            ? d().settings!
+                            : defaultEmailSettings()),
+                          aliases: next,
+                        },
+                      });
+                    }}
+                    placeholder="alias@example.com"
+                    style={{ ...inputStyle, flex: 1, "margin-top": 0 }}
+                  />
+                  <button
+                    onClick={() => {
+                      const next = [
+                        ...(d().type === "email" ? d().settings!.aliases : []),
+                      ];
+                      next.splice(idx(), 1);
+                      setDraft({
+                        ...d(),
+                        settings: {
+                          ...(d().type === "email"
+                            ? d().settings!
+                            : defaultEmailSettings()),
+                          aliases: next,
+                        },
+                      });
+                    }}
+                    style={{ color: "var(--danger)" }}
+                    aria-label="Remove alias"
+                  >
+                    <Icon name="ph-trash" size={16} />
+                  </button>
+                </div>
+              )}
+            </For>
+            <button
+              onClick={() =>
+                setDraft({
+                  ...d(),
+                  settings: {
+                    ...(d().type === "email"
+                      ? d().settings!
+                      : defaultEmailSettings()),
+                    aliases: [
+                      ...(d().type === "email" ? d().settings!.aliases : []),
+                      "",
+                    ],
+                  },
+                })
+              }
+              style={{
+                "margin-top": "var(--space-1)",
+                padding: "6px 12px",
+                background: "var(--paper-mid)",
+                color: "var(--text-secondary)",
+                "border-radius": "var(--radius-pill)",
+                "font-size": "var(--text-caption)",
+                "font-weight": "600",
+                "align-self": "flex-start",
+              }}
+            >
+              <Icon name="ph-plus" size={12} /> Add alias
+            </button>
+          </div>
+        </Field>
+        <Field label="Default From">
+          <select
+            value={
+              d().type === "email"
+                ? (d().settings?.defaultFrom ?? d().email)
+                : ""
+            }
+            onChange={(e) =>
+              setDraft({
+                ...d(),
+                settings: {
+                  ...(d().type === "email"
+                    ? d().settings!
+                    : defaultEmailSettings()),
+                  defaultFrom: e.currentTarget.value,
+                },
+              })
+            }
+            style={inputStyle}
+          >
+            <option value={d().email}>{d().email} (primary)</option>
+            <For
+              each={d().type === "email" ? (d().settings?.aliases ?? []) : []}
+            >
+              {(alias) => <option value={alias}>{alias}</option>}
+            </For>
+          </select>
+        </Field>
         <Field label="Sync frequency">
           <select
-            value={d().type === "email" ? d().settings?.syncFrequency ?? "15min" : "15min"}
-            onChange={(e) => setDraft({ ...d(), settings: { ...(d().type === "email" ? d().settings! : defaultEmailSettings()), syncFrequency: e.currentTarget.value as AccountSettings["syncFrequency"] } })}
+            value={
+              d().type === "email"
+                ? (d().settings?.syncFrequency ?? "15min")
+                : "15min"
+            }
+            onChange={(e) =>
+              setDraft({
+                ...d(),
+                settings: {
+                  ...(d().type === "email"
+                    ? d().settings!
+                    : defaultEmailSettings()),
+                  syncFrequency: e.currentTarget
+                    .value as AccountSettings["syncFrequency"],
+                },
+              })
+            }
             style={inputStyle}
           >
             <option value="5min">每 5 分钟</option>
@@ -501,88 +954,247 @@ function AccountEditModal(props: { account: Account; onClose: () => void; onSave
             <option value="manual">手动</option>
           </select>
         </Field>
+        <Field label="Sync folders">
+          <div
+            style={{
+              display: "grid",
+              "grid-template-columns": "repeat(2, 1fr)",
+              gap: "var(--space-2)",
+            }}
+          >
+            <For each={FOLDER_OPTIONS}>
+              {(name) => {
+                const folders = () =>
+                  d().type === "email" ? (d().settings?.syncFolders ?? []) : [];
+                const enabled = () =>
+                  folders().some((f) => f.name === name && f.enabled);
+                return (
+                  <label
+                    style={{
+                      display: "flex",
+                      "align-items": "center",
+                      gap: "var(--space-2)",
+                      "font-size": "var(--text-body-sm)",
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={enabled()}
+                      onChange={(e) => {
+                        const current = folders();
+                        const next = current.some((f) => f.name === name)
+                          ? current.map((f) =>
+                              f.name === name
+                                ? { ...f, enabled: e.currentTarget.checked }
+                                : f,
+                            )
+                          : [
+                              ...current,
+                              { name, enabled: e.currentTarget.checked },
+                            ];
+                        setDraft({
+                          ...d(),
+                          settings: {
+                            ...(d().type === "email"
+                              ? d().settings!
+                              : defaultEmailSettings()),
+                            syncFolders: next,
+                          },
+                        });
+                      }}
+                    />
+                    {name}
+                  </label>
+                );
+              }}
+            </For>
+          </div>
+        </Field>
         <Field label="Auto-BCC">
-          <label style={{ display: "flex", "align-items": "center", gap: "var(--space-2)" }}>
+          <label
+            style={{
+              display: "flex",
+              "align-items": "center",
+              gap: "var(--space-2)",
+            }}
+          >
             <input
               type="checkbox"
-              checked={d().type === "email" ? d().settings?.autoBcc ?? false : false}
-              onChange={(e) => setDraft({ ...d(), settings: { ...(d().type === "email" ? d().settings! : defaultEmailSettings()), autoBcc: e.currentTarget.checked } })}
+              checked={
+                d().type === "email" ? (d().settings?.autoBcc ?? false) : false
+              }
+              onChange={(e) =>
+                setDraft({
+                  ...d(),
+                  settings: {
+                    ...(d().type === "email"
+                      ? d().settings!
+                      : defaultEmailSettings()),
+                    autoBcc: e.currentTarget.checked,
+                  },
+                })
+              }
             />
-            <span style={{ "font-size": "var(--text-body-sm)" }}>启用 Auto-BCC</span>
+            <span style={{ "font-size": "var(--text-body-sm)" }}>
+              启用 Auto-BCC
+            </span>
           </label>
           <Show when={d().type === "email" && d().settings?.autoBcc}>
             <input
-              value={d().type === "email" ? d().settings?.autoBccAddress ?? "" : ""}
-              onInput={(e) => setDraft({ ...d(), settings: { ...(d().type === "email" ? d().settings! : defaultEmailSettings()), autoBccAddress: e.currentTarget.value } })}
+              value={
+                d().type === "email" ? (d().settings?.autoBccAddress ?? "") : ""
+              }
+              onInput={(e) =>
+                setDraft({
+                  ...d(),
+                  settings: {
+                    ...(d().type === "email"
+                      ? d().settings!
+                      : defaultEmailSettings()),
+                    autoBccAddress: e.currentTarget.value,
+                  },
+                })
+              }
               placeholder="bcc@example.com"
               style={{ ...inputStyle, "margin-top": "var(--space-2)" }}
             />
           </Show>
         </Field>
         <Field label="Vacation responder">
-          <label style={{ display: "flex", "align-items": "center", gap: "var(--space-2)" }}>
+          <label
+            style={{
+              display: "flex",
+              "align-items": "center",
+              gap: "var(--space-2)",
+            }}
+          >
             <input
               type="checkbox"
-              checked={d().type === "email" ? d().settings?.vacationResponder?.enabled ?? false : false}
-              onChange={(e) => setDraft({
-                ...d(),
-                settings: {
-                  ...(d().type === "email" ? d().settings! : defaultEmailSettings()),
-                  vacationResponder: {
-                    enabled: e.currentTarget.checked,
-                    subject: d().type === "email" ? d().settings?.vacationResponder?.subject ?? "" : "",
-                    body: d().type === "email" ? d().settings?.vacationResponder?.body ?? "" : "",
+              checked={
+                d().type === "email"
+                  ? (d().settings?.vacationResponder?.enabled ?? false)
+                  : false
+              }
+              onChange={(e) =>
+                setDraft({
+                  ...d(),
+                  settings: {
+                    ...(d().type === "email"
+                      ? d().settings!
+                      : defaultEmailSettings()),
+                    vacationResponder: {
+                      enabled: e.currentTarget.checked,
+                      subject:
+                        d().type === "email"
+                          ? (d().settings?.vacationResponder?.subject ?? "")
+                          : "",
+                      body:
+                        d().type === "email"
+                          ? (d().settings?.vacationResponder?.body ?? "")
+                          : "",
+                    },
                   },
-                },
-              })}
+                })
+              }
             />
-            <span style={{ "font-size": "var(--text-body-sm)" }}>启用 Vacation Responder</span>
+            <span style={{ "font-size": "var(--text-body-sm)" }}>
+              启用 Vacation Responder
+            </span>
           </label>
-          <Show when={d().type === "email" && d().settings?.vacationResponder?.enabled}>
+          <Show
+            when={
+              d().type === "email" && d().settings?.vacationResponder?.enabled
+            }
+          >
             <input
-              value={d().type === "email" ? d().settings?.vacationResponder?.subject ?? "" : ""}
-              onInput={(e) => setDraft({
-                ...d(),
-                settings: {
-                  ...(d().type === "email" ? d().settings! : defaultEmailSettings()),
-                  vacationResponder: {
-                    enabled: true,
-                    subject: e.currentTarget.value,
-                    body: d().type === "email" ? d().settings?.vacationResponder?.body ?? "" : "",
+              value={
+                d().type === "email"
+                  ? (d().settings?.vacationResponder?.subject ?? "")
+                  : ""
+              }
+              onInput={(e) =>
+                setDraft({
+                  ...d(),
+                  settings: {
+                    ...(d().type === "email"
+                      ? d().settings!
+                      : defaultEmailSettings()),
+                    vacationResponder: {
+                      enabled: true,
+                      subject: e.currentTarget.value,
+                      body:
+                        d().type === "email"
+                          ? (d().settings?.vacationResponder?.body ?? "")
+                          : "",
+                    },
                   },
-                },
-              })}
+                })
+              }
               placeholder="主题"
               style={{ ...inputStyle, "margin-top": "var(--space-2)" }}
             />
             <textarea
-              value={d().type === "email" ? d().settings?.vacationResponder?.body ?? "" : ""}
-              onInput={(e) => setDraft({
-                ...d(),
-                settings: {
-                  ...(d().type === "email" ? d().settings! : defaultEmailSettings()),
-                  vacationResponder: {
-                    enabled: true,
-                    subject: d().type === "email" ? d().settings?.vacationResponder?.subject ?? "" : "",
-                    body: e.currentTarget.value,
+              value={
+                d().type === "email"
+                  ? (d().settings?.vacationResponder?.body ?? "")
+                  : ""
+              }
+              onInput={(e) =>
+                setDraft({
+                  ...d(),
+                  settings: {
+                    ...(d().type === "email"
+                      ? d().settings!
+                      : defaultEmailSettings()),
+                    vacationResponder: {
+                      enabled: true,
+                      subject:
+                        d().type === "email"
+                          ? (d().settings?.vacationResponder?.subject ?? "")
+                          : "",
+                      body: e.currentTarget.value,
+                    },
                   },
-                },
-              })}
+                })
+              }
               placeholder="正文"
               rows={3}
-              style={{ ...inputStyle, "min-height": "80px", "font-family": "var(--font-body)", "margin-top": "var(--space-2)", resize: "vertical" }}
+              style={{
+                ...inputStyle,
+                "min-height": "80px",
+                "font-family": "var(--font-body)",
+                "margin-top": "var(--space-2)",
+                resize: "vertical",
+              }}
             />
           </Show>
         </Field>
       </Show>
       <Show when={d().type !== "email"}>
-        <p style={{ color: "var(--text-muted)", "font-size": "var(--text-caption)" }}>
+        <p
+          style={{
+            color: "var(--text-muted)",
+            "font-size": "var(--text-caption)",
+          }}
+        >
           {d().type === "im" ? "IM" : "Calendar"} 账户的详细设置（M10 实装）。
         </p>
       </Show>
     </Modal>
   );
 }
+
+const FOLDER_OPTIONS = [
+  "INBOX",
+  "Sent",
+  "Drafts",
+  "Archive",
+  "Trash",
+  "Spam",
+  "Starred",
+  "Important",
+];
 
 function defaultEmailSettings(): AccountSettings {
   return {
@@ -600,79 +1212,133 @@ function defaultEmailSettings(): AccountSettings {
 
 function PreferencesTab() {
   const s = appSettings;
-  const save = async () => {
-    const store = await load(STORE_PATH);
-    await store.set("app_settings", appSettings);
-    await store.save();
-    showToast({ message: "已保存", kind: "success" });
-  };
   return (
     <div>
       <SectionTitle>Notifications</SectionTitle>
       <Toggle
         label="桌面通知"
         checked={s.preferences.notifications.desktop}
-        onChange={(v) => setAppSettings("preferences", "notifications", "desktop", v)}
+        onChange={(v) =>
+          setAppSettings("preferences", "notifications", "desktop", v)
+        }
       />
       <Toggle
         label="每日摘要邮件"
         checked={s.preferences.notifications.digest}
-        onChange={(v) => setAppSettings("preferences", "notifications", "digest", v)}
+        onChange={(v) =>
+          setAppSettings("preferences", "notifications", "digest", v)
+        }
       />
       <Toggle
         label="勿扰时段"
         checked={s.preferences.notifications.quietHoursEnabled}
-        onChange={(v) => setAppSettings("preferences", "notifications", "quietHoursEnabled", v)}
+        onChange={(v) =>
+          setAppSettings("preferences", "notifications", "quietHoursEnabled", v)
+        }
       />
       <Show when={s.preferences.notifications.quietHoursEnabled}>
         <div style={{ display: "flex", gap: "var(--space-2)" }}>
           <input
             type="time"
             value={s.preferences.notifications.quietHoursStart}
-            onInput={(e) => setAppSettings("preferences", "notifications", "quietHoursStart", e.currentTarget.value)}
+            onInput={(e) =>
+              setAppSettings(
+                "preferences",
+                "notifications",
+                "quietHoursStart",
+                e.currentTarget.value,
+              )
+            }
             style={inputStyle}
           />
-          <span style={{ "align-self": "center", color: "var(--text-muted)" }}>到</span>
+          <span style={{ "align-self": "center", color: "var(--text-muted)" }}>
+            到
+          </span>
           <input
             type="time"
             value={s.preferences.notifications.quietHoursEnd}
-            onInput={(e) => setAppSettings("preferences", "notifications", "quietHoursEnd", e.currentTarget.value)}
+            onInput={(e) =>
+              setAppSettings(
+                "preferences",
+                "notifications",
+                "quietHoursEnd",
+                e.currentTarget.value,
+              )
+            }
             style={inputStyle}
           />
         </div>
       </Show>
 
       <SectionTitle>Security</SectionTitle>
-      <Toggle label="应用锁" checked={s.preferences.security.appLock} onChange={(v) => setAppSettings("preferences", "security", "appLock", v)} />
-      <Toggle label="允许截图" checked={s.preferences.security.screenshotAllowed} onChange={(v) => setAppSettings("preferences", "security", "screenshotAllowed", v)} />
-      <Toggle label="剪贴板同步" checked={s.preferences.security.clipboardSync} onChange={(v) => setAppSettings("preferences", "security", "clipboardSync", v)} />
+      <Toggle
+        label="应用锁"
+        checked={s.preferences.security.appLock}
+        onChange={(v) =>
+          setAppSettings("preferences", "security", "appLock", v)
+        }
+      />
+      <Toggle
+        label="允许截图"
+        checked={s.preferences.security.screenshotAllowed}
+        onChange={(v) =>
+          setAppSettings("preferences", "security", "screenshotAllowed", v)
+        }
+      />
+      <Toggle
+        label="剪贴板同步"
+        checked={s.preferences.security.clipboardSync}
+        onChange={(v) =>
+          setAppSettings("preferences", "security", "clipboardSync", v)
+        }
+      />
 
       <SectionTitle>Sync & Storage</SectionTitle>
-      <Toggle label="自动下载附件" checked={s.preferences.syncAndStorage.autoDownloadAttachments} onChange={(v) => setAppSettings("preferences", "syncAndStorage", "autoDownloadAttachments", v)} />
-
-      <button onClick={save} style={{ ...primaryBtn, "margin-top": "var(--space-4)" }}>保存</button>
+      <Toggle
+        label="自动下载附件"
+        checked={s.preferences.syncAndStorage.autoDownloadAttachments}
+        onChange={(v) =>
+          setAppSettings(
+            "preferences",
+            "syncAndStorage",
+            "autoDownloadAttachments",
+            v,
+          )
+        }
+      />
     </div>
   );
 }
 
 function AgentTab() {
   const s = appSettings;
-  const save = async () => {
-    const store = await load(STORE_PATH);
-    await store.set("app_settings", appSettings);
-    await store.save();
-    showToast({ message: "已保存", kind: "success" });
-  };
   return (
     <div>
       <SectionTitle>Agent behavior</SectionTitle>
-      <Toggle label="自动起草回复" checked={s.agent.autoDraft} onChange={(v) => setAppSettings("agent", "autoDraft", v)} />
-      <Toggle label="自动生成简报" checked={s.agent.autoSummarize} onChange={(v) => setAppSettings("agent", "autoSummarize", v)} />
-      <Toggle label="记忆可编辑" checked={s.agent.memoryEditable} onChange={(v) => setAppSettings("agent", "memoryEditable", v)} />
-      <p style={{ "margin-top": "var(--space-4)", "font-size": "var(--text-caption)", color: "var(--text-muted)" }}>
+      <Toggle
+        label="自动起草回复"
+        checked={s.agent.autoDraft}
+        onChange={(v) => setAppSettings("agent", "autoDraft", v)}
+      />
+      <Toggle
+        label="自动生成简报"
+        checked={s.agent.autoSummarize}
+        onChange={(v) => setAppSettings("agent", "autoSummarize", v)}
+      />
+      <Toggle
+        label="记忆可编辑"
+        checked={s.agent.memoryEditable}
+        onChange={(v) => setAppSettings("agent", "memoryEditable", v)}
+      />
+      <p
+        style={{
+          "margin-top": "var(--space-4)",
+          "font-size": "var(--text-caption)",
+          color: "var(--text-muted)",
+        }}
+      >
         详细 memory 编辑器在 M6 实装。
       </p>
-      <button onClick={save} style={{ ...primaryBtn, "margin-top": "var(--space-3)" }}>保存</button>
     </div>
   );
 }
@@ -697,7 +1363,19 @@ function LabelsTab() {
   return (
     <div>
       <SectionTitle>Labels</SectionTitle>
-      <For each={labels() ?? []} fallback={<p style={{ color: "var(--text-muted)", "font-size": "var(--text-caption)" }}>暂无 label</p>}>
+      <For
+        each={labels() ?? []}
+        fallback={
+          <p
+            style={{
+              color: "var(--text-muted)",
+              "font-size": "var(--text-caption)",
+            }}
+          >
+            暂无 label
+          </p>
+        }
+      >
         {(l) => (
           <div
             style={{
@@ -711,10 +1389,30 @@ function LabelsTab() {
               "margin-bottom": "var(--space-2)",
             }}
           >
-            <div style={{ width: "16px", height: "16px", "border-radius": "50%", background: l.color }} />
+            <div
+              style={{
+                width: "16px",
+                height: "16px",
+                "border-radius": "50%",
+                background: l.color,
+              }}
+            />
             <span style={{ flex: 1, "font-weight": "600" }}>{l.name}</span>
-            <button onClick={() => setEditing(l)} style={{ color: "var(--blurple)", "font-size": "var(--text-caption)", "font-weight": "700" }}>Edit</button>
-            <button onClick={() => remove(l.id)} style={{ color: "var(--text-muted)" }} aria-label="Delete">
+            <button
+              onClick={() => setEditing(l)}
+              style={{
+                color: "var(--blurple)",
+                "font-size": "var(--text-caption)",
+                "font-weight": "700",
+              }}
+            >
+              Edit
+            </button>
+            <button
+              onClick={() => remove(l.id)}
+              style={{ color: "var(--text-muted)" }}
+              aria-label="Delete"
+            >
               <Icon name="ph-trash" size={14} />
             </button>
           </div>
@@ -728,13 +1426,21 @@ function LabelsTab() {
       </button>
 
       <Show when={editing()}>
-        <LabelEditModal label={editing()!} onClose={() => setEditing(null)} onSave={save} />
+        <LabelEditModal
+          label={editing()!}
+          onClose={() => setEditing(null)}
+          onSave={save}
+        />
       </Show>
     </div>
   );
 }
 
-function LabelEditModal(props: { label: Label; onClose: () => void; onSave: (l: Label) => void }) {
+function LabelEditModal(props: {
+  label: Label;
+  onClose: () => void;
+  onSave: (l: Label) => void;
+}) {
   const [draft, setDraft] = createSignal<Label>({ ...props.label });
   return (
     <Modal
@@ -744,16 +1450,221 @@ function LabelEditModal(props: { label: Label; onClose: () => void; onSave: (l: 
       width="380px"
       footer={
         <>
-          <button onClick={props.onClose} style={{ padding: "8px 16px", "font-size": "var(--text-caption)", color: "var(--text-secondary)" }}>取消</button>
-          <button onClick={() => props.onSave(draft())} style={primaryBtn}>保存</button>
+          <button
+            onClick={props.onClose}
+            style={{
+              padding: "8px 16px",
+              "font-size": "var(--text-caption)",
+              color: "var(--text-secondary)",
+            }}
+          >
+            取消
+          </button>
+          <button onClick={() => props.onSave(draft())} style={primaryBtn}>
+            保存
+          </button>
         </>
       }
     >
       <Field label="Name">
-        <input value={draft().name} onInput={(e) => setDraft({ ...draft(), name: e.currentTarget.value })} style={inputStyle} />
+        <input
+          value={draft().name}
+          onInput={(e) => setDraft({ ...draft(), name: e.currentTarget.value })}
+          style={inputStyle}
+        />
       </Field>
       <Field label="Color">
-        <input type="color" value={draft().color} onInput={(e) => setDraft({ ...draft(), color: e.currentTarget.value })} style={{ width: "60px", height: "32px", padding: 0, border: "none" }} />
+        <input
+          type="color"
+          value={draft().color}
+          onInput={(e) =>
+            setDraft({ ...draft(), color: e.currentTarget.value })
+          }
+          style={{ width: "60px", height: "32px", padding: 0, border: "none" }}
+        />
+      </Field>
+    </Modal>
+  );
+}
+
+function SnippetsTab() {
+  const [snippets, { refetch }] = createResource(listSnippets);
+  const [editing, setEditing] = createSignal<Snippet | null>(null);
+
+  const save = async (s: Snippet) => {
+    await upsertSnippet(s);
+    await refetch();
+    setEditing(null);
+    showToast({ message: "已保存", kind: "success" });
+  };
+  const remove = async (id: string) => {
+    await deleteSnippet(id);
+    await refetch();
+    showToast({ message: "已删除", kind: "info" });
+  };
+  const newSnippet = (): Snippet => ({
+    id: uid("sn"),
+    label: "",
+    body: "",
+    shortcut: "",
+  });
+
+  return (
+    <div>
+      <SectionTitle>Snippets</SectionTitle>
+      <p
+        style={{
+          color: "var(--text-secondary)",
+          "font-size": "var(--text-caption)",
+          "margin-top": 0,
+          "margin-bottom": "var(--space-3)",
+        }}
+      >
+        在 Compose 中点击 Snippet 按钮插入常用段落。
+      </p>
+      <For
+        each={snippets() ?? []}
+        fallback={
+          <p
+            style={{
+              color: "var(--text-muted)",
+              "font-size": "var(--text-caption)",
+            }}
+          >
+            暂无 snippet
+          </p>
+        }
+      >
+        {(s) => (
+          <div
+            style={{
+              display: "flex",
+              "align-items": "center",
+              gap: "var(--space-3)",
+              padding: "var(--space-2) var(--space-3)",
+              background: "var(--paper-light)",
+              "border-radius": "var(--radius-md)",
+              border: "0.5px solid var(--border)",
+              "margin-bottom": "var(--space-2)",
+            }}
+          >
+            <Icon name="ph-text-aa" size={18} color="var(--text-muted)" />
+            <div style={{ flex: 1, "min-width": 0 }}>
+              <div style={{ "font-weight": "600" }}>{s.label}</div>
+              <div
+                style={{
+                  "font-size": "var(--text-micro)",
+                  color: "var(--text-muted)",
+                  "white-space": "nowrap",
+                  overflow: "hidden",
+                  "text-overflow": "ellipsis",
+                }}
+              >
+                {s.shortcut ? `/${s.shortcut} · ` : ""}
+                {s.body}
+              </div>
+            </div>
+            <button
+              onClick={() => setEditing(s)}
+              style={{
+                color: "var(--blurple)",
+                "font-size": "var(--text-caption)",
+                "font-weight": "700",
+              }}
+            >
+              Edit
+            </button>
+            <button
+              onClick={() => remove(s.id)}
+              style={{ color: "var(--text-muted)" }}
+              aria-label="Delete"
+            >
+              <Icon name="ph-trash" size={14} />
+            </button>
+          </div>
+        )}
+      </For>
+      <button
+        onClick={() => setEditing(newSnippet())}
+        style={{ ...primaryBtn, "margin-top": "var(--space-3)" }}
+      >
+        <Icon name="ph-plus" size={12} /> New snippet
+      </button>
+
+      <Show when={editing()}>
+        <SnippetEditModal
+          snippet={editing()!}
+          onClose={() => setEditing(null)}
+          onSave={save}
+        />
+      </Show>
+    </div>
+  );
+}
+
+function SnippetEditModal(props: {
+  snippet: Snippet;
+  onClose: () => void;
+  onSave: (s: Snippet) => void;
+}) {
+  const [draft, setDraft] = createSignal<Snippet>({ ...props.snippet });
+  return (
+    <Modal
+      open
+      onClose={props.onClose}
+      title={props.snippet.label ? "Edit snippet" : "New snippet"}
+      width="480px"
+      footer={
+        <>
+          <button
+            onClick={props.onClose}
+            style={{
+              padding: "8px 16px",
+              "font-size": "var(--text-caption)",
+              color: "var(--text-secondary)",
+            }}
+          >
+            取消
+          </button>
+          <button onClick={() => props.onSave(draft())} style={primaryBtn}>
+            保存
+          </button>
+        </>
+      }
+    >
+      <Field label="名称">
+        <input
+          value={draft().label}
+          onInput={(e) =>
+            setDraft({ ...draft(), label: e.currentTarget.value })
+          }
+          placeholder="问候语"
+          style={inputStyle}
+        />
+      </Field>
+      <Field label="快捷输入">
+        <input
+          value={draft().shortcut ?? ""}
+          onInput={(e) =>
+            setDraft({ ...draft(), shortcut: e.currentTarget.value })
+          }
+          placeholder="greeting"
+          style={inputStyle}
+        />
+      </Field>
+      <Field label="正文">
+        <textarea
+          value={draft().body}
+          onInput={(e) => setDraft({ ...draft(), body: e.currentTarget.value })}
+          placeholder="Hi there, ..."
+          rows={6}
+          style={{
+            ...inputStyle,
+            resize: "vertical",
+            "font-family": "var(--font-body)",
+            "line-height": 1.5,
+          }}
+        />
       </Field>
     </Modal>
   );
@@ -762,11 +1673,55 @@ function LabelEditModal(props: { label: Label; onClose: () => void; onSave: (l: 
 function DataTab() {
   const exportContacts = async () => {
     const contacts = await listContacts();
-    const csv = ["id,name,email,company,title,stage"].concat(
-      contacts.map((c) => [c.id, c.name, c.emails[0]?.value ?? "", c.company, c.title, c.stage].join(","))
-    ).join("\n");
+    const csv = ["id,name,email,company,title,stage"]
+      .concat(
+        contacts.map((c) =>
+          [
+            c.id,
+            c.name,
+            c.emails[0]?.value ?? "",
+            c.company,
+            c.title,
+            c.stage,
+          ].join(","),
+        ),
+      )
+      .join("\n");
     download("sendpalm-contacts.csv", csv, "text/csv");
     showToast({ message: "已导出 CSV", kind: "success" });
+  };
+  const exportTasks = async () => {
+    const tasks = await listTasks();
+    download(
+      "sendpalm-tasks.json",
+      JSON.stringify({ exportedAt: isoNow(), tasks }, null, 2),
+      "application/json",
+    );
+    showToast({ message: "已导出 Tasks JSON", kind: "success" });
+  };
+  const backupMailbox = async () => {
+    const messages = await listMessages();
+    const files = await listFiles();
+    const data = {
+      exportedAt: isoNow(),
+      messages,
+      files: files.map((f) => ({
+        id: f.id,
+        pid: f.pid,
+        name: f.name,
+        type: f.type,
+        mime: f.mime,
+        size: f.size,
+        url: f.url,
+        st: f.st,
+      })),
+    };
+    download(
+      "sendpalm-mailbox-backup.json",
+      JSON.stringify(data, null, 2),
+      "application/json",
+    );
+    showToast({ message: "已导出 Mailbox backup", kind: "success" });
   };
   const exportAll = async () => {
     const data = {
@@ -777,8 +1732,16 @@ function DataTab() {
       labels: await listLabels(),
       shortcuts: await listShortcuts(),
     };
-    download("sendpalm-export.json", JSON.stringify(data, null, 2), "application/json");
+    download(
+      "sendpalm-export.json",
+      JSON.stringify(data, null, 2),
+      "application/json",
+    );
     showToast({ message: "已导出 JSON", kind: "success" });
+  };
+  const emptyTrashNow = async () => {
+    const count = await emptyTrash();
+    showToast({ message: `已清空 Trash（${count} 封）`, kind: "success" });
   };
   const reset = async () => {
     const code = prompt("输入 DELETE 以清空所有数据：");
@@ -786,14 +1749,41 @@ function DataTab() {
     await resetAllData();
     location.reload();
   };
+  const deleteAccount = () => {
+    const code = prompt("输入 DELETE ACCOUNT 以删除当前账户（演示）：");
+    if (code !== "DELETE ACCOUNT") return;
+    showToast({ message: "账户删除请求已记录（演示模式）", kind: "info" });
+  };
   return (
     <div>
       <SectionTitle>Export</SectionTitle>
-      <button onClick={exportContacts} style={secondaryBtn}>导出 Contacts CSV</button>
-      <button onClick={exportAll} style={secondaryBtn}>导出全部数据 JSON</button>
+      <button onClick={exportContacts} style={secondaryBtn}>
+        导出 Contacts CSV
+      </button>
+      <button onClick={exportTasks} style={secondaryBtn}>
+        导出 Tasks JSON
+      </button>
+      <button onClick={backupMailbox} style={secondaryBtn}>
+        导出 Mailbox backup
+      </button>
+      <button onClick={exportAll} style={secondaryBtn}>
+        导出全部数据 JSON
+      </button>
 
       <SectionTitle>危险区</SectionTitle>
-      <button onClick={reset} style={{ ...secondaryBtn, color: "var(--coral)" }}>
+      <button onClick={emptyTrashNow} style={secondaryBtn}>
+        清空 Trash
+      </button>
+      <button
+        onClick={deleteAccount}
+        style={{ ...secondaryBtn, color: "var(--coral)" }}
+      >
+        删除账户（演示）
+      </button>
+      <button
+        onClick={reset}
+        style={{ ...secondaryBtn, color: "var(--coral)" }}
+      >
         清空所有数据（输入 DELETE 确认）
       </button>
     </div>
@@ -809,47 +1799,105 @@ function ShortcutsTab() {
     setEditing(null);
     showToast({ message: "已保存", kind: "success" });
   };
+  const restore = async () => {
+    await resetShortcuts();
+    await refetch();
+    showToast({ message: "已恢复默认快捷键", kind: "success" });
+  };
   return (
     <div>
-      <SectionTitle>Keyboard shortcuts</SectionTitle>
+      <div
+        style={{
+          display: "flex",
+          "align-items": "center",
+          "justify-content": "space-between",
+        }}
+      >
+        <SectionTitle>Keyboard shortcuts</SectionTitle>
+        <button
+          onClick={restore}
+          style={{
+            padding: "6px 12px",
+            "font-size": "var(--text-caption)",
+            "font-weight": "600",
+            color: "var(--text-secondary)",
+            background: "var(--paper-mid)",
+            "border-radius": "var(--radius-pill)",
+          }}
+        >
+          Restore defaults
+        </button>
+      </div>
       <For each={shortcuts() ?? []}>
         {(s) => (
-          <div style={{
-            display: "flex",
-            "align-items": "center",
-            gap: "var(--space-3)",
-            padding: "var(--space-2) var(--space-3)",
-            background: "var(--paper-light)",
-            "border-radius": "var(--radius-md)",
-            border: "0.5px solid var(--border)",
-            "margin-bottom": "var(--space-2)",
-          }}>
-            <kbd style={{
-              padding: "4px 10px",
-              background: "var(--paper-mid)",
-              "border-radius": "var(--radius-sm)",
-              "font-size": "var(--text-caption)",
-              "font-weight": "700",
-              color: "var(--text-primary)",
-              "font-family": "var(--font-mono)",
-            }}>{s.combo}</kbd>
-            <span style={{ flex: 1, "font-size": "var(--text-body-sm)" }}>{s.label}</span>
-            <span style={{ "font-size": "var(--text-micro)", color: "var(--text-muted)" }}>{s.action}</span>
+          <div
+            style={{
+              display: "flex",
+              "align-items": "center",
+              gap: "var(--space-3)",
+              padding: "var(--space-2) var(--space-3)",
+              background: "var(--paper-light)",
+              "border-radius": "var(--radius-md)",
+              border: "0.5px solid var(--border)",
+              "margin-bottom": "var(--space-2)",
+            }}
+          >
+            <kbd
+              style={{
+                padding: "4px 10px",
+                background: "var(--paper-mid)",
+                "border-radius": "var(--radius-sm)",
+                "font-size": "var(--text-caption)",
+                "font-weight": "700",
+                color: "var(--text-primary)",
+                "font-family": "var(--font-mono)",
+              }}
+            >
+              {s.combo}
+            </kbd>
+            <span style={{ flex: 1, "font-size": "var(--text-body-sm)" }}>
+              {s.label}
+            </span>
+            <span
+              style={{
+                "font-size": "var(--text-micro)",
+                color: "var(--text-muted)",
+              }}
+            >
+              {s.action}
+            </span>
             <Show when={s.editable}>
-              <button onClick={() => setEditing(s)} style={{ color: "var(--blurple)", "font-size": "var(--text-caption)", "font-weight": "700" }}>Edit</button>
+              <button
+                onClick={() => setEditing(s)}
+                style={{
+                  color: "var(--blurple)",
+                  "font-size": "var(--text-caption)",
+                  "font-weight": "700",
+                }}
+              >
+                Edit
+              </button>
             </Show>
           </div>
         )}
       </For>
 
       <Show when={editing()}>
-        <ShortcutEditModal s={editing()!} onClose={() => setEditing(null)} onSave={save} />
+        <ShortcutEditModal
+          s={editing()!}
+          onClose={() => setEditing(null)}
+          onSave={save}
+        />
       </Show>
     </div>
   );
 }
 
-function ShortcutEditModal(props: { s: Shortcut; onClose: () => void; onSave: (s: Shortcut) => void }) {
+function ShortcutEditModal(props: {
+  s: Shortcut;
+  onClose: () => void;
+  onSave: (s: Shortcut) => void;
+}) {
   const [combo, setCombo] = createSignal(props.s.combo);
   return (
     <Modal
@@ -859,13 +1907,31 @@ function ShortcutEditModal(props: { s: Shortcut; onClose: () => void; onSave: (s
       width="380px"
       footer={
         <>
-          <button onClick={props.onClose} style={{ padding: "8px 16px", "font-size": "var(--text-caption)", color: "var(--text-secondary)" }}>取消</button>
-          <button onClick={() => props.onSave({ ...props.s, combo: combo() })} style={primaryBtn}>保存</button>
+          <button
+            onClick={props.onClose}
+            style={{
+              padding: "8px 16px",
+              "font-size": "var(--text-caption)",
+              color: "var(--text-secondary)",
+            }}
+          >
+            取消
+          </button>
+          <button
+            onClick={() => props.onSave({ ...props.s, combo: combo() })}
+            style={primaryBtn}
+          >
+            保存
+          </button>
         </>
       }
     >
       <Field label="Combo (e.g. ⌘1)">
-        <input value={combo()} onInput={(e) => setCombo(e.currentTarget.value)} style={inputStyle} />
+        <input
+          value={combo()}
+          onInput={(e) => setCombo(e.currentTarget.value)}
+          style={inputStyle}
+        />
       </Field>
     </Modal>
   );
@@ -876,16 +1942,42 @@ function ShortcutEditModal(props: { s: Shortcut; onClose: () => void; onSave: (s
 function Field(props: { label: string; children: unknown }) {
   return (
     <label style={{ display: "block", "margin-bottom": "var(--space-3)" }}>
-      <span style={{ display: "block", "font-size": "var(--text-micro)", color: "var(--text-muted)", "font-weight": "700", "margin-bottom": "4px" }}>{props.label}</span>
+      <span
+        style={{
+          display: "block",
+          "font-size": "var(--text-micro)",
+          color: "var(--text-muted)",
+          "font-weight": "700",
+          "margin-bottom": "4px",
+        }}
+      >
+        {props.label}
+      </span>
       {props.children as never}
     </label>
   );
 }
 
-function Toggle(props: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+function Toggle(props: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
   return (
-    <label style={{ display: "flex", "align-items": "center", gap: "var(--space-3)", padding: "var(--space-2) 0", cursor: "pointer" }}>
-      <input type="checkbox" checked={props.checked} onChange={(e) => props.onChange(e.currentTarget.checked)} />
+    <label
+      style={{
+        display: "flex",
+        "align-items": "center",
+        gap: "var(--space-3)",
+        padding: "var(--space-2) 0",
+        cursor: "pointer",
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={props.checked}
+        onChange={(e) => props.onChange(e.currentTarget.checked)}
+      />
       <span style={{ "font-size": "var(--text-body-sm)" }}>{props.label}</span>
     </label>
   );
