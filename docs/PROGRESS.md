@@ -1533,3 +1533,22 @@ Second focused pass after the user asked to log in to `edwinhao@sendpalm.com` on
   64 px sidebar width on iPad.
 - Net effect: the desktop rail is clean and HEY-consistent; the
   `Im…` / `St…` / `Comp…` ellipsis regression is resolved.
+
+## 2026-08-10 — Inbox data chain revamp (Phase 5)
+
+### Phase 5 — Titlebar + brand (2026-08-10)
+
+- Tauri `titleBarStyle` flipped from `Visible` to `Overlay`; the
+  `trafficLightPosition` is set to `{x: 14, y: 14}`.
+- The JS `Titlebar.tsx` component and its grid row in `base.css` are
+  deleted. `--titlebar-height` is now `0`; a new `--titlebar-traffic-pad:
+  78px` token reserves the macOS safe area.
+- New `<BrandMark />` (Phosphor `ph-leaf` + 18 px wordmark) is the
+  leftmost topbar element. The topbar body is draggable
+  (`-webkit-app-region: drag`); every interactive control carries
+  `no-drag` to keep clickability.
+- The single Playwright `text=SendPalm` assertion is scoped to
+  `[data-testid="brand-mark"]` to avoid the splash collision.
+- Net effect: the macOS window shows native traffic lights on top of a
+  draggable topbar; the SendPalm brand is at the expected HEY-style
+  position (Phosphor leaf + wordmark).
