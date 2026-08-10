@@ -381,16 +381,17 @@ test.describe("Responsive layout — iPad portrait", () => {
     await shoot(page, "19-ipad-portrait");
   });
 
-  test("iPad sidebar shows full labels (not truncated)", async ({ page }) => {
+  test("iPad portrait shows icon-only sidebar and tooltip on hover", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 820, height: 1180 });
     await page.goto("/");
-    // "Follow-ups" is the longest label — make sure it's readable.
-    await expect(page.locator('[data-nav="Follow-ups"]').first()).toBeVisible();
-    const text = await page
-      .locator('[data-nav="Follow-ups"]')
-      .first()
-      .textContent();
-    expect(text?.trim()).toBe("Follow-ups");
-    await shoot(page, "20-ipad-sidebar-labels");
+    await page.locator("body.app-ready").waitFor();
+    const nav = page.locator("[data-nav='Follow-ups']");
+    await expect(nav).toBeVisible();
+    await nav.hover();
+    const tip = page.locator("[data-testid='sidebar-tooltip']");
+    await expect(tip).toContainText("Follow-ups");
   });
 });
 
@@ -412,7 +413,11 @@ test.describe("Responsive layout — iPad landscape", () => {
     const sidebarWidth = await sidebar.evaluate(
       (el) => el.getBoundingClientRect().width,
     );
-    expect(sidebarWidth).toBe(64);
+    expect(
+      await page
+        .locator("#sidebar")
+        .evaluate((el) => el.getBoundingClientRect().width),
+    ).toBe(64);
 
     await shoot(page, "21-ipad-landscape");
   });
