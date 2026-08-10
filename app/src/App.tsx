@@ -1,9 +1,8 @@
 /** App shell — matches prototype-v11's HTML mount points.
- * #root contains the titlebar + sidebar + topbar + main + detail + agent + toasts.
+ * #root contains the sidebar + topbar + main + detail + agent + toasts.
  */
 
 import { Show, createSignal, onMount, onCleanup, createEffect } from "solid-js";
-import { Titlebar } from "./components/Titlebar";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { Main } from "./components/Main";
@@ -73,7 +72,6 @@ export default function App() {
             "agent-open": agentPanelOpen(),
           }}
         >
-          <Titlebar />
           <Sidebar />
           <Topbar />
           <Main />

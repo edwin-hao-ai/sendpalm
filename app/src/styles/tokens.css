@@ -144,7 +144,8 @@
   --cal-peach: var(--peach);
 
   /* ── Layout ──────────────────────────────────────────────────── */
-  --titlebar-height: 32px;
+  --titlebar-height: 0px; /* Tauri Overlay owns the chrome. */
+  --titlebar-traffic-pad: 78px; /* Standard macOS traffic-light safe area. */
   --topbar-height: 52px;
   --sidebar-width: 64px;
   --sidebar-width-tablet: 64px;

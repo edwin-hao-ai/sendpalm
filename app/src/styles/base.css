@@ -128,11 +128,8 @@ hr {
 #app {
   display: grid;
   grid-template-columns: var(--sidebar-width) 1fr;
-  grid-template-rows:
-    var(--titlebar-height) calc(var(--topbar-height) + env(safe-area-inset-top))
-    1fr;
+  grid-template-rows: calc(var(--topbar-height) + env(safe-area-inset-top)) 1fr;
   grid-template-areas:
-    "titlebar titlebar"
     "sidebar  topbar"
     "sidebar  main";
   height: 100dvh;
@@ -141,7 +138,6 @@ hr {
 #app.detail-open {
   grid-template-columns: var(--sidebar-width) 1fr var(--detail-panel-width);
   grid-template-areas:
-    "titlebar titlebar titlebar"
     "sidebar  topbar   topbar"
     "sidebar  main     detail";
 }
@@ -149,7 +145,6 @@ hr {
 #app.agent-open {
   grid-template-columns: var(--sidebar-width) 1fr var(--agent-panel-width);
   grid-template-areas:
-    "titlebar titlebar titlebar"
     "sidebar  topbar   topbar"
     "sidebar  main     agent";
 }
@@ -159,16 +154,8 @@ hr {
       --agent-panel-width
     );
   grid-template-areas:
-    "titlebar titlebar titlebar titlebar"
     "sidebar  topbar   topbar   topbar"
     "sidebar  main     detail   agent";
-}
-
-#titlebar {
-  grid-area: titlebar;
-  padding-top: env(safe-area-inset-top);
-  padding-left: env(safe-area-inset-left);
-  padding-right: env(safe-area-inset-right);
 }
 
 #sidebar {
@@ -213,11 +200,7 @@ hr {
 @media (min-width: 768px) and (max-width: 1023px) {
   #app {
     grid-template-columns: var(--sidebar-width-tablet) 1fr;
-    grid-template-rows:
-      var(--titlebar-height) calc(
-        var(--topbar-height) + env(safe-area-inset-top)
-      )
-      1fr;
+    grid-template-rows: calc(var(--topbar-height) + env(safe-area-inset-top)) 1fr;
   }
   /* On iPad, the detail panel overlays main instead of squeezing it.
      This preserves the full message-list width while still showing the
@@ -227,7 +210,7 @@ hr {
   }
   #app.detail-open #detail-panel {
     position: fixed;
-    top: var(--titlebar-height);
+    top: 0;
     bottom: 0;
     right: 0;
     width: min(420px, 60vw);
@@ -238,9 +221,6 @@ hr {
 
 /* Mobile — iPhone */
 @media (max-width: 767px) {
-  #titlebar {
-    display: none;
-  }
   #topbar {
     height: auto;
     min-height: calc(var(--topbar-height) + env(safe-area-inset-top));
