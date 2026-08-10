@@ -470,6 +470,27 @@ async fn sync_and_notify(
     Ok(())
 }
 
+/// Aggregate of one `sync_one` cycle, exposed for tests.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct SyncOutcome {
+    pub total_inserted: u32,
+    pub failed_folders: Vec<String>,
+}
+
+/// Test seam: aggregate per-folder outcomes without touching IMAP.
+pub async fn sync_one_outcome(
+    results: Vec<(&str, Result<u32, String>)>,
+) -> SyncOutcome {
+    let mut out = SyncOutcome::default();
+    for (folder, result) in results {
+        match result {
+            Ok(n) => out.total_inserted += n,
+            Err(_) => out.failed_folders.push(folder.to_string()),
+        }
+    }
+    out
+}
+
 async fn sync_one(
     app: &AppHandle,
     data_dir: &std::path::Path,
@@ -507,7 +528,7 @@ async fn sync_one(
             folder_last_uid
         };
 
-        let (inserted, cursor, uid_validity) = sync_folder(
+        let (inserted, cursor, uid_validity) = match sync_folder(
             app,
             data_dir,
             pool,
@@ -518,7 +539,19 @@ async fn sync_one(
             // Only trigger vacation replies for new mail in INBOX.
             if is_inbox { previous_last_uid } else { 0 },
         )
-        .await?;
+        .await
+        {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!(
+                    "[sync] folder={folder} failed for {}: {e}",
+                    account.account_id
+                );
+                // Persist the previous cursor so a fixed folder can resume cleanly.
+                let _ = save_folder_sync_state(pool, &state_key, start_uid, 0).await;
+                continue;
+            }
+        };
         total_inserted += inserted;
 
         save_folder_sync_state(pool, &state_key, cursor, uid_validity).await?;
