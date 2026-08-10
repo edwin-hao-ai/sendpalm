@@ -281,8 +281,25 @@ function matchRow(
         return (
           Array.isArray(cond.value) && cond.value.some((v) => v === colVal)
         );
+      case "not in":
+        return (
+          !Array.isArray(cond.value) ||
+          !cond.value.some((v) => v === colVal)
+        );
       case "match":
         return matchFts(cond.value, row);
+      case "is null":
+        return colVal == null;
+      case "is not null":
+        return colVal != null;
+      case "json_contains": {
+        try {
+          const arr = JSON.parse(String(colVal ?? "[]")) as unknown[];
+          return Array.isArray(arr) && arr.some((v) => v === cond.value);
+        } catch {
+          return false;
+        }
+      }
       default:
         return true;
     }
@@ -304,26 +321,81 @@ interface Condition {
   value: unknown;
 }
 
+function readColumnName(tokens: Token[], start: number): { name: string; next: number } {
+  let i = start;
+  let name = "";
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (t?.kind === "id") {
+      name += t.value;
+      i++;
+      const dot = tokens[i];
+      if (dot?.kind === "sym" && dot.value === ".") {
+        name += ".";
+        i++;
+      } else {
+        break;
+      }
+    } else {
+      break;
+    }
+  }
+  return { name: name.toLowerCase(), next: i };
+}
+
+function stripTableAlias(col: string, alias?: string): string {
+  if (!alias) return col;
+  const prefix = `${alias}.`;
+  return col.startsWith(prefix) ? col.slice(prefix.length) : col;
+}
+
 function parseWhere(
   tokens: Token[],
   start: number,
   bindValues: unknown[],
+  jsonColumn?: string,
 ): { conditions: Condition[]; next: number } {
   const conditions: Condition[] = [];
   let i = start;
   while (i < tokens.length) {
     const t = tokens[i];
     if (!t || t.kind !== "id") break;
-    const col = normalizeId(t);
-    i++;
-    const opToken = tokens[i];
-    if (!opToken) break;
-    if (normalizeId(opToken) === "match") {
+    const { name: rawCol, next: afterCol } = readColumnName(tokens, i);
+    i = afterCol;
+    let col = rawCol;
+
+    // IS NULL / IS NOT NULL
+    if (normalizeId(tokens[i]) === "is") {
       i++;
+      let op = "is null";
+      if (normalizeId(tokens[i]) === "not") {
+        op = "is not null";
+        i++;
+      }
+      // consume NULL token
+      if (normalizeId(tokens[i]) === "null") i++;
+      conditions.push({ col, op, value: null });
+    } else if (col === "json_each.value" && jsonColumn) {
+      const opToken = tokens[i];
+      if (!opToken || (opToken.kind !== "op" && opToken.kind !== "sym")) break;
+      i++;
+      const afterOp = tokens[i];
+      if (
+        (opToken.value === "!" &&
+          afterOp?.kind === "op" &&
+          afterOp.value === "=") ||
+        (opToken.value === "<" &&
+          afterOp?.kind === "op" &&
+          afterOp.value === ">")
+      ) {
+        i++;
+      }
       const { value, next } = resolveValue(tokens, i, bindValues);
-      conditions.push({ col, op: "match", value });
+      conditions.push({ col: jsonColumn, op: "json_contains", value });
       i = next;
-    } else if (opToken.kind === "op" || opToken.kind === "sym") {
+    } else {
+      const opToken = tokens[i];
+      if (!opToken || (opToken.kind !== "op" && opToken.kind !== "sym")) break;
       let op = opToken.value;
       i++;
       const afterOp = tokens[i];
@@ -363,8 +435,6 @@ function parseWhere(
         conditions.push({ col, op, value });
         i = next;
       }
-    } else {
-      break;
     }
     if (normalizeId(tokens[i]) === "and") {
       i++;
@@ -373,6 +443,61 @@ function parseWhere(
     }
   }
   return { conditions, next: i };
+}
+
+interface SelectSource {
+  kind: "table" | "json_each";
+  name?: string;
+  alias?: string;
+  jsonColumn?: string;
+}
+
+function isReservedKeyword(id: string): boolean {
+  return ["where", "order", "limit", "group", "having"].includes(id);
+}
+
+function parseFromSources(
+  tokens: Token[],
+  start: number,
+): { sources: SelectSource[]; next: number } {
+  const sources: SelectSource[] = [];
+  let i = start;
+  while (i < tokens.length) {
+    const t = tokens[i];
+    const kw = normalizeId(t);
+    if (kw === "where" || kw === "order" || kw === "limit") break;
+    if (kw === "json_each") {
+      i++; // json_each
+      const open = tokens[i];
+      if (open?.kind === "sym" && open.value === "(") {
+        i++;
+        let expr = "";
+        while (i < tokens.length) {
+          const t2 = tokens[i];
+          if (t2?.kind === "sym" && t2.value === ")") break;
+          if (t2) expr += t2.value;
+          i++;
+        }
+        const close = tokens[i];
+        if (close?.kind === "sym" && close.value === ")") i++;
+        const jsonColumn = expr.split(".").pop()?.toLowerCase() ?? expr.toLowerCase();
+        sources.push({ kind: "json_each", jsonColumn });
+      }
+    } else if (t?.kind === "id") {
+      const name = t.value.toLowerCase();
+      i++;
+      const next = tokens[i];
+      let alias: string | undefined;
+      if (next?.kind === "id" && !isReservedKeyword(next.value.toLowerCase())) {
+        alias = next.value.toLowerCase();
+        i++;
+      }
+      sources.push({ kind: "table", name, alias });
+    } else {
+      i++;
+    }
+  }
+  return { sources, next: i };
 }
 
 /* ── SELECT ────────────────────────────────────────────── */
@@ -391,7 +516,19 @@ function runSelect(sql: string, bindValues: unknown[]): Row[] {
     if (t?.kind === "sym" && t.value === "*") {
       allColumns = true;
     } else if (t?.kind === "id") {
-      columns.push(t.value.toLowerCase());
+      const dot = tokens[i + 1];
+      const afterDot = tokens[i + 2];
+      if (
+        dot?.kind === "sym" &&
+        dot.value === "." &&
+        afterDot?.kind === "sym" &&
+        afterDot.value === "*"
+      ) {
+        allColumns = true;
+        i += 2;
+      } else {
+        columns.push(t.value.toLowerCase());
+      }
     }
     i++;
   }
@@ -399,9 +536,15 @@ function runSelect(sql: string, bindValues: unknown[]): Row[] {
   if (normalizeId(tokens[i]) !== "from") return [];
   i++;
 
-  const tableName = normalizeId(tokens[i]);
-  i++;
-  if (!tableName) return [];
+  const fromSources = parseFromSources(tokens, i);
+  i = fromSources.next;
+  const mainSource = fromSources.sources.find((s) => s.kind === "table");
+  const mainTable = mainSource?.name ?? "";
+  const mainAlias = mainSource?.alias;
+  const jsonEachColumn = fromSources.sources.find(
+    (s) => s.kind === "json_each",
+  )?.jsonColumn;
+  if (!mainTable) return [];
 
   let conditions: Condition[] = [];
   let orderBy: { col: string; desc: boolean }[] = [];
@@ -412,16 +555,20 @@ function runSelect(sql: string, bindValues: unknown[]): Row[] {
     const kw = normalizeId(t);
     if (kw === "where") {
       i++;
-      const parsed = parseWhere(tokens, i, bindValues);
-      conditions = parsed.conditions;
+      const parsed = parseWhere(tokens, i, bindValues, jsonEachColumn);
+      conditions = parsed.conditions.map((c) => ({
+        ...c,
+        col: stripTableAlias(c.col, mainAlias),
+      }));
       i = parsed.next;
     } else if (kw === "order") {
       i++;
       if (normalizeId(tokens[i]) === "by") i++;
       while (i < tokens.length) {
-        const col = normalizeId(tokens[i]);
+        const { name: rawCol, next: afterCol } = readColumnName(tokens, i);
+        i = afterCol;
+        const col = stripTableAlias(rawCol, mainAlias);
         if (!col) break;
-        i++;
         let desc = false;
         const dir = normalizeId(tokens[i]);
         if (dir === "desc") {
@@ -448,7 +595,7 @@ function runSelect(sql: string, bindValues: unknown[]): Row[] {
     }
   }
 
-  const table = getTable(tableName);
+  const table = getTable(mainTable);
   let rows = table.filter((row) => matchRow(row, conditions, bindValues));
   if (orderBy.length > 0) {
     rows = [...rows].sort((a, b) => compareRows(a, b, orderBy));

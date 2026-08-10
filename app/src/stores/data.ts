@@ -277,6 +277,7 @@ function rowToFile(r: Record<string, unknown>): FileItem {
     sender: (r.sender as string | undefined) ?? undefined,
     thumbUrl: (r.thumb_url as string | undefined) ?? undefined,
     md: (r.md as string | undefined) ?? undefined,
+    sourceMessageIds: safeParse<ID[]>(r.source_message_ids as string, []),
   };
 }
 
@@ -853,6 +854,39 @@ export async function listFiles(): Promise<FileItem[]> {
     "SELECT * FROM files ORDER BY st DESC",
   );
   return rows.map(rowToFile);
+}
+
+export async function listSourceMessages(fileId: ID): Promise<Message[]> {
+  const db = await getDb();
+  const rows = await db.select<Array<Record<string, unknown>>>(
+    "SELECT m.* FROM messages m, json_each(m.attachments_json) " +
+      "WHERE json_each.value = $1 AND m.deleted_at IS NULL ORDER BY m.tm DESC",
+    [fileId],
+  );
+  return rows.map(rowToMessage);
+}
+
+export async function listContactAttachments(contactId: ID): Promise<FileItem[]> {
+  const db = await getDb();
+  const rows = await db.select<Array<Record<string, unknown>>>(
+    "SELECT * FROM files WHERE pid = $1 ORDER BY st DESC",
+    [contactId],
+  );
+  return rows.map(rowToFile);
+}
+
+export async function addFileSourceMessage(fileId: ID, messageId: ID): Promise<void> {
+  const db = await getDb();
+  const existing = (await db.select<Array<{ source_message_ids: string }>>(
+    "SELECT source_message_ids FROM files WHERE id = $1",
+    [fileId],
+  ))[0]?.source_message_ids ?? "[]";
+  const next = safeParse<string[]>(existing, []);
+  if (!next.includes(messageId)) next.push(messageId);
+  await db.execute("UPDATE files SET source_message_ids = $1 WHERE id = $2", [
+    safeStringify(next),
+    fileId,
+  ]);
 }
 
 export async function upsertFile(f: FileItem): Promise<void> {

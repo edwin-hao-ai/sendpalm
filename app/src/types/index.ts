@@ -199,6 +199,7 @@ export interface FileItem {
   sender?: string;
   thumbUrl?: string;
   md?: string; // markdown extract
+  sourceMessageIds: ID[];
 }
 
 /* ── Event (Meeting) ──────────────────────────────────────── */

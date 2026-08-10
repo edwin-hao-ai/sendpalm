@@ -93,6 +93,7 @@ function file(pid: string, name: string): FileItem {
     mime: "application/pdf",
     size: 1024,
     st: new Date().toISOString(),
+    sourceMessageIds: [],
   };
 }
 
