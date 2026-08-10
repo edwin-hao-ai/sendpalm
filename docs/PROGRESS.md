@@ -1516,3 +1516,20 @@ Second focused pass after the user asked to log in to `edwinhao@sendpalm.com` on
   `0014_gate_screened_backfill.sql` migration.
 - Confirmed via `pnpm test -- empty-state.test.ts` (5 tests) and
   `cd app/src-tauri && cargo check --tests`.
+
+## 2026-08-10 — Inbox data chain revamp (Phase 4)
+
+### Phase 4 — Sidebar icon-only (2026-08-10)
+
+- New `SidebarTooltip` primitive with edge-flip positioning (covered by
+  `sidebar-tooltip.test.ts`).
+- `NavItem` is now icon-only on desktop/tablet; the visible label is
+  rendered only on the mobile bottom tab bar. The ⌘N chip is repositioned
+  to the bottom-right corner of the button and marked `aria-hidden`.
+- `aria-current="page"` is set on the active item; the tooltip
+  accessible name combines the label and the shortcut hint.
+- `useLongPress` (600 ms) surfaces the tooltip on touch / tablet.
+- Playwright tests updated to assert the tooltip on hover and the
+  64 px sidebar width on iPad.
+- Net effect: the desktop rail is clean and HEY-consistent; the
+  `Im…` / `St…` / `Comp…` ellipsis regression is resolved.
