@@ -812,7 +812,7 @@ async fn insert_message(
     let _ = index_entity(pool, &mid, "message", &parsed.subject, &search_body).await;
 
     // Persist attachments to disk and link them to the message.
-    let attachment_ids = persist_attachments(data_dir, pool, &contact_id, &parsed.attachments)
+    let attachment_ids = persist_attachments(data_dir, pool, &contact_id, &mid, &parsed.attachments)
         .await
         .map_err(|e| format!("persist attachments uid={uid}: {e}"))?;
     if !attachment_ids.is_empty() {
@@ -1037,7 +1037,7 @@ pub async fn save_sent_message(
 
     // Persist outgoing attachments to disk and link them to the recipient.
     let attachment_ids =
-        persist_outgoing_attachments(data_dir, pool, &route.id, attachments).await?;
+        persist_outgoing_attachments(data_dir, pool, &route.id, &mid, attachments).await?;
     let attachments_json =
         serde_json::to_string(&attachment_ids).unwrap_or_else(|_| "[]".to_string());
 
@@ -1066,6 +1066,7 @@ async fn persist_attachments(
     data_dir: &std::path::Path,
     pool: &SqlitePool,
     contact_id: &str,
+    m_id: &str,
     attachments: &[crate::services::parser::ParsedAttachment],
 ) -> Result<Vec<String>, String> {
     if attachments.is_empty() {
@@ -1097,8 +1098,12 @@ async fn persist_attachments(
         let file_type = crate::services::parser::file_type_from_mime(&att.mime);
         let now = chrono::Utc::now().to_rfc3339();
         sqlx::query(
-            "INSERT INTO files (id, pid, name, type, mime, size, url, st) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            "INSERT INTO files (id, pid, name, type, mime, size, url, st, source_message_ids) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
+             ON CONFLICT(id) DO UPDATE SET \
+                source_message_ids = excluded.source_message_ids, \
+                pid = excluded.pid, \
+                st = excluded.st",
         )
         .bind(&file_id)
         .bind(contact_id)
@@ -1108,9 +1113,25 @@ async fn persist_attachments(
         .bind(content.len() as i64)
         .bind(&relative)
         .bind(&now)
+        .bind(format!("[\"{}\"]", m_id))
         .execute(pool)
         .await
         .map_err(|e| format!("insert file row {file_id}: {e}"))?;
+
+        // Merge into existing source_message_ids if any.
+        let existing: String = sqlx::query_scalar("SELECT source_message_ids FROM files WHERE id = $1")
+            .bind(&file_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| format!("read source_message_ids: {e}"))?;
+        let merged = crate::services::db::merge_json_array(&existing, &format!("[\"{}\"]", m_id))
+            .map_err(|e| format!("merge_json_array: {e}"))?;
+        sqlx::query("UPDATE files SET source_message_ids = $1 WHERE id = $2")
+            .bind(&merged)
+            .bind(&file_id)
+            .execute(pool)
+            .await
+            .map_err(|e| format!("update source_message_ids: {e}"))?;
 
         ids.push(file_id);
     }
@@ -1122,6 +1143,7 @@ async fn persist_outgoing_attachments(
     data_dir: &std::path::Path,
     pool: &SqlitePool,
     contact_id: &str,
+    m_id: &str,
     attachments: &[crate::services::smtp::OutgoingAttachment],
 ) -> Result<Vec<String>, String> {
     if attachments.is_empty() {
@@ -1150,8 +1172,12 @@ async fn persist_outgoing_attachments(
         let file_type = crate::services::parser::file_type_from_mime(&att.mime);
         let now = chrono::Utc::now().to_rfc3339();
         sqlx::query(
-            "INSERT INTO files (id, pid, name, type, mime, size, url, st) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            "INSERT INTO files (id, pid, name, type, mime, size, url, st, source_message_ids) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
+             ON CONFLICT(id) DO UPDATE SET \
+                source_message_ids = excluded.source_message_ids, \
+                pid = excluded.pid, \
+                st = excluded.st",
         )
         .bind(&file_id)
         .bind(contact_id)
@@ -1161,9 +1187,25 @@ async fn persist_outgoing_attachments(
         .bind(att.bytes.len() as i64)
         .bind(&relative)
         .bind(&now)
+        .bind(format!("[\"{}\"]", m_id))
         .execute(pool)
         .await
         .map_err(|e| format!("insert file row {file_id}: {e}"))?;
+
+        // Merge into existing source_message_ids if any.
+        let existing: String = sqlx::query_scalar("SELECT source_message_ids FROM files WHERE id = $1")
+            .bind(&file_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| format!("read source_message_ids: {e}"))?;
+        let merged = crate::services::db::merge_json_array(&existing, &format!("[\"{}\"]", m_id))
+            .map_err(|e| format!("merge_json_array: {e}"))?;
+        sqlx::query("UPDATE files SET source_message_ids = $1 WHERE id = $2")
+            .bind(&merged)
+            .bind(&file_id)
+            .execute(pool)
+            .await
+            .map_err(|e| format!("update source_message_ids: {e}"))?;
 
         ids.push(file_id);
     }
