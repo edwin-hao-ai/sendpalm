@@ -6,6 +6,7 @@
 //! accounts added in Settings start syncing without an app restart.
 
 use crate::services::imap::{ImapClient, IDLE_TIMEOUT};
+use crate::services::mailbox_resolver::resolve_all;
 use crate::services::providers;
 use crate::services::vault;
 use crate::services::{load_test_credentials, EmailCredentials};
@@ -187,6 +188,40 @@ fn spawn_account_loop(
             .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
             .map(|v| sync_frequency_from_json(&v))
             .unwrap_or(IDLE_TIMEOUT);
+
+        // Resolve server-side folder names once per account boot, before the
+        // first sync. The result is persisted into accounts.settings_json.syncFolders
+        // so subsequent ticks reuse the same mapping.
+        match client.list_mailboxes().await {
+            Ok(server) => {
+                let resolved = resolve_all(&server);
+                eprintln!(
+                    "[mailbox] resolved folders for {}: {:?}",
+                    account.account_id, resolved
+                );
+                let resolved_json = serde_json::json!({
+                    "folders": resolved.iter().map(|n| serde_json::json!({
+                        "name": n,
+                        "enabled": true,
+                    })).collect::<Vec<_>>()
+                });
+                let mut updated_settings: serde_json::Value = serde_json::from_str(
+                    account.settings_json.as_deref().unwrap_or("{}"),
+                )
+                .unwrap_or_default();
+                if let Some(obj) = updated_settings.as_object_mut() {
+                    obj.insert("syncFolders".to_string(), resolved_json);
+                }
+                account.settings_json = Some(updated_settings.to_string());
+                let _ = upsert_account(&pool, &account).await;
+            }
+            Err(e) => {
+                eprintln!(
+                    "[mailbox] list_mailboxes failed for {}: {e}; using default folders",
+                    account.account_id
+                );
+            }
+        }
 
         if !stop.load(Ordering::Relaxed) {
             if let Err(e) = sync_and_notify(&app, &pool, &client, &mut account).await {
