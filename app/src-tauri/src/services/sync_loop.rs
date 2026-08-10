@@ -626,6 +626,26 @@ async fn save_folder_sync_state(
     Ok(())
 }
 
+/// Test seam: given a starting cursor and a list of `(uid, success)`
+/// outcomes, return `(inserted, new_cursor)`. The cursor is the largest UID
+/// whose outcome was `success`; it never advances past a failed UID.
+pub fn advance_cursor(
+    start: u32,
+    results: &[(u32, bool)],
+) -> (u32, u32) {
+    let mut cursor = start;
+    let mut inserted = 0u32;
+    for &(uid, ok) in results {
+        if ok {
+            cursor = cursor.max(uid);
+            inserted += 1;
+        } else {
+            break;
+        }
+    }
+    (inserted, cursor)
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn sync_folder(
     _app: &AppHandle,
@@ -649,9 +669,9 @@ async fn sync_folder(
             cursor = bundle.highest_uid;
             break;
         }
-        let chunk_highest = bundle.highest_uid;
+        let mut chunk_outcomes: Vec<(u32, bool)> = Vec::with_capacity(bundle.messages.len());
         for (uid, parsed) in &bundle.messages {
-            insert_message(
+            let ok = insert_message(
                 data_dir,
                 pool,
                 account,
@@ -660,14 +680,18 @@ async fn sync_folder(
                 parsed,
                 previous_last_uid,
             )
-            .await?;
-            inserted += 1;
+            .await
+            .is_ok();
+            chunk_outcomes.push((*uid, ok));
         }
-        if bundle.highest_uid <= cursor {
-            cursor = chunk_highest;
+        let (chunk_inserted, chunk_last_ok) = advance_cursor(cursor, &chunk_outcomes);
+        inserted += chunk_inserted;
+        let next_cursor = chunk_last_ok.max(bundle.highest_uid);
+        cursor = next_cursor;
+        if !chunk_outcomes.iter().all(|(_, ok)| *ok) {
+            // Don't skip past failures within a chunk.
             break;
         }
-        cursor = chunk_highest;
         if (bundle.messages.len() as u32) < crate::services::imap::MAX_PER_TICK {
             break;
         }
