@@ -104,6 +104,12 @@ pub fn run() {
             sql: include_str!("../migrations/0014_gate_screened_backfill.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 15,
+            description: "add_files_source_message_ids",
+            sql: include_str!("../migrations/0015_file_source_message_ids.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     eprintln!("[sendpalm] starting tauri builder");
