@@ -1217,13 +1217,6 @@ function PreferencesTab() {
     <div>
       <SectionTitle>Notifications</SectionTitle>
       <PreferencesNotificationsTab />
-      <Toggle
-        label="每日摘要邮件"
-        checked={s.preferences.notifications.digest}
-        onChange={(v) =>
-          setAppSettings("preferences", "notifications", "digest", v)
-        }
-      />
 
       <SectionTitle>Security</SectionTitle>
       <Toggle
@@ -2019,6 +2012,7 @@ function PreferencesNotificationsTab() {
                   quietHoursStart: e.currentTarget.value,
                 })
               }
+              style={inputStyle}
             />
           </label>
           <label>
@@ -2032,10 +2026,22 @@ function PreferencesNotificationsTab() {
                   quietHoursEnd: e.currentTarget.value,
                 })
               }
+              style={inputStyle}
             />
           </label>
         </div>
       </Show>
+      <ToggleRow
+        label="每日摘要邮件"
+        description="每天发送一封汇总未读邮件的摘要。"
+        checked={prefs().digest}
+        onChange={(v) =>
+          setAppSettings("preferences", "notifications", {
+            ...prefs(),
+            digest: v,
+          })
+        }
+      />
     </div>
   );
 }
