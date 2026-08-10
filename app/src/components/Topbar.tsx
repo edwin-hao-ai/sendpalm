@@ -2,6 +2,8 @@
 
 import { Show, For } from "solid-js";
 import { Icon } from "./Icon";
+import { BrandMark } from "./BrandMark";
+import { useViewport } from "../utils/gestures";
 import {
   commandPaletteOpen,
   setCommandPaletteOpen,
@@ -20,6 +22,7 @@ import { createSignal, onCleanup, createResource } from "solid-js";
 import { listAccounts, countUnreadNotifications } from "../stores/data";
 
 export function Topbar() {
+  const { isMobile } = useViewport();
   const currentTitle = () => {
     const sec = NAV_SECTIONS.find((s) => s.view === view());
     return sec?.label ?? "SendPalm";
@@ -32,27 +35,27 @@ export function Topbar() {
         display: "flex",
         "align-items": "center",
         "justify-content": "space-between",
-        padding: "0 var(--space-5)",
+        padding: isMobile()
+          ? "0 var(--space-5)"
+          : "0 var(--space-5) 0 var(--titlebar-traffic-pad)",
         background: "var(--surface)",
         "border-bottom": "0.5px solid var(--border)",
         gap: "var(--space-4)",
         position: "relative",
         "z-index": "var(--z-sticky)",
+        "-webkit-app-region": "drag",
       }}
     >
+      <BrandMark />
       <div
         style={{
           display: "flex",
           "align-items": "center",
           gap: "var(--space-2)",
           "min-width": "0",
+          "-webkit-app-region": "no-drag",
         }}
       >
-        <Icon
-          name="ph-leaf"
-          size={18}
-          style={{ color: "var(--palm)", "flex-shrink": "0" }}
-        />
         <span
           style={{
             "font-family": "var(--font-display)",
@@ -100,6 +103,7 @@ export function Topbar() {
             "min-width": "0",
             "font-family": "var(--font-body)",
             outline: "none",
+            "-webkit-app-region": "no-drag",
           }}
         />
       </div>
@@ -111,6 +115,7 @@ export function Topbar() {
           display: "flex",
           "align-items": "center",
           gap: "var(--space-2)",
+          "-webkit-app-region": "no-drag",
         }}
       >
         <button
@@ -262,7 +267,7 @@ function SyncBadge() {
   };
 
   return (
-    <div style={{ position: "relative" }}>
+    <div style={{ position: "relative", "-webkit-app-region": "no-drag" }}>
       <button
         onClick={() => setOpen(!open())}
         title="IMAP 同步状态"
