@@ -17,7 +17,7 @@ export async function ensureNotificationPermission(): Promise<void> {
   const prefs = appSettings.preferences.notifications;
   if (!prefs.desktop) {
     // User has explicitly opted out — no prompt.
-    await pushPrefsToRust(prefs);
+    await notifySettingsChanged(prefs);
     return;
   }
 
@@ -30,10 +30,10 @@ export async function ensureNotificationPermission(): Promise<void> {
       desktop: granted,
     });
   }
-  await pushPrefsToRust(appSettings.preferences.notifications);
+  await notifySettingsChanged(appSettings.preferences.notifications);
 }
 
-async function pushPrefsToRust(prefs: {
+export async function notifySettingsChanged(prefs: {
   desktop: boolean;
   quietHoursEnabled: boolean;
   quietHoursStart: string;
@@ -42,10 +42,10 @@ async function pushPrefsToRust(prefs: {
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("notify_settings_changed", {
-      desktop_enabled: prefs.desktop,
-      quiet_hours_enabled: prefs.quietHoursEnabled,
-      quiet_hours_start: prefs.quietHoursStart,
-      quiet_hours_end: prefs.quietHoursEnd,
+      desktopEnabled: prefs.desktop,
+      quietHoursEnabled: prefs.quietHoursEnabled,
+      quietHoursStart: prefs.quietHoursStart,
+      quietHoursEnd: prefs.quietHoursEnd,
     });
   } catch {
     // The Rust side will pick up the next store.set on app restart.

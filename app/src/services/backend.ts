@@ -69,19 +69,19 @@ export async function sendEmailViaBackend(
       to,
       subject,
       body,
-      html_body: htmlBody,
-      account_id: accountId,
+      htmlBody,
+      accountId,
       attachments,
       cc,
       bcc,
-      from_override: fromOverride,
+      fromOverride,
     },
   );
 }
 
 export async function fetchMailboxes(accountId: string): Promise<string[]> {
   const r = await safeInvoke<string[]>("list_mailboxes", {
-    account_id: accountId,
+    accountId,
   });
   return r ?? [];
 }
@@ -90,7 +90,7 @@ export async function syncNow(
   accountId: string,
   mailbox: string = "INBOX",
 ): Promise<{ new_messages: number; last_uid: number } | null> {
-  return safeInvoke("sync_now", { account_id: accountId, mailbox });
+  return safeInvoke("sync_now", { accountId, mailbox });
 }
 
 export async function getSyncState(accountId: string): Promise<SyncStateDto> {
