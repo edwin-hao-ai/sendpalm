@@ -37,12 +37,9 @@ JS 端把 9 个 snake_case keys 改为 camelCase,Rust 不动。修完后所有 1
 
 ## 4. 改动清单 (单 commit `fix(ipc): rename JS payload keys to camelCase (Tauri 2 default)`)
 
-### 4.1 `app/src/services/backend.ts` (5 处 + 1 接口字段)
+### 4.1 `app/src/services/backend.ts` (5 处 payload key)
 
 ```diff
-- account_id: string;
-+ accountId: string;     // line 29 — SendOpts interface
-
   return safeInvoke<{ message_id: string; local_message_id?: string }>(
     "send_message",
     {
@@ -70,6 +67,8 @@ JS 端把 9 个 snake_case keys 改为 camelCase,Rust 不动。修完后所有 1
 ```
 
 > **TS shorthand**: 5 处 `key: var` 改为 `key` (ES2015+ 语法,本仓库 `tsconfig.json:8` 目标 ES2020 包含)。这样**无新引入任何 naming 不一致**。
+>
+> **不要改 `SyncStateDto` interface (line 28-34)** — 那是响应 DTO,不是请求 payload。Tauri 2 的 camelCase 转换只针对**命令参数**,不针对响应序列化。`SyncStateDto` Rust 端 (`commands/mod.rs:353-360`) 没有 `#[serde(rename_all = "camelCase")]`,所以线格式就是 snake_case,TS interface 当前正确。改动会撒谎。同理不动 `EmailProvider` (line 36-47) 和 `IcalEvent` (line 135-144)。
 
 ### 4.2 `app/src/services/notifications.ts` (4 处)
 

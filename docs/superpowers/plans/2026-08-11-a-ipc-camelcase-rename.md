@@ -23,31 +23,24 @@ Verbatim from spec + AGENTS.md:
 
 ---
 
-## Task 1: Rename keys in `app/src/services/backend.ts` + `SendOpts` interface
+## Task 1: Rename keys in `app/src/services/backend.ts` (5 payload keys only)
 
 **Files:**
-- Modify: `app/src/services/backend.ts:29` (interface field `account_id` → `accountId`)
 - Modify: `app/src/services/backend.ts:72,73,77,84,93` (5 payload keys)
 - Read first: `app/src/services/backend.ts` (163 lines, especially lines 25-100)
 
 **Interfaces:**
-- Consumes: current `backend.ts` with snake_case payload keys + `account_id: string` interface field.
-- Produces: `backend.ts` with all camelCase payload keys + `accountId: string` interface field. TS shorthand syntax used everywhere a key matches its variable.
+- Consumes: current `backend.ts` with snake_case payload keys.
+- Produces: `backend.ts` with all camelCase payload keys. TS shorthand syntax used everywhere a key matches its variable.
+- **Do NOT touch `SyncStateDto`, `EmailProvider`, `IcalEvent` interfaces** — those are response DTOs (or calendar event struct), not request payloads. Tauri 2's camelCase conversion applies only to command arguments, not response serialization. `SyncStateDto` Rust struct has no `#[serde(rename_all = "camelCase")]` so wire format is snake_case — TS interface is currently correct.
 
-- [ ] **Step 1: Read current `backend.ts` lines 1-100**
+- [ ] **Step 1: Read current `backend.ts` lines 25-100**
 
 Verify the exact code shape. Note especially:
-- The `SendOpts` interface (around line 29).
-- The 5 call sites at lines 67-77 (send_message), 82-86 (fetchMailboxes), 92-94 (syncNow).
+- The `SyncStateDto` interface (around line 28-34) — DO NOT modify.
+- The 5 call sites at lines 67-79 (send_message), 82-86 (fetchMailboxes), 89-94 (syncNow).
 
-- [ ] **Step 2: Rename `account_id: string` → `accountId: string` (interface field)**
-
-```diff
-- account_id: string;
-+ accountId: string;
-```
-
-- [ ] **Step 3: Rename payload keys at lines 72, 73, 77 (send_message call)**
+- [ ] **Step 2: Rename payload keys at lines 72, 73, 77 (send_message call)**
 
 ```diff
   return safeInvoke<{ message_id: string; local_message_id?: string }>(
@@ -67,7 +60,7 @@ Verify the exact code shape. Note especially:
 
 Use TS shorthand — `htmlBody, accountId, fromOverride,` not `htmlBody: htmlBody, ...`.
 
-- [ ] **Step 4: Rename payload key at line 84 (fetchMailboxes call)**
+- [ ] **Step 3: Rename payload key at line 84 (fetchMailboxes call)**
 
 ```diff
   const r = await safeInvoke<string[]>("list_mailboxes", {
@@ -76,7 +69,7 @@ Use TS shorthand — `htmlBody, accountId, fromOverride,` not `htmlBody: htmlBod
   });
 ```
 
-- [ ] **Step 5: Rename payload key at line 93 (syncNow call)**
+- [ ] **Step 4: Rename payload key at line 93 (syncNow call)**
 
 ```diff
   return safeInvoke("sync_now", {
@@ -86,17 +79,17 @@ Use TS shorthand — `htmlBody, accountId, fromOverride,` not `htmlBody: htmlBod
   });
 ```
 
-- [ ] **Step 6: Run `pnpm typecheck`**
+- [ ] **Step 5: Run `pnpm typecheck`**
 
 ```bash
 cd app && pnpm typecheck 2>&1 | tee qa-tmp/audit-2026-08-11-fix-a-typecheck.log
 ```
 
-Expected: 0 errors. If errors, check that `SendOpts.accountId` is the only field name change in the interface, and that no other file in `app/src` references `SendOpts.account_id`. (`grep "SendOpts"` may surface callers.)
+Expected: 0 errors. (Since no interface fields were renamed, no callers should break.)
 
-- [ ] **Step 7: Do NOT commit yet**
+- [ ] **Step 6: Do NOT commit yet**
 
-Task A.2 adds more renames + tests. Single commit at the end (per spec §4 commit message).
+Task 2 adds more renames + tests. Single commit at the end (per spec §4 commit message).
 
 ---
 
