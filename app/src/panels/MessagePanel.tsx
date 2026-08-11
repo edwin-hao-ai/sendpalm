@@ -55,11 +55,14 @@ import { addCalendarEvent, getAttachmentContent } from "../services/backend";
 import { useRefreshEffect, useViewport } from "../utils/gestures";
 import { formatMessageSource, messagePreview } from "./message-source";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { sanitizeEmailHtml } from "../utils/html";
 import { useAgent } from "../agent/useAgent";
 
 type ViewMode = "rendered" | "plain" | "source";
 
 function htmlEmailSrcdoc(html: string): string {
+  const safe = sanitizeEmailHtml(html);
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -71,8 +74,18 @@ img { max-width: 100%; height: auto; }
 a { color: #0A8F63; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 </style>
+<script>
+document.addEventListener('click', function(e) {
+  var a = e.target && e.target.closest && e.target.closest('a[href]');
+  if (!a) return;
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  e.stopPropagation();
+  try { parent.postMessage({ type: 'sendpalm:open-url', href: a.href }, '*'); } catch (_) {}
+}, true);
+</script>
 </head>
-<body>${html}</body>
+<body>${safe}</body>
 </html>`;
 }
 
@@ -639,6 +652,19 @@ export function MessagePanel(props: { messageId: string }) {
   const [labelOpen, setLabelOpen] = createSignal(false);
   const [moveOpen, setMoveOpen] = createSignal(false);
 
+  let currentIframe: HTMLIFrameElement | null = null;
+
+  onMount(() => {
+    const handler = (e: MessageEvent) => {
+      if (currentIframe && e.source !== currentIframe.contentWindow) return;
+      const data = e.data as { type?: string; href?: string } | null;
+      if (!data || data.type !== "sendpalm:open-url" || typeof data.href !== "string") return;
+      openUrl(data.href).catch(() => {});
+    };
+    window.addEventListener("message", handler);
+    onCleanup(() => window.removeEventListener("message", handler));
+  });
+
   onMount(() => {
     const onLabel = (ev: Event) => {
       const detail = (ev as CustomEvent).detail as { messageId?: string };
@@ -1051,6 +1077,7 @@ export function MessagePanel(props: { messageId: string }) {
                         >
                           <iframe
                             ref={(el) => {
+                              currentIframe = el;
                               el.onload = () => {
                                 try {
                                   const doc = el.contentDocument;
@@ -1064,7 +1091,7 @@ export function MessagePanel(props: { messageId: string }) {
                               };
                             }}
                             srcdoc={htmlEmailSrcdoc(m.bodyHtml!)}
-                            sandbox="allow-same-origin"
+                            sandbox="allow-scripts allow-same-origin"
                             style={{
                               width: "100%",
                               "min-height": "240px",

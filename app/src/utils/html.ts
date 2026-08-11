@@ -30,3 +30,35 @@ export function plainTextToHtml(text: string): string {
   );
   return withLinks;
 }
+
+export function sanitizeEmailHtml(html: string): string {
+  return html
+    // Strip <script>...</script> blocks (multi-line aware, case-insensitive)
+    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, "")
+    // Strip <meta http-equiv="refresh"> (redirect attack vector)
+    .replace(/<meta\b[^>]*\bhttp-equiv\s*=\s*["']?refresh["']?[^>]*>/gi, "")
+    // Strip <base> tags entirely (can hijack all relative URLs)
+    .replace(/<base\b[^>]*>/gi, "")
+    // Strip inline event handlers (onclick=, onload=, onerror=, etc.)
+    // No leading-whitespace requirement → catches <svg/onload=...> bypass
+    .replace(/\bon[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    // Neutralize javascript: URLs in href / src / action / formaction
+    .replace(
+      /(\s(?:href|src|action|formaction)\s*=\s*["']?)\s*javascript:[^"'>\s]*(["']?)/gi,
+      "$1#$2",
+    )
+    // Add rel="noopener noreferrer" to <a target=_blank> (with or without quotes)
+    .replace(
+      /<a\b([^>]*?)\btarget\s*=\s*["']?_blank["']?([^>]*?)>/gi,
+      (match, before, after) => {
+        if (/\brel\s*=/i.test(match)) {
+          return match.replace(
+            /\brel\s*=\s*["']?([^"']*)["']?/i,
+            (_r, rel) =>
+              `rel="${rel.includes("noopener") ? rel : `${rel} noopener`.trim()} noreferrer"`,
+          );
+        }
+        return `<a${before}target="_blank" rel="noopener noreferrer"${after}>`;
+      },
+    );
+}
