@@ -23,7 +23,7 @@ Verbatim from spec + AGENTS.md:
 
 ---
 
-## Task A.1: Rename keys in `app/src/services/backend.ts` + `SendOpts` interface
+## Task 1: Rename keys in `app/src/services/backend.ts` + `SendOpts` interface
 
 **Files:**
 - Modify: `app/src/services/backend.ts:29` (interface field `account_id` → `accountId`)
@@ -100,7 +100,7 @@ Task A.2 adds more renames + tests. Single commit at the end (per spec §4 commi
 
 ---
 
-## Task A.2: Rename keys in `app/src/services/notifications.ts`
+## Task 2: Rename keys in `app/src/services/notifications.ts`
 
 **Files:**
 - Modify: `app/src/services/notifications.ts:45,46,47,48` (4 payload keys)
@@ -143,7 +143,7 @@ A.3 adds tests, A.4 commits.
 
 ---
 
-## Task A.3: Add Vitest unit tests for `backend.ts` payload shapes
+## Task 3: Add Vitest unit tests for `backend.ts` payload shapes
 
 **Files:**
 - Create: `app/src/services/backend.test.ts`
@@ -175,7 +175,7 @@ Most likely failure mode: the `vi.mock` factory function timing — Vitest hoist
 
 ---
 
-## Task A.4: Add Vitest unit test for `notifications.ts` payload shape
+## Task 4: Add Vitest unit test for `notifications.ts` payload shape
 
 **Files:**
 - Create: `app/src/services/notifications.test.ts`
@@ -198,7 +198,7 @@ Expected: 1 test passes.
 
 ---
 
-## Task A.5: Full verification sweep + commit
+## Task 5: Full verification sweep + commit
 
 **Files:**
 - Stage: `app/src/services/backend.ts`, `app/src/services/backend.test.ts`, `app/src/services/notifications.ts`, `app/src/services/notifications.test.ts`
