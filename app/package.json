@@ -30,6 +30,7 @@
     "@tauri-apps/plugin-os": "^2",
     "@tauri-apps/plugin-sql": "^2",
     "@tauri-apps/plugin-store": "^2",
+    "dompurify": "^3.4.13",
     "fuse.js": "^7.5.0",
     "solid-js": "^1.9.3"
   },

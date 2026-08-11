@@ -56,7 +56,7 @@ import { useRefreshEffect, useViewport } from "../utils/gestures";
 import { formatMessageSource, messagePreview } from "./message-source";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { sanitizeEmailHtml } from "../utils/html";
+import { sanitizeEmailHtml, analyzeImages } from "../utils/html";
 import { useAgent } from "../agent/useAgent";
 
 type ViewMode = "rendered" | "plain" | "source";
@@ -73,6 +73,11 @@ html, body { margin: 0; padding: 0; font-family: system-ui, -apple-system, Blink
 img { max-width: 100%; height: auto; }
 a { color: #0A8F63; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+table { border-collapse: collapse; max-width: 100%; }
+td, th { padding: 6px 10px; vertical-align: top; }
+blockquote { border-left: 3px solid #0A8F63; margin: 0; padding: 0 0 0 12px; color: #666; font-style: italic; }
+.sp-img-hidden { display: none !important; }
+.sp-img-hidden[data-shown="true"] { display: inline !important; }
 </style>
 <script>
 document.addEventListener('click', function(e) {
@@ -83,6 +88,12 @@ document.addEventListener('click', function(e) {
   e.stopPropagation();
   try { parent.postMessage({ type: 'sendpalm:open-url', href: a.href }, '*'); } catch (_) {}
 }, true);
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'sendpalm:show-images') {
+    var imgs = document.querySelectorAll('.sp-img-hidden');
+    for (var i = 0; i < imgs.length; i++) imgs[i].setAttribute('data-shown', 'true');
+  }
+});
 </script>
 </head>
 <body>${safe}</body>
@@ -918,6 +929,9 @@ export function MessagePanel(props: { messageId: string }) {
                 const sender = () => senderFor(m);
                 const current = () => isCurrent(m);
                 const c = () => contactsById()[m.pid];
+                const imageAnalysis = createMemo(() =>
+                  m.bodyHtml ? analyzeImages(m.bodyHtml) : null,
+                );
                 return (
                   <div
                     data-thread-message
@@ -1075,6 +1089,20 @@ export function MessagePanel(props: { messageId: string }) {
                             </div>
                           }
                         >
+                          <Show when={(imageAnalysis()?.externalImageCount ?? 0) > 0}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const iframe = currentIframe;
+                                if (iframe?.contentWindow) {
+                                  iframe.contentWindow.postMessage({ type: "sendpalm:show-images" }, "*");
+                                }
+                              }}
+                            >
+                              Show images ({imageAnalysis()!.externalImageCount})
+                              {imageAnalysis()!.hasTrackingPixel ? " ⚠" : ""}
+                            </button>
+                          </Show>
                           <iframe
                             ref={(el) => {
                               currentIframe = el;

@@ -1,5 +1,66 @@
 /** HTML <-> plain text helpers used by Compose and message rendering. */
 
+import DOMPurify from "dompurify";
+
+const PLACEHOLDER_DATA_URL =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E";
+
+// Register hook once at module load (idempotent per module instance).
+DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+  if (node.nodeName === "IMG") {
+    const src = node.getAttribute("src");
+    if (src && /^https?:\/\//i.test(src)) {
+      node.setAttribute("data-original-src", src);
+      node.setAttribute("src", PLACEHOLDER_DATA_URL);
+      node.classList.add("sp-img-hidden");
+    }
+  } else if (node.nodeName === "A" && node.getAttribute("target") === "_blank") {
+    const rel = node.getAttribute("rel") || "";
+    const tokens = new Set(rel.split(/\s+/).filter(Boolean));
+    tokens.add("noopener");
+    tokens.add("noreferrer");
+    node.setAttribute("rel", Array.from(tokens).join(" "));
+  }
+});
+
+const EMAIL_ALLOWED_TAGS = [
+  "a", "abbr", "address", "article", "aside", "b", "blockquote", "br",
+  "caption", "cite", "code", "col", "colgroup", "dd", "del", "details",
+  "dfn", "div", "dl", "dt", "em", "figcaption", "figure", "footer",
+  "h1", "h2", "h3", "h4", "h5", "h6", "header", "hgroup", "hr", "i",
+  "img", "ins", "kbd", "li", "main", "mark", "nav", "ol", "p", "pre",
+  "q", "samp", "section", "small", "span", "strong", "sub", "summary",
+  "sup", "table", "tbody", "td", "tfoot", "th", "thead", "time",
+  "tr", "u", "ul", "var",
+];
+
+export function sanitizeEmailHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: EMAIL_ALLOWED_TAGS,
+    FORBID_TAGS: ["script", "object", "embed", "link", "meta", "base", "iframe", "frame", "frameset", "form", "input", "button", "textarea", "select"],
+    FORBID_ATTR: ["onload", "onerror", "onclick", "onmouseover", "onmouseout", "onfocus", "onblur", "onkeydown", "onkeyup", "onkeypress", "onsubmit"],
+    ALLOW_DATA_ATTR: false,
+    KEEP_CONTENT: true,
+    ADD_ATTR: ["target", "rel"],
+  });
+}
+
+export interface ImageAnalysis {
+  safeHtml: string;
+  externalImageCount: number;
+  hasTrackingPixel: boolean;
+}
+
+const TRACKING_DIMENSIONS = /width\s*[:=]\s*["']?0|height\s*[:=]\s*["']?0|display\s*:\s*none|visibility\s*:\s*hidden/i;
+
+export function analyzeImages(html: string): ImageAnalysis {
+  const safeHtml = sanitizeEmailHtml(html);
+  const externalMatches = html.match(/<img\b[^>]*\bsrc\s*=\s*["']?https?:\/\/[^"'>\s]+/gi) || [];
+  const externalImageCount = externalMatches.length;
+  const hasTrackingPixel = externalMatches.some((m) => TRACKING_DIMENSIONS.test(m));
+  return { safeHtml, externalImageCount, hasTrackingPixel };
+}
+
 export function htmlToPlainText(html: string): string {
   return html
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
@@ -13,11 +74,6 @@ export function htmlToPlainText(html: string): string {
     .trim();
 }
 
-/** Convert a plain-text user input into a safe minimal HTML body.
- *  - escapes HTML entities
- *  - converts line breaks to <br>
- *  - auto-links http/https URLs
- */
 export function plainTextToHtml(text: string): string {
   const escaped = text
     .replace(/&/g, "&amp;")
@@ -29,36 +85,4 @@ export function plainTextToHtml(text: string): string {
     '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>',
   );
   return withLinks;
-}
-
-export function sanitizeEmailHtml(html: string): string {
-  return html
-    // Strip <script>...</script> blocks (multi-line aware, case-insensitive)
-    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, "")
-    // Strip <meta http-equiv="refresh"> (redirect attack vector)
-    .replace(/<meta\b[^>]*\bhttp-equiv\s*=\s*["']?refresh["']?[^>]*>/gi, "")
-    // Strip <base> tags entirely (can hijack all relative URLs)
-    .replace(/<base\b[^>]*>/gi, "")
-    // Strip inline event handlers (onclick=, onload=, onerror=, etc.)
-    // No leading-whitespace requirement → catches <svg/onload=...> bypass
-    .replace(/\bon[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-    // Neutralize javascript: URLs in href / src / action / formaction
-    .replace(
-      /(\s(?:href|src|action|formaction)\s*=\s*["']?)\s*javascript:[^"'>\s]*(["']?)/gi,
-      "$1#$2",
-    )
-    // Add rel="noopener noreferrer" to <a target=_blank> (with or without quotes)
-    .replace(
-      /<a\b([^>]*?)\btarget\s*=\s*["']?_blank["']?([^>]*?)>/gi,
-      (match, before, after) => {
-        if (/\brel\s*=/i.test(match)) {
-          return match.replace(
-            /\brel\s*=\s*["']?([^"']*)["']?/i,
-            (_r, rel) =>
-              `rel="${rel.includes("noopener") ? rel : `${rel} noopener`.trim()} noreferrer"`,
-          );
-        }
-        return `<a${before}target="_blank" rel="noopener noreferrer"${after}>`;
-      },
-    );
 }
