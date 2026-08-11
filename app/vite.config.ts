@@ -21,8 +21,9 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // tell Vite to ignore watching `src-tauri` and the mddock vault overlay
+      // (AGENTS.md §11: this repo is overlaid by mddock at .mddock/)
+      ignored: ["**/src-tauri/**", "**/.mddock/**"],
     },
   },
 
