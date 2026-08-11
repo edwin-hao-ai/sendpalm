@@ -1,0 +1,12 @@
+/Users/edwinhao/sendpalm/app/src/services/backend.ts:17:async function safeInvoke<T>(
+/Users/edwinhao/sendpalm/app/src/services/backend.ts:66:  return safeInvoke<{ message_id: string; local_message_id?: string }>(
+/Users/edwinhao/sendpalm/app/src/services/backend.ts:83:  const r = await safeInvoke<string[]>("list_mailboxes", {
+/Users/edwinhao/sendpalm/app/src/services/backend.ts:93:  return safeInvoke("sync_now", { account_id: accountId, mailbox });
+/Users/edwinhao/sendpalm/app/src/services/backend.ts:97:  const r = await safeInvoke<SyncStateDto>("get_sync_state", { accountId });
+/Users/edwinhao/sendpalm/app/src/services/backend.ts:110:  const r = await safeInvoke<EmailProvider[]>("list_email_providers");
+/Users/edwinhao/sendpalm/app/src/services/backend.ts:120:  const r = await safeInvoke<void>("vault_save", { accountId, password });
+/Users/edwinhao/sendpalm/app/src/services/backend.ts:125:  return safeInvoke<string | null>("vault_load", { accountId });
+/Users/edwinhao/sendpalm/app/src/services/backend.ts:129:  const r = await safeInvoke<void>("vault_delete", { accountId });
+/Users/edwinhao/sendpalm/app/src/services/backend.ts:150:  return safeInvoke<string>("add_calendar_event", { invite, contactId });
+/Users/edwinhao/sendpalm/app/src/services/backend.ts:156:  return safeInvoke<string>("get_attachment_content", { fileId });
+/Users/edwinhao/sendpalm/app/src/services/backend.ts:162:  return safeInvoke<string>("get_attachment_path", { fileId });

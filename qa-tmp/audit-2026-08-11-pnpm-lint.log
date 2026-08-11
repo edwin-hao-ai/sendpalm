@@ -1,0 +1,9 @@
+ESLint: 1 errors, 0 warnings in 1 files
+═══════════════════════════════════════
+Top rules:
+  @typescript-eslint/no-unused-vars (1x)
+
+Top files:
+  views.spec.ts (1 issues)
+    @typescript-eslint/no-unused-vars (1)
+[full output: ~/Library/Application Support/rtk/tee/1786433509_lint.log]

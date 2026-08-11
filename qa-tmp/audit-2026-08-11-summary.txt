@@ -1,0 +1,62 @@
+===== qa-tmp/audit-2026-08-11-cargo-build.log =====
+cargo build (0 crates compiled)
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.04s
+
+===== qa-tmp/audit-2026-08-11-cargo-clippy.log =====
+cargo clippy: No issues found
+
+===== qa-tmp/audit-2026-08-11-cargo-test.log =====
+cargo test: 62 passed (15 suites, 0.22s)
+
+===== qa-tmp/audit-2026-08-11-pnpm-e2e.log =====
+  ✓  29 e2e/workflows.spec.ts:376:3 › Email workflows › Thread-first detail expands older message and shows both bodies (3.5s)
+  ✓  30 e2e/workflows.spec.ts:424:3 › Email workflows › Trash action shows undo toast and restores message to Imbox (4.6s)
+  ✓  31 e2e/workflows.spec.ts:453:3 › Email workflows › Source view renders the raw message source (3.3s)
+  ✓  32 e2e/workflows.spec.ts:468:3 › Email workflows › Save message as draft from MessagePanel More menu (3.7s)
+  ✓  33 e2e/workflows.spec.ts:490:3 › Email workflows › LiveSearch surfaces events and jumps to Calendar on click (2.9s)
+  ✓  34 e2e/workflows.spec.ts:528:3 › Email workflows › MessagePanel header Summarize opens the Agent panel (3.4s)
+  ✓  35 e2e/workflows.spec.ts:542:3 › Email workflows › MessagePanel header Copy copies the message body to clipboard (3.3s)
+  ✓  36 e2e/workflows.spec.ts:558:3 › Email workflows › MessagePanel header Download triggers a message download (3.5s)
+  ✓  37 e2e/workflows.spec.ts:572:3 › Email workflows › Calendar filter chips filter events by kind (3.0s)
+  ✓  38 e2e/workflows.spec.ts:667:3 › Email workflows › More menu direct move moves a message to Records (3.9s)
+  ✓  39 e2e/workflows.spec.ts:692:3 › Email workflows › More menu Ask Agent opens the Agent panel (3.5s)
+  ✓  40 e2e/workflows.spec.ts:705:3 › Email workflows › ContactPanel indexes messages, files and events by contact (3.7s)
+  ✓  41 e2e/workflows.spec.ts:826:3 › Email workflows › Reply All opens Compose with sender, original To and CC (3.6s)
+  ✓  42 e2e/workflows.spec.ts:859:3 › Email workflows › MessagePanel shows attachments and can trigger download (3.5s)
+  ✓  43 e2e/workflows.spec.ts:924:3 › Email workflows › Compose can attach a file and send in browser mode (3.2s)
+  ✓  44 e2e/workflows.spec.ts:1059:3 › Mobile workflows with data › Imbox, MessagePanel, ContactPanel, Calendar and Files render on iPhone (5.0s)
+  ✓  45 e2e/workflows.spec.ts:1147:3 › Mobile workflows with data › Mobile reply flow opens Compose full-screen (4.1s)
+
+  1 skipped
+  44 passed (2.7m)
+
+===== qa-tmp/audit-2026-08-11-pnpm-install.log =====
+node_modules exists, skip
+Date: 2026-08-11T07:28:39Z
+
+===== qa-tmp/audit-2026-08-11-pnpm-lint.log =====
+ESLint: 1 errors, 0 warnings in 1 files
+═══════════════════════════════════════
+Top rules:
+  @typescript-eslint/no-unused-vars (1x)
+
+Top files:
+  views.spec.ts (1 issues)
+    @typescript-eslint/no-unused-vars (1)
+[full output: ~/Library/Application Support/rtk/tee/1786433509_lint.log]
+
+===== qa-tmp/audit-2026-08-11-pnpm-test.log =====
+$ vitest run
+
+ RUN  v4.1.10 /Users/edwinhao/sendpalm/app
+
+
+ Test Files  19 passed (19)
+      Tests  137 passed (137)
+   Start at  15:28:55
+   Duration  3.81s (transform 1.19s, setup 4.81s, import 1.35s, tests 224ms, environment 15.03s)
+
+
+===== qa-tmp/audit-2026-08-11-pnpm-typecheck.log =====
+$ tsc --noEmit
+

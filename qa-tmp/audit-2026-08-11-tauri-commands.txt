@@ -1,0 +1,35 @@
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs-#[tauri::command]
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs:pub async fn sync_now(
+--
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs-#[tauri::command]
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs:pub async fn list_mailboxes(account_id: String) -> Result<Vec<String>, String> {
+--
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs-#[allow(clippy::too_many_arguments)]
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs:pub async fn send_message(
+--
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs-#[tauri::command]
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs:pub async fn get_sync_state(app: AppHandle, account_id: String) -> Result<SyncStateDto, String> {
+--
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs-#[tauri::command]
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs:pub async fn list_email_providers() -> Result<Vec<EmailProvider>, String> {
+--
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs-#[tauri::command]
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs:pub async fn vault_save(account_id: String, password: String) -> Result<(), String> {
+--
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs-#[tauri::command]
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs:pub async fn vault_load(account_id: String) -> Result<Option<String>, String> {
+--
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs-#[tauri::command]
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs:pub async fn vault_delete(account_id: String) -> Result<(), String> {
+--
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs-#[tauri::command]
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs:pub async fn add_calendar_event(
+--
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs-#[tauri::command]
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs:pub async fn get_attachment_content(app: AppHandle, file_id: String) -> Result<String, String> {
+--
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs-#[tauri::command]
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/mod.rs:pub async fn get_attachment_path(app: AppHandle, file_id: String) -> Result<String, String> {
+--
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/notification_settings.rs-#[tauri::command]
+/Users/edwinhao/sendpalm/app/src-tauri/src/commands/notification_settings.rs:pub async fn notify_settings_changed(

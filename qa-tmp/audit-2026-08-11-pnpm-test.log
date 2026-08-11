@@ -1,0 +1,10 @@
+$ vitest run
+
+ RUN  v4.1.10 /Users/edwinhao/sendpalm/app
+
+
+ Test Files  19 passed (19)
+      Tests  137 passed (137)
+   Start at  15:28:55
+   Duration  3.81s (transform 1.19s, setup 4.81s, import 1.35s, tests 224ms, environment 15.03s)
+
