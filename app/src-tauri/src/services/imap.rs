@@ -198,11 +198,8 @@ impl ImapClient {
 
         let uid_validity = mailbox.uid_validity.unwrap_or(0);
 
-        // Fetch in chunks. async-imap interprets the range `a:b` as UID a through UID b
-        // and then * (highest) up to the implicit final UID. To get a strict bounded
-        // chunk we use a sequence of explicit ranges. We start at last_uid+1 and walk
-        // forward up to MAX_PER_TICK per tick. On the first run, last_uid=0 and we
-        // start at 1.
+        // UID-range fetch via UID FETCH command (RFC 3501 §6.4.8); Session::fetch is
+        // sequence-based and would break after any expunge (sequence ≠ UID).
         let mut messages = Vec::new();
         let mut highest_uid = last_uid;
         let start_uid = last_uid.saturating_add(1).max(1);
@@ -210,7 +207,7 @@ impl ImapClient {
         let range = format!("{start_uid}:{end_uid}");
         eprintln!("[imap] FETCH {range} on {mailbox_name}");
         let mut stream = session
-            .fetch(&range, "(FLAGS UID ENVELOPE BODY.PEEK[])")
+            .uid_fetch(&range, "(FLAGS UID ENVELOPE BODY.PEEK[])")
             .await
             .map_err(|e| format!("fetch: {e}"))?;
 

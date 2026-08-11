@@ -21,6 +21,17 @@ use std::time::Duration;
 use tauri::async_runtime::{spawn, JoinHandle};
 use tauri::{AppHandle, Emitter, Manager};
 
+/// RFC 3501 §6.4.8: UIDVALIDITY change invalidates the UID cursor cache.
+/// Returns `Some(0)` to signal cursor reset, `None` to keep current cursor.
+/// First sync (stored == 0) is treated as initial sync, no reset.
+fn detect_uid_validity_change(stored: u32, current: u32) -> Option<u32> {
+    if stored != 0 && stored != current {
+        Some(0)
+    } else {
+        None
+    }
+}
+
 /// When IDLE fails (server doesn't support it, connection drop, etc.), wait
 /// this long before the next sync attempt.
 const IDLE_ERROR_BACKOFF: Duration = Duration::from_secs(60);
@@ -742,8 +753,17 @@ async fn sync_folder(
         }
     }
 
+    let new_uv = uid_validity;
+    if let Some(reset_to) = detect_uid_validity_change(account.uid_validity, new_uv) {
+        eprintln!(
+            "[sync_loop] UIDVALIDITY changed for {folder} ({} → {}); resetting cursor to {}",
+            account.uid_validity, new_uv, reset_to
+        );
+        cursor = reset_to;
+    }
+
     eprintln!("[sync] folder={folder} inserted={inserted} cursor={cursor}");
-    Ok((inserted, cursor, uid_validity))
+    Ok((inserted, cursor, new_uv))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1573,4 +1593,28 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<(), String> {
     .await
     .map_err(|e| format!("backfill gate queue: {e}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uid_validity_unchanged_keeps_cursor() {
+        assert_eq!(detect_uid_validity_change(123, 123), None);
+    }
+
+    #[test]
+    fn uid_validity_changed_resets_cursor_to_zero() {
+        assert_eq!(detect_uid_validity_change(123, 456), Some(0));
+        assert_eq!(detect_uid_validity_change(1, u32::MAX), Some(0));
+    }
+
+    #[test]
+    fn uid_validity_initial_sync_does_not_reset() {
+        // stored == 0 means we have no prior UIDVALIDITY recorded; this is
+        // either a brand-new account or a wiped cursor — treat as initial sync.
+        assert_eq!(detect_uid_validity_change(0, 123), None);
+        assert_eq!(detect_uid_validity_change(0, 0), None);
+    }
 }
