@@ -4,7 +4,7 @@
 //!
 //! See AGENTS.md §10 and the F plan §4.1 for the design.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
@@ -184,9 +184,88 @@ fn guess_mime(bytes: &[u8]) -> String {
     "application/octet-stream".to_string()
 }
 
+/// Delete the oldest cache files until the directory's total byte size is
+/// within `max_bytes`. Files are sorted by modification time ascending
+/// (oldest first). If the directory does not exist, this is a no-op.
+pub async fn enforce_cache_cap(cache_dir: &Path, max_bytes: u64) -> Result<(), String> {
+    let mut entries = match tokio::fs::read_dir(cache_dir).await {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("image_proxy: read cache dir {}: {e}", cache_dir.display())),
+    };
+
+    let mut files: Vec<(PathBuf, u64, std::time::SystemTime)> = Vec::new();
+    let mut total: u64 = 0;
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|e| format!("image_proxy: iterate cache dir: {e}"))?
+    {
+        let path = entry.path();
+        let meta = entry
+            .metadata()
+            .await
+            .map_err(|e| format!("image_proxy: stat {}: {e}", path.display()))?;
+        if !meta.is_file() {
+            continue;
+        }
+        let size = meta.len();
+        let mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        total += size;
+        files.push((path, size, mtime));
+    }
+
+    files.sort_by_key(|(_, _, mtime)| *mtime);
+
+    for (path, size, _) in files {
+        if total <= max_bytes {
+            break;
+        }
+        tokio::fs::remove_file(&path)
+            .await
+            .map_err(|e| format!("image_proxy: evict {}: {e}", path.display()))?;
+        total = total.saturating_sub(size);
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn enforce_cache_cap_below_limit_no_op() {
+        let cache_dir = std::env::temp_dir().join(format!("sendpalm-image-cache-{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir_all(&cache_dir).await.unwrap();
+        for name in ["one", "two", "three"] {
+            tokio::fs::write(cache_dir.join(name), [0; 4]).await.unwrap();
+        }
+
+        enforce_cache_cap(&cache_dir, 13).await.unwrap();
+
+        for name in ["one", "two", "three"] {
+            assert!(cache_dir.join(name).exists());
+        }
+        tokio::fs::remove_dir_all(cache_dir).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn enforce_cache_cap_above_limit_evicts_oldest() {
+        let cache_dir = std::env::temp_dir().join(format!("sendpalm-image-cache-{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir_all(&cache_dir).await.unwrap();
+        for name in ["oldest", "middle", "newest"] {
+            tokio::fs::write(cache_dir.join(name), [0; 4]).await.unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        enforce_cache_cap(&cache_dir, 8).await.unwrap();
+
+        assert!(!cache_dir.join("oldest").exists());
+        assert!(cache_dir.join("middle").exists());
+        assert!(cache_dir.join("newest").exists());
+        tokio::fs::remove_dir_all(cache_dir).await.unwrap();
+    }
 
     #[test]
     fn guess_mime_png() {

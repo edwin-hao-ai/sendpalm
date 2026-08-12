@@ -745,7 +745,6 @@ export function MessagePanel(props: { messageId: string }) {
   return (
     <div
       class="message-panel-root"
-      onClick={handlePlainTextLinkClick}
       style={{
         display: "flex",
         "flex-direction": "column",
@@ -1123,6 +1122,7 @@ export function MessagePanel(props: { messageId: string }) {
                           fallback={
                             <div
                               class="sp-plaintext-body"
+                              onClick={handlePlainTextLinkClick}
                               style={{
                                 "font-size": "var(--text-body-sm)",
                                 color: "var(--text-secondary)",

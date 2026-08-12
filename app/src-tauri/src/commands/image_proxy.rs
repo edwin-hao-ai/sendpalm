@@ -13,6 +13,7 @@ pub async fn fetch_image(url: String, app: AppHandle) -> Result<String, String> 
         .map_err(|e| format!("create cache dir: {e}"))?;
     let (bytes, mime) =
         crate::services::image_proxy::fetch_and_cache(&url, &cache_dir).await?;
+    crate::services::image_proxy::enforce_cache_cap(&cache_dir, 100 * 1024 * 1024).await?;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(format!("data:{};base64,{}", mime, b64))
 }
