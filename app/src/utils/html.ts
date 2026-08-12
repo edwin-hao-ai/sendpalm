@@ -81,7 +81,7 @@ export function plainTextToHtml(text: string): string {
     .replace(/>/g, "&gt;");
   const withBreaks = escaped.replace(/\r\n/g, "\n").replace(/\n/g, "<br>");
   const withLinks = withBreaks.replace(
-    /(https?:\/\/[^\s<]+)/g,
+    /(https?:\/\/[^\s<]+|mailto:[^\s<]+)/g,
     '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>',
   );
   return withLinks;

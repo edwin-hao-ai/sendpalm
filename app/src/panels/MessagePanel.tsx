@@ -56,7 +56,7 @@ import { useRefreshEffect, useViewport } from "../utils/gestures";
 import { formatMessageSource, messagePreview } from "./message-source";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { sanitizeEmailHtml, analyzeImages } from "../utils/html";
+import { sanitizeEmailHtml, analyzeImages, plainTextToHtml } from "../utils/html";
 import { useAgent } from "../agent/useAgent";
 
 type ViewMode = "rendered" | "plain" | "source";
@@ -120,6 +120,16 @@ export function MessagePanel(props: { messageId: string }) {
 
   const [viewMode, setViewMode] = createSignal<ViewMode>("rendered");
   const [expandedIds, setExpandedIds] = createSignal<Set<string>>(new Set());
+
+  const handlePlainTextLinkClick = (e: MouseEvent) => {
+    const target = e.target as HTMLElement | null;
+    const a = target?.closest?.("a[href]") as HTMLAnchorElement | null;
+    if (!a) return;
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openUrl(a.href).catch(() => {});
+  };
 
   useRefreshEffect(() => {
     void refetchMessage();
@@ -715,6 +725,8 @@ export function MessagePanel(props: { messageId: string }) {
 
   return (
     <div
+      class="message-panel-root"
+      onClick={handlePlainTextLinkClick}
       style={{
         display: "flex",
         "flex-direction": "column",
@@ -1066,6 +1078,7 @@ export function MessagePanel(props: { messageId: string }) {
                           when={viewMode() === "rendered" && m.bodyHtml}
                           fallback={
                             <div
+                              class="sp-plaintext-body"
                               style={{
                                 "font-size": "var(--text-body-sm)",
                                 color: "var(--text-secondary)",
@@ -1073,20 +1086,8 @@ export function MessagePanel(props: { messageId: string }) {
                                 "overflow-wrap": "anywhere",
                                 "word-break": "break-word",
                               }}
-                            >
-                              <For each={formatBodyParagraphs(m.body)}>
-                                {(p) => (
-                                  <p
-                                    style={{
-                                      margin: "0 0 var(--space-2) 0",
-                                      "white-space": "pre-wrap",
-                                    }}
-                                  >
-                                    {p}
-                                  </p>
-                                )}
-                              </For>
-                            </div>
+                               innerHTML={plainTextToHtml(m.body)}
+                            />
                           }
                         >
                           <Show when={(imageAnalysis()?.externalImageCount ?? 0) > 0}>
@@ -1840,16 +1841,6 @@ function ViewModeToggle(props: {
       </For>
     </div>
   );
-}
-
-function formatBodyParagraphs(body: string): string[] {
-  const text = body.trim();
-  if (!text) return [];
-  const paragraphs = text.split(/\n\s*\n/).filter((p) => p.trim());
-  if (paragraphs.length <= 1) {
-    return text.split("\n").map((p) => p.trim());
-  }
-  return paragraphs.map((p) => p.trim());
 }
 
 function baseSubject(subj: string): string {

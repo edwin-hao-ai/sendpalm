@@ -32,4 +32,17 @@ describe("plainTextToHtml", () => {
       'See <a href="https://example.com/path" target="_blank" rel="noopener noreferrer">https://example.com/path</a> here',
     );
   });
+
+  it("plainTextToHtml auto-links mailto URLs", () => {
+    const out = plainTextToHtml("Contact me at mailto:a@b.com or a@b.com");
+    expect(out).toContain('<a href="mailto:a@b.com"');
+  });
+
+  it("plainTextToHtml still escapes < > & after regex change", () => {
+    const out = plainTextToHtml("a < b & c > d");
+    expect(out).toContain("&lt;");
+    expect(out).toContain("&amp;");
+    expect(out).toContain("&gt;");
+    expect(out).not.toContain("<b>"); // not interpreted as HTML tag
+  });
 });
