@@ -397,3 +397,246 @@ Captures the recurring traps the next agent should avoid. Detailed explanations 
 - **`cli.send_email_via_backend`** signature changes are silently breaking: the frontend shim returns `null` for unknown commands, so a renamed parameter produces no error — just a Compose that "sends" nothing. Always keep `safeInvoke<…>` parameter names in sync with the Rust `#[tauri::command]` argument names.
 - **Tauri store plugin**: the `sendpalm.prefs.json` file is written only after `store.save()`. If a view reads via `store.get(...)` and never calls `set+save`, the file does not exist on disk and any FS-level test will see `null`. In `bootstrap.ts`, always set `onboarding_completed=true; store.save()` so the file materializes.
 - **本仓库被 mddock overlay**。`.mddock/` 是 mddock vault 状态目录 (含 tantivy 索引、audit.db、blobs.db), **不得**被 SendPalm 工具链观察、编译、提交。Vite `server.watch.ignored` 已加 `**/.mddock/**`; 任何后续新增 watcher、tsc include、tauri resources 都必须显式排除 `.mddock/**`。
+
+### 11.1 Lessons learned (Session 2026-08-12 audit-fix series)
+
+7-sub-project audit fix series (`23c6474` A · `22a601a` B · `5f3da2f` C · `ad8f133` D · `0910f98` E · `2a78c74` F · `3187d7d` G). All 9 HIGH-risk items from `docs/superpowers/audit/2026-08-11-email-html-link-audit.md` §3.3 + §5 + §7 fixed.
+
+- **`session.fetch` vs `session.uid_fetch` (RFC 3501 §6.4.8)** — never feed a UID-range string to `session.fetch(range, ...)`. It is **sequence**-fetch; sequence numbers diverge from UIDs after any expunge. Use `session.uid_fetch(range, "(FLAGS UID ENVELOPE BODY.PEEK[])")`. Coincidentally correct on pristine mailboxes; silently wrong on day 2. Fixed in `app/src-tauri/src/services/imap.rs` (Sub-D, `ad8f133`).
+- **Tauri 2 IPC convention is camelCase JS ↔ snake_case Rust, but ONLY for command arguments** — response DTOs (e.g. `SyncStateDto` in `backend.ts`) mirror the Rust wire format. Tauri 2 does the camelCase↔snake_case conversion only on the way IN to the Rust handler; serialization OUT is plain serde with whatever `rename_all` the Rust struct declares. Do NOT auto-rename response DTO fields to camelCase — most Rust structs here have no `#[serde(rename_all)]` and the wire is snake_case; renaming the TS interface to camelCase makes it lie about the wire shape. (`SyncStateDto` in `app/src/services/backend.ts` deliberately kept snake_case; see spec 2026-08-11-a §3 for the reasoning.)
+- **`safeInvoke` returns `null` on parse failure** — already in §11 above; reinforced by the Sub-A fix: 6 of 12 IPC commands had `null`-swallowing bug because JS sent `html_body`/`account_id` but Tauri 2 expects `htmlBody`/`accountId`. The frontend shim catches and returns null, so users saw "Compose sent" with no email leaving. **Any new `#[tauri::command]` must have its JS caller use camelCase keys.** Add a Vitest regression test (`expect(args).not.toHaveProperty("snake_case_key")`) so future re-introductions are caught.
+- **DOMPurify 3.x ships its own TypeScript types** — `@types/dompurify@3.x` is a **deprecated stub package** that contains no `.d.ts`. `pnpm add dompurify` is enough; do not also `pnpm add -D @types/dompurify`. (Sub-C Task 1, dropped after 1 fix round.)
+- **DOMPurify strips `<a target="_blank">` and `target`/`rel` attributes by default** — to safely rewrite `<a target="_blank">` → add `rel="noopener noreferrer"` in the `afterSanitizeAttributes` hook, also pass `ADD_ATTR: ["target", "rel"]` in the sanitize config. Without `ADD_ATTR`, the rewrite hook fires but the attributes never reach the output. (Sub-C Task 3 scope deviation, implementer fixed inline.)
+- **Tauri 2 CSP requires `'unsafe-inline'` for `script-src` and `style-src` when using iframe `srcdoc`** — the iframe srcdoc injects an inline `<script>` (click interceptor + show-images handler) and an inline `<style>` block (table/blockquote styles). Without `'unsafe-inline'` the srcdoc renders inert. Also: `connect-src` MUST include `ipc: http://ipc.localhost` for `safeInvoke`/`invoke` to reach Rust commands — Tauri 2's IPC bridge uses these schemes. Current strict CSP is in `app/src-tauri/tauri.conf.json` (Sub-G, `3187d7d`).
+- **`#mddock` `closest()` returns `Element`, not `HTMLAnchorElement`** — must cast `as HTMLAnchorElement | null` before reading `.href`. `tsc --noEmit` rejects `e.target.closest("a[href"]).href` without the cast. (Sub-E Task 3.)
+- **`vi.mock` is hoisted before imports** — any `const` referenced inside the factory must use `vi.hoisted(() => ({ ... }))`. Otherwise `ReferenceError: Cannot access 'x' before initialization`. (Sub-A Tasks 3, 4.)
+- **`pnpm lint --max-warnings=0` makes unused `// eslint-disable-next-line` directives themselves a lint error** — only add the directive if the rule actually fires on the next line; otherwise remove the directive. (Sub-C final review; Sub-G Task 5 reviewer caught the same issue.)
+- **Pre-existing dirty files in working tree are environment state, not task scope** — this repo's working tree routinely contains uncommitted `AGENTS.md` (system context load), `.gitignore` updates, `.claude/`, `.kimi/`, `.opencode/` (skill dirs), `qa-tmp/.DS_Store` (macOS metadata), and other agents' untracked plans. Sub-task reviewers must scope-check via `git status --short` against the brief's intended files only, not the full diff. (Sub-C Task 3, Sub-F Task 3.)
+- **iOS build on this darwin is supported** — Xcode toolchain + iOS Simulator runtimes are installed. `pnpm tauri ios build` produces a signed-or-unsigned `SendPalm.app` bundle at `~/Library/Developer/Xcode/DerivedData/sendpalm-app-*/Build/Products/release-iphoneos/`. First build is slow (~30 min cargo + ~2 min xcodebuild). Bash `5 min` timeouts are too short; use `60 min` for iOS builds. Per AGENTS §10.6 caveats: `devUrl` hash/query params don't survive into WKWebView; AppleScript/`osascript` clicks don't reach the Simulator's WKWebView under macOS Accessibility prompts — UI interaction verification remains manual, but compile verification is now in CI scope.
+- **Subagent-driven execution pattern works on this repo** — spec → plan → task brief → implementer subagent → reviewer subagent → fix rounds → final review. 7 sub-projects × ~5 tasks each = 35 dispatches, all reviewer-approved except 5 fix rounds (acceptable scope drift caught + corrected). Pattern survives subagent `vi.mock` hoisting quirks, log-path inconsistencies (`app/qa-tmp/` vs `qa-tmp/`), and pre-existing dirty files.
+
+---
+
+## 12. Agent Skills & Global Protocols
+
+SendPalm adopts a set of global agent skills stored in `~/.agents/skills/`. These skills are available to Kimi Code, Claude Code, OpenCode, and any other agent that reads the standard skill directory. **Invoke them by name** when the situation matches their description:
+
+| Skill | When to invoke |
+|---|---|
+| `managing-git-worktrees` | Before starting a non-trivial task, creating a worktree, merging a worktree branch, or cleaning up worktrees. |
+| `preventing-code-debt` | Before declaring a feature done, during review, or when planning periodic cleanup with subagents. |
+| `debugging-monorepo` | When a bug spans Rust / TypeScript / Tauri / frontend layers, or when previous fixes failed. |
+| `session-handoff` | When pausing unfinished work that another session may continue, or resuming such work. |
+| `pre-execution-safety` | Before running any shell command that could mutate shared state, especially git, filesystem, credentials, or production. |
+| `cleanup-and-docs-sync` | When planning periodic cleanup or verifying documentation matches code. |
+
+Additional Superpowers plugin skills are also available:
+
+| Skill | When to invoke |
+|---|---|
+| `using-git-worktrees` | Worktree setup and isolation decisions. |
+| `systematic-debugging` | Any bug, test failure, or unexpected behavior before proposing a fix. |
+| `subagent-driven-development` | When executing a plan with independent tasks that can run in parallel. |
+| `verification-before-completion` | Before claiming a task is complete, fixed, or passing. |
+
+**Rule**: if a skill applies, invoke it before acting. Do not skip skill discipline because the task "feels simple."
+
+---
+
+## 13. Worktree & Git Workflow
+
+Based on the MDDock worktree incidents, SendPalm uses the following hard rules to prevent lost work and cross-session overwrites.
+
+### 13.1 When to use a worktree
+
+| Situation | Use worktree? | Branch naming |
+|---|---|---|
+| New feature / bugfix / refactor | **Yes** | `feat/<slug>`, `fix/<slug>`, `refactor/<slug>` |
+| Multiple concurrent AI or human sessions | **Yes, one per session** | unique slugs |
+| Read-only exploration / review | No | stay on current tree |
+| Emergency hotfix | Yes | `hotfix/<slug>` |
+| Temporary spike / bug reproduction | Yes, delete same day | `spike/<slug>` |
+| Solo, <5 lines in one file | Optional; branch still safer | `fix/<slug>` |
+
+### 13.2 Creating a worktree
+
+1. Ensure `.worktrees/` is gitignored. If not:
+   ```bash
+   echo ".worktrees/" >> .gitignore
+   git add .gitignore && git commit -m "chore: ignore worktree directory"
+   ```
+2. Create from latest `main`:
+   ```bash
+   git fetch origin main
+   git worktree add .worktrees/feat/<slug> -b feat/<slug> origin/main
+   ```
+3. **Never create a worktree inside another worktree.**
+4. Bootstrap the new worktree before editing:
+   ```bash
+   cd .worktrees/feat/<slug>
+   pnpm install
+   cargo build
+   pnpm test || cargo test
+   ```
+   If baseline tests fail, stop and report.
+
+### 13.3 Working inside a worktree
+
+- Commit early and often. Uncommitted work can be lost on force-removal.
+- Lock long-running worktrees: `git worktree lock <path>`.
+- Keep shared handoff files outside the worktree, resolving paths via `git rev-parse --git-common-dir`.
+
+### 13.4 Merging back
+
+1. Preview the merge without committing:
+   ```bash
+   git fetch origin main
+   git merge origin/main --no-commit --no-ff
+   ```
+2. Resolve conflicts file by file:
+   - **UI/flow/behavior conflicts**: prefer the worktree's implementation, then manually port clearly newer bugfixes from `main`.
+   - **Non-UI code conflicts**: prefer the newer commit.
+   - **Never use `--theirs` or `--ours` wholesale.**
+3. Run regression tests and visual verification before pushing.
+
+### 13.5 Cleaning up
+
+```bash
+# Dry-run first
+git worktree remove --dry-run .worktrees/feat/<slug>
+# Then remove
+git worktree remove .worktrees/feat/<slug>
+git branch -d feat/<slug>
+```
+
+---
+
+## 14. Debugging Discipline
+
+SendPalm is a Tauri 2 + Rust + SolidJS monorepo. Bugs can hide across Rust commands, IPC bindings, frontend stores, and native shell behavior. Follow this discipline before editing code.
+
+1. **Lock the surface first.** Decide whether the symptom lives in:
+   - Rust backend (`src-tauri/src/`) → `cargo test`
+   - Tauri IPC / commands → check `src-tauri/src/commands/` and typed bindings in `app/src/ipc/`
+   - SolidJS frontend → `pnpm test`, browser devtools
+   - Tauri shell / native → `pnpm tauri dev`, panic logs, device logs
+   - Build / tooling → clean rebuild, source maps
+2. **Reproduce before fixing.** If you cannot reproduce the bug, you do not understand it.
+3. **Add boundary logs.** Log at the exact layer where expected diverges from actual.
+4. **Trace data flow backward** from the symptom to the source.
+5. **One hypothesis, one change, one verification.** Do not change multiple surfaces at once.
+6. **Three-strike rule.** If three fix attempts fail, stop and question the architecture before a fourth.
+7. **Read logs first.** Tauri panic log: `~/Library/Logs/com.sendpalm.app/`; browser/Tauri devtools console; Rust stderr.
+8. **Never debug in release builds.** Use dev/debug builds with source maps and symbols.
+
+Invoke the `debugging-monorepo` or `systematic-debugging` skill at the start of any non-trivial bug investigation.
+
+---
+
+## 15. Code Hygiene & Debt Prevention
+
+SendPalm already forbids technical debt in §3.2. This section adds the cleanup protocol.
+
+### 15.1 Prevention checklist (apply before every commit)
+
+1. **Delete, don't comment out.** No `_legacy`, `_old`, `.deprecated.*`, or commented-out blocks.
+2. **Remove unused code.** Imports, parameters, variables, functions, unreachable branches.
+3. **One logical change per commit.** No mixing refactor + feature + bugfix.
+4. **Match surrounding style.** Follow existing file patterns before imposing your own.
+5. **No speculative abstraction.** Don't extract a helper until it has ≥ 3 concrete callers.
+6. **Keep files small.** Soft limit 1200 lines per file; split before hitting it.
+7. **Update collateral.** Deleting a feature means deleting its tests, docs, i18n keys, types, and generated artifacts.
+8. **Tests prove the change.** Every behavior change has a failing test that turns green.
+
+### 15.2 Slop detection signals
+
+Watch for these AI-generation warning signs:
+
+| Signal | Fix |
+|---|---|
+| Unnecessary comments stating the obvious | Delete them. |
+| Defensive over-engineering (`as any`, broad try/catch) | Narrow types and error handling. |
+| Duplicated logic | Extract a shared helper. |
+| Magic numbers / strings | Move to named constants. |
+| TODO / FIXME without justification | Fix now or remove. |
+
+### 15.3 Periodic cleanup with subagents
+
+When debt accumulates, run a structured cleanup:
+
+1. **Audit** — identify hotspots (large files, duplicated code, dead code).
+2. **Triage** — prioritize by impact and risk.
+3. **Delegate** — use isolated subagents with narrow scopes. Never delegate whole-codebase cleanup or overlapping files in parallel.
+4. **Review** — verify each cleanup with tests and diff review.
+5. **Update debt ledger** — record what was cleaned and what remains.
+
+Invoke the `preventing-code-debt` skill before declaring a feature done or when planning cleanup.
+
+---
+
+## 16. Cross-Session Handoff & Context
+
+AI sessions lose context when they end, get compacted, or run in parallel. Use a layered handoff strategy.
+
+| Need | Mechanism | Location | Lifetime |
+|---|---|---|---|
+| Same tool, same task, short break | Native resume | `kimi --continue` / `claude --resume` | tool-managed |
+| Task state for next session | `HANDOFF.md` | repo root or worktree root | delete when done |
+| Parallel session coordination | `.ai-handoff/STATUS.md` | repo root, resolved via `GIT_COMMON_DIR` | rolling |
+| Permanent project memory | vault / memory files / `AGENTS.md` updates | project memory store | permanent |
+
+### 16.1 `HANDOFF.md` contents
+
+When pausing unfinished work, write a `HANDOFF.md` in the repo or worktree root:
+
+```markdown
+# Handoff: <task-title>
+
+## Status
+- Started: <ISO date>
+- Last session: <ISO date>
+- Current branch / worktree: <name>
+- Completed: <bullet list>
+- Blocked by: <external dependency or question>
+
+## Next step
+<single concrete next action>
+
+## Open decisions
+<questions the next session must answer>
+
+## Important context
+<files, commands, test failures, gotchas>
+
+## Drift / out-of-scope items
+<tasks discovered but not part of this branch>
+```
+
+Delete `HANDOFF.md` when the task is complete.
+
+### 16.2 Parallel sessions
+
+If multiple AI or human sessions are editing SendPalm concurrently:
+
+1. Maintain `.ai-handoff/STATUS.md` at the repo root.
+2. Each session records its branch/worktree, current task, and estimated completion.
+3. Resolve shared paths via `git rev-parse --git-common-dir` so all worktrees see the same status file.
+4. When in doubt, prefer worktree isolation (§13) over concurrent edits on the same branch.
+
+Invoke the `session-handoff` skill when starting, pausing, or resuming multi-session work.
+
+## Agent Role Definitions
+
+This repo provides declarative agent definitions for Claude Code (`.claude/agents/`), Kimi Code (`.kimi/agents/`), and OpenCode (`.opencode/agent/`). Available roles:
+
+| Role | File | Purpose | Isolation |
+|---|---|---|---|
+| `feature-builder` | `.claude/agents/feature-builder.md`, `.kimi/agents/feature-builder.yaml`, `.opencode/agent/feature-builder.md` | Build features and bugfixes | worktree |
+| `debugger` | `.claude/agents/debugger.md`, `.kimi/agents/debugger.yaml`, `.opencode/agent/debugger.md` | Investigate bugs | worktree when editing |
+| `cleanup-agent` | `.claude/agents/cleanup-agent.md`, `.kimi/agents/cleanup-agent.yaml`, `.opencode/agent/cleanup-agent.md` | Periodic cleanup + docs sync | worktree |
+| `reviewer` | `.claude/agents/reviewer.md`, `.kimi/agents/reviewer.yaml`, `.opencode/agent/reviewer.md` | Pre-merge diff review | none (read-only) |
+
+These definitions reference the global skills in `~/.agents/skills/`. When starting a task, invoke the appropriate role by name, e.g.:
+
+> "Use the feature-builder agent to implement ..."
+> "Use the cleanup-agent to audit and clean up ..."
