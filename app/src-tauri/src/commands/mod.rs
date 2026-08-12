@@ -1,5 +1,6 @@
 //! Tauri commands exposing real IMAP/SMTP services to JS.
 
+pub mod image_proxy;
 pub mod notification_settings;
 
 use crate::services::providers::{list as provider_list, EmailProvider};

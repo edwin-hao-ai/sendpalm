@@ -6,9 +6,15 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { load } from "@tauri-apps/plugin-store";
 // Importing the shim guarantees `window.__TAURI_INTERNALS__` is installed
 // before this module evaluates, even in browser-only Playwright runs.
 import "./tauri-shim";
+
+const STORE_PATH = "sendpalm.prefs.json";
+const IMAGE_POLICY_KEY = "email-image-policy";
+export type ImageSenderPolicy = "always" | "ask";
+type ImageSenderPolicyMap = Record<string, ImageSenderPolicy>;
 
 // Call the Tauri invoke bridge. In the real Tauri shell this hits Rust
 // commands; in browser mode the shim above answers known commands and the
@@ -160,4 +166,25 @@ export async function getAttachmentPath(
   fileId: string,
 ): Promise<string | null> {
   return safeInvoke<string>("get_attachment_path", { fileId });
+}
+
+// ── Image sender policy (per-sender always/ask) ──
+
+export async function getImageSenderPolicy(
+  sender: string,
+): Promise<ImageSenderPolicy> {
+  const store = await load(STORE_PATH);
+  const map = (await store.get<ImageSenderPolicyMap>(IMAGE_POLICY_KEY)) ?? {};
+  return map[sender] ?? "ask";
+}
+
+export async function setImageSenderPolicy(
+  sender: string,
+  policy: ImageSenderPolicy,
+): Promise<void> {
+  const store = await load(STORE_PATH);
+  const map = (await store.get<ImageSenderPolicyMap>(IMAGE_POLICY_KEY)) ?? {};
+  map[sender] = policy;
+  await store.set(IMAGE_POLICY_KEY, map);
+  await store.save();
 }

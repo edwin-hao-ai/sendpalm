@@ -154,6 +154,7 @@ pub fn run() {
             commands::get_attachment_content,
             commands::get_attachment_path,
             commands::notification_settings::notify_settings_changed,
+            commands::image_proxy::fetch_image,
         ])
         .run(tauri::generate_context!());
     if let Err(e) = result {

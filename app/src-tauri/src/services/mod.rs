@@ -6,6 +6,7 @@
 pub mod db;
 pub mod desktop_notifier;
 pub mod ical;
+pub mod image_proxy;
 pub mod imap;
 pub mod mailbox_resolver;
 pub mod parser;

@@ -1,6 +1,7 @@
 /** HTML <-> plain text helpers used by Compose and message rendering. */
 
 import DOMPurify from "dompurify";
+import { invoke } from "@tauri-apps/api/core";
 
 const PLACEHOLDER_DATA_URL =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E";
@@ -59,6 +60,29 @@ export function analyzeImages(html: string): ImageAnalysis {
   const externalImageCount = externalMatches.length;
   const hasTrackingPixel = externalMatches.some((m) => TRACKING_DIMENSIONS.test(m));
   return { safeHtml, externalImageCount, hasTrackingPixel };
+}
+
+export function extractExternalImageUrls(html: string): string[] {
+  const matches = html.match(/<img\b[^>]*\bsrc\s*=\s*["']?https?:\/\/[^"'>\s]+/gi) || [];
+  return matches
+    .map((m) => {
+      const srcMatch = m.match(/\bsrc\s*=\s*["']?([^"'>\s]+)/i);
+      return srcMatch ? srcMatch[1]! : "";
+    })
+    .filter(Boolean);
+}
+
+export async function prefetchImages(urls: string[]): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  await Promise.all(urls.map(async (url) => {
+    try {
+      const dataUrl = await invoke<string>("fetch_image", { url });
+      result.set(url, dataUrl);
+    } catch {
+      // Failed fetch — leave as placeholder.
+    }
+  }));
+  return result;
 }
 
 export function htmlToPlainText(html: string): string {

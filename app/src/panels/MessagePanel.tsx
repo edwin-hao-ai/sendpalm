@@ -51,12 +51,18 @@ import { uid } from "../utils/id";
 import { addDays, isoNow, relativeTime } from "../utils/date";
 import { trackerSummary } from "../utils/trackers";
 import type { Clip, Contact, FollowUp, Message, Sticky } from "../types";
-import { addCalendarEvent, getAttachmentContent } from "../services/backend";
+import { addCalendarEvent, getAttachmentContent, setImageSenderPolicy } from "../services/backend";
 import { useRefreshEffect, useViewport } from "../utils/gestures";
 import { formatMessageSource, messagePreview } from "./message-source";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { sanitizeEmailHtml, analyzeImages, plainTextToHtml } from "../utils/html";
+import {
+  sanitizeEmailHtml,
+  analyzeImages,
+  plainTextToHtml,
+  extractExternalImageUrls,
+  prefetchImages,
+} from "../utils/html";
 import { useAgent } from "../agent/useAgent";
 
 type ViewMode = "rendered" | "plain" | "source";
@@ -90,8 +96,18 @@ document.addEventListener('click', function(e) {
 }, true);
 window.addEventListener('message', function(e) {
   if (e.data && e.data.type === 'sendpalm:show-images') {
+    var srcMap = e.data.srcMap || {};
     var imgs = document.querySelectorAll('.sp-img-hidden');
-    for (var i = 0; i < imgs.length; i++) imgs[i].setAttribute('data-shown', 'true');
+    for (var i = 0; i < imgs.length; i++) {
+      var orig = imgs[i].getAttribute('data-original-src');
+      if (orig && srcMap[orig]) {
+        imgs[i].setAttribute('src', srcMap[orig]);
+        imgs[i].removeAttribute('class');
+        imgs[i].removeAttribute('data-original-src');
+      } else {
+        imgs[i].setAttribute('data-shown', 'true');
+      }
+    }
   }
 });
 </script>
@@ -675,6 +691,9 @@ export function MessagePanel(props: { messageId: string }) {
 
   let currentIframe: HTMLIFrameElement | null = null;
 
+  const [showBusy, setShowBusy] = createSignal(false);
+  const [alwaysShow, setAlwaysShow] = createSignal(false);
+
   onMount(() => {
     const handler = (e: MessageEvent) => {
       if (currentIframe && e.source !== currentIframe.contentWindow) return;
@@ -944,6 +963,31 @@ export function MessagePanel(props: { messageId: string }) {
                 const imageAnalysis = createMemo(() =>
                   m.bodyHtml ? analyzeImages(m.bodyHtml) : null,
                 );
+                const onShowImages = async () => {
+                  if (!m.bodyHtml) return;
+                  setShowBusy(true);
+                  try {
+                    const urls = extractExternalImageUrls(m.bodyHtml);
+                    const map = await prefetchImages(urls);
+                    if (currentIframe?.contentWindow) {
+                      currentIframe.contentWindow.postMessage(
+                        {
+                          type: "sendpalm:show-images",
+                          srcMap: Object.fromEntries(map),
+                        },
+                        "*",
+                      );
+                    }
+                    if (alwaysShow()) {
+                      const senderEmail = sender().email;
+                      if (senderEmail && sender().isMe === false) {
+                        await setImageSenderPolicy(senderEmail, "always");
+                      }
+                    }
+                  } finally {
+                    setShowBusy(false);
+                  }
+                };
                 return (
                   <div
                     data-thread-message
@@ -1091,18 +1135,48 @@ export function MessagePanel(props: { messageId: string }) {
                           }
                         >
                           <Show when={(imageAnalysis()?.externalImageCount ?? 0) > 0}>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const iframe = currentIframe;
-                                if (iframe?.contentWindow) {
-                                  iframe.contentWindow.postMessage({ type: "sendpalm:show-images" }, "*");
-                                }
+                            <div
+                              style={{
+                                display: "flex",
+                                "align-items": "center",
+                                gap: "var(--space-3)",
+                                "margin-bottom": "var(--space-2)",
                               }}
                             >
-                              Show images ({imageAnalysis()!.externalImageCount})
-                              {imageAnalysis()!.hasTrackingPixel ? " ⚠" : ""}
-                            </button>
+                              <button
+                                type="button"
+                                onClick={() => void onShowImages()}
+                                disabled={showBusy()}
+                                style={{
+                                  opacity: showBusy() ? 0.6 : 1,
+                                  cursor: showBusy() ? "wait" : "pointer",
+                                }}
+                              >
+                                {showBusy()
+                                  ? "Loading…"
+                                  : `Show images (${imageAnalysis()!.externalImageCount})`}
+                                {imageAnalysis()!.hasTrackingPixel ? " ⚠" : ""}
+                              </button>
+                              <label
+                                style={{
+                                  display: "inline-flex",
+                                  "align-items": "center",
+                                  gap: "6px",
+                                  "font-size": "var(--text-caption)",
+                                  color: "var(--text-secondary)",
+                                  cursor: "pointer",
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={alwaysShow()}
+                                  onChange={(e) =>
+                                    setAlwaysShow(e.currentTarget.checked)
+                                  }
+                                />
+                                Always show from this sender
+                              </label>
+                            </div>
                           </Show>
                           <iframe
                             ref={(el) => {

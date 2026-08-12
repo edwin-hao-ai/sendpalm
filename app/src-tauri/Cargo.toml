@@ -47,3 +47,8 @@ base64 = "0.22"
 mime_guess = "2"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "macros", "chrono"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+
+# F — image proxy + tracking-pixel filter
+hex = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+sha2 = "0.10"
