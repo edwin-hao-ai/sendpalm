@@ -1,4 +1,6 @@
-use sendpalm_app_lib::services::mailbox_resolver::{resolve_all, resolve_folder_name, FolderKind};
+use sendpalm_app_lib::services::mailbox_resolver::{
+    folder_kind_for_name, resolve_all, resolve_folder_name, FolderKind,
+};
 
 #[test]
 fn feishu_sent_resolves_to_utf7_name() {
@@ -78,4 +80,53 @@ fn resolve_all_skips_missing_kinds() {
     let mailboxes = vec!["INBOX".to_string(), "Sent".to_string()];
     let resolved = resolve_all(&mailboxes);
     assert_eq!(resolved, vec!["INBOX".to_string(), "Sent".to_string()]);
+}
+
+#[test]
+fn folder_kind_for_name_recognizes_inbox_variants() {
+    assert_eq!(folder_kind_for_name("INBOX"), Some(FolderKind::Inbox));
+    assert_eq!(folder_kind_for_name("Inbox"), Some(FolderKind::Inbox));
+    assert_eq!(folder_kind_for_name("inbox"), Some(FolderKind::Inbox));
+    assert_eq!(folder_kind_for_name("收件箱"), Some(FolderKind::Inbox));
+}
+
+#[test]
+fn folder_kind_for_name_recognizes_sent_variants() {
+    assert_eq!(folder_kind_for_name("Sent"), Some(FolderKind::Sent));
+    assert_eq!(folder_kind_for_name("Sent Items"), Some(FolderKind::Sent));
+    assert_eq!(folder_kind_for_name("Sent Messages"), Some(FolderKind::Sent));
+    assert_eq!(folder_kind_for_name("已发送"), Some(FolderKind::Sent));
+    assert_eq!(
+        folder_kind_for_name("[Gmail]/Sent Mail"),
+        Some(FolderKind::Sent)
+    );
+    assert_eq!(
+        folder_kind_for_name("&XfJT0ZAB-"),
+        Some(FolderKind::Sent),
+        "Feishu UTF-7 sent folder must be detected"
+    );
+}
+
+#[test]
+fn folder_kind_for_name_recognizes_drafts_trash_spam() {
+    assert_eq!(folder_kind_for_name("Drafts"), Some(FolderKind::Drafts));
+    assert_eq!(folder_kind_for_name("&XfJ8T-"), Some(FolderKind::Drafts));
+    assert_eq!(folder_kind_for_name("Trash"), Some(FolderKind::Trash));
+    assert_eq!(folder_kind_for_name("Deleted Items"), Some(FolderKind::Trash));
+    assert_eq!(folder_kind_for_name("Spam"), Some(FolderKind::Spam));
+    assert_eq!(folder_kind_for_name("Junk"), Some(FolderKind::Spam));
+}
+
+#[test]
+fn folder_kind_for_name_returns_none_for_unknown() {
+    assert_eq!(folder_kind_for_name("Foo"), None);
+    assert_eq!(folder_kind_for_name(""), None);
+    assert_eq!(folder_kind_for_name("CustomLabel"), None);
+}
+
+#[test]
+fn folder_kind_for_name_is_case_insensitive() {
+    assert_eq!(folder_kind_for_name("SENT"), Some(FolderKind::Sent));
+    assert_eq!(folder_kind_for_name("sent"), Some(FolderKind::Sent));
+    assert_eq!(folder_kind_for_name("INBOX"), Some(FolderKind::Inbox));
 }

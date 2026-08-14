@@ -105,6 +105,7 @@ export const [agentPanelOpen, setAgentPanelOpen] = createSignal(false);
 
 export const [detailPanelWidth, setDetailPanelWidth] = createSignal(380);
 export const [agentPanelWidth, setAgentPanelWidth] = createSignal(340);
+export const [mainPaneWidth, setMainPaneWidth] = createSignal(640);
 
 export interface ComposeContext {
   mode: "new" | "reply" | "replyAll" | "forward";

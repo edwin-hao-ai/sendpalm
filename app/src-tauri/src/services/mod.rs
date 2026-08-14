@@ -70,5 +70,11 @@ pub struct SyncReport {
     pub skipped: usize,
     pub uid_validity: u64,
     pub last_uid: u64,
+    /// IDs of messages newly inserted by this cycle, in insertion order
+    /// (oldest first). The frontend uses this to prepend them to the
+    /// current list view instead of triggering a full paginated refetch.
+    /// Empty when new_messages == 0.
+    #[serde(default)]
+    pub new_message_ids: Vec<String>,
     pub error: Option<String>,
 }

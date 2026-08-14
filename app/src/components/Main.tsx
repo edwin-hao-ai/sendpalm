@@ -24,6 +24,7 @@ import { FocusReply } from "../views/FocusReply";
 import { ReadTogether } from "../views/ReadTogether";
 import { Agent } from "../views/Agent";
 import { Empty, Skeleton } from "../components/Empty";
+import { PanelResizeHandle } from "./PanelResizeHandle";
 
 export function Main() {
   const viewport = useViewport();
@@ -35,6 +36,7 @@ export function Main() {
       ref={(el) => setMainEl(el)}
       style={{ position: "relative" }}
     >
+      <PanelResizeHandle panel="main" side="right" />
       <PullToRefresh
         container={mainEl()}
         enabled={!viewport.isDesktop()}

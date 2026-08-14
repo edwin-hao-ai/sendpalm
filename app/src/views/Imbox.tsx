@@ -11,15 +11,17 @@ import {
   createEffect,
   onCleanup,
 } from "solid-js";
+import { WindowVirtualizer } from "virtua/solid";
 import {
-  listMessages,
   listContacts,
+  listMessages,
   upsertMessage,
   moveMessageToBucket,
   listBundleConfigs,
   listAccounts,
   countGateCandidates,
 } from "../stores/data";
+import { usePaginatedMessages } from "../utils/paginated-messages";
 import type { Contact, Message, BundleConfig } from "../types";
 import {
   setDetailOpen,
@@ -47,6 +49,7 @@ import { syncNow } from "../services/backend";
 import { useRefreshEffect, useViewport } from "../utils/gestures";
 import { priorityScore } from "../utils/priority";
 import { SwipeActions } from "../components/SwipeActions";
+import { registerPrepend } from "../services/sync-events";
 
 interface Bundle {
   contactId: string;
@@ -58,13 +61,41 @@ type PileKey = "replyLater" | "setAside" | "remind";
 
 export function Imbox() {
   const [contacts] = createResource(listContacts);
-  const [messages, { refetch: refetchMessages }] = createResource(listMessages);
   const [bundles] = createResource(listBundleConfigs);
+  const [allMessages, { refetch: refetchAll }] = createResource(listMessages);
   const { isMobile } = useViewport();
 
-  useRefreshEffect(() => {
-    void refetchMessages();
+  // Main list is paginated — only the first 100 imbox rows render in memory
+  // until the user scrolls; pile slices below need every message in DB to
+  // filter by replyLater/setAside/bubbleUpAt flags, so a second resource
+  // (unchanged from before) keeps them accurate without slowing down the
+  // hot list path.
+  const paged = usePaginatedMessages({
+    bucket: "imbox",
+    direction: "in",
   });
+  const items = paged.items;
+  const refresh = paged.refresh;
+
+  useRefreshEffect(() => {
+    void refresh();
+    void refetchAll();
+  });
+
+  // Live-prepend on sync:new-messages. The registry fires for every
+  // bucket so we filter to imbox+incoming here — the Gate contract hides
+  // unscreened senders, but appending them below would create flicker
+  // when the next refresh refetch runs. Trust the row's own bucket field.
+  onCleanup(
+    registerPrepend("imbox", (ids) => {
+      void paged.prependByIds(ids);
+    }),
+  );
+
+  const loadMoreIfNearEnd = () => {
+    if (!paged.hasMore() || paged.loadingMore()) return;
+    void paged.loadMore();
+  };
 
   /* ── Multi-select ── */
   const [lastSelectedId, setLastSelectedId] = createSignal<string | null>(null);
@@ -124,7 +155,7 @@ export function Imbox() {
   });
 
   const imboxMsgs = createMemo<Message[]>(() => {
-    const list = (messages() ?? [])
+    const list = items()
       .filter((m) => m.bucket === "imbox")
       .filter((m) => !m.setAside && !m.replyLater)
       .filter((m) => {
@@ -210,13 +241,13 @@ export function Imbox() {
   ]);
 
   const replyLater = createMemo<Message[]>(() =>
-    (messages() ?? []).filter((m) => m.replyLater),
+    (allMessages() ?? []).filter((m) => m.replyLater),
   );
   const setAside = createMemo<Message[]>(() =>
-    (messages() ?? []).filter((m) => m.setAside),
+    (allMessages() ?? []).filter((m) => m.setAside),
   );
   const reminded = createMemo<Message[]>(() =>
-    (messages() ?? []).filter((m) => m.bubbleUpAt),
+    (allMessages() ?? []).filter((m) => m.bubbleUpAt),
   );
 
   /* ── UI ── */
@@ -293,16 +324,36 @@ export function Imbox() {
   document.addEventListener("keydown", handleKey);
   onCleanup(() => document.removeEventListener("keydown", handleKey));
 
+  // Centralized refresh that keeps the paginated imbox list AND the pile
+  // slices (which need every message to filter replyLater/setAside/bubbleUpAt)
+  // in sync after an upsert/move. Both fire in parallel; the UI then
+  // re-derives everything from the resources.
+  const refreshAll = async () => {
+    await Promise.all([refresh(), refetchAll()]);
+  };
+
   const awaitReplyLater = async (m: Message) => {
-    await upsertMessage({ ...m, replyLater: true });
-    await refetchMessages();
-    showToast({ message: "已 Reply Later", kind: "success" });
+    paged.removeByIds([m.id]);
+    try {
+      await upsertMessage({ ...m, replyLater: true });
+      await refetchAll();
+      showToast({ message: "已 Reply Later", kind: "success" });
+    } catch (err) {
+      await refreshAll();
+      showToast({ message: `Reply Later 失败：${String(err)}`, kind: "error" });
+    }
   };
 
   const awaitSetAside = async (m: Message) => {
-    await upsertMessage({ ...m, setAside: true });
-    await refetchMessages();
-    showToast({ message: "已 Set Aside", kind: "success" });
+    paged.removeByIds([m.id]);
+    try {
+      await upsertMessage({ ...m, setAside: true });
+      await refetchAll();
+      showToast({ message: "已 Set Aside", kind: "success" });
+    } catch (err) {
+      await refreshAll();
+      showToast({ message: `Set Aside 失败：${String(err)}`, kind: "error" });
+    }
   };
 
   return (
@@ -360,7 +411,7 @@ export function Imbox() {
               ttlMs: 2000,
             });
             await Promise.all(emailAccounts.map((a) => syncNow(a.id, "INBOX")));
-            await refetchMessages();
+            await refreshAll();
             showToast({ message: "同步完成", kind: "success" });
           }}
           title="立即从 IMAP 同步所有账户"
@@ -382,7 +433,7 @@ export function Imbox() {
         </button>
       </div>
       <Show
-        when={messages.state !== "pending"}
+        when={paged.resource.state !== "pending"}
         fallback={
           <div
             style={{
@@ -409,8 +460,11 @@ export function Imbox() {
               "margin-right": "auto",
             }}
           >
-            <For each={newForYou()}>
-              {(item, i) => {
+            <WindowVirtualizer
+              data={newForYou()}
+              onScrollEnd={loadMoreIfNearEnd}
+            >
+              {(item: Message | Bundle, i: () => number) => {
                 const isBundle = "messages" in item;
                 const cursorHere = () => cursorIndex() === i();
                 const isSelected = () =>
@@ -537,7 +591,7 @@ export function Imbox() {
                           setComposeContext({ mode: "reply", originalMsg: m });
                           setComposeOpen(true);
                         }}
-                        onChange={refetchMessages}
+                        onChange={refreshAll}
                       />
                     </Show>
                   </div>
@@ -590,7 +644,7 @@ export function Imbox() {
                   </li>
                 );
               }}
-            </For>
+            </WindowVirtualizer>
           </ul>
         </Show>
 
@@ -664,7 +718,7 @@ export function Imbox() {
                         setComposeContext({ mode: "reply", originalMsg: m });
                         setComposeOpen(true);
                       }}
-                      onChange={refetchMessages}
+                      onChange={refreshAll}
                     />
                   </div>
                 );
@@ -705,7 +759,7 @@ export function Imbox() {
             contactById={contactById}
             onOpen={open}
             onChange={async () => {
-              await refetchMessages();
+              await refreshAll();
             }}
           />
         </Show>
@@ -715,31 +769,63 @@ export function Imbox() {
             count={selectedIds().size}
             onClear={clearSelection}
             onArchive={async () => {
-              const ids = selectedIds();
-              for (const id of ids) {
-                await moveMessageToBucket(id, "paperTrail");
-              }
+              const ids = Array.from(selectedIds());
+              paged.removeByIds(ids);
+              const snapshot = items();
               clearSelection();
-              await refetchMessages();
-              showToast({ message: "已批量归档", kind: "success" });
+              try {
+                for (const id of ids) {
+                  await moveMessageToBucket(id, "paperTrail");
+                }
+                await refetchAll();
+                showToast({ message: "已批量归档", kind: "success" });
+              } catch (err) {
+                await refresh();
+                await refetchAll();
+                showToast({
+                  message: `归档失败：${String(err)}`,
+                  kind: "error",
+                });
+              }
+              void snapshot;
             }}
             onTrash={async () => {
-              const ids = selectedIds();
-              for (const id of ids) {
-                await moveMessageToBucket(id, "trash");
-              }
+              const ids = Array.from(selectedIds());
+              paged.removeByIds(ids);
               clearSelection();
-              await refetchMessages();
-              showToast({ message: "已批量移到 Trash", kind: "info" });
+              try {
+                for (const id of ids) {
+                  await moveMessageToBucket(id, "trash");
+                }
+                await refetchAll();
+                showToast({ message: "已批量移到 Trash", kind: "info" });
+              } catch (err) {
+                await refresh();
+                await refetchAll();
+                showToast({
+                  message: `移到 Trash 失败：${String(err)}`,
+                  kind: "error",
+                });
+              }
             }}
             onSpam={async () => {
-              const ids = selectedIds();
-              for (const id of ids) {
-                await moveMessageToBucket(id, "spam");
-              }
+              const ids = Array.from(selectedIds());
+              paged.removeByIds(ids);
               clearSelection();
-              await refetchMessages();
-              showToast({ message: "已批量移到 Spam", kind: "info" });
+              try {
+                for (const id of ids) {
+                  await moveMessageToBucket(id, "spam");
+                }
+                await refetchAll();
+                showToast({ message: "已批量移到 Spam", kind: "info" });
+              } catch (err) {
+                await refresh();
+                await refetchAll();
+                showToast({
+                  message: `移到 Spam 失败：${String(err)}`,
+                  kind: "error",
+                });
+              }
             }}
             onLabel={() => setBulkLabelOpen(true)}
             onMove={() => setBulkMoveOpen(true)}
@@ -751,7 +837,7 @@ export function Imbox() {
             messageIds={Array.from(selectedIds())}
             onChange={async () => {
               clearSelection();
-              await refetchMessages();
+              await refreshAll();
             }}
           />
           <MovePicker
@@ -760,7 +846,7 @@ export function Imbox() {
             messageIds={Array.from(selectedIds())}
             onChange={async () => {
               clearSelection();
-              await refetchMessages();
+              await refreshAll();
             }}
           />
         </Show>

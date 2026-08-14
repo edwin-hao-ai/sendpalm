@@ -58,6 +58,71 @@ pub fn resolve_folder_name(
     None
 }
 
+/// Classify a folder name we already have (typically returned by
+/// `list_mailboxes` or stored in `accounts.settings_json.syncFolders`).
+/// Returns `None` for unrecognized names so the caller can fall back to the
+/// safe default (`FolderKind::Inbox`-like behavior, i.e. treat as incoming).
+///
+/// Matching is case-insensitive against the static candidate tables used by
+/// `resolve_folder_name` above. This does NOT consult the server — it only
+/// asks "what kind does this name LOOK like?" — so it works on a single
+/// string without needing the full mailbox list.
+pub fn folder_kind_for_name(folder_name: &str) -> Option<FolderKind> {
+    let kinds: &[(FolderKind, &[&str])] = &[
+        (
+            FolderKind::Inbox,
+            &["INBOX", "Inbox", "收件箱"],
+        ),
+        (
+            FolderKind::Sent,
+            &[
+                "Sent",
+                "Sent Messages",
+                "Sent Items",
+                "已发送",
+                "[Gmail]/Sent Mail",
+                "&XfJT0ZAB-", // Feishu
+            ],
+        ),
+        (
+            FolderKind::Drafts,
+            &["Drafts", "Draft", "草稿箱", "&XfJ8T-"],
+        ),
+        (
+            FolderKind::Trash,
+            &[
+                "Trash",
+                "Deleted",
+                "Deleted Items",
+                "Deleted Messages",
+                "已删除",
+                "[Gmail]/Trash",
+            ],
+        ),
+        (
+            FolderKind::Spam,
+            &[
+                "Spam",
+                "Junk",
+                "Junk Mail",
+                "Junk E-mail",
+                "Bulk Mail",
+                "垃圾邮件",
+                "[Gmail]/Spam",
+            ],
+        ),
+    ];
+    for (kind, candidates) in kinds {
+        if candidates
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case(folder_name))
+        {
+            return Some(*kind);
+        }
+    }
+    None
+}
+
 /// Resolve every folder kind in one call, skipping any that the server
 /// doesn't expose. The first entry is always `Inbox`; if even that is
 /// missing the caller should treat the account as mis-configured.

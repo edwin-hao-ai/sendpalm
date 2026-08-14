@@ -57,8 +57,8 @@ import { formatMessageSource, messagePreview } from "./message-source";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
-  sanitizeEmailHtml,
   analyzeImages,
+  htmlEmailSrcdoc,
   plainTextToHtml,
   extractExternalImageUrls,
   prefetchImages,
@@ -66,55 +66,6 @@ import {
 import { useAgent } from "../agent/useAgent";
 
 type ViewMode = "rendered" | "plain" | "source";
-
-function htmlEmailSrcdoc(html: string): string {
-  const safe = sanitizeEmailHtml(html);
-  return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-html, body { margin: 0; padding: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.6; color: #333; }
-img { max-width: 100%; height: auto; }
-a { color: #0A8F63; }
-pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-table { border-collapse: collapse; max-width: 100%; }
-td, th { padding: 6px 10px; vertical-align: top; }
-blockquote { border-left: 3px solid #0A8F63; margin: 0; padding: 0 0 0 12px; color: #666; font-style: italic; }
-.sp-img-hidden { display: none !important; }
-.sp-img-hidden[data-shown="true"] { display: inline !important; }
-</style>
-<script>
-document.addEventListener('click', function(e) {
-  var a = e.target && e.target.closest && e.target.closest('a[href]');
-  if (!a) return;
-  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-  e.preventDefault();
-  e.stopPropagation();
-  try { parent.postMessage({ type: 'sendpalm:open-url', href: a.href }, '*'); } catch (_) {}
-}, true);
-window.addEventListener('message', function(e) {
-  if (e.data && e.data.type === 'sendpalm:show-images') {
-    var srcMap = e.data.srcMap || {};
-    var imgs = document.querySelectorAll('.sp-img-hidden');
-    for (var i = 0; i < imgs.length; i++) {
-      var orig = imgs[i].getAttribute('data-original-src');
-      if (orig && srcMap[orig]) {
-        imgs[i].setAttribute('src', srcMap[orig]);
-        imgs[i].removeAttribute('class');
-        imgs[i].removeAttribute('data-original-src');
-      } else {
-        imgs[i].setAttribute('data-shown', 'true');
-      }
-    }
-  }
-});
-</script>
-</head>
-<body>${safe}</body>
-</html>`;
-}
 
 export function MessagePanel(props: { messageId: string }) {
   const agent = useAgent();
