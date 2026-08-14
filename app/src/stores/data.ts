@@ -36,6 +36,7 @@ import type {
   ID,
   Label,
   Message,
+  MessageBucket,
   Notification,
   ScheduledSend,
   Shortcut,
@@ -684,12 +685,64 @@ export async function deleteContact(id: ID): Promise<void> {
 
 /* ── Message CRUD ──────────────────────────────────────────── */
 
+export interface ListMessagesOptions {
+  bucket?: MessageBucket;
+  direction?: "in" | "out";
+  unreadOnly?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ListMessagesPage {
+  items: Message[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export async function listMessages(): Promise<Message[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
     "SELECT * FROM messages ORDER BY st DESC",
   );
   return rows.map(rowToMessage);
+}
+
+export async function listMessagesPaged(
+  options: ListMessagesOptions = {},
+): Promise<ListMessagesPage> {
+  const limit = Math.max(1, Math.min(options.limit ?? 100, 500));
+  const offset = Math.max(0, options.offset ?? 0);
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (options.bucket) {
+    where.push("bucket = ?");
+    params.push(options.bucket);
+  }
+  if (options.direction) {
+    where.push("direction = ?");
+    params.push(options.direction);
+  }
+  if (options.unreadOnly) {
+    where.push("unread = 1");
+  }
+  const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+  const db = await getDb();
+  const totalRow = await db.select<Array<{ total: number }>>(
+    `SELECT COUNT(*) AS total FROM messages ${whereClause}`,
+    params,
+  );
+  const total = totalRow[0]?.total ?? 0;
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT * FROM messages ${whereClause} ORDER BY st DESC LIMIT ? OFFSET ?`,
+    [...params, limit, offset],
+  );
+  return {
+    items: rows.map(rowToMessage),
+    total,
+    limit,
+    offset,
+  };
 }
 
 export async function getMessage(id: ID): Promise<Message | null> {
