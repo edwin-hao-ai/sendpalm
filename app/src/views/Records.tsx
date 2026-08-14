@@ -1,16 +1,16 @@
 /** Records view — receipts, transactions. Quiet auto-file. */
 
-import { For, Show, createMemo, createResource } from "solid-js";
+import { For, Show, createResource } from "solid-js";
+import { VList, type VListHandle } from "virtua/solid";
 import {
   listContacts,
-  listMessages,
   listFiles,
   upsertMessage,
 } from "../stores/data";
+import { usePaginatedMessages } from "../utils/paginated-messages";
 import { Avatar } from "../components/Avatar";
 import { Empty } from "../components/Empty";
 import { Icon } from "../components/Icon";
-import { SkeletonList } from "../components/Skeleton";
 import {
   setDetailOpen,
   setSelectedMessageId,
@@ -23,54 +23,51 @@ import type { Message } from "../types";
 
 export function Records() {
   const [contacts] = createResource(listContacts);
-  const [messages, { refetch: refetchMessages }] = createResource(listMessages);
   const [files, { refetch: refetchFiles }] = createResource(listFiles);
   const { isMobile } = useViewport();
 
+  const paged = usePaginatedMessages({ bucket: "paperTrail" });
+  const items = paged.items;
+  const refresh = paged.refresh;
+
   useRefreshEffect(() => {
-    void refetchMessages();
+    void refresh();
     void refetchFiles();
   });
 
   const setAside = async (m: Message) => {
     await upsertMessage({ ...m, setAside: true });
-    await refetchMessages();
+    await refresh();
     showToast({ message: "已 Set Aside", kind: "success" });
   };
 
   const replyLater = async (m: Message) => {
     await upsertMessage({ ...m, replyLater: true });
-    await refetchMessages();
+    await refresh();
     showToast({ message: "已 Reply Later", kind: "success" });
   };
-
-  const items = createMemo(() => {
-    return (messages() ?? [])
-      .filter((m) => m.bucket === "paperTrail")
-      .sort((a, b) => new Date(b.st).getTime() - new Date(a.st).getTime());
-  });
-
-  const grouped = createMemo(() => {
-    const today: typeof items extends () => infer T ? T : never = [];
-    const earlier: typeof today = [];
-    const now = new Date();
-    const yesterday = new Date(now);
-    yesterday.setDate(now.getDate() - 1);
-    for (const m of items()) {
-      const d = new Date(m.st);
-      if (d.toDateString() === now.toDateString()) today.push(m);
-      else if (d.toDateString() === yesterday.toDateString()) earlier.push(m);
-      else earlier.push(m);
-    }
-    return { today, earlier };
-  });
 
   const contactById = (id: string) => contacts()?.find((c) => c.id === id);
   const filesByMsg = (m: { attachments: string[] }) =>
     (files() ?? []).filter((f) => m.attachments.includes(f.id));
 
+  let listRef: VListHandle | undefined;
+  const loadMoreIfNearEnd = (offset: number) => {
+    const handle = listRef;
+    if (!handle || !paged.hasMore() || paged.loadingMore()) return;
+    const remaining = handle.scrollSize - (offset + handle.viewportSize);
+    if (remaining < 800) void paged.loadMore();
+  };
+
   return (
-    <div style={{ animation: "view-enter 0.3s var(--ease-out) both" }}>
+    <div
+      style={{
+        animation: "view-enter 0.3s var(--ease-out) both",
+        height: "100%",
+        display: "flex",
+        "flex-direction": "column",
+      }}
+    >
       <header
         style={{
           padding: "var(--space-6) var(--space-5) var(--space-3)",
@@ -96,20 +93,22 @@ export function Records() {
           }}
         >
           发票 / 物流 / 系统通知。安静躺着，需要时随时搜。
+          {paged.hasMore() ? ` · ${items().length}/${paged.total()}` : ""}
         </p>
       </header>
 
       <Show
-        when={messages.state !== "pending"}
+        when={paged.resource.state !== "pending"}
         fallback={
           <div
             style={{
               "max-width": "720px",
               margin: "var(--space-4) auto",
               padding: "0 var(--space-5)",
+              flex: 1,
             }}
           >
-            <SkeletonList count={8} />
+            <SkeletonRows />
           </div>
         }
       >
@@ -117,60 +116,33 @@ export function Records() {
           <div
             style={{
               "max-width": "720px",
+              width: "100%",
               margin: "0 auto",
-              padding: "0 var(--space-5)",
+              padding: "0 var(--space-5) var(--space-5)",
+              flex: 1,
+              "min-height": 0,
             }}
           >
-            <Show when={grouped().today.length > 0}>
-              <GroupHeader title="Today" />
-              <For each={grouped().today}>
-                {(m) => (
-                  <RecordRow
-                    m={m}
-                    contact={contactById(m.pid)}
-                    attachments={filesByMsg(m)}
-                    isMobile={isMobile()}
-                    onSetAside={() => void setAside(m)}
-                    onReplyLater={() => void replyLater(m)}
-                  />
-                )}
-              </For>
-            </Show>
-            <Show when={grouped().earlier.length > 0}>
-              <GroupHeader title="Earlier" />
-              <For each={grouped().earlier}>
-                {(m) => (
-                  <RecordRow
-                    m={m}
-                    contact={contactById(m.pid)}
-                    attachments={filesByMsg(m)}
-                    isMobile={isMobile()}
-                    onSetAside={() => void setAside(m)}
-                    onReplyLater={() => void replyLater(m)}
-                  />
-                )}
-              </For>
-            </Show>
+            <VList
+              ref={(h) => (listRef = (h ?? undefined) as VListHandle | undefined)}
+              data={items()}
+              onScroll={loadMoreIfNearEnd}
+              style={{ height: "100%" }}
+            >
+              {(m: Message) => (
+                <RecordRow
+                  m={m}
+                  contact={contactById(m.pid)}
+                  attachments={filesByMsg(m)}
+                  isMobile={isMobile()}
+                  onSetAside={() => void setAside(m)}
+                  onReplyLater={() => void replyLater(m)}
+                />
+              )}
+            </VList>
           </div>
         </Show>
       </Show>
-    </div>
-  );
-}
-
-function GroupHeader(props: { title: string }) {
-  return (
-    <div
-      style={{
-        "font-size": "var(--text-micro)",
-        color: "var(--text-muted)",
-        "font-weight": "700",
-        "letter-spacing": "0.06em",
-        "text-transform": "uppercase",
-        padding: "var(--space-4) 0 var(--space-2)",
-      }}
-    >
-      {props.title}
     </div>
   );
 }
@@ -315,5 +287,57 @@ function EmptyState() {
       title="Records 是空的"
       description="还没有发票、物流或系统通知。"
     />
+  );
+}
+
+function SkeletonRows() {
+  return (
+    <div
+      style={{
+        display: "flex",
+        "flex-direction": "column",
+        gap: "var(--space-3)",
+      }}
+    >
+      <For each={[0, 1, 2, 3, 4, 5]}>
+        {() => (
+          <div
+            style={{
+              display: "flex",
+              gap: "var(--space-3)",
+              padding: "var(--space-3) 0",
+            }}
+          >
+            <div
+              style={{
+                width: "32px",
+                height: "32px",
+                "border-radius": "50%",
+                background: "var(--paper-mid)",
+              }}
+            />
+            <div style={{ flex: 1 }}>
+              <div
+                style={{
+                  height: "12px",
+                  width: "50%",
+                  background: "var(--paper-mid)",
+                  "border-radius": "4px",
+                  "margin-bottom": "6px",
+                }}
+              />
+              <div
+                style={{
+                  height: "10px",
+                  width: "80%",
+                  background: "var(--paper-mid)",
+                  "border-radius": "4px",
+                }}
+              />
+            </div>
+          </div>
+        )}
+      </For>
+    </div>
   );
 }

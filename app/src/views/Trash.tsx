@@ -1,13 +1,14 @@
 /** Trash — recoverable for 30 days. */
 
-import { For, Show, createMemo, createResource } from "solid-js";
+import { Show, createResource } from "solid-js";
+import { VList, type VListHandle } from "virtua/solid";
 import {
   listContacts,
-  listMessages,
   moveMessageToBucket,
   deleteMessage,
   emptyTrash,
 } from "../stores/data";
+import { usePaginatedMessages } from "../utils/paginated-messages";
 import { Avatar } from "../components/Avatar";
 import { Empty } from "../components/Empty";
 import { Icon } from "../components/Icon";
@@ -17,30 +18,35 @@ import { useRefreshEffect } from "../utils/gestures";
 
 export function Trash() {
   const [contacts] = createResource(listContacts);
-  const [messages, { refetch }] = createResource(listMessages);
+
+  const paged = usePaginatedMessages({ bucket: "trash" });
+  const items = paged.items;
+  const refresh = paged.refresh;
 
   useRefreshEffect(() => {
-    void refetch();
-  });
-
-  const items = createMemo(() => {
-    return (messages() ?? [])
-      .filter((m) => m.bucket === "trash")
-      .sort((a, b) => new Date(b.st).getTime() - new Date(a.st).getTime());
+    void refresh();
   });
 
   const contactById = (id: string) => contacts()?.find((c) => c.id === id);
 
   const restore = async (id: string) => {
     await moveMessageToBucket(id, "imbox");
-    await refetch();
+    await refresh();
     showToast({ message: "已恢复到 Imbox", kind: "success" });
   };
 
   const purge = async (id: string) => {
     await deleteMessage(id);
-    await refetch();
+    await refresh();
     showToast({ message: "已永久删除", kind: "info" });
+  };
+
+  let listRef: VListHandle | undefined;
+  const loadMoreIfNearEnd = (offset: number) => {
+    const handle = listRef;
+    if (!handle || !paged.hasMore() || paged.loadingMore()) return;
+    const remaining = handle.scrollSize - (offset + handle.viewportSize);
+    if (remaining < 800) void paged.loadMore();
   };
 
   return (
@@ -48,6 +54,9 @@ export function Trash() {
       style={{
         padding: "var(--space-5)",
         animation: "view-enter 0.3s var(--ease-out) both",
+        height: "100%",
+        display: "flex",
+        "flex-direction": "column",
       }}
     >
       <header
@@ -72,12 +81,13 @@ export function Trash() {
           }}
         >
           删除的邮件 30 天内可恢复。过期后自动清理。
+          {paged.hasMore() ? ` · ${items().length}/${paged.total()}` : ""}
         </p>
         <Show when={items().length > 0}>
           <button
             onClick={async () => {
               const count = await emptyTrash();
-              await refetch();
+              await refresh();
               showToast({
                 message: `已清空 Trash（${count} 封邮件）`,
                 kind: "info",
@@ -101,8 +111,21 @@ export function Trash() {
       </header>
 
       <Show when={items().length > 0} fallback={<EmptyState />}>
-        <div style={{ "max-width": "720px", margin: "0 auto" }}>
-          <For each={items()}>
+        <div
+          style={{
+            "max-width": "720px",
+            width: "100%",
+            margin: "0 auto",
+            flex: 1,
+            "min-height": 0,
+          }}
+        >
+          <VList
+            ref={(h) => (listRef = (h ?? undefined) as VListHandle | undefined)}
+            data={items()}
+            onScroll={loadMoreIfNearEnd}
+            style={{ height: "100%" }}
+          >
             {(m) => {
               const c = contactById(m.pid);
               return (
@@ -170,7 +193,7 @@ export function Trash() {
                 </div>
               );
             }}
-          </For>
+          </VList>
         </div>
       </Show>
     </div>
