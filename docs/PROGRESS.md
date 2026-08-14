@@ -1627,3 +1627,45 @@ This pass is one logical change set spread across seven commits:
 | `cargo build` | ✅ |
 | `cargo test --lib` | ✅ 29 passed |
 | `cargo test --test mailbox_resolver_test` | ✅ 13 passed |
+
+## 2026-08-14 (continued) — Incremental sync + optimistic UI
+
+Two follow-up commits completing the performance series.
+
+### Sync incremental append
+
+- **feat(sync): emit new_message_ids; frontend prepends instead of full refetch**
+  - `SyncReport` gains `new_message_ids: Vec<String>`. `sync_loop::insert_message`
+    now returns `Result<Option<String>>` — `Some(id)` when INSERT OR IGNORE
+    actually wrote a row, `None` on idempotent re-sync (driven by
+    `rows_affected()`). `sync_folder` collects ids; `sync_one` accumulates
+    across folders and ships the bundle on the `sync:new-messages` emit.
+  - `services/sync-events.ts` exposes `registerPrepend(bucket, handler)`;
+    each list view registers on mount and cleans up via `onCleanup`.
+  - `usePaginatedMessages::prependByIds(ids)` fetches each id via
+    `getMessage()`, drops ones already loaded, prepends the rest to the
+    in-memory list and bumps total.
+  - `sync:new-messages` keeps `bumpRefreshTick()` for non-paginated
+    resources AND now fans the ids out to the prepend registry so
+    paginated lists update with O(new_ids) IPC round-trips.
+
+### Optimistic UI
+
+- **feat(ui): optimistic remove on move/delete across list views**
+  - `usePaginatedMessages::removeByIds(ids)` drops the rows from the
+    loaded pages + total + offset in one synchronous step.
+  - Every move/delete in Imbox / Stream / Records / Trash / Spam now:
+    1. optimistically removes locally,
+    2. awaits the backend call,
+    3. on success → toast + (for bulk) refresh pile slices,
+    4. on failure → full refresh to resync truth + error toast.
+  - Bulk action bar in Imbox removes the whole selected set up front
+    before iterating the per-id backend calls.
+
+### Verification
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | ✅ |
+| `pnpm test` | ✅ 156 passed |
+| `cargo test --lib` | ✅ 29 passed |
