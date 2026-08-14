@@ -49,6 +49,7 @@ import { syncNow } from "../services/backend";
 import { useRefreshEffect, useViewport } from "../utils/gestures";
 import { priorityScore } from "../utils/priority";
 import { SwipeActions } from "../components/SwipeActions";
+import { registerPrepend } from "../services/sync-events";
 
 interface Bundle {
   contactId: string;
@@ -80,6 +81,16 @@ export function Imbox() {
     void refresh();
     void refetchAll();
   });
+
+  // Live-prepend on sync:new-messages. The registry fires for every
+  // bucket so we filter to imbox+incoming here — the Gate contract hides
+  // unscreened senders, but appending them below would create flicker
+  // when the next refresh refetch runs. Trust the row's own bucket field.
+  onCleanup(
+    registerPrepend("imbox", (ids) => {
+      void paged.prependByIds(ids);
+    }),
+  );
 
   const loadMoreIfNearEnd = () => {
     if (!paged.hasMore() || paged.loadingMore()) return;

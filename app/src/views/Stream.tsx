@@ -16,6 +16,7 @@ import {
   createMemo,
   createResource,
   createSignal,
+  onCleanup,
 } from "solid-js";
 import { VList, type VListHandle } from "virtua/solid";
 import { listContacts } from "../stores/data";
@@ -31,6 +32,7 @@ import { Icon } from "../components/Icon";
 import { htmlEmailSrcdoc } from "../utils/html";
 import { showToast } from "../stores/ui";
 import { useViewport } from "../utils/gestures";
+import { registerPrepend } from "../services/sync-events";
 
 const PREVIEW_PARAGRAPHS = 2;
 
@@ -50,6 +52,15 @@ export function Stream() {
   const paged = usePaginatedMessages({ bucket: "feed" });
   const items = paged.items;
   const refresh = paged.refresh;
+
+  // Live-prepend on sync:new-messages so a freshly delivered newsletter
+  // appears at the top of the list within one IPC round-trip instead of
+  // waiting for the next refreshTick-driven LIMIT 100 refetch.
+  onCleanup(
+    registerPrepend("feed", (ids) => {
+      void paged.prependByIds(ids);
+    }),
+  );
 
   const contactById = createMemo<Map<string, Contact>>(() => {
     const map = new Map<string, Contact>();

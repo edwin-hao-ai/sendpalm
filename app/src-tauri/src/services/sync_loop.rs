@@ -565,6 +565,7 @@ async fn sync_one(
     let mut total_inserted = 0u32;
     let mut inbox_cursor = account.last_uid;
     let mut inbox_uid_validity = account.uid_validity;
+    let mut new_message_ids: Vec<String> = Vec::new();
 
     for folder in &folders {
         let state_key = format!("sync_state::{}::{}", account.account_id, folder);
@@ -579,7 +580,7 @@ async fn sync_one(
             folder_last_uid
         };
 
-        let (inserted, cursor, uid_validity) = match sync_folder(
+        let (inserted, cursor, uid_validity, mut folder_new_ids) = match sync_folder(
             app,
             data_dir,
             pool,
@@ -604,6 +605,7 @@ async fn sync_one(
             }
         };
         total_inserted += inserted;
+        new_message_ids.append(&mut folder_new_ids);
 
         save_folder_sync_state(pool, &state_key, cursor, uid_validity).await?;
         if is_inbox {
@@ -628,6 +630,7 @@ async fn sync_one(
         skipped: 0,
         uid_validity: inbox_uid_validity as u64,
         last_uid: inbox_cursor as u64,
+        new_message_ids,
         error: None,
     };
     let _ = app.emit("sync:new-messages", report);
@@ -709,12 +712,13 @@ async fn sync_folder(
     folder: &str,
     start_uid: u32,
     previous_last_uid: u32,
-) -> Result<(u32, u32, u32), String> {
+) -> Result<(u32, u32, u32, Vec<String>), String> {
     let folder_kind = crate::services::mailbox_resolver::folder_kind_for_name(folder);
     let mut inserted = 0u32;
     #[allow(unused_assignments)]
     let mut uid_validity = 0u32;
     let mut cursor = start_uid;
+    let mut new_ids: Vec<String> = Vec::new();
 
     loop {
         let bundle = client.sync(folder, cursor).await?;
@@ -725,7 +729,7 @@ async fn sync_folder(
         }
         let mut chunk_outcomes: Vec<(u32, bool)> = Vec::with_capacity(bundle.messages.len());
         for (uid, parsed) in &bundle.messages {
-            let ok = insert_message(
+            match insert_message(
                 app,
                 data_dir,
                 pool,
@@ -737,8 +741,14 @@ async fn sync_folder(
                 previous_last_uid,
             )
             .await
-            .is_ok();
-            chunk_outcomes.push((*uid, ok));
+            {
+                Ok(Some(new_id)) => {
+                    new_ids.push(new_id);
+                    chunk_outcomes.push((*uid, true));
+                }
+                Ok(None) => chunk_outcomes.push((*uid, true)),
+                Err(_) => chunk_outcomes.push((*uid, false)),
+            }
         }
         let (chunk_inserted, chunk_last_ok) = advance_cursor(cursor, &chunk_outcomes);
         inserted += chunk_inserted;
@@ -764,8 +774,11 @@ async fn sync_folder(
         cursor = reset_to;
     }
 
-    eprintln!("[sync] folder={folder} inserted={inserted} cursor={cursor}");
-    Ok((inserted, cursor, new_uv))
+    eprintln!(
+        "[sync] folder={folder} inserted={inserted} cursor={cursor} new_ids={}",
+        new_ids.len()
+    );
+    Ok((inserted, cursor, new_uv, new_ids))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -779,7 +792,7 @@ async fn insert_message(
     uid: u32,
     parsed: &crate::services::parser::ParsedMessage,
     previous_last_uid: u32,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     let is_self = parsed
         .sender_email
         .eq_ignore_ascii_case(&account.creds.email);
@@ -821,7 +834,7 @@ async fn insert_message(
     let body_html = parsed.body_html.as_deref().unwrap_or("");
     let cc_json = serde_json::to_string(&parsed.cc).unwrap_or_else(|_| "[]".to_string());
     let bcc_json = serde_json::to_string(&parsed.bcc).unwrap_or_else(|_| "[]".to_string());
-    sqlx::query(
+    let insert_result = sqlx::query(
         "INSERT OR IGNORE INTO messages \
          (id, pid, subj, prev, body, body_html, tm, st, ac, bucket, direction, unread, labels_json, attachments_json, trackers_json, thread_id, calendar_json, to_addr, cc_json, bcc_json) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1, '[]', '[]', '[]', $12, $13, $14, $15, $16)"
@@ -845,6 +858,15 @@ async fn insert_message(
     .execute(pool)
     .await
     .map_err(|e| format!("insert message uid={uid}: {e}"))?;
+
+    // INSERT OR IGNORE returns rows_affected() = 1 on first write, 0 on
+    // conflict (idempotent re-sync). Surface the id only when we actually
+    // wrote a new row so the frontend's prepend list is accurate.
+    let new_id = if insert_result.rows_affected() > 0 {
+        Some(mid.clone())
+    } else {
+        None
+    };
 
     // Index the message for full-text search.
     let search_body = format!(
@@ -916,7 +938,7 @@ async fn insert_message(
         // Trigger vacation auto-responder for new mail.
         let _ = maybe_send_vacation_reply(pool, &account.account_id, &account.creds, parsed).await;
     }
-    Ok(())
+    Ok(new_id)
 }
 
 /// Send a vacation auto-reply if the account has one enabled and the sender

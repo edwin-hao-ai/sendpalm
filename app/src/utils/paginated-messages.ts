@@ -18,6 +18,7 @@ import {
   type Resource,
 } from "solid-js";
 import {
+  getMessage,
   listMessagesPaged,
   type ListMessagesOptions,
   type ListMessagesPage,
@@ -33,6 +34,15 @@ export interface PaginatedMessagesHandle {
   loadingMore: Accessor<boolean>;
   loadMore: () => Promise<void>;
   refresh: () => Promise<void>;
+  /**
+   * Prepend specific message ids to the loaded list, fetching each one
+   * from the DB. Called by the sync:new-messages event handler so the
+   * user sees new mail at the top of the list within one IPC round-trip
+   * per id, instead of waiting for a full paginated refetch.
+   * Already-loaded ids are skipped (idempotent). New total reflects the
+   * ids we couldn't load as a no-op bump.
+   */
+  prependByIds: (ids: string[]) => Promise<void>;
   resource: Resource<ListMessagesPage | undefined>;
 }
 
@@ -86,6 +96,25 @@ export function usePaginatedMessages(
     await refetch();
   };
 
+  const prependByIds = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    const loaded = new Set(pages().map((m) => m.id));
+    const fresh: Message[] = [];
+    for (const id of ids) {
+      if (loaded.has(id)) continue;
+      try {
+        const msg = await getMessage(id);
+        if (msg) fresh.push(msg);
+      } catch {
+        // Ignore per-id fetch failures — the next paginated refetch will
+        // pick them up. Better than blocking the prepend on one bad id.
+      }
+    }
+    if (fresh.length === 0) return;
+    setPages([...fresh, ...pages()]);
+    setTotal(total() + fresh.length);
+  };
+
   return {
     items,
     total,
@@ -93,6 +122,7 @@ export function usePaginatedMessages(
     loadingMore,
     loadMore,
     refresh,
+    prependByIds,
     resource,
   };
 }

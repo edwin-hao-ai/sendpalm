@@ -1,6 +1,6 @@
 /** Records view — receipts, transactions. Quiet auto-file. */
 
-import { For, Show, createResource } from "solid-js";
+import { For, Show, createResource, onCleanup } from "solid-js";
 import { VList, type VListHandle } from "virtua/solid";
 import {
   listContacts,
@@ -20,6 +20,7 @@ import {
 import { useRefreshEffect, useViewport } from "../utils/gestures";
 import { SwipeActions } from "../components/SwipeActions";
 import type { Message } from "../types";
+import { registerPrepend } from "../services/sync-events";
 
 export function Records() {
   const [contacts] = createResource(listContacts);
@@ -29,6 +30,12 @@ export function Records() {
   const paged = usePaginatedMessages({ bucket: "paperTrail" });
   const items = paged.items;
   const refresh = paged.refresh;
+
+  onCleanup(
+    registerPrepend("paperTrail", (ids) => {
+      void paged.prependByIds(ids);
+    }),
+  );
 
   useRefreshEffect(() => {
     void refresh();

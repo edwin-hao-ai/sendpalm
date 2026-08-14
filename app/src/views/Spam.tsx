@@ -1,6 +1,6 @@
 /** Spam view — filtered. */
 
-import { Show, createResource } from "solid-js";
+import { Show, createResource, onCleanup } from "solid-js";
 import { VList, type VListHandle } from "virtua/solid";
 import {
   listContacts,
@@ -14,6 +14,7 @@ import { Icon } from "../components/Icon";
 import { showToast } from "../stores/ui";
 import { addDays, daysUntil } from "../utils/date";
 import { useRefreshEffect } from "../utils/gestures";
+import { registerPrepend } from "../services/sync-events";
 
 export function Spam() {
   const [contacts] = createResource(listContacts);
@@ -21,6 +22,12 @@ export function Spam() {
   const paged = usePaginatedMessages({ bucket: "spam" });
   const items = paged.items;
   const refresh = paged.refresh;
+
+  onCleanup(
+    registerPrepend("spam", (ids) => {
+      void paged.prependByIds(ids);
+    }),
+  );
 
   useRefreshEffect(() => {
     void refresh();

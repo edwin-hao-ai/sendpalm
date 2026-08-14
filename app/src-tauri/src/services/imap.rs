@@ -260,6 +260,7 @@ impl SyncBundle {
             skipped,
             uid_validity: self.uid_validity as u64,
             last_uid: self.highest_uid as u64,
+            new_message_ids: Vec::new(),
             error: None,
         }
     }

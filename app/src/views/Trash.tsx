@@ -1,6 +1,6 @@
 /** Trash — recoverable for 30 days. */
 
-import { Show, createResource } from "solid-js";
+import { Show, createResource, onCleanup } from "solid-js";
 import { VList, type VListHandle } from "virtua/solid";
 import {
   listContacts,
@@ -15,6 +15,7 @@ import { Icon } from "../components/Icon";
 import { setDetailOpen, setSelectedMessageId, showToast } from "../stores/ui";
 import { addDays, daysUntil } from "../utils/date";
 import { useRefreshEffect } from "../utils/gestures";
+import { registerPrepend } from "../services/sync-events";
 
 export function Trash() {
   const [contacts] = createResource(listContacts);
@@ -22,6 +23,12 @@ export function Trash() {
   const paged = usePaginatedMessages({ bucket: "trash" });
   const items = paged.items;
   const refresh = paged.refresh;
+
+  onCleanup(
+    registerPrepend("trash", (ids) => {
+      void paged.prependByIds(ids);
+    }),
+  );
 
   useRefreshEffect(() => {
     void refresh();
