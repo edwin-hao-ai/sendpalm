@@ -36,15 +36,25 @@ export function Spam() {
   const contactById = (id: string) => contacts()?.find((c) => c.id === id);
 
   const notSpam = async (id: string) => {
-    await moveMessageToBucket(id, "imbox");
-    await refresh();
-    showToast({ message: "已恢复到 Imbox", kind: "success" });
+    paged.removeByIds([id]);
+    try {
+      await moveMessageToBucket(id, "imbox");
+      showToast({ message: "已恢复到 Imbox", kind: "success" });
+    } catch (err) {
+      await refresh();
+      showToast({ message: `恢复失败：${String(err)}`, kind: "error" });
+    }
   };
 
   const purge = async (id: string) => {
-    await deleteMessage(id);
-    await refresh();
-    showToast({ message: "已删除", kind: "info" });
+    paged.removeByIds([id]);
+    try {
+      await deleteMessage(id);
+      showToast({ message: "已删除", kind: "info" });
+    } catch (err) {
+      await refresh();
+      showToast({ message: `删除失败：${String(err)}`, kind: "error" });
+    }
   };
 
   let listRef: VListHandle | undefined;

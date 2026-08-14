@@ -87,15 +87,25 @@ export function Stream() {
   const isExpanded = (id: string) => expanded().has(id);
 
   const setAside = async (m: Message) => {
-    await upsertMessage({ ...m, setAside: true });
-    await refresh();
-    showToast({ message: "已 Set Aside", kind: "success" });
+    paged.removeByIds([m.id]);
+    try {
+      await upsertMessage({ ...m, setAside: true });
+      showToast({ message: "已 Set Aside", kind: "success" });
+    } catch (err) {
+      await refresh();
+      showToast({ message: `Set Aside 失败：${String(err)}`, kind: "error" });
+    }
   };
 
   const replyLater = async (m: Message) => {
-    await upsertMessage({ ...m, replyLater: true });
-    await refresh();
-    showToast({ message: "已 Reply Later", kind: "success" });
+    paged.removeByIds([m.id]);
+    try {
+      await upsertMessage({ ...m, replyLater: true });
+      showToast({ message: "已 Reply Later", kind: "success" });
+    } catch (err) {
+      await refresh();
+      showToast({ message: `Reply Later 失败：${String(err)}`, kind: "error" });
+    }
   };
 
   let listRef: VListHandle | undefined;

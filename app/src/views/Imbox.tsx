@@ -333,15 +333,27 @@ export function Imbox() {
   };
 
   const awaitReplyLater = async (m: Message) => {
-    await upsertMessage({ ...m, replyLater: true });
-    await refreshAll();
-    showToast({ message: "已 Reply Later", kind: "success" });
+    paged.removeByIds([m.id]);
+    try {
+      await upsertMessage({ ...m, replyLater: true });
+      await refetchAll();
+      showToast({ message: "已 Reply Later", kind: "success" });
+    } catch (err) {
+      await refreshAll();
+      showToast({ message: `Reply Later 失败：${String(err)}`, kind: "error" });
+    }
   };
 
   const awaitSetAside = async (m: Message) => {
-    await upsertMessage({ ...m, setAside: true });
-    await refreshAll();
-    showToast({ message: "已 Set Aside", kind: "success" });
+    paged.removeByIds([m.id]);
+    try {
+      await upsertMessage({ ...m, setAside: true });
+      await refetchAll();
+      showToast({ message: "已 Set Aside", kind: "success" });
+    } catch (err) {
+      await refreshAll();
+      showToast({ message: `Set Aside 失败：${String(err)}`, kind: "error" });
+    }
   };
 
   return (
@@ -757,31 +769,63 @@ export function Imbox() {
             count={selectedIds().size}
             onClear={clearSelection}
             onArchive={async () => {
-              const ids = selectedIds();
-              for (const id of ids) {
-                await moveMessageToBucket(id, "paperTrail");
-              }
+              const ids = Array.from(selectedIds());
+              paged.removeByIds(ids);
+              const snapshot = items();
               clearSelection();
-              await refreshAll();
-              showToast({ message: "已批量归档", kind: "success" });
+              try {
+                for (const id of ids) {
+                  await moveMessageToBucket(id, "paperTrail");
+                }
+                await refetchAll();
+                showToast({ message: "已批量归档", kind: "success" });
+              } catch (err) {
+                await refresh();
+                await refetchAll();
+                showToast({
+                  message: `归档失败：${String(err)}`,
+                  kind: "error",
+                });
+              }
+              void snapshot;
             }}
             onTrash={async () => {
-              const ids = selectedIds();
-              for (const id of ids) {
-                await moveMessageToBucket(id, "trash");
-              }
+              const ids = Array.from(selectedIds());
+              paged.removeByIds(ids);
               clearSelection();
-              await refreshAll();
-              showToast({ message: "已批量移到 Trash", kind: "info" });
+              try {
+                for (const id of ids) {
+                  await moveMessageToBucket(id, "trash");
+                }
+                await refetchAll();
+                showToast({ message: "已批量移到 Trash", kind: "info" });
+              } catch (err) {
+                await refresh();
+                await refetchAll();
+                showToast({
+                  message: `移到 Trash 失败：${String(err)}`,
+                  kind: "error",
+                });
+              }
             }}
             onSpam={async () => {
-              const ids = selectedIds();
-              for (const id of ids) {
-                await moveMessageToBucket(id, "spam");
-              }
+              const ids = Array.from(selectedIds());
+              paged.removeByIds(ids);
               clearSelection();
-              await refreshAll();
-              showToast({ message: "已批量移到 Spam", kind: "info" });
+              try {
+                for (const id of ids) {
+                  await moveMessageToBucket(id, "spam");
+                }
+                await refetchAll();
+                showToast({ message: "已批量移到 Spam", kind: "info" });
+              } catch (err) {
+                await refresh();
+                await refetchAll();
+                showToast({
+                  message: `移到 Spam 失败：${String(err)}`,
+                  kind: "error",
+                });
+              }
             }}
             onLabel={() => setBulkLabelOpen(true)}
             onMove={() => setBulkMoveOpen(true)}

@@ -43,6 +43,12 @@ export interface PaginatedMessagesHandle {
    * ids we couldn't load as a no-op bump.
    */
   prependByIds: (ids: string[]) => Promise<void>;
+  /**
+   * Optimistically drop ids from the loaded list and total. Use right
+   * after a move/delete so the row disappears instantly; if the backend
+   * call later fails, call refresh() to resync truth from the DB.
+   */
+  removeByIds: (ids: string[]) => void;
   resource: Resource<ListMessagesPage | undefined>;
 }
 
@@ -115,6 +121,19 @@ export function usePaginatedMessages(
     setTotal(total() + fresh.length);
   };
 
+  const removeByIds = (ids: string[]) => {
+    if (ids.length === 0) return;
+    const drop = new Set(ids);
+    const next = pages().filter((m) => !drop.has(m.id));
+    if (next.length === pages().length) return;
+    setPages(next);
+    setTotal(Math.max(0, total() - (pages().length - next.length)));
+    // Cursor offset: only count removals that came from within the loaded
+    // window. If we removed 2 of the 100 loaded rows the offset shrinks
+    // by 2; if we removed a row beyond the cursor it doesn't matter.
+    setOffset(Math.max(0, offset() - (pages().length - next.length)));
+  };
+
   return {
     items,
     total,
@@ -123,6 +142,7 @@ export function usePaginatedMessages(
     loadMore,
     refresh,
     prependByIds,
+    removeByIds,
     resource,
   };
 }
