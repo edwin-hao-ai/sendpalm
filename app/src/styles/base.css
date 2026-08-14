@@ -136,26 +136,30 @@ hr {
 }
 
 #app.detail-open {
-  grid-template-columns: var(--sidebar-width) 1fr var(--detail-panel-width);
+  grid-template-columns: var(--sidebar-width) var(--main-pane-width) var(--detail-panel-width);
   grid-template-areas:
     "sidebar  topbar   topbar"
     "sidebar  main     detail";
 }
 
 #app.agent-open {
-  grid-template-columns: var(--sidebar-width) 1fr var(--agent-panel-width);
+  grid-template-columns: var(--sidebar-width) var(--main-pane-width) var(--agent-panel-width);
   grid-template-areas:
     "sidebar  topbar   topbar"
     "sidebar  main     agent";
 }
 
 #app.detail-open.agent-open {
-  grid-template-columns: var(--sidebar-width) 1fr var(--detail-panel-width) var(
+  grid-template-columns: var(--sidebar-width) var(--main-pane-width) var(--detail-panel-width) var(
       --agent-panel-width
     );
   grid-template-areas:
     "sidebar  topbar   topbar   topbar"
     "sidebar  main     detail   agent";
+}
+
+#app:not(.detail-open):not(.agent-open) {
+  grid-template-columns: var(--sidebar-width) var(--main-pane-width);
 }
 
 #sidebar {

@@ -150,6 +150,7 @@
   --sidebar-width: 64px;
   --sidebar-width-tablet: 64px;
   --bottom-tab-height: 64px;
+  --main-pane-width: 1fr;
   --detail-panel-width: 380px;
   --agent-panel-width: 340px;
 

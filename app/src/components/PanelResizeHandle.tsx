@@ -1,4 +1,4 @@
-/** Resize handle for detail/agent side panels.
+/** Resize handle for detail/agent side panels + the Main column boundary.
  *  Dragging updates the matching CSS variable and persists to localStorage.
  */
 
@@ -8,25 +8,41 @@ import {
   setDetailPanelWidth,
   agentPanelWidth,
   setAgentPanelWidth,
+  mainPaneWidth,
+  setMainPaneWidth,
 } from "../stores/ui";
 
 type PanelSide = "left" | "right";
 
 interface Props {
-  panel: "detail" | "agent";
+  panel: "detail" | "agent" | "main";
   side?: PanelSide;
 }
 
-const MIN_WIDTH = 280;
-const MAX_WIDTH = 720;
+const MIN_DETAIL = 280;
+const MAX_DETAIL = 720;
+const MIN_AGENT = 280;
+const MAX_AGENT = 720;
+const MIN_MAIN = 360;
+const MAX_MAIN = 1100;
 const STORAGE_KEY = "sendpalm.panelWidths";
 
-function readStored(): { detail: number; agent: number } | null {
+interface StoredWidths {
+  detail: number;
+  agent: number;
+  main: number;
+}
+
+function readStored(): StoredWidths | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (typeof parsed.detail === "number" && typeof parsed.agent === "number") {
+    if (
+      typeof parsed.detail === "number" &&
+      typeof parsed.agent === "number" &&
+      typeof parsed.main === "number"
+    ) {
       return parsed;
     }
   } catch {
@@ -40,6 +56,7 @@ export function initializePanelWidths(): void {
   if (stored) {
     setDetailPanelWidth(stored.detail);
     setAgentPanelWidth(stored.agent);
+    setMainPaneWidth(stored.main);
   }
   updateRootVars();
 }
@@ -53,11 +70,18 @@ function updateRootVars() {
     "--agent-panel-width",
     `${agentPanelWidth()}px`,
   );
+  document.documentElement.style.setProperty(
+    "--main-pane-width",
+    `${mainPaneWidth()}px`,
+  );
 }
 
-function persist(d: number, a: number) {
+function persist(d: number, a: number, m: number) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ detail: d, agent: a }));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ detail: d, agent: a, main: m }),
+    );
   } catch {
     // ignore
   }
@@ -65,12 +89,18 @@ function persist(d: number, a: number) {
 
 export function PanelResizeHandle(props: Props) {
   const [dragging, setDragging] = createSignal(false);
-  const side = props.side ?? (props.panel === "detail" ? "left" : "left");
+  const side = props.side ?? (props.panel === "agent" ? "left" : "right");
 
-  const width = () =>
-    props.panel === "detail" ? detailPanelWidth() : agentPanelWidth();
-  const setWidth =
-    props.panel === "detail" ? setDetailPanelWidth : setAgentPanelWidth;
+  const width = () => {
+    if (props.panel === "detail") return detailPanelWidth();
+    if (props.panel === "agent") return agentPanelWidth();
+    return mainPaneWidth();
+  };
+  const setWidth = (n: number) => {
+    if (props.panel === "detail") setDetailPanelWidth(n);
+    else if (props.panel === "agent") setAgentPanelWidth(n);
+    else setMainPaneWidth(n);
+  };
 
   onMount(() => {
     updateRootVars();
@@ -82,9 +112,22 @@ export function PanelResizeHandle(props: Props) {
     const startX = e.clientX;
     const startWidth = width();
 
+    const min =
+      props.panel === "detail"
+        ? MIN_DETAIL
+        : props.panel === "agent"
+          ? MIN_AGENT
+          : MIN_MAIN;
+    const max =
+      props.panel === "detail"
+        ? MAX_DETAIL
+        : props.panel === "agent"
+          ? MAX_AGENT
+          : MAX_MAIN;
+
     const onPointerMove = (ev: PointerEvent) => {
       const delta = side === "left" ? startX - ev.clientX : ev.clientX - startX;
-      const next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth + delta));
+      const next = Math.min(max, Math.max(min, startWidth + delta));
       setWidth(next);
       updateRootVars();
     };
@@ -95,7 +138,7 @@ export function PanelResizeHandle(props: Props) {
       document.removeEventListener("pointerup", onPointerUp);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
-      persist(detailPanelWidth(), agentPanelWidth());
+      persist(detailPanelWidth(), agentPanelWidth(), mainPaneWidth());
     };
 
     document.body.style.cursor = "col-resize";
