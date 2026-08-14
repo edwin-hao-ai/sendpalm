@@ -710,6 +710,7 @@ async fn sync_folder(
     start_uid: u32,
     previous_last_uid: u32,
 ) -> Result<(u32, u32, u32), String> {
+    let folder_kind = crate::services::mailbox_resolver::folder_kind_for_name(folder);
     let mut inserted = 0u32;
     #[allow(unused_assignments)]
     let mut uid_validity = 0u32;
@@ -730,6 +731,7 @@ async fn sync_folder(
                 pool,
                 account,
                 folder,
+                folder_kind,
                 *uid,
                 parsed,
                 previous_last_uid,
@@ -773,15 +775,36 @@ async fn insert_message(
     pool: &SqlitePool,
     account: &SyncAccount,
     folder: &str,
+    folder_kind: Option<crate::services::mailbox_resolver::FolderKind>,
     uid: u32,
     parsed: &crate::services::parser::ParsedMessage,
     previous_last_uid: u32,
 ) -> Result<(), String> {
-    let route = upsert_contact(pool, &parsed.sender_email, parsed.sender_name.as_deref()).await?;
+    let is_self = parsed
+        .sender_email
+        .eq_ignore_ascii_case(&account.creds.email);
+    let route = upsert_contact(
+        pool,
+        &parsed.sender_email,
+        parsed.sender_name.as_deref(),
+        is_self,
+    )
+    .await?;
     let bucket = compute_message_bucket(&route);
     let contact_id = route.id;
     let folder_slug = folder.replace(['/', ' '], "_");
     let mid = format!("imap_{}_{folder_slug}_{uid}", account.account_id);
+
+    // Sent folder messages are outgoing (sender is the user); they must be
+    // tagged direction='out' so they never flow into the Imbox list, the
+    // Gate screener, or the unread count. compute_message_bucket already
+    // routes them to 'paperTrail' because the self-contact is screened=1
+    // with default_bucket='paperTrail', but the explicit direction='out'
+    // makes the data self-describing for any future per-direction query.
+    let direction = match folder_kind {
+        Some(crate::services::mailbox_resolver::FolderKind::Sent) => "out",
+        _ => "in",
+    };
 
     let prev_excerpt = parsed
         .body_text
@@ -801,7 +824,7 @@ async fn insert_message(
     sqlx::query(
         "INSERT OR IGNORE INTO messages \
          (id, pid, subj, prev, body, body_html, tm, st, ac, bucket, direction, unread, labels_json, attachments_json, trackers_json, thread_id, calendar_json, to_addr, cc_json, bcc_json) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'in', 1, '[]', '[]', '[]', $11, $12, $13, $14, $15)"
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1, '[]', '[]', '[]', $12, $13, $14, $15, $16)"
     )
     .bind(&mid)
     .bind(&contact_id)
@@ -813,6 +836,7 @@ async fn insert_message(
     .bind(parsed.date.to_rfc3339())
     .bind(&account.account_id)
     .bind(bucket)
+    .bind(direction)
     .bind(parsed.thread_id.as_deref().unwrap_or(""))
     .bind(calendar_json.as_deref())
     .bind(&parsed.to_addr)
@@ -1044,7 +1068,7 @@ pub async fn save_sent_message(
     body: &str,
     attachments: &[crate::services::smtp::OutgoingAttachment],
 ) -> Result<String, String> {
-    let route = upsert_contact(pool, to_email, None).await?;
+    let route = upsert_contact(pool, to_email, None, false).await?;
     let mid = format!("sent_{}", uuid::Uuid::new_v4().simple());
     let prev_excerpt = body
         .split('\n')
@@ -1299,6 +1323,7 @@ pub async fn upsert_contact(
     pool: &SqlitePool,
     email: &str,
     name: Option<&str>,
+    is_self: bool,
 ) -> Result<ContactRouteInfo, String> {
     let id = format!("c_{}", email.replace('@', "_at_").replace('.', "_"));
     let display_name = name
@@ -1310,16 +1335,33 @@ pub async fn upsert_contact(
         Some((f, l)) => (f.to_string(), l.to_string()),
         None => (display_name.clone(), "".to_string()),
     };
+    // Self-contact invariants: first_seen=0, screened=1, default_bucket='paperTrail'.
+    // We force these on both INSERT and ON CONFLICT so the self-contact can never
+    // accidentally surface in the Gate screener after the Sent folder is synced.
+    let (first_seen, screened, default_bucket) = if is_self {
+        (0i64, 1i64, "paperTrail")
+    } else {
+        (1i64, 0i64, "imbox")
+    };
     sqlx::query(
         "INSERT INTO contacts (id, first_name, last_name, nickname, name, emails_json, stage, grp, health, first_contact, first_seen, screened, default_bucket) \
-         VALUES ($1, $2, $3, '', $4, $5, 'active', 'active', 75, datetime('now'), 1, 0, 'imbox') \
-         ON CONFLICT(id) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name, name = excluded.name"
+         VALUES ($1, $2, $3, '', $4, $5, 'active', 'active', 75, datetime('now'), $6, $7, $8) \
+         ON CONFLICT(id) DO UPDATE SET \
+           first_name = excluded.first_name, \
+           last_name = excluded.last_name, \
+           name = excluded.name, \
+           first_seen = CASE WHEN excluded.first_seen = 0 THEN 0 ELSE contacts.first_seen END, \
+           screened = CASE WHEN excluded.screened = 1 THEN 1 ELSE contacts.screened END, \
+           default_bucket = CASE WHEN excluded.first_seen = 0 THEN excluded.default_bucket ELSE contacts.default_bucket END"
     )
     .bind(&id)
     .bind(&first)
     .bind(&last)
     .bind(&display_name)
     .bind(format!("[{{\"value\":\"{}\",\"label\":\"work\"}}]", email))
+    .bind(first_seen)
+    .bind(screened)
+    .bind(default_bucket)
     .execute(pool)
     .await
     .map_err(|e| format!("upsert contact: {e}"))?;

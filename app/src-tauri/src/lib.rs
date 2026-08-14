@@ -110,6 +110,12 @@ pub fn run() {
             sql: include_str!("../migrations/0015_file_source_message_ids.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 16,
+            description: "backfill_sent_folder_direction_and_self_contact",
+            sql: include_str!("../migrations/0016_sent_direction_backfill.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     eprintln!("[sendpalm] starting tauri builder");
