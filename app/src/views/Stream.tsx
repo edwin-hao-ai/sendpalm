@@ -1,60 +1,119 @@
-/** Stream view — newsletters, casual reads. Scannable list, no read/unread. */
-
-import { For, Show, createMemo, createResource } from "solid-js";
-import { listContacts, listMessages } from "../stores/data";
+/** Stream view — newsletters, casual reads, newspaper mode.
+ *
+ *  Per prototype-v9 §renderStream: a continuous scroll of full-bleed cards.
+ *  Click a card to expand the full message body inline; click again to
+ *  collapse. The DetailPanel never opens for a Stream click — that would
+ *  interrupt the reading flow.
+ *
+ *  Backend: pages 100 messages at a time via `usePaginatedMessages`, so
+ *  a 5k-newsletter mailbox does not lock the UI on first paint.
+ *  Rendering: virtua's VList mounts only ~30 DOM nodes for the visible
+ *  window even when the dataset is 1000+.
+ */
+import {
+  For,
+  Show,
+  createMemo,
+  createResource,
+  createSignal,
+} from "solid-js";
+import { VList, type VListHandle } from "virtua/solid";
+import { listContacts } from "../stores/data";
 import type { Contact, Message } from "../types";
-import { setDetailOpen, setSelectedMessageId } from "../stores/ui";
+import {
+  listFiles,
+  upsertMessage,
+} from "../stores/data";
+import { usePaginatedMessages } from "../utils/paginated-messages";
 import { Avatar } from "../components/Avatar";
 import { Empty } from "../components/Empty";
-import { SkeletonList } from "../components/Skeleton";
-import { useRefreshEffect, useViewport } from "../utils/gestures";
-import { SwipeActions } from "../components/SwipeActions";
-import { upsertMessage } from "../stores/data";
+import { Icon } from "../components/Icon";
+import { htmlEmailSrcdoc } from "../utils/html";
 import { showToast } from "../stores/ui";
+import { useViewport } from "../utils/gestures";
+
+const PREVIEW_PARAGRAPHS = 2;
+
+function splitParagraphs(body: string): string[] {
+  return body
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+}
 
 export function Stream() {
   const [contacts] = createResource(listContacts);
-  const [messages, { refetch: refetchMessages }] = createResource(listMessages);
+  const [files] = createResource(listFiles);
   const { isMobile } = useViewport();
+  const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
 
-  useRefreshEffect(() => {
-    void refetchMessages();
+  const paged = usePaginatedMessages({ bucket: "feed" });
+  const items = paged.items;
+  const refresh = paged.refresh;
+
+  const contactById = createMemo<Map<string, Contact>>(() => {
+    const map = new Map<string, Contact>();
+    for (const c of contacts() ?? []) map.set(c.id, c);
+    return map;
   });
 
-  const items = createMemo<Message[]>(() => {
-    return (messages() ?? [])
-      .filter((m) => m.bucket === "feed")
-      .sort((a, b) => new Date(b.st).getTime() - new Date(a.st).getTime());
-  });
+  const fileById = createMemo<Map<string, { name: string; mime: string }>>(
+    () => {
+      const map = new Map<string, { name: string; mime: string }>();
+      for (const f of files() ?? [])
+        map.set(f.id, { name: f.name, mime: f.mime });
+      return map;
+    },
+  );
 
-  const contactById = (id: string): Contact | undefined =>
-    contacts()?.find((c) => c.id === id);
-
-  const open = (id: string) => {
-    setSelectedMessageId(id);
-    setDetailOpen(true);
+  const toggle = (id: string) => {
+    const next = new Set(expanded());
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setExpanded(next);
   };
+
+  const isExpanded = (id: string) => expanded().has(id);
 
   const setAside = async (m: Message) => {
     await upsertMessage({ ...m, setAside: true });
-    await refetchMessages();
+    await refresh();
     showToast({ message: "已 Set Aside", kind: "success" });
   };
 
   const replyLater = async (m: Message) => {
     await upsertMessage({ ...m, replyLater: true });
-    await refetchMessages();
+    await refresh();
     showToast({ message: "已 Reply Later", kind: "success" });
   };
 
+  let listRef: VListHandle | undefined;
+  const loadMoreIfNearEnd = (offset: number) => {
+    const handle = listRef;
+    if (!handle || !paged.hasMore() || paged.loadingMore()) return;
+    const remaining = handle.scrollSize - (offset + handle.viewportSize);
+    if (remaining < 800) {
+      void paged.loadMore();
+    }
+  };
+
   return (
-    <div style={{ animation: "view-enter 0.3s var(--ease-out) both" }}>
+    <div
+      style={{
+        animation: "view-enter 0.3s var(--ease-out) both",
+        height: "100%",
+        display: "flex",
+        "flex-direction": "column",
+      }}
+    >
       <SectionHeader
         title="The Stream"
-        subtitle="订阅邮件、长文慢慢看。没有已读/未读，光滑滚动。"
+        subtitle={`订阅邮件、长文慢慢看。点击展开全文，多篇可同时展开。无 DetailPanel，光滑滚动。${
+          paged.hasMore() ? ` · 已加载 ${items().length}/${paged.total()}` : ""
+        }`}
       />
       <Show
-        when={messages.state !== "pending"}
+        when={paged.resource.state !== "pending"}
         fallback={
           <div
             style={{
@@ -63,7 +122,7 @@ export function Stream() {
               padding: "0 var(--space-5)",
             }}
           >
-            <SkeletonList count={8} />
+            <SkeletonBlock />
           </div>
         }
       >
@@ -71,105 +130,273 @@ export function Stream() {
           <div
             style={{
               "max-width": "720px",
+              width: "100%",
               margin: "0 auto",
-              padding: "0 var(--space-5)",
+              padding: "0 var(--space-5) var(--space-7)",
+              flex: 1,
+              "min-height": 0,
             }}
           >
-            <For each={items()}>
-              {(m) => {
-                const c = contactById(m.pid);
-                return (
-                  <SwipeActions
-                    role="listitem"
-                    style={{
-                      "border-radius": "var(--radius-lg)",
-                      "border-bottom": "0.5px solid var(--border)",
-                    }}
-                    leftAction={{
-                      label: "Set Aside",
-                      icon: "ph-push-pin",
-                      color: "green",
-                      onClick: () => void setAside(m),
-                    }}
-                    rightAction={{
-                      label: "Reply Later",
-                      icon: "ph-clock",
-                      color: "yellow",
-                      onClick: () => void replyLater(m),
-                    }}
-                    disabled={!isMobile()}
-                  >
-                    <article
-                      onClick={() => open(m.id)}
-                      style={{
-                        padding: "var(--space-5) var(--space-4)",
-                        cursor: "pointer",
-                        transition:
-                          "background var(--duration-fast) var(--ease-out)",
-                      }}
-                      onMouseEnter={(e) =>
-                        (e.currentTarget.style.background = "var(--paper-mid)")
-                      }
-                      onMouseLeave={(e) =>
-                        (e.currentTarget.style.background = "transparent")
-                      }
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "var(--space-3)",
-                          "align-items": "center",
-                          "margin-bottom": "var(--space-3)",
-                        }}
-                      >
-                        <Avatar
-                          name={c?.name ?? "Newsletter"}
-                          src={c?.avatar}
-                          size={40}
-                        />
-                        <div>
-                          <strong style={{ "font-weight": "700" }}>
-                            {c?.name ?? "Newsletter"}
-                          </strong>
-                          <div
-                            style={{
-                              "font-size": "var(--text-micro)",
-                              color: "var(--text-muted)",
-                            }}
-                          >
-                            {m.tm}
-                          </div>
-                        </div>
-                      </div>
-                      <h3
-                        style={{
-                          "font-family": "var(--font-display)",
-                          "font-size": "var(--text-h4)",
-                          "font-weight": "800",
-                          margin: "0 0 var(--space-2)",
-                        }}
-                      >
-                        {m.subj}
-                      </h3>
-                      <p
-                        style={{
-                          margin: 0,
-                          color: "var(--text-secondary)",
-                          "font-size": "var(--text-body-sm)",
-                          "line-height": 1.5,
-                        }}
-                      >
-                        {m.prev}
-                      </p>
-                    </article>
-                  </SwipeActions>
-                );
-              }}
-            </For>
+            <VList
+              ref={(h) => (listRef = (h ?? undefined) as VListHandle | undefined)}
+              data={items()}
+              onScroll={loadMoreIfNearEnd}
+              style={{ height: "100%" }}
+            >
+              {(m: Message) => (
+                <StreamCard
+                  m={m}
+                  contact={contactById().get(m.pid)}
+                  attachments={(m.attachments ?? [])
+                    .map((id) => fileById().get(id))
+                    .filter((f): f is { name: string; mime: string } => !!f)}
+                  expanded={isExpanded(m.id)}
+                  onToggle={() => toggle(m.id)}
+                  onSetAside={() => void setAside(m)}
+                  onReplyLater={() => void replyLater(m)}
+                  isMobile={isMobile()}
+                />
+              )}
+            </VList>
           </div>
         </Show>
       </Show>
     </div>
+  );
+}
+
+interface StreamCardProps {
+  m: Message;
+  contact: Contact | undefined;
+  attachments: { name: string; mime: string }[];
+  expanded: boolean;
+  onToggle: () => void;
+  onSetAside: () => void;
+  onReplyLater: () => void;
+  isMobile: boolean;
+}
+
+function StreamCard(props: StreamCardProps) {
+  const paragraphs = createMemo(() => splitParagraphs(props.m.body || ""));
+  const visibleParagraphs = createMemo(() =>
+    props.expanded
+      ? paragraphs()
+      : paragraphs().slice(0, PREVIEW_PARAGRAPHS),
+  );
+
+  return (
+    <article
+      data-stream-card
+      data-expanded={props.expanded ? "true" : "false"}
+      onClick={(e) => {
+        // Don't toggle when clicking an interactive child (button/link/iframe).
+        const target = e.target as HTMLElement;
+        if (target.closest("button, a, input, iframe")) return;
+        props.onToggle();
+      }}
+      style={{
+        "border-radius": "var(--radius-lg)",
+        "border-bottom": "0.5px solid var(--border)",
+        padding: "var(--space-5) var(--space-4)",
+        background: props.expanded ? "var(--paper-light)" : "transparent",
+        cursor: "pointer",
+        transition:
+          "background var(--duration-fast) var(--ease-out)",
+        "margin-bottom": "var(--space-2)",
+      }}
+    >
+      <header
+        style={{
+          display: "flex",
+          gap: "var(--space-3)",
+          "align-items": "center",
+          "margin-bottom": "var(--space-3)",
+        }}
+      >
+        <Avatar
+          name={props.contact?.name ?? "Newsletter"}
+          src={props.contact?.avatar}
+          size={40}
+        />
+        <div style={{ flex: 1, "min-width": 0 }}>
+          <strong style={{ "font-weight": 700 }}>
+            {props.contact?.name ?? "Newsletter"}
+          </strong>
+          <div
+            style={{
+              "font-size": "var(--text-micro)",
+              color: "var(--text-muted)",
+            }}
+          >
+            {props.m.tm}
+          </div>
+        </div>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            props.onToggle();
+          }}
+          title={props.expanded ? "收起" : "展开"}
+          aria-label={props.expanded ? "收起" : "展开"}
+          style={{
+            background: "transparent",
+            border: "0",
+            color: "var(--text-muted)",
+            cursor: "pointer",
+            padding: "6px",
+            "border-radius": "var(--radius-pill)",
+            display: "inline-flex",
+            "align-items": "center",
+            "justify-content": "center",
+          }}
+        >
+          <Icon name={props.expanded ? "ph-caret-up" : "ph-caret-down"} size={14} />
+        </button>
+      </header>
+
+      <h3
+        style={{
+          "font-family": "var(--font-display)",
+          "font-size": "var(--text-h4)",
+          "font-weight": 800,
+          margin: "0 0 var(--space-3)",
+        }}
+      >
+        {props.m.subj}
+      </h3>
+
+      <Show when={props.m.bodyHtml && props.expanded}>
+        <div
+          data-stream-html
+          style={{
+            margin: "0 0 var(--space-3)",
+            "border-radius": "var(--radius-md)",
+            overflow: "hidden",
+            border: "0.5px solid var(--border)",
+            background: "var(--paper)",
+          }}
+        >
+          <iframe
+            srcdoc={htmlEmailSrcdoc(props.m.bodyHtml!)}
+            sandbox=""
+            title={props.m.subj}
+            style={{
+              width: "100%",
+              border: "0",
+              "min-height": "200px",
+              height: "480px",
+              display: "block",
+            }}
+          />
+        </div>
+      </Show>
+
+      <Show when={visibleParagraphs().length > 0}>
+        <div
+          style={{
+            color: "var(--text-secondary)",
+            "font-size": "var(--text-body-sm)",
+            "line-height": 1.6,
+          }}
+        >
+          <For each={visibleParagraphs()}>
+            {(p) => <p style={{ margin: "0 0 var(--space-2)" }}>{p}</p>}
+          </For>
+        </div>
+      </Show>
+
+      <Show when={!props.expanded && paragraphs().length > PREVIEW_PARAGRAPHS}>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            props.onToggle();
+          }}
+          style={{
+            background: "transparent",
+            border: "0",
+            color: "var(--palm)",
+            "font-weight": 700,
+            "font-size": "var(--text-caption)",
+            padding: "var(--space-2) 0",
+            cursor: "pointer",
+          }}
+        >
+          展开全文 ({paragraphs().length - PREVIEW_PARAGRAPHS} 段更多) ↓
+        </button>
+      </Show>
+
+      <Show when={props.expanded}>
+        <footer
+          data-stream-actions
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            display: "flex",
+            gap: "var(--space-2)",
+            "flex-wrap": "wrap",
+            "margin-top": "var(--space-4)",
+            "padding-top": "var(--space-3)",
+            "border-top": "0.5px solid var(--border)",
+          }}
+        >
+          <ActionButton
+            icon="ph-clock"
+            label={props.isMobile ? "" : "Reply Later"}
+            onClick={props.onReplyLater}
+          />
+          <ActionButton
+            icon="ph-push-pin"
+            label={props.isMobile ? "" : "Set Aside"}
+            onClick={props.onSetAside}
+          />
+          <Show when={props.attachments.length > 0}>
+            <span
+              data-stream-attachments-count
+              style={{
+                display: "inline-flex",
+                "align-items": "center",
+                gap: "4px",
+                padding: "4px 10px",
+                "font-size": "var(--text-micro)",
+                color: "var(--text-muted)",
+                background: "var(--paper-mid)",
+                "border-radius": "var(--radius-pill)",
+              }}
+            >
+              <Icon name="ph-paperclip" size={12} />
+              {props.attachments.length} 个附件
+            </span>
+          </Show>
+        </footer>
+      </Show>
+    </article>
+  );
+}
+
+function ActionButton(props: {
+  icon: string;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={props.onClick}
+      style={{
+        display: "inline-flex",
+        "align-items": "center",
+        gap: "4px",
+        padding: "6px 10px",
+        background: "var(--paper-mid)",
+        "border-radius": "var(--radius-pill)",
+        border: "0",
+        "font-size": "var(--text-micro)",
+        "font-weight": 700,
+        color: "var(--text-secondary)",
+        cursor: "pointer",
+      }}
+    >
+      <Icon name={props.icon} size={12} />
+      {props.label || <span style={{ width: "12px" }} />}
+    </button>
   );
 }
 
@@ -185,7 +412,7 @@ function SectionHeader(props: { title: string; subtitle?: string }) {
         style={{
           "font-family": "var(--font-display)",
           "font-size": "var(--text-h3)",
-          "font-weight": "800",
+          "font-weight": 800,
           margin: 0,
           "margin-bottom": "var(--space-1)",
         }}
@@ -204,6 +431,93 @@ function SectionHeader(props: { title: string; subtitle?: string }) {
         </p>
       </Show>
     </header>
+  );
+}
+
+function SkeletonBlock() {
+  return (
+    <div
+      style={{
+        display: "flex",
+        "flex-direction": "column",
+        gap: "var(--space-3)",
+      }}
+    >
+      <For each={[0, 1, 2, 3]}>
+        {() => (
+          <div
+            style={{
+              padding: "var(--space-5) var(--space-4)",
+              "border-radius": "var(--radius-lg)",
+              "border-bottom": "0.5px solid var(--border)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                gap: "var(--space-3)",
+                "align-items": "center",
+                "margin-bottom": "var(--space-3)",
+              }}
+            >
+              <div
+                style={{
+                  width: "40px",
+                  height: "40px",
+                  "border-radius": "50%",
+                  background: "var(--paper-mid)",
+                }}
+              />
+              <div style={{ flex: 1 }}>
+                <div
+                  style={{
+                    height: "12px",
+                    width: "40%",
+                    background: "var(--paper-mid)",
+                    "border-radius": "4px",
+                    "margin-bottom": "6px",
+                  }}
+                />
+                <div
+                  style={{
+                    height: "10px",
+                    width: "20%",
+                    background: "var(--paper-mid)",
+                    "border-radius": "4px",
+                  }}
+                />
+              </div>
+            </div>
+            <div
+              style={{
+                height: "18px",
+                width: "70%",
+                background: "var(--paper-mid)",
+                "border-radius": "4px",
+                "margin-bottom": "var(--space-2)",
+              }}
+            />
+            <div
+              style={{
+                height: "12px",
+                width: "90%",
+                background: "var(--paper-mid)",
+                "border-radius": "4px",
+                "margin-bottom": "4px",
+              }}
+            />
+            <div
+              style={{
+                height: "12px",
+                width: "60%",
+                background: "var(--paper-mid)",
+                "border-radius": "4px",
+              }}
+            />
+          </div>
+        )}
+      </For>
+    </div>
   );
 }
 
