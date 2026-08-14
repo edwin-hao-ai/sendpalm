@@ -1552,3 +1552,78 @@ Second focused pass after the user asked to log in to `edwinhao@sendpalm.com` on
 - Net effect: the macOS window shows native traffic lights on top of a
   draggable topbar; the SendPalm brand is at the expected HEY-style
   position (Phosphor leaf + wordmark).
+
+## 2026-08-14 — Imbox sync + Stream 读报 + virtualization
+
+Three independently observable problems on the running app (`pnpm tauri
+dev`) shared one architectural cause: every list view loaded the entire
+`messages` table on every refresh, did an O(n) filter over all rows in a
+`createMemo`, and then mounted every row via `<For>`. With the real
+account holding 913 imbox rows (908 of them hidden by the Gate contract),
+the per-render work was always there even when only 5 rows were visible.
+
+This pass is one logical change set spread across seven commits:
+
+### Sync correctness (1 commit)
+
+- **fix(sync): tag Sent-folder messages direction='out' and skip self in Gate**
+  - `services/mailbox_resolver::folder_kind_for_name()` classifies a
+    folder without needing the server mailbox list.
+  - `sync_loop::insert_message()` hard-codes `direction='out'` for Sent
+    folders (Feishu `&XfJT0ZAB-`, Gmail `[Gmail]/Sent Mail`, Outlook
+    `Sent Items`, etc.); `bucket` still comes from
+    `compute_message_bucket` via the contact's `default_bucket`.
+  - `sync_loop::upsert_contact(pool, email, name, is_self)` forces
+    `first_seen=0, screened=1, default_bucket='paperTrail'` for the
+    account's own email on both INSERT and ON CONFLICT, with CASE guards
+    so the user's manual screening decisions are preserved on later
+    syncs.
+  - Migration `0016_sent_direction_backfill.sql` repairs legacy rows
+    (direction='out', bucket='paperTrail', unread=0) and normalizes the
+    matching self-contact.
+  - 7 new tests in `mailbox_resolver_test.rs` covering all FolderKind
+    candidates and case-insensitive matching.
+
+### Frontend virtualization + pagination (4 commits)
+
+- **chore(deps): virtua** — `inokawa/virtua` 0.50.1, zero-config Solid
+  adapter, ~3kB. Chosen over `@tanstack/solid-virtual` for smaller
+  footprint and built-in `onScrollEnd`/`onLoadMore`-style hooks.
+- **feat(perf): listMessagesPaged + usePaginatedMessages** — new
+  `LIMIT/OFFSET` query returning `{ items, total, limit, offset }` plus
+  a Solid composable exposing `items/total/hasMore/loadMore/refresh`.
+  `listMessages()` kept untouched for callers that need the full table
+  (search, reminder loop, BulkActionMenu).
+- **feat(ui): Stream 读报模式** — replaces the
+  `open(m.id) → setDetailOpen(true)` flow with click-to-expand inline.
+  Multiple cards can be expanded; DetailPanel never opens for Stream
+  clicks. `htmlEmailSrcdoc` extracted from MessagePanel into
+  `utils/html.ts` so both surfaces share the same srcdoc + click
+  interceptor.
+- **feat(ui): Records/Trash/Spam virtualized** — same pattern as
+  Stream: `<VList data={paged.items()}>` with scroll-end → `loadMore()`.
+- **feat(ui): Imbox virtualized with WindowVirtualizer** — Imbox uses
+  window scroll (the page-level `<main>` is the scroll container) so
+  `WindowVirtualizer` from virtua fits without restructuring the
+  layout. Pile slices (replyLater/setAside/reminded) still need every
+  message to filter by flag, so a second `listMessages` resource stays
+  around only for those mappers.
+
+### UI polish (1 commit)
+
+- **feat(ui): drag handle between Main and DetailPanel** — adds
+  `--main-pane-width` token (default 640px) and a `<PanelResizeHandle
+  panel="main" side="right" />` mounted on Main. Persisted alongside
+  detail/agent widths in the existing `sendpalm.panelWidths`
+  localStorage entry.
+
+### Verification
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | ✅ |
+| `pnpm test` | ✅ 156 passed (22 files) |
+| `pnpm lint` | 🟡 1 pre-existing `sidebarWidth` error in `e2e/views.spec.ts:416` (verified by `git stash` — present on `main` before this branch) |
+| `cargo build` | ✅ |
+| `cargo test --lib` | ✅ 29 passed |
+| `cargo test --test mailbox_resolver_test` | ✅ 13 passed |
