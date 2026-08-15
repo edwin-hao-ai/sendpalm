@@ -13,6 +13,7 @@
 import {
   type Accessor,
   createMemo,
+  createEffect,
   createResource,
   createSignal,
   type Resource,
@@ -23,6 +24,7 @@ import {
   type ListMessagesOptions,
   type ListMessagesPage,
 } from "../stores/data";
+import { refreshTick } from "../stores/ui";
 import type { Message } from "../types";
 
 const DEFAULT_PAGE_SIZE = 100;
@@ -74,6 +76,13 @@ export function usePaginatedMessages(
     setOffset(page.items.length);
     setTotal(page.total);
     return page;
+  });
+
+  // Refresh on global tick (e.g. sync:new-messages, manual refetch, or
+  // e2e seed bumps). Triggers a re-fetch so the list reflects DB state.
+  createEffect(() => {
+    refreshTick();
+    void refetch();
   });
 
   const items = createMemo(() => pages());

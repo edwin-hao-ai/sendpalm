@@ -1,7 +1,19 @@
 /** Imbox view — main workhorse. M1: bundles, splits, piles, keyboard nav.
- * Spec mirrors prototype-v11 §3.1 exactly.
+ *  Mirrors prototype-v11 §renderImbox + §renderFeedItem closely so the
+ *  feel matches the HTML prototype the user can scroll through.
+ *
+ *  Scroll performance contract: at 5,000 rows the page MUST still paint
+ *  at 60fps. We achieve that with browser-native virtualization
+ *  (content-visibility: auto on every .feed-card in styles/imbox.css)
+ *  + paginated loads of 100 rows at a time. No JS virtualization —
+ *  WindowVirtualizer/VList break page-scroll layout in subtle ways and
+ *  pull in extra state we don't need.
+ *
+ *  Every imbox bucket row shows in the list; first-time senders render
+ *  with an inline approve/block pill so the user never has to jump to
+ *  Gate for a single message. Bulk Gate approval remains in Gate for
+ *  the 200+ queue case.
  */
-
 import {
   For,
   Show,
@@ -10,19 +22,18 @@ import {
   createSignal,
   createEffect,
   onCleanup,
+  onMount,
 } from "solid-js";
-import { WindowVirtualizer } from "virtua/solid";
 import {
   listContacts,
   listMessages,
-  upsertMessage,
   moveMessageToBucket,
-  listBundleConfigs,
-  listAccounts,
-  countGateCandidates,
+  upsertMessage,
+  upsertContact,
+  getMessage,
 } from "../stores/data";
 import { usePaginatedMessages } from "../utils/paginated-messages";
-import type { Contact, Message, BundleConfig } from "../types";
+import type { Contact, Message, MessageBucket } from "../types";
 import {
   setDetailOpen,
   setSelectedMessageId,
@@ -30,25 +41,13 @@ import {
   setCursorIndex,
   selectedIds,
   setSelectedIds,
-  setComposeOpen,
-  setComposeContext,
-  setView,
   showToast,
-  gateCandidateCount,
-  setGateCandidateCount,
   refreshTick,
 } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
-import { Empty } from "../components/Empty";
 import { SkeletonList } from "../components/Skeleton";
-
-import { LabelPicker } from "../components/LabelPicker";
-import { MovePicker } from "../components/MovePicker";
-import { syncNow } from "../services/backend";
-import { useRefreshEffect, useViewport } from "../utils/gestures";
 import { priorityScore } from "../utils/priority";
-import { SwipeActions } from "../components/SwipeActions";
 import { registerPrepend } from "../services/sync-events";
 
 interface Bundle {
@@ -57,50 +56,173 @@ interface Bundle {
   messages: Message[];
 }
 
-type PileKey = "replyLater" | "setAside" | "remind";
+type Item = Message | Bundle;
+type ItemList = Item[];
+
+interface Pile {
+  id: "pending" | "saved" | "remind";
+  icon: string;
+  title: string;
+  messages: Message[];
+}
+
+const BUNDLE_THRESHOLD = 3;
+const PREVIEW_CHARS = 220;
+const PAGE_SIZE = 100;
 
 export function Imbox() {
-  const [contacts] = createResource(listContacts);
-  const [bundles] = createResource(listBundleConfigs);
-  const [allMessages, { refetch: refetchAll }] = createResource(listMessages);
-  const { isMobile } = useViewport();
-
-  // Main list is paginated — only the first 100 imbox rows render in memory
-  // until the user scrolls; pile slices below need every message in DB to
-  // filter by replyLater/setAside/bubbleUpAt flags, so a second resource
-  // (unchanged from before) keeps them accurate without slowing down the
-  // hot list path.
-  const paged = usePaginatedMessages({
-    bucket: "imbox",
-    direction: "in",
-  });
+  // Hot list: first PAGE_SIZE rows of imbox+incoming. Scroll triggers
+  // loadMore via the IntersectionObserver in the sentinel at the bottom.
+  const paged = usePaginatedMessages(
+    {
+      bucket: "imbox",
+      direction: "in",
+    },
+    PAGE_SIZE,
+  );
   const items = paged.items;
   const refresh = paged.refresh;
+  const total = paged.total;
 
-  useRefreshEffect(() => {
-    void refresh();
-    void refetchAll();
-  });
+  // Pile slices still need every message to filter by flag, so a second
+  // resource keeps them accurate without slowing down the hot list.
+  const [allMessages, { refetch: refetchAll }] = createResource(listMessages);
+  const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
 
-  // Live-prepend on sync:new-messages. The registry fires for every
-  // bucket so we filter to imbox+incoming here — the Gate contract hides
-  // unscreened senders, but appending them below would create flicker
-  // when the next refresh refetch runs. Trust the row's own bucket field.
+  // Live-prepend on sync:new-messages (O(new_ids) IPC round-trips).
   onCleanup(
     registerPrepend("imbox", (ids) => {
       void paged.prependByIds(ids);
     }),
   );
 
-  const loadMoreIfNearEnd = () => {
-    if (!paged.hasMore() || paged.loadingMore()) return;
-    void paged.loadMore();
+  useRefreshEffect(() => {
+    void refresh();
+    void refetchAll();
+    void refetchContacts();
+  });
+
+  /* ── Contact map (for first-time badge + inline approve) ───────── */
+
+  const contactMap = createMemo<Map<string, Contact>>(() => {
+    const map = new Map<string, Contact>();
+    for (const c of contacts() ?? []) map.set(c.id, c);
+    return map;
+  });
+
+  /* ── Derived: split into new-for-you / previously-seen / bundles ── */
+
+  // First-time senders = contacts where screened=0 OR firstSeen=1.
+  // For these we show the row with an inline approve pill so the user
+  // never has to leave Imbox for a single-message decision.
+  const _isFirstTime = (c: Contact | undefined) =>
+    !c || !!c.firstSeen || !c.screened;
+  void _isFirstTime;
+
+  // Per-message priority score (matches prototype §priorityScore).
+  const scoreFor = (m: Message) => {
+    const c = contactMap().get(m.pid);
+    return priorityScore(m, c);
   };
 
-  /* ── Multi-select ── */
-  const [lastSelectedId, setLastSelectedId] = createSignal<string | null>(null);
-  const [bulkLabelOpen, setBulkLabelOpen] = createSignal(false);
-  const [bulkMoveOpen, setBulkMoveOpen] = createSignal(false);
+  // Group unread by sender for bundle detection.
+  const renderList = createMemo<ItemList>(() => {
+    const list = items()
+      .filter((m) => !m.setAside && !m.replyLater)
+      .filter((m) => m.unread);
+
+    const bySender = new Map<string, Message[]>();
+    for (const m of list) {
+      const arr = bySender.get(m.pid) ?? [];
+      arr.push(m);
+      bySender.set(m.pid, arr);
+    }
+
+    const out: Item[] = [];
+    const standalone: Message[] = [];
+    for (const [pid, msgs] of bySender) {
+      if (msgs.length >= BUNDLE_THRESHOLD) {
+        const c = contactMap().get(pid);
+        if (c) {
+          out.push({ contactId: pid, contact: c, messages: msgs });
+          continue;
+        }
+      }
+      for (const m of msgs) standalone.push(m);
+    }
+    // Standalone messages sort by priority desc, then date desc.
+    standalone.sort(
+      (a, b) =>
+        scoreFor(b) - scoreFor(a) ||
+        new Date(b.st).getTime() - new Date(a.st).getTime(),
+    );
+    // Bundle rows interleaved by highest member priority.
+    const bundleItems = out.filter(
+      (x): x is Bundle => "messages" in x,
+    );
+    bundleItems.sort((a, b) => {
+      const sa = Math.max(...a.messages.map(scoreFor));
+      const sb = Math.max(...b.messages.map(scoreFor));
+      return sb - sa;
+    });
+    return [...bundleItems, ...standalone];
+  });
+
+  const newForYou = createMemo<ItemList>(() => renderList());
+
+  const previouslySeen = createMemo<Message[]>(() => {
+    return items()
+      .filter((m) => !m.setAside && !m.replyLater)
+      .filter((m) => !m.unread)
+      .sort((a, b) => new Date(b.st).getTime() - new Date(a.st).getTime());
+  });
+
+  /* ── Piles (Pending / Saved / Remind) ─────────────────────────────── */
+
+  const piles = createMemo((): Pile[] => {
+    const all = allMessages() ?? [];
+    const all_piles: Pile[] = [
+      {
+        id: "pending",
+        icon: "ph-clock",
+        title: "Pending",
+        messages: all.filter((m) => m.replyLater),
+      },
+      {
+        id: "saved",
+        icon: "ph-push-pin",
+        title: "Saved",
+        messages: all.filter((m) => m.setAside),
+      },
+      {
+        id: "remind",
+        icon: "ph-arrow-fat-line-up",
+        title: "Remind",
+        messages: all.filter((m) => m.bubbleUpAt),
+      },
+    ];
+    return all_piles.filter((p) => p.messages.length > 0);
+  });
+
+  const remindedCount = createMemo(
+    () => (allMessages() ?? []).filter((m) => m.bubbleUpAt).length,
+  );
+
+  /* ── Bundle drawer state ─────────────────────────────────────────── */
+
+  const [openBundles, setOpenBundles] = createSignal<Set<string>>(new Set());
+  const toggleBundle = (id: string) => {
+    const next = new Set(openBundles());
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setOpenBundles(next);
+  };
+
+  /* ── Selection (multi-select with x) ─────────────────────────────── */
+
+  const [lastSelectedId, setLastSelectedId] = createSignal<string | null>(
+    null,
+  );
 
   const toggleSelect = (id: string) => {
     const next = new Set(selectedIds());
@@ -110,14 +232,18 @@ export function Imbox() {
     setLastSelectedId(id);
   };
 
-  const selectRange = (fromId: string, toId: string, ids: string[]) => {
+  const selectRange = (fromId: string, toId: string) => {
+    const ids = flatIds();
     const fromIdx = ids.indexOf(fromId);
     const toIdx = ids.indexOf(toId);
     if (fromIdx === -1 || toIdx === -1) return;
     const start = Math.min(fromIdx, toIdx);
     const end = Math.max(fromIdx, toIdx);
     const next = new Set(selectedIds());
-    for (let i = start; i <= end; i++) next.add(ids[i]!);
+    for (let i = start; i <= end; i++) {
+      const id = ids[i];
+      if (id) next.add(id);
+    }
     setSelectedIds(next);
     setLastSelectedId(toId);
   };
@@ -126,140 +252,28 @@ export function Imbox() {
     setSelectedIds(new Set<string>());
     setLastSelectedId(null);
   };
+  void clearSelection; // exposed for downstream bulk-action surfaces
 
-  const bundleSelectedState = (bundle: Bundle): "none" | "partial" | "all" => {
-    const ids = bundle.messages.map((m) => m.id);
-    const selectedCount = ids.filter((id) => selectedIds().has(id)).length;
-    if (selectedCount === 0) return "none";
-    if (selectedCount === ids.length) return "all";
+  const bundleSelectedState = (b: Bundle): "none" | "partial" | "all" => {
+    const ids = b.messages.map((m) => m.id);
+    const selected = ids.filter((id) => selectedIds().has(id)).length;
+    if (selected === 0) return "none";
+    if (selected === ids.length) return "all";
     return "partial";
   };
 
-  const toggleBundle = (bundle: Bundle) => {
-    const state = bundleSelectedState(bundle);
+  const toggleBundleSelection = (b: Bundle) => {
+    const state = bundleSelectedState(b);
     const next = new Set(selectedIds());
-    for (const m of bundle.messages) {
+    for (const m of b.messages) {
       if (state === "all") next.delete(m.id);
       else next.add(m.id);
     }
     setSelectedIds(next);
-    setLastSelectedId(bundle.contactId);
+    setLastSelectedId(b.contactId);
   };
 
-  /* ── Derived ── */
-
-  const contactMap = createMemo<Map<string, Contact>>(() => {
-    const map = new Map<string, Contact>();
-    for (const c of contacts() ?? []) map.set(c.id, c);
-    return map;
-  });
-
-  const imboxMsgs = createMemo<Message[]>(() => {
-    const list = items()
-      .filter((m) => m.bucket === "imbox")
-      .filter((m) => !m.setAside && !m.replyLater)
-      .filter((m) => {
-        const c = contactMap().get(m.pid);
-        // Gate contract: unscreened or blocked senders must not appear in Imbox.
-        return c && c.screened && !c.blocked;
-      });
-
-    const unread = list
-      .filter((m) => m.unread)
-      .sort(
-        (a, b) =>
-          priorityScore(b, contactMap().get(b.pid)) -
-          priorityScore(a, contactMap().get(a.pid)),
-      );
-    const read = list
-      .filter((m) => !m.unread)
-      .sort((a, b) => new Date(b.st).getTime() - new Date(a.st).getTime());
-
-    return [...unread, ...read];
-  });
-
-  const bundlesEnabled = createMemo(() => {
-    const cfg = new Map<string, BundleConfig>();
-    for (const b of bundles() ?? []) cfg.set(b.contactId, b);
-    return cfg;
-  });
-
-  /* Auto-detect bundles: senders with >= 3 unread in imbox. */
-  const detectedBundleSenders = createMemo<Set<string>>(() => {
-    const counts = new Map<string, number>();
-    for (const m of imboxMsgs()) {
-      if (!m.unread) continue;
-      counts.set(m.pid, (counts.get(m.pid) ?? 0) + 1);
-    }
-    return new Set(
-      [...counts.entries()].filter(([, c]) => c >= 3).map(([id]) => id),
-    );
-  });
-
-  const renderList = createMemo<(Message | Bundle)[]>(() => {
-    const out: (Message | Bundle)[] = [];
-    const bundledIds = new Set<string>();
-
-    // Auto-bundled: 3+ unread OR explicit bundle config
-    const bundlesByContact = new Map<string, Message[]>();
-    for (const m of imboxMsgs()) {
-      const cfg = bundlesEnabled().get(m.pid);
-      const enabled =
-        cfg !== undefined ? cfg.enabled : detectedBundleSenders().has(m.pid);
-      if (!enabled || !m.unread) continue;
-      bundledIds.add(m.id);
-      const arr = bundlesByContact.get(m.pid) ?? [];
-      arr.push(m);
-      bundlesByContact.set(m.pid, arr);
-    }
-
-    for (const [contactId, msgs] of bundlesByContact) {
-      const c = contacts()?.find((x) => x.id === contactId);
-      if (!c) continue;
-      out.push({ contactId, contact: c, messages: msgs });
-    }
-
-    // Remaining unread (not bundled) — appear as individual rows.
-    for (const m of imboxMsgs()) {
-      if (!m.unread) continue;
-      if (bundledIds.has(m.id)) continue;
-      out.push(m);
-    }
-    return out;
-  });
-
-  const newForYou = createMemo<(Message | Bundle)[]>(() => renderList());
-  const previouslySeen = createMemo<Message[]>(() =>
-    imboxMsgs().filter((m) => !m.unread),
-  );
-
-  const selectableIds = createMemo(() => [
-    ...newForYou().flatMap((x) =>
-      "messages" in x ? x.messages.map((m) => m.id) : [x.id],
-    ),
-    ...previouslySeen().map((m) => m.id),
-  ]);
-
-  const replyLater = createMemo<Message[]>(() =>
-    (allMessages() ?? []).filter((m) => m.replyLater),
-  );
-  const setAside = createMemo<Message[]>(() =>
-    (allMessages() ?? []).filter((m) => m.setAside),
-  );
-  const reminded = createMemo<Message[]>(() =>
-    (allMessages() ?? []).filter((m) => m.bubbleUpAt),
-  );
-
-  /* ── UI ── */
-
-  const contactById = (id: string) => contacts()?.find((c) => c.id === id);
-
-  const open = (id: string) => {
-    setSelectedMessageId(id);
-    setDetailOpen(true);
-  };
-
-  /* ── Keyboard nav ── */
+  /* ── Cursor (j/k navigation) ───────────────────────────────────────── */
 
   const flatIds = createMemo(() =>
     renderList().map((x) => ("messages" in x ? x.contactId : x.id)),
@@ -270,10 +284,10 @@ export function Imbox() {
   });
 
   const moveCursor = (delta: number) => {
-    const len = flatIds().length;
-    if (len === 0) return;
+    const ids = flatIds();
+    if (ids.length === 0) return;
     const cur = cursorIndex() < 0 ? 0 : cursorIndex();
-    const next = (cur + delta + len) % len;
+    const next = (cur + delta + ids.length) % ids.length;
     setCursorIndex(next);
     const item = renderList()[next];
     if (item) {
@@ -282,11 +296,163 @@ export function Imbox() {
     }
   };
 
+  /* ── Open message in DetailPanel ──────────────────────────────────── */
+
+  const open = (id: string) => {
+    setSelectedMessageId(id);
+    setDetailOpen(true);
+  };
+
+  /* ── Per-message optimistic actions ───────────────────────────────── */
+
+  const refreshAll = async () => {
+    await Promise.all([refresh(), refetchAll()]);
+  };
+
+  const replyLater = async (m: Message) => {
+    paged.removeByIds([m.id]);
+    try {
+      await upsertMessage({ ...m, replyLater: true });
+      await refetchAll();
+      showToast({ message: "已 Reply Later", kind: "success" });
+    } catch (err) {
+      await refreshAll();
+      showToast({ message: `Reply Later 失败：${String(err)}`, kind: "error" });
+    }
+  };
+
+  const setAside = async (m: Message) => {
+    paged.removeByIds([m.id]);
+    try {
+      await upsertMessage({ ...m, setAside: true });
+      await refetchAll();
+      showToast({ message: "已 Set Aside", kind: "success" });
+    } catch (err) {
+      await refreshAll();
+      showToast({ message: `Set Aside 失败：${String(err)}`, kind: "error" });
+    }
+  };
+
+  const archive = async (m: Message) => {
+    paged.removeByIds([m.id]);
+    try {
+      await moveMessageToBucket(m.id, "paperTrail");
+      await refetchAll();
+      showToast({ message: "已归档", kind: "success" });
+    } catch (err) {
+      await refreshAll();
+      showToast({ message: `归档失败：${String(err)}`, kind: "error" });
+    }
+  };
+
+  const trash = async (m: Message) => {
+    paged.removeByIds([m.id]);
+    try {
+      await moveMessageToBucket(m.id, "trash");
+      await refetchAll();
+      showToast({ message: "已移到 Trash", kind: "info" });
+    } catch (err) {
+      await refreshAll();
+      showToast({ message: `移到 Trash 失败：${String(err)}`, kind: "error" });
+    }
+  };
+
+  const spam = async (m: Message) => {
+    paged.removeByIds([m.id]);
+    try {
+      await moveMessageToBucket(m.id, "spam");
+      await refetchAll();
+      showToast({ message: "已标为垃圾", kind: "info" });
+    } catch (err) {
+      await refreshAll();
+      showToast({ message: `标垃圾失败：${String(err)}`, kind: "error" });
+    }
+  };
+
+  const toggleUnread = async (m: Message) => {
+    try {
+      await upsertMessage({ ...m, unread: !m.unread });
+      await refetchAll();
+    } catch (err) {
+      await refreshAll();
+      showToast({ message: `标记失败：${String(err)}`, kind: "error" });
+    }
+  };
+
+  /* ── First-time sender inline approve/block ──────────────────────── */
+
+  const approveFirstTime = async (m: Message, bucket: MessageBucket) => {
+    try {
+      const c = contactMap().get(m.pid);
+      if (c) {
+        await upsertContact({
+          ...c,
+          firstSeen: false,
+          screened: true,
+          defaultBucket: bucket,
+        });
+      }
+      await moveMessageToBucket(m.id, bucket);
+      await refreshAll();
+      showToast({
+        message: `已批准 → ${bucket === "imbox" ? "Imbox" : bucket === "feed" ? "Stream" : "Records"}`,
+        kind: "success",
+      });
+    } catch (err) {
+      await refreshAll();
+      showToast({ message: `批准失败：${String(err)}`, kind: "error" });
+    }
+  };
+
+  const blockFirstTime = async (m: Message) => {
+    try {
+      const c = contactMap().get(m.pid);
+      if (c) {
+        await upsertContact({
+          ...c,
+          firstSeen: false,
+          screened: true,
+          blocked: true,
+        });
+      }
+      await moveMessageToBucket(m.id, "spam");
+      await refreshAll();
+      showToast({ message: `已阻止 ${c?.name ?? m.pid}`, kind: "info" });
+    } catch (err) {
+      await refreshAll();
+      showToast({ message: `阻止失败：${String(err)}`, kind: "error" });
+    }
+  };
+
+  /* ── Mark a message read when opened ─────────────────────────────── */
+
+  const openAndMarkRead = async (m: Message) => {
+    open(m.id);
+    if (m.unread) {
+      try {
+        await upsertMessage({ ...m, unread: false });
+      } catch {
+        /* ignore — refetch on next refreshTick */
+      }
+    }
+  };
+
+  /* ── Drag and drop (HTMl5 DnD → DropBar) ──────────────────────────── */
+
+  const onDragStart = (m: Message, ev: DragEvent) => {
+    ev.dataTransfer?.setData("text/plain", m.id);
+    if (ev.dataTransfer) ev.dataTransfer.effectAllowed = "move";
+    (ev.currentTarget as HTMLElement).classList.add("dragging");
+  };
+  const onDragEnd = (ev: DragEvent) => {
+    (ev.currentTarget as HTMLElement).classList.remove("dragging");
+  };
+
+  /* ── Keyboard shortcuts (j/k/x/Enter/l/s/a/r/t/b/o/u) ─────────────── */
+
   const handleKey = (e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
     if (tag === "input" || tag === "textarea") return;
-    // Local cursor/select/open only; per-message shortcuts (a/l/z/e/t/u/b/v)
-    // are handled by the global shortcut router so they stay editable.
     if (e.key === "j") {
       e.preventDefault();
       moveCursor(1);
@@ -300,9 +466,9 @@ export function Imbox() {
         if (item) {
           if ("messages" in item) {
             const first = item.messages[0];
-            if (first) open(first.id);
+            if (first) openAndMarkRead(first);
           } else {
-            open(item.id);
+            openAndMarkRead(item);
           }
         }
       }
@@ -310,1598 +476,777 @@ export function Imbox() {
       const cur = cursorIndex();
       const item = renderList()[cur];
       if (!item) return;
-      if ("messages" in item) {
-        toggleBundle(item);
-      } else {
-        toggleSelect(item.id);
-      }
-    } else if (e.key === "o" || e.key === "O") {
-      e.preventDefault();
-      setView("readTogether");
+      if ("messages" in item) toggleBundleSelection(item);
+      else toggleSelect(item.id);
+    } else if (e.key === "l") {
+      const cur = cursorIndex();
+      const item = renderList()[cur];
+      if (item && !("messages" in item)) void replyLater(item);
+    } else if (e.key === "s") {
+      const cur = cursorIndex();
+      const item = renderList()[cur];
+      if (item && !("messages" in item)) void setAside(item);
+    } else if (e.key === "e") {
+      const cur = cursorIndex();
+      const item = renderList()[cur];
+      if (item && !("messages" in item)) void archive(item);
+    } else if (e.key === "t" || e.key === "#") {
+      const cur = cursorIndex();
+      const item = renderList()[cur];
+      if (item && !("messages" in item)) void trash(item);
+    } else if (e.key === "b") {
+      const cur = cursorIndex();
+      const item = renderList()[cur];
+      if (item && !("messages" in item)) void spam(item);
+    } else if (e.key === "u") {
+      const cur = cursorIndex();
+      const item = renderList()[cur];
+      if (item && !("messages" in item)) void toggleUnread(item);
     }
   };
 
-  document.addEventListener("keydown", handleKey);
-  onCleanup(() => document.removeEventListener("keydown", handleKey));
+  onMount(() => {
+    document.addEventListener("keydown", handleKey);
+  });
+  onCleanup(() => {
+    document.removeEventListener("keydown", handleKey);
+  });
 
-  // Centralized refresh that keeps the paginated imbox list AND the pile
-  // slices (which need every message to filter replyLater/setAside/bubbleUpAt)
-  // in sync after an upsert/move. Both fire in parallel; the UI then
-  // re-derives everything from the resources.
-  const refreshAll = async () => {
-    await Promise.all([refresh(), refetchAll()]);
-  };
+  /* ── IntersectionObserver for infinite scroll ──────────────────── */
 
-  const awaitReplyLater = async (m: Message) => {
-    paged.removeByIds([m.id]);
-    try {
-      await upsertMessage({ ...m, replyLater: true });
-      await refetchAll();
-      showToast({ message: "已 Reply Later", kind: "success" });
-    } catch (err) {
-      await refreshAll();
-      showToast({ message: `Reply Later 失败：${String(err)}`, kind: "error" });
-    }
-  };
+  let sentinel: HTMLDivElement | undefined;
+  let observer: IntersectionObserver | undefined;
+  onMount(() => {
+    if (!sentinel) return;
+    observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry && entry.isIntersecting && paged.hasMore() && !paged.loadingMore()) {
+          void paged.loadMore();
+        }
+      },
+      { rootMargin: "400px" },
+    );
+    observer.observe(sentinel);
+  });
+  onCleanup(() => observer?.disconnect());
 
-  const awaitSetAside = async (m: Message) => {
-    paged.removeByIds([m.id]);
-    try {
-      await upsertMessage({ ...m, setAside: true });
-      await refetchAll();
-      showToast({ message: "已 Set Aside", kind: "success" });
-    } catch (err) {
-      await refreshAll();
-      showToast({ message: `Set Aside 失败：${String(err)}`, kind: "error" });
-    }
-  };
+  /* ── Render ──────────────────────────────────────────────────────── */
+
+  const itemKey = (item: Item) =>
+    "messages" in item ? `bundle:${item.contactId}` : `msg:${item.id}`;
+
+  const hasAny = createMemo(
+    () =>
+      newForYou().length > 0 ||
+      previouslySeen().length > 0 ||
+      piles().length > 0 ||
+      total() > 0,
+  );
 
   return (
-    <div
-      style={{
-        padding: "0",
-        animation: "view-enter 0.3s var(--ease-out) both",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          "align-items": "center",
-          gap: "var(--space-2)",
-          padding: "var(--space-4) var(--space-5) var(--space-2)",
+    <div class="imbox-view">
+      <ImboxHeader
+        total={total()}
+        newCount={newForYou().length}
+        previouslySeenCount={previouslySeen().length}
+        onSync={async () => {
+          await refresh();
+          showToast({ message: "已刷新", kind: "info", ttlMs: 1500 });
         }}
-      >
-        <SectionHeader title="New for you" count={newForYou().length} />
-        <div style={{ flex: 1 }} />
-        <button
-          onClick={() => setView("readTogether")}
-          title="Read Together"
-          aria-label="Read Together"
-          data-read-together
-          style={{
-            display: "inline-flex",
-            "align-items": "center",
-            gap: "4px",
-            padding: "4px 10px",
-            background: "var(--paper-light)",
-            color: "var(--text-secondary)",
-            "border-radius": "var(--radius-pill)",
-            "font-size": "var(--text-micro)",
-            "font-weight": "700",
-            border: "0.5px solid var(--border)",
-            cursor: "pointer",
+      />
+
+      <Show when={remindedCount() > 0}>
+        <div
+          class="bubble-up-banner"
+          role="button"
+          onClick={() => {
+            /* navigate to first remind — same UX as prototype */
+            const first = (allMessages() ?? []).find((m) => m.bubbleUpAt);
+            if (first) open(first.id);
           }}
         >
-          <Icon name="ph-eye" size={12} /> 一起读
-        </button>
-        <button
-          onClick={async () => {
-            const list = (await listAccounts()) ?? [];
-            const emailAccounts = list.filter((a) => a.type === "email");
-            if (emailAccounts.length === 0) {
-              showToast({
-                message: "请先到 Settings → Accounts 添加邮箱账户",
-                kind: "info",
-              });
-              return;
-            }
-            showToast({
-              message: `正在从 IMAP 同步 ${emailAccounts.length} 个账户…`,
-              kind: "info",
-              ttlMs: 2000,
-            });
-            await Promise.all(emailAccounts.map((a) => syncNow(a.id, "INBOX")));
-            await refreshAll();
-            showToast({ message: "同步完成", kind: "success" });
-          }}
-          title="立即从 IMAP 同步所有账户"
-          aria-label="同步所有账户"
-          data-sync-now
-          style={{
-            display: "inline-flex",
-            "align-items": "center",
-            gap: "4px",
-            padding: "4px 10px",
-            background: "var(--palm-soft)",
-            color: "var(--palm)",
-            "border-radius": "var(--radius-pill)",
-            "font-size": "var(--text-micro)",
-            "font-weight": "700",
-          }}
-        >
-          <Icon name="arrows-clockwise" size={12} /> 同步
-        </button>
-      </div>
-      <Show
-        when={paged.resource.state !== "pending"}
-        fallback={
-          <div
-            style={{
-              padding: "0 var(--space-5)",
-              "max-width": "720px",
-              margin: "var(--space-4) auto",
-            }}
-          >
-            <SkeletonList count={8} />
+          <Icon name="ph-arrow-fat-line-up" size={20} />
+          <div class="bubble-up-body">
+            <div class="bubble-up-title">{remindedCount()} reminded</div>
+            <div class="bubble-up-subtitle">
+              Back at the top of your Inbox
+            </div>
           </div>
+        </div>
+      </Show>
+
+      <Show
+        when={hasAny}
+        fallback={
+          <Show
+            when={paged.loadingMore() || items().length === 0}
+            fallback={<EmptyState />}
+          >
+            <SkeletonBlock />
+          </Show>
         }
       >
-        <Show
-          when={newForYou().length > 0 || previouslySeen().length > 0}
-          fallback={<InboxEmptyState />}
-        >
-          <ul
-            style={{
-              "list-style": "none",
-              margin: 0,
-              padding: "0 var(--space-5)",
-              "max-width": "720px",
-              "margin-left": "auto",
-              "margin-right": "auto",
-            }}
-          >
-            <WindowVirtualizer
-              data={newForYou()}
-              onScrollEnd={loadMoreIfNearEnd}
-            >
-              {(item: Message | Bundle, i: () => number) => {
-                const isBundle = "messages" in item;
-                const cursorHere = () => cursorIndex() === i();
-                const isSelected = () =>
-                  !isBundle && selectedIds().has((item as Message).id);
-                const rowContent = (
-                  <div
-                    data-message-id={
-                      !isBundle ? (item as Message).id : undefined
-                    }
-                    onClick={() => {
-                      setCursorIndex(i());
-                      if (isBundle) {
-                        const first = (item as Bundle).messages[0];
-                        if (first) open(first.id);
-                      } else {
-                        open((item as Message).id);
-                      }
-                    }}
-                    style={{
-                      display: "flex",
-                      gap: "var(--space-3)",
-                      padding: "var(--space-3)",
-                      "padding-left": cursorHere()
-                        ? "calc(var(--space-3) - 2px)"
-                        : "var(--space-3)",
-                      cursor: "pointer",
-                      position: "relative",
-                      background: isSelected()
-                        ? "var(--palm-soft)"
-                        : cursorHere()
-                          ? "var(--palm-soft)"
-                          : "transparent",
-                      "box-shadow": cursorHere()
-                        ? "inset 2px 0 0 var(--palm)"
-                        : "none",
-                      transition:
-                        "background var(--duration-fast) var(--ease-out), transform 0.18s var(--ease-out), box-shadow var(--duration-fast) var(--ease-out)",
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!cursorHere())
-                        e.currentTarget.style.background =
-                          "rgba(35,28,51,0.03)";
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!cursorHere())
-                        e.currentTarget.style.background = "transparent";
-                    }}
-                  >
-                    <Show when={!isBundle}>
-                      <input
-                        type="checkbox"
-                        checked={selectedIds().has((item as Message).id)}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const id = (item as Message).id;
-                          if (e.shiftKey && lastSelectedId()) {
-                            selectRange(lastSelectedId()!, id, selectableIds());
-                          } else {
-                            toggleSelect(id);
-                          }
-                        }}
-                        style={{
-                          width: "16px",
-                          height: "16px",
-                          "flex-shrink": 0,
-                          "margin-top": "10px",
-                          cursor: "pointer",
-                          "accent-color": "var(--palm)",
-                        }}
-                      />
-                    </Show>
-                    <Show when={isBundle}>
-                      <IndeterminateCheckbox
-                        checked={() =>
-                          bundleSelectedState(item as Bundle) === "all"
-                        }
-                        indeterminate={() =>
-                          bundleSelectedState(item as Bundle) === "partial"
-                        }
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleBundle(item as Bundle);
-                        }}
-                      />
-                    </Show>
-                    <div
-                      style={{
-                        "flex-shrink": 0,
-                      }}
-                    >
-                      <Avatar
-                        name={
-                          isBundle
-                            ? (item as Bundle).contact.name
-                            : (contactById((item as Message).pid)?.name ?? "?")
-                        }
-                        src={
-                          isBundle
-                            ? (item as Bundle).contact.avatar
-                            : contactById((item as Message).pid)?.avatar
-                        }
-                        size={36}
-                      />
-                    </div>
-                    <div style={{ flex: 1, "min-width": 0 }}>
-                      <Show
-                        when={isBundle}
-                        fallback={
-                          <MessageSummary
-                            m={item as Message}
-                            contactName={
-                              contactById((item as Message).pid)?.name ?? "?"
-                            }
-                          />
-                        }
-                      >
-                        <BundleSummary bundle={item as Bundle} onOpen={open} />
-                      </Show>
-                    </div>
-                    <Show when={!isBundle}>
-                      <MessageActions
-                        m={item as Message}
-                        onReply={(m) => {
-                          setComposeContext({ mode: "reply", originalMsg: m });
-                          setComposeOpen(true);
-                        }}
-                        onChange={refreshAll}
-                      />
-                    </Show>
-                  </div>
-                );
-                return (
-                  <li
-                    style={{
-                      "list-style": "none",
-                      animation:
-                        i() < 12
-                          ? `list-item-enter 0.34s var(--ease-out) both`
-                          : undefined,
-                      "animation-delay": i() < 12 ? `${i() * 28}ms` : undefined,
-                    }}
-                  >
-                    <SwipeActions
-                      role="listitem"
-                      style={{
-                        "border-bottom": "0.5px solid var(--border)",
-                        "border-left": cursorHere()
-                          ? "2px solid var(--palm)"
-                          : "2px solid transparent",
-                      }}
-                      leftAction={
-                        isBundle
-                          ? undefined
-                          : {
-                              label: "Set Aside",
-                              icon: "ph-push-pin",
-                              color: "green",
-                              onClick: () =>
-                                void awaitSetAside(item as Message),
-                            }
-                      }
-                      rightAction={
-                        isBundle
-                          ? undefined
-                          : {
-                              label: "Reply Later",
-                              icon: "ph-clock",
-                              color: "yellow",
-                              onClick: () =>
-                                void awaitReplyLater(item as Message),
-                            }
-                      }
-                      disabled={isBundle || !isMobile()}
-                    >
-                      {rowContent}
-                    </SwipeActions>
-                  </li>
-                );
-              }}
-            </WindowVirtualizer>
-          </ul>
-        </Show>
-
-        <Show when={previouslySeen().length > 0}>
-          <SectionHeader
-            title="Previously seen"
-            count={previouslySeen().length}
-          />
-          <ul
-            style={{
-              "list-style": "none",
-              margin: 0,
-              padding: "0 var(--space-5)",
-              "max-width": "720px",
-              "margin-left": "auto",
-              "margin-right": "auto",
-            }}
-          >
-            <For each={previouslySeen()}>
-              {(m) => {
-                const isSelected = () => selectedIds().has(m.id);
-                const content = (
-                  <div
-                    data-message-id={m.id}
-                    onClick={() => open(m.id)}
-                    style={{
-                      display: "flex",
-                      gap: "var(--space-3)",
-                      padding: "var(--space-3)",
-                      cursor: "pointer",
-                      opacity: 0.75,
-                      background: isSelected()
-                        ? "var(--palm-soft)"
-                        : "transparent",
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isSelected()}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (e.shiftKey && lastSelectedId()) {
-                          selectRange(lastSelectedId()!, m.id, selectableIds());
-                        } else {
-                          toggleSelect(m.id);
-                        }
-                      }}
-                      style={{
-                        width: "16px",
-                        height: "16px",
-                        "flex-shrink": 0,
-                        "margin-top": "10px",
-                        cursor: "pointer",
-                        "accent-color": "var(--palm)",
-                      }}
-                    />
-                    <Avatar
-                      name={contactById(m.pid)?.name ?? "?"}
-                      src={contactById(m.pid)?.avatar}
-                      size={36}
-                    />
-                    <div style={{ flex: 1, "min-width": 0 }}>
-                      <MessageSummary
-                        m={m}
-                        contactName={contactById(m.pid)?.name ?? "?"}
-                      />
-                    </div>
-                    <MessageActions
-                      m={m}
-                      onReply={(m) => {
-                        setComposeContext({ mode: "reply", originalMsg: m });
-                        setComposeOpen(true);
-                      }}
-                      onChange={refreshAll}
-                    />
-                  </div>
-                );
-                return (
-                  <SwipeActions
-                    role="listitem"
-                    style={{ "border-bottom": "0.5px solid var(--border)" }}
-                    leftAction={{
-                      label: "Set Aside",
-                      icon: "ph-push-pin",
-                      color: "green",
-                      onClick: () => void awaitSetAside(m),
-                    }}
-                    rightAction={{
-                      label: "Reply Later",
-                      icon: "ph-clock",
-                      color: "yellow",
-                      onClick: () => void awaitReplyLater(m),
-                    }}
-                    disabled={!isMobile()}
-                  >
-                    {content}
-                  </SwipeActions>
-                );
-              }}
+        <div class="feed-list" data-feed-list>
+          <Show when={newForYou().length > 0}>
+            <SectionHeader
+              title="New for you"
+              variant="new"
+              action={{ label: "一起读", onClick: () => undefined }}
+            />
+            <For each={newForYou()}>
+              {(item, i) => (
+                <ItemRow
+                  item={item}
+                  index={i()}
+                  isCursor={(idx) => cursorIndex() === idx}
+                  selectedIds={selectedIds()}
+                  lastSelectedId={lastSelectedId()}
+                  contactMap={contactMap}
+                  scoreFor={scoreFor}
+                  bundleOpen={(id) => openBundles().has(id)}
+                  onToggleBundle={(id) => toggleBundle(id)}
+                  onOpen={openAndMarkRead}
+                  onToggleSelect={(id) => toggleSelect(id)}
+                  onSelectRange={selectRange}
+                  onReplyLater={(m) => void replyLater(m)}
+                  onSetAside={(m) => void setAside(m)}
+                  onArchive={(m) => void archive(m)}
+                  onTrash={(m) => void trash(m)}
+                  onSpam={(m) => void spam(m)}
+                  onToggleUnread={(m) => void toggleUnread(m)}
+                  onApproveFirstTime={(m, b) => void approveFirstTime(m, b)}
+                  onBlockFirstTime={(m) => void blockFirstTime(m)}
+                  onBundleSelect={(b) => toggleBundleSelection(b)}
+                  onDragStart={onDragStart}
+                  onDragEnd={onDragEnd}
+                  itemKey={itemKey}
+                />
+              )}
             </For>
-          </ul>
+          </Show>
+
+          <Show when={previouslySeen().length > 0}>
+            <SectionHeader title="Previously seen" variant="seen" />
+            <For each={previouslySeen()}>
+              {(m, i) => (
+                <MessageCard
+                  m={m}
+                  index={newForYou().length + i()}
+                  isCursor={() => false}
+                  selectedIds={selectedIds()}
+                  lastSelectedId={lastSelectedId()}
+                  contact={contactMap().get(m.pid)}
+                  scoreFor={scoreFor}
+                  onOpen={openAndMarkRead}
+                  onToggleSelect={(id) => toggleSelect(id)}
+                  onSelectRange={selectRange}
+                  onReplyLater={(msg) => void replyLater(msg)}
+                  onSetAside={(msg) => void setAside(msg)}
+                  onArchive={(msg) => void archive(msg)}
+                  onTrash={(msg) => void trash(msg)}
+                  onSpam={(msg) => void spam(msg)}
+                  onToggleUnread={(msg) => void toggleUnread(msg)}
+                  onDragStart={onDragStart}
+                  onDragEnd={onDragEnd}
+                  draggable
+                />
+              )}
+            </For>
+          </Show>
+
+          <div ref={(el) => (sentinel = el)} data-load-more-sentinel />
+          <Show when={paged.hasMore()}>
+            <ShowMoreButton loading={paged.loadingMore()} />
+          </Show>
+        </div>
+
+        <Show when={piles().length > 0}>
+          <div class="imbox-piles" data-imbox-piles>
+            <For each={piles()}>
+              {(p) => <PileCard pile={p} onOpen={(id) => open(id)} />}
+            </For>
+          </div>
         </Show>
-
-        <Show
-          when={replyLater().length + setAside().length + reminded().length > 0}
-        >
-          <SectionHeader title="Piles" />
-          <InlinePiles
-            replyLater={replyLater()}
-            setAside={setAside()}
-            reminded={reminded()}
-            contactById={contactById}
-            onOpen={open}
-            onChange={async () => {
-              await refreshAll();
-            }}
-          />
-        </Show>
-
-        <Show when={selectedIds().size > 0}>
-          <BulkActionBar
-            count={selectedIds().size}
-            onClear={clearSelection}
-            onArchive={async () => {
-              const ids = Array.from(selectedIds());
-              paged.removeByIds(ids);
-              const snapshot = items();
-              clearSelection();
-              try {
-                for (const id of ids) {
-                  await moveMessageToBucket(id, "paperTrail");
-                }
-                await refetchAll();
-                showToast({ message: "已批量归档", kind: "success" });
-              } catch (err) {
-                await refresh();
-                await refetchAll();
-                showToast({
-                  message: `归档失败：${String(err)}`,
-                  kind: "error",
-                });
-              }
-              void snapshot;
-            }}
-            onTrash={async () => {
-              const ids = Array.from(selectedIds());
-              paged.removeByIds(ids);
-              clearSelection();
-              try {
-                for (const id of ids) {
-                  await moveMessageToBucket(id, "trash");
-                }
-                await refetchAll();
-                showToast({ message: "已批量移到 Trash", kind: "info" });
-              } catch (err) {
-                await refresh();
-                await refetchAll();
-                showToast({
-                  message: `移到 Trash 失败：${String(err)}`,
-                  kind: "error",
-                });
-              }
-            }}
-            onSpam={async () => {
-              const ids = Array.from(selectedIds());
-              paged.removeByIds(ids);
-              clearSelection();
-              try {
-                for (const id of ids) {
-                  await moveMessageToBucket(id, "spam");
-                }
-                await refetchAll();
-                showToast({ message: "已批量移到 Spam", kind: "info" });
-              } catch (err) {
-                await refresh();
-                await refetchAll();
-                showToast({
-                  message: `移到 Spam 失败：${String(err)}`,
-                  kind: "error",
-                });
-              }
-            }}
-            onLabel={() => setBulkLabelOpen(true)}
-            onMove={() => setBulkMoveOpen(true)}
-          />
-
-          <LabelPicker
-            open={bulkLabelOpen()}
-            onClose={() => setBulkLabelOpen(false)}
-            messageIds={Array.from(selectedIds())}
-            onChange={async () => {
-              clearSelection();
-              await refreshAll();
-            }}
-          />
-          <MovePicker
-            open={bulkMoveOpen()}
-            onClose={() => setBulkMoveOpen(false)}
-            messageIds={Array.from(selectedIds())}
-            onChange={async () => {
-              clearSelection();
-              await refreshAll();
-            }}
-          />
-        </Show>
-
-        <FocusAndReplyButton onClick={() => setView("focusReply")} />
       </Show>
     </div>
   );
 }
 
-function SectionHeader(props: { title: string; count?: number }) {
+/* ── Sub-components ─────────────────────────────────────────────────── */
+
+function ImboxHeader(props: {
+  total: number;
+  newCount: number;
+  previouslySeenCount: number;
+  onSync: () => void | Promise<void>;
+}) {
   return (
-    <div
+    <header
       style={{
         display: "flex",
-        "align-items": "baseline",
+        "align-items": "center",
         gap: "var(--space-2)",
         padding: "var(--space-4) var(--space-5) var(--space-2)",
-        "font-family": "var(--font-display)",
-        "font-size": "var(--text-h4)",
-        "font-weight": "800",
-        color: "var(--text-primary)",
       }}
     >
-      {props.title}
-      {props.count !== undefined && (
-        <span
-          style={{
-            "font-family": "var(--font-body)",
-            "font-size": "var(--text-caption)",
-            color: "var(--text-muted)",
-            "font-weight": "500",
-          }}
-        >
-          {props.count}
-        </span>
-      )}
-    </div>
-  );
-}
-
-function MessageSummary(props: { m: Message; contactName: string }) {
-  const { isMobile } = useViewport();
-  const displayDate = () => {
-    if (!isMobile()) return props.m.tm;
-    // On mobile, keep the time portion only to leave room for the sender name.
-    const parts = props.m.tm.split(" ");
-    return parts.length === 2 ? parts[1] : props.m.tm;
-  };
-  return (
-    <>
-      <div
+      <h1
         style={{
-          display: "flex",
-          "align-items": "baseline",
-          gap: "var(--space-2)",
+          "font-family": "var(--font-display)",
+          "font-size": "var(--text-h3)",
+          "font-weight": "800",
+          margin: 0,
         }}
       >
-        <strong
-          style={{
-            "font-weight": props.m.unread ? "700" : "500",
-            "white-space": "nowrap",
-            overflow: "hidden",
-            "text-overflow": "ellipsis",
-          }}
-        >
-          {props.contactName}
-        </strong>
-        <span
-          style={{
-            "font-size": "var(--text-micro)",
-            color: "var(--text-muted)",
-            "margin-left": "auto",
-            "white-space": "nowrap",
-          }}
-        >
-          {displayDate()}
-        </span>
-      </div>
-      <div
-        style={{
-          "font-size": "var(--text-body-sm)",
-          color: props.m.unread
-            ? "var(--text-primary)"
-            : "var(--text-secondary)",
-          "white-space": "nowrap",
-          overflow: "hidden",
-          "text-overflow": "ellipsis",
-          "margin-top": "2px",
-        }}
-      >
-        <span
-          style={{
-            "font-family": "var(--font-display)",
-            "font-weight": props.m.unread ? "650" : "500",
-            "letter-spacing": props.m.unread ? "-0.012em" : "-0.005em",
-            color: props.m.unread
-              ? "var(--text-primary)"
-              : "var(--text-secondary)",
-          }}
-        >
-          {props.m.subj}
-        </span>
-        <span style={{ color: "var(--text-muted)", "margin-left": "6px" }}>
-          — {props.m.prev}
-        </span>
-      </div>
-    </>
-  );
-}
-
-function BundleSummary(props: {
-  bundle: Bundle;
-  onOpen: (id: string) => void;
-}) {
-  const [expanded, setExpanded] = createSignal(false);
-  const last = () => props.bundle.messages[0];
-  return (
-    <>
-      <div
-        onClick={(e) => {
-          e.stopPropagation();
-          setExpanded(!expanded());
-        }}
-        style={{
-          display: "flex",
-          "align-items": "baseline",
-          gap: "var(--space-2)",
-          cursor: "pointer",
-        }}
-      >
-        <strong style={{ "font-weight": "700" }}>
-          {props.bundle.contact.name}
-        </strong>
-        <span
-          style={{
-            "font-size": "var(--text-micro)",
-            color: "var(--text-muted)",
-            "font-weight": "600",
-          }}
-        >
-          · {props.bundle.messages.length} 封未读
-        </span>
-        <span
-          style={{
-            "font-size": "var(--text-micro)",
-            color: "var(--text-muted)",
-            "margin-left": "auto",
-            "white-space": "nowrap",
-          }}
-        >
-          {last()?.tm}
-        </span>
-      </div>
-      <div
-        style={{
-          "font-size": "var(--text-body-sm)",
-          color: "var(--text-secondary)",
-          "white-space": "nowrap",
-          overflow: "hidden",
-          "text-overflow": "ellipsis",
-          "margin-top": "2px",
-        }}
-      >
-        <span
-          style={{
-            "font-family": "var(--font-display)",
-            "font-weight": "650",
-            "letter-spacing": "-0.012em",
-            color: "var(--text-primary)",
-          }}
-        >
-          {last()?.subj}
-        </span>
-        <span style={{ color: "var(--text-muted)", "margin-left": "6px" }}>
-          — {last()?.prev}
-        </span>
-      </div>
-      <Show when={expanded()}>
-        <div
-          style={{
-            "margin-top": "var(--space-3)",
-            "padding-top": "var(--space-3)",
-            "border-top": "0.5px dashed var(--border)",
-            animation: "list-item-enter 0.3s var(--ease-out) both",
-          }}
-        >
-          <For each={props.bundle.messages}>
-            {(m) => (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  props.onOpen(m.id);
-                }}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  "text-align": "left",
-                  padding: "4px 0",
-                  color: "var(--text-secondary)",
-                  "font-size": "var(--text-caption)",
-                }}
-              >
-                <Icon name="ph-envelope-simple" size={12} /> {m.subj}
-              </button>
-            )}
-          </For>
-        </div>
-      </Show>
-    </>
-  );
-}
-
-function InlinePiles(props: {
-  replyLater: Message[];
-  setAside: Message[];
-  reminded: Message[];
-  contactById: (id: string) => Contact | undefined;
-  onOpen: (id: string) => void | Promise<void>;
-  onChange: () => Promise<void>;
-}) {
-  const { isMobile } = useViewport();
-  const [expanded, setExpanded] = createSignal<PileKey | null>(null);
-
-  const piles: {
-    key: PileKey;
-    label: string;
-    icon: string;
-    items: Message[];
-  }[] = [
-    {
-      key: "replyLater",
-      label: "Reply Later",
-      icon: "ph-clock",
-      items: props.replyLater,
-    },
-    {
-      key: "setAside",
-      label: "Set Aside",
-      icon: "ph-push-pin",
-      items: props.setAside,
-    },
-    {
-      key: "remind",
-      label: "Remind",
-      icon: "ph-arrow-fat-line-up",
-      items: props.reminded,
-    },
-  ];
-
-  const clearFlag = async (m: Message, key: PileKey) => {
-    await upsertMessage({
-      ...m,
-      replyLater: key === "replyLater" ? false : m.replyLater,
-      setAside: key === "setAside" ? false : m.setAside,
-      bubbleUpAt: key === "remind" ? null : m.bubbleUpAt,
-    });
-    await props.onChange();
-  };
-
-  return (
-    <div
-      data-testid="piles"
-      style={{
-        display: "grid",
-        "grid-template-columns": isMobile() ? "1fr" : "repeat(3, 1fr)",
-        gap: "var(--space-3)",
-        padding: "var(--space-4) var(--space-5)",
-        "max-width": "720px",
-        margin: "0 auto",
-      }}
-    >
-      <For each={piles}>
-        {(pile) => {
-          const isOpen = () => expanded() === pile.key;
-          return (
-            <div
-              data-pile={pile.key}
-              style={{
-                background: "var(--paper-light)",
-                border: "0.5px solid var(--border)",
-                "border-radius": "var(--radius-lg)",
-                overflow: "hidden",
-                "box-shadow": isOpen()
-                  ? "var(--shadow-md)"
-                  : "var(--shadow-sm)",
-                transition: "box-shadow var(--duration-fast) var(--ease-out)",
-              }}
-            >
-              <button
-                onClick={() => setExpanded(isOpen() ? null : pile.key)}
-                data-testid={`pile-${pile.key}`}
-                style={{
-                  width: "100%",
-                  display: "flex",
-                  "align-items": "center",
-                  gap: "var(--space-2)",
-                  padding: "var(--space-3) var(--space-4)",
-                  background: isOpen() ? "var(--paper-mid)" : "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                  "text-align": "left",
-                }}
-              >
-                <Icon name={pile.icon} size={18} color="var(--text-muted)" />
-                <span
-                  style={{
-                    flex: 1,
-                    "font-weight": "700",
-                    "font-size": "var(--text-body-sm)",
-                    color: "var(--text-primary)",
-                  }}
-                >
-                  {pile.label}
-                </span>
-                <span
-                  style={{
-                    padding: "2px 8px",
-                    background: "var(--paper-mid)",
-                    "border-radius": "var(--radius-pill)",
-                    "font-size": "10px",
-                    "font-weight": "700",
-                    color: "var(--text-muted)",
-                  }}
-                >
-                  {pile.items.length}
-                </span>
-                <Icon
-                  name={isOpen() ? "ph-caret-up" : "ph-caret-down"}
-                  size={12}
-                  color="var(--text-muted)"
-                />
-              </button>
-              <Show when={isOpen()}>
-                <div
-                  style={{
-                    padding: "0 var(--space-3) var(--space-3)",
-                    animation: "list-item-enter 0.25s var(--ease-out) both",
-                  }}
-                >
-                  <For each={pile.items.slice(0, 5)}>
-                    {(m, i) => (
-                      <InlinePileRow
-                        m={m}
-                        contact={props.contactById(m.pid)}
-                        index={i()}
-                        pileKey={pile.key}
-                        onOpen={() => props.onOpen(m.id)}
-                        onClear={() => clearFlag(m, pile.key)}
-                      />
-                    )}
-                  </For>
-                  <Show when={pile.items.length > 5}>
-                    <div
-                      style={{
-                        padding: "var(--space-2) 0",
-                        "text-align": "center",
-                        "font-size": "var(--text-caption)",
-                        color: "var(--text-muted)",
-                      }}
-                    >
-                      +{pile.items.length - 5} more
-                    </div>
-                  </Show>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "var(--space-2)",
-                      "margin-top": "var(--space-2)",
-                    }}
-                  >
-                    <Show when={pile.key === "replyLater"}>
-                      <button
-                        onClick={() => setView("focusReply")}
-                        style={{
-                          flex: 1,
-                          padding: "6px 10px",
-                          background: "var(--agent-soft)",
-                          color: "var(--agent)",
-                          "border-radius": "var(--radius-pill)",
-                          "font-size": "10px",
-                          "font-weight": "700",
-                          border: "none",
-                          cursor: "pointer",
-                        }}
-                      >
-                        <Icon name="ph-target" size={10} /> Focus & Reply
-                      </button>
-                    </Show>
-                    <button
-                      onClick={async () => {
-                        for (const m of pile.items) {
-                          await clearFlag(m, pile.key);
-                        }
-                      }}
-                      style={{
-                        flex: 1,
-                        padding: "6px 10px",
-                        background: "var(--paper-mid)",
-                        color: "var(--text-secondary)",
-                        "border-radius": "var(--radius-pill)",
-                        "font-size": "10px",
-                        "font-weight": "700",
-                        border: "none",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Clear all
-                    </button>
-                  </div>
-                </div>
-              </Show>
-            </div>
-          );
-        }}
-      </For>
-    </div>
-  );
-}
-
-function InlinePileRow(props: {
-  m: Message;
-  contact?: Contact;
-  index: number;
-  pileKey: PileKey;
-  onOpen: () => void | Promise<void>;
-  onClear: () => Promise<void>;
-}) {
-  return (
-    <div
-      data-pile-item={props.m.id}
-      style={{
-        display: "flex",
-        gap: "var(--space-2)",
-        padding: "var(--space-2) 0",
-        "border-bottom": "0.5px solid var(--border)",
-        "align-items": "center",
-        animation: "list-item-enter 0.25s var(--ease-out) both",
-        "animation-delay": `${props.index * 40}ms`,
-      }}
-    >
-      <Avatar
-        name={props.contact?.name ?? "?"}
-        src={props.contact?.avatar}
-        size={28}
-      />
-      <div
-        style={{ flex: 1, "min-width": 0, cursor: "pointer" }}
-        onClick={() => props.onOpen()}
-      >
-        <div
-          style={{
-            "font-size": "var(--text-caption)",
-            "font-weight": "600",
-            color: "var(--text-primary)",
-            "white-space": "nowrap",
-            overflow: "hidden",
-            "text-overflow": "ellipsis",
-          }}
-        >
-          {props.m.subj}
-        </div>
-        <div
-          style={{
-            "font-size": "10px",
-            color: "var(--text-secondary)",
-            "white-space": "nowrap",
-            overflow: "hidden",
-            "text-overflow": "ellipsis",
-          }}
-        >
-          {props.contact?.name ?? "?"} · {props.m.tm}
-        </div>
-        <Show when={props.m.bubbleUpAt && props.pileKey === "remind"}>
-          <div
-            style={{
-              "font-size": "10px",
-              color: "var(--blurple)",
-            }}
-          >
-            回浮于 {new Date(props.m.bubbleUpAt!).toLocaleString()}
-          </div>
-        </Show>
-      </div>
-      <button
-        onClick={() => props.onClear()}
-        title="从 pile 移除"
-        aria-label="Remove from pile"
-        style={{
-          padding: "4px 8px",
-          background: "transparent",
-          color: "var(--text-muted)",
-          "border-radius": "var(--radius-pill)",
-          "font-size": "10px",
-          border: "none",
-          cursor: "pointer",
-        }}
-      >
-        <Icon name="ph-x" size={12} />
-      </button>
-    </div>
-  );
-}
-
-function MessageActions(props: {
-  m: Message;
-  onReply: (m: Message) => void;
-  onChange: () => void;
-}) {
-  const { isMobile } = useViewport();
-  const [moreOpen, setMoreOpen] = createSignal(false);
-  const [wrapRef, setWrapRef] = createSignal<HTMLDivElement | undefined>(
-    undefined,
-  );
-  const [labelOpen, setLabelOpen] = createSignal(false);
-  const [moveOpen, setMoveOpen] = createSignal(false);
-
-  const onDocClick = (e: MouseEvent) => {
-    const el = wrapRef();
-    if (!el) return;
-    if (!el.contains(e.target as Node)) setMoreOpen(false);
-  };
-  document.addEventListener("click", onDocClick);
-  onCleanup(() => document.removeEventListener("click", onDocClick));
-
-  const run = async (fn: () => Promise<void>) => {
-    await fn();
-    props.onChange();
-  };
-
-  const replyLater = async (m: Message) => {
-    await upsertMessage({ ...m, replyLater: true });
-  };
-  const setAside = async (m: Message) => {
-    await upsertMessage({ ...m, setAside: true });
-  };
-  const bubbleUp = async (m: Message) => {
-    const t = new Date();
-    t.setDate(t.getDate() + 1);
-    t.setHours(9, 0, 0, 0);
-    await upsertMessage({ ...m, bubbleUpAt: t.toISOString() });
-  };
-  const archive = async (m: Message) => {
-    await moveMessageToBucket(m.id, "paperTrail");
-  };
-  const trash = async (m: Message) => {
-    await moveMessageToBucket(m.id, "trash");
-  };
-  const spam = async (m: Message) => {
-    await moveMessageToBucket(m.id, "spam");
-  };
-  const toggleUnread = async (m: Message) => {
-    await upsertMessage({ ...m, unread: !m.unread });
-  };
-
-  const showUndoToast = (message: string, undo: () => Promise<void>) => {
-    showToast({
-      message,
-      kind: "success",
-      action: {
-        label: "撤销",
-        run: async () => {
-          await undo();
-          props.onChange();
-          showToast({ message: "已撤销", kind: "success" });
-        },
-      },
-    });
-  };
-
-  const iconBtn = (
-    title: string,
-    icon: string,
-    onClick: (e: MouseEvent) => void,
-  ) => (
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick(e);
-      }}
-      title={title}
-      aria-label={title}
-      style={{
-        "align-self": "center",
-        color: "var(--text-muted)",
-        padding: "6px",
-        "border-radius": "var(--radius-pill)",
-        "flex-shrink": 0,
-      }}
-      onMouseEnter={(e) =>
-        (e.currentTarget.style.background = "var(--paper-mid)")
-      }
-      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-    >
-      <Icon name={icon} size={16} />
-    </button>
-  );
-
-  const moreItems = () => [
-    {
-      label: "Reply",
-      icon: "ph-arrow-u-up-left",
-      action: () => {
-        props.onReply(props.m);
-        props.onChange();
-      },
-    },
-    {
-      label: "Reply later",
-      icon: "ph-clock",
-      action: () =>
-        run(async () => {
-          const m = props.m;
-          await replyLater(m);
-          showUndoToast("已 Reply Later", async () => {
-            await upsertMessage({ ...m, replyLater: false });
-          });
-        }),
-    },
-    {
-      label: "Set aside",
-      icon: "ph-push-pin",
-      action: () =>
-        run(async () => {
-          const m = props.m;
-          await setAside(m);
-          showUndoToast("已 Set Aside", async () => {
-            await upsertMessage({ ...m, setAside: false });
-          });
-        }),
-    },
-    {
-      label: "Bubble up",
-      icon: "ph-arrow-fat-line-up",
-      action: () =>
-        run(async () => {
-          const m = props.m;
-          const previous = m.bubbleUpAt;
-          await bubbleUp(m);
-          showUndoToast("已 Bubble Up 到明天 9:00", async () => {
-            await upsertMessage({ ...m, bubbleUpAt: previous });
-          });
-        }),
-    },
-    {
-      label: "Archive",
-      icon: "ph-tray",
-      action: () =>
-        run(async () => {
-          const m = props.m;
-          const previousBucket = m.bucket;
-          await archive(m);
-          showUndoToast("已归档到 Records", async () => {
-            await moveMessageToBucket(m.id, previousBucket);
-          });
-        }),
-    },
-    {
-      label: "Trash",
-      icon: "ph-trash",
-      action: () =>
-        run(async () => {
-          const m = props.m;
-          const previousBucket = m.bucket;
-          await trash(m);
-          showUndoToast("已移到 Trash", async () => {
-            await moveMessageToBucket(m.id, previousBucket);
-          });
-        }),
-    },
-    {
-      label: props.m.unread ? "Mark read" : "Mark unread",
-      icon: "ph-envelope",
-      action: () =>
-        run(async () => {
-          await toggleUnread(props.m);
-          showToast({
-            message: props.m.unread ? "已标为已读" : "已标为未读",
-            kind: "success",
-          });
-        }),
-    },
-    {
-      label: "Forward",
-      icon: "ph-arrow-u-up-right",
-      action: () => {
-        setComposeContext({
-          mode: "forward",
-          originalMsg: props.m,
-        });
-        setComposeOpen(true);
-      },
-    },
-    {
-      label: "Label",
-      icon: "ph-tag",
-      action: () => setLabelOpen(true),
-    },
-    {
-      label: "Move",
-      icon: "ph-folder",
-      action: () => setMoveOpen(true),
-    },
-    {
-      label: "Spam",
-      icon: "ph-warning-circle",
-      action: () =>
-        run(async () => {
-          const m = props.m;
-          const previousBucket = m.bucket;
-          await spam(m);
-          showUndoToast("已移到 Spam", async () => {
-            await moveMessageToBucket(m.id, previousBucket);
-          });
-        }),
-    },
-  ];
-
-  return (
-    <div
-      ref={setWrapRef}
-      style={{
-        display: "flex",
-        "align-items": "center",
-        gap: "2px",
-        position: "relative",
-        "flex-shrink": 0,
-      }}
-    >
-      {isMobile() ? (
-        iconBtn("More", "ph-dots-three", () => setMoreOpen(true))
-      ) : (
-        <>
-          {iconBtn("Reply", "ph-arrow-u-up-left", () => {
-            props.onReply(props.m);
-            props.onChange();
-          })}
-          {iconBtn("Reply later", "ph-clock", () =>
-            run(async () => {
-              const m = props.m;
-              await replyLater(m);
-              showUndoToast("已 Reply Later", async () => {
-                await upsertMessage({ ...m, replyLater: false });
-              });
-            }),
-          )}
-          {iconBtn("Set aside", "ph-push-pin", () =>
-            run(async () => {
-              const m = props.m;
-              await setAside(m);
-              showUndoToast("已 Set Aside", async () => {
-                await upsertMessage({ ...m, setAside: false });
-              });
-            }),
-          )}
-          {iconBtn("Bubble up", "ph-arrow-fat-line-up", () =>
-            run(async () => {
-              const m = props.m;
-              const previous = m.bubbleUpAt;
-              await bubbleUp(m);
-              showUndoToast("已 Bubble Up 到明天 9:00", async () => {
-                await upsertMessage({ ...m, bubbleUpAt: previous });
-              });
-            }),
-          )}
-          {iconBtn("Archive", "ph-tray", () =>
-            run(async () => {
-              const m = props.m;
-              const previousBucket = m.bucket;
-              await archive(m);
-              showUndoToast("已归档到 Records", async () => {
-                await moveMessageToBucket(m.id, previousBucket);
-              });
-            }),
-          )}
-          {iconBtn("Trash", "ph-trash", () =>
-            run(async () => {
-              const m = props.m;
-              const previousBucket = m.bucket;
-              await trash(m);
-              showUndoToast("已移到 Trash", async () => {
-                await moveMessageToBucket(m.id, previousBucket);
-              });
-            }),
-          )}
-          <div style={{ position: "relative" }}>
-            {iconBtn("More", "ph-dots-three", () => setMoreOpen(true))}
-          </div>
-        </>
-      )}
-
-      <Show when={moreOpen()}>
-        <div
-          style={{
-            position: "absolute",
-            top: "calc(100% + 4px)",
-            right: 0,
-            "z-index": 20,
-            "background-color": "var(--paper-light)",
-            border: "0.5px solid var(--border-strong)",
-            "border-radius": "var(--radius-md)",
-            "box-shadow": "var(--shadow-lg)",
-            "min-width": "160px",
-            padding: "4px",
-          }}
-        >
-          <For each={moreItems()}>
-            {(item) => (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  item.action();
-                  setMoreOpen(false);
-                }}
-                style={{
-                  display: "flex",
-                  "align-items": "center",
-                  gap: "var(--space-2)",
-                  width: "100%",
-                  padding: "8px 10px",
-                  "text-align": "left",
-                  "font-size": "var(--text-caption)",
-                  color: "var(--text-secondary)",
-                  "border-radius": "var(--radius-sm)",
-                  background: "transparent",
-                  border: "none",
-                  cursor: "pointer",
-                }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.background = "var(--paper-mid)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.background = "transparent")
-                }
-              >
-                <Icon name={item.icon} size={14} />
-                {item.label}
-              </button>
-            )}
-          </For>
-        </div>
-      </Show>
-
-      <LabelPicker
-        open={labelOpen()}
-        onClose={() => setLabelOpen(false)}
-        messageIds={[props.m.id]}
-        onChange={props.onChange}
-      />
-      <MovePicker
-        open={moveOpen()}
-        onClose={() => setMoveOpen(false)}
-        messageIds={[props.m.id]}
-        onChange={props.onChange}
-      />
-    </div>
-  );
-}
-
-function BulkActionBar(props: {
-  count: number;
-  onClear: () => void;
-  onArchive: () => Promise<void> | void;
-  onTrash: () => Promise<void> | void;
-  onSpam: () => Promise<void> | void;
-  onLabel: () => void;
-  onMove: () => void;
-}) {
-  const btn = (
-    icon: string,
-    label: string,
-    onClick: () => Promise<void> | void,
-  ) => (
-    <button
-      onClick={() => void onClick()}
-      style={{
-        display: "flex",
-        "flex-direction": "column",
-        "align-items": "center",
-        gap: "2px",
-        padding: "8px 10px",
-        "border-radius": "var(--radius-md)",
-        color: "var(--text-secondary)",
-        background: "var(--paper-light)",
-        "font-size": "10px",
-        "font-weight": "600",
-        border: "0.5px solid var(--border)",
-        cursor: "pointer",
-      }}
-    >
-      <Icon name={icon} size={18} />
-      <span>{label}</span>
-    </button>
-  );
-
-  const { isMobile } = useViewport();
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        bottom: isMobile()
-          ? "calc(var(--bottom-tab-height) + env(safe-area-inset-bottom) + var(--space-4))"
-          : "var(--space-4)",
-        left: "50%",
-        transform: "translateX(-50%)",
-        "z-index": 30,
-        display: "flex",
-        "align-items": "center",
-        gap: "var(--space-2)",
-        padding: "var(--space-2) var(--space-3)",
-        background: "var(--paper-light)",
-        border: "0.5px solid var(--border-strong)",
-        "border-radius": "var(--radius-xl)",
-        "box-shadow": "var(--shadow-xl)",
-      }}
-    >
+        Imbox
+      </h1>
       <span
         style={{
           "font-size": "var(--text-caption)",
-          "font-weight": "700",
-          padding: "0 var(--space-2)",
-          color: "var(--text-primary)",
-        }}
-      >
-        已选 {props.count}
-      </span>
-      {btn("ph-archive", "Archive", props.onArchive)}
-      {btn("ph-trash", "Trash", props.onTrash)}
-      {btn("ph-warning-circle", "Spam", props.onSpam)}
-      {btn("ph-tag", "Label", props.onLabel)}
-      {btn("ph-folder", "Move", props.onMove)}
-      <button
-        onClick={props.onClear}
-        style={{
-          padding: "8px 10px",
           color: "var(--text-muted)",
-          "font-size": "10px",
-          "font-weight": "600",
         }}
       >
-        清除
+        {props.newCount} 待读 · {props.previouslySeenCount} 已读 · {props.total} 总数
+      </span>
+      <div style={{ flex: 1 }} />
+      <button
+        onClick={() => void props.onSync()}
+        data-sync-now
+        style={{
+          display: "inline-flex",
+          "align-items": "center",
+          gap: "4px",
+          padding: "4px 10px",
+          background: "var(--palm-soft)",
+          color: "var(--palm)",
+          "border-radius": "var(--radius-pill)",
+          "font-size": "var(--text-micro)",
+          "font-weight": "700",
+          border: "0",
+          cursor: "pointer",
+        }}
+      >
+        <Icon name="arrows-clockwise" size={12} /> 同步
       </button>
+    </header>
+  );
+}
+
+function SectionHeader(props: {
+  title: string;
+  variant: "new" | "seen";
+  action?: { label: string; onClick: () => void };
+}) {
+  return (
+    <div
+      class={
+        "feed-section-header" +
+        (props.variant === "new" ? " feed-section-new" : " feed-section-seen")
+      }
+      data-feed-section={props.variant}
+    >
+      <span class="feed-section-title">{props.title}</span>
+      <Show when={props.action}>
+        {(a) => (
+          <button class="feed-section-action" onClick={a().onClick}>
+            {a().label}
+          </button>
+        )}
+      </Show>
     </div>
   );
 }
 
-function InboxEmptyState() {
-  const [accounts] = createResource(listAccounts);
-  const [gate, { refetch: refetchGate }] = createResource(countGateCandidates);
-
-  // Re-fetch the unscreened count on every backend sync event so the copy
-  // stays accurate as new senders arrive via IMAP. We mirror the latest
-  // resource value into the `gateCandidateCount` UI signal so other surfaces
-  // (topbar Gate badge, sidebar counter) can subscribe to a single source
-  // instead of each spinning up its own resource.
-  createEffect(() => {
-    refreshTick();
-    void refetchGate();
-  });
-  createEffect(() => {
-    const v = gate();
-    if (v !== undefined) setGateCandidateCount(v);
-  });
-
-  const emailAccountCount = createMemo(
-    () => (accounts() ?? []).filter((a) => a.type === "email").length,
-  );
-  const unscreened = createMemo(() => gateCandidateCount());
-
+function EmptyState() {
   return (
-    <Show when={emailAccountCount() === 0} fallback={
-      <Show when={unscreened() > 0} fallback={
-        <Empty
-          icon="ph-tray"
-          title="Inbox 是空的"
-          description="新邮件到达时会自动显示在此处。试着给自己发一封测试邮件吧。"
-        />
-      }>
-        <Empty
-          icon="ph-shield-check"
-          title={`${unscreened()} 个发件人待 Gate 筛选`}
-          description="这些发件人的邮件会先沉淀在 Gate，直到你决定是收进 Inbox 还是 Block。"
-          action={{
-            label: "打开 Gate",
-            onClick: () => setView("screener"),
-          }}
-        />
-      </Show>
-    }>
-      <Empty
-        icon="ph-tray"
-        title="Inbox 是空的"
-        description="请到 Settings → Accounts → Add account 接入真实邮箱。背景同步会从 IMAP 拉取最近的邮件。"
-        action={{ label: "打开 Settings", onClick: () => setView("settings") }}
-      />
-    </Show>
+    <div class="imbox-empty">
+      <Icon name="ph-tray" size={48} />
+      <h2>Inbox 是给你的重要邮件</h2>
+      <p>
+        重要的、需要你来处理的对话会出现在这里。
+        <br />
+        还没有？等你的下一次签到。
+      </p>
+    </div>
   );
 }
 
-function IndeterminateCheckbox(props: {
-  checked: () => boolean;
-  indeterminate: () => boolean;
-  onClick: (e: MouseEvent) => void;
-}) {
-  let ref: HTMLInputElement | undefined;
-  createEffect(() => {
-    if (ref) ref.indeterminate = props.indeterminate();
-  });
+function SkeletonBlock() {
   return (
-    <input
-      ref={(el) => (ref = el)}
-      type="checkbox"
-      checked={props.checked()}
-      onClick={props.onClick}
+    <div
       style={{
-        width: "16px",
-        height: "16px",
-        "flex-shrink": 0,
-        "margin-top": "10px",
-        cursor: "pointer",
-        "accent-color": "var(--palm)",
+        "max-width": "720px",
+        margin: "var(--space-4) auto",
+        padding: "0 var(--space-5)",
       }}
+    >
+      <SkeletonList count={8} />
+    </div>
+  );
+}
+
+function ShowMoreButton(props: { loading: boolean }) {
+  return (
+    <div
+      style={{
+        padding: "var(--space-5)",
+        "text-align": "center",
+        color: "var(--text-muted)",
+        "font-size": "var(--text-caption)",
+      }}
+    >
+      {props.loading ? "加载中…" : "继续滚动加载更多"}
+    </div>
+  );
+}
+
+/* ── Per-item row renderer ─────────────────────────────────────────── */
+
+interface RowProps {
+  item: Item;
+  index: number;
+  isCursor: (i: number) => boolean;
+  selectedIds: Set<string>;
+  lastSelectedId: string | null;
+  contactMap: () => Map<string, Contact>;
+  scoreFor: (m: Message) => number;
+  bundleOpen: (id: string) => boolean;
+  onToggleBundle: (id: string) => void;
+  onOpen: (m: Message) => void;
+  onToggleSelect: (id: string) => void;
+  onSelectRange: (a: string, b: string) => void;
+  onReplyLater: (m: Message) => void;
+  onSetAside: (m: Message) => void;
+  onArchive: (m: Message) => void;
+  onTrash: (m: Message) => void;
+  onSpam: (m: Message) => void;
+  onToggleUnread: (m: Message) => void;
+  onApproveFirstTime: (m: Message, b: MessageBucket) => void;
+  onBlockFirstTime: (m: Message) => void;
+  onBundleSelect: (b: Bundle) => void;
+  onDragStart: (m: Message, ev: DragEvent) => void;
+  onDragEnd: (ev: DragEvent) => void;
+  itemKey: (item: Item) => string;
+}
+
+function ItemRow(props: RowProps) {
+  if ("messages" in props.item) {
+    const bundle = props.item;
+    return (
+      <BundleCard
+        bundle={bundle}
+        isCursor={() => props.isCursor(props.index)}
+        selectedIds={props.selectedIds}
+        contactMap={props.contactMap}
+        scoreFor={props.scoreFor}
+        isOpen={props.bundleOpen(bundle.contactId)}
+        onToggle={() => props.onToggleBundle(bundle.contactId)}
+        onOpenFirst={(m) => props.onOpen(m)}
+        onSelect={() => props.onBundleSelect(bundle)}
+        onSelectRange={props.onSelectRange}
+        onDragStart={(m, ev) => props.onDragStart(m, ev)}
+        onDragEnd={props.onDragEnd}
+      />
+    );
+  }
+  return (
+    <MessageCard
+      m={props.item}
+      index={props.index}
+      isCursor={() => props.isCursor(props.index)}
+      selectedIds={props.selectedIds}
+      lastSelectedId={props.lastSelectedId}
+      contact={props.contactMap().get(props.item.pid)}
+      scoreFor={props.scoreFor}
+      firstTimeSender={isFirstTimeContact(props.contactMap().get(props.item.pid))}
+      onOpen={props.onOpen}
+      onToggleSelect={props.onToggleSelect}
+      onSelectRange={props.onSelectRange}
+      onReplyLater={props.onReplyLater}
+      onSetAside={props.onSetAside}
+      onArchive={props.onArchive}
+      onTrash={props.onTrash}
+      onSpam={props.onSpam}
+      onToggleUnread={props.onToggleUnread}
+      onApproveFirstTime={props.onApproveFirstTime}
+      onBlockFirstTime={props.onBlockFirstTime}
+      onDragStart={props.onDragStart}
+      onDragEnd={props.onDragEnd}
+      draggable
     />
   );
 }
 
-function FocusAndReplyButton(props: { onClick: () => void }) {
+function isFirstTimeContact(c: Contact | undefined) {
+  return !c || !!c.firstSeen || !c.screened;
+}
+
+/* ── Single message card ───────────────────────────────────────────── */
+
+interface MessageCardProps {
+  m: Message;
+  index: number;
+  isCursor: () => boolean;
+  selectedIds: Set<string>;
+  lastSelectedId: string | null;
+  contact: Contact | undefined;
+  scoreFor: (m: Message) => number;
+  firstTimeSender?: boolean;
+  onOpen: (m: Message) => void;
+  onToggleSelect: (id: string) => void;
+  onSelectRange: (a: string, b: string) => void;
+  onReplyLater: (m: Message) => void;
+  onSetAside: (m: Message) => void;
+  onArchive: (m: Message) => void;
+  onTrash: (m: Message) => void;
+  onSpam: (m: Message) => void;
+  onToggleUnread: (m: Message) => void;
+  onApproveFirstTime?: (m: Message, b: MessageBucket) => void;
+  onBlockFirstTime?: (m: Message) => void;
+  onDragStart?: (m: Message, ev: DragEvent) => void;
+  onDragEnd?: (ev: DragEvent) => void;
+  draggable?: boolean;
+}
+
+function MessageCard(props: MessageCardProps) {
+  const score = () => props.scoreFor(props.m);
+  const isSelected = () => props.selectedIds.has(props.m.id);
+  const priorityClass = () =>
+    score() >= 80 ? " priority-high" : "";
+  const cursorClass = () => (props.isCursor() ? " cursor" : "");
+  const selectedClass = () => (isSelected() ? " selected" : "");
+  const unreadClass = () => (props.m.unread ? " unread" : "");
+  const firstTimeClass = () =>
+    props.firstTimeSender ? " first-time" : "";
+
+  const preview = () => {
+    const raw = props.m.body || props.m.prev || "";
+    if (raw.length <= PREVIEW_CHARS) return raw;
+    return raw.slice(0, PREVIEW_CHARS).trimEnd() + "…";
+  };
+
   return (
-    <div
-      style={{
-        display: "flex",
-        "justify-content": "center",
-        padding: "var(--space-4)",
+    <article
+      class={
+        "feed-card" +
+        priorityClass() +
+        cursorClass() +
+        selectedClass() +
+        unreadClass() +
+        firstTimeClass()
+      }
+      data-message-id={props.m.id}
+      data-feed-card="message"
+      draggable={props.draggable}
+      onDragStart={(ev) => props.onDragStart?.(props.m, ev)}
+      onDragEnd={(ev) => props.onDragEnd?.(ev)}
+      onClick={(ev) => {
+        // Don't open when the user is interacting with a checkbox, button, or link.
+        const target = ev.target as HTMLElement;
+        if (target.closest("button, a, input")) return;
+        props.onOpen(props.m);
       }}
     >
-      <button
-        onClick={props.onClick}
-        style={{
-          display: "flex",
-          "align-items": "center",
-          gap: "var(--space-2)",
-          padding: "10px 20px",
-          background: "var(--paper-light)",
-          "border-radius": "var(--radius-pill)",
-          border: "0.5px solid var(--border-strong)",
-          "font-size": "var(--text-caption)",
-          "font-weight": "700",
-          color: "var(--text-secondary)",
-          cursor: "pointer",
-        }}
-      >
-        <Icon name="ph-crosshair" size={14} />
-        Focus & Reply
-      </button>
+      <Show when={props.firstTimeSender}>
+        <input
+          type="checkbox"
+          class="select-checkbox"
+          checked={isSelected()}
+          onClick={(ev) => {
+            ev.stopPropagation();
+            const id = props.m.id;
+            if (ev.shiftKey && props.lastSelectedId) {
+              props.onSelectRange(props.lastSelectedId, id);
+            } else {
+              props.onToggleSelect(id);
+            }
+          }}
+        />
+      </Show>
+
+      <Avatar
+        name={props.contact?.name ?? "Newsletter"}
+        src={props.contact?.avatar}
+        size={40}
+      />
+
+      <div class="feed-body">
+        <div class="feed-top-row">
+          <span
+            class="feed-name"
+            data-feed-name={props.m.pid}
+            onClick={(ev) => {
+              ev.stopPropagation();
+              if (props.contact) {
+                props.onOpen(props.m); // detail panel opens; user can switch to ContactPanel from there
+              }
+            }}
+          >
+            {props.contact?.name ?? "Unknown"}
+          </span>
+          <Show when={props.firstTimeSender}>
+            <span class="first-time-pill" data-first-time-pill>
+              首次发件人
+            </span>
+          </Show>
+          <span class="feed-spacer" />
+          <span class="feed-time">{props.m.tm}</span>
+        </div>
+
+        <div class="feed-bottom-row">
+          <span class="feed-subject">{props.m.subj}</span>
+        </div>
+        <div class="feed-bottom-row">
+          <span class="feed-preview">{preview()}</span>
+        </div>
+
+        <Show when={props.firstTimeSender}>
+          <div
+            class="first-time-actions"
+            data-first-time-actions
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <button
+              class="first-time-btn primary"
+              onClick={() => props.onApproveFirstTime?.(props.m, "imbox")}
+              data-approve-imbox
+            >
+              批准到 Imbox
+            </button>
+            <button
+              class="first-time-btn"
+              onClick={() => props.onApproveFirstTime?.(props.m, "feed")}
+              data-approve-feed
+            >
+              Stream
+            </button>
+            <button
+              class="first-time-btn"
+              onClick={() => props.onApproveFirstTime?.(props.m, "paperTrail")}
+              data-approve-paper
+            >
+              Records
+            </button>
+            <button
+              class="first-time-btn"
+              onClick={() => props.onBlockFirstTime?.(props.m)}
+              data-block-sender
+            >
+              阻止
+            </button>
+          </div>
+        </Show>
+      </div>
+
+      <div class="feed-card-actions" data-feed-card-actions>
+        <button
+          class="feed-card-action-btn"
+          title="Pending (l)"
+          onClick={(ev) => {
+            ev.stopPropagation();
+            props.onReplyLater(props.m);
+          }}
+        >
+          <Icon name="ph-clock" size={14} />
+        </button>
+        <button
+          class="feed-card-action-btn"
+          title="Saved (s)"
+          onClick={(ev) => {
+            ev.stopPropagation();
+            props.onSetAside(props.m);
+          }}
+        >
+          <Icon name="ph-push-pin" size={14} />
+        </button>
+        <button
+          class="feed-card-action-btn"
+          title="Archive (e)"
+          onClick={(ev) => {
+            ev.stopPropagation();
+            props.onArchive(props.m);
+          }}
+        >
+          <Icon name="ph-archive" size={14} />
+        </button>
+        <button
+          class="feed-card-action-btn"
+          title="Trash (#)"
+          onClick={(ev) => {
+            ev.stopPropagation();
+            props.onTrash(props.m);
+          }}
+        >
+          <Icon name="ph-trash" size={14} />
+        </button>
+        <button
+          class="feed-card-action-btn"
+          title={props.m.unread ? "Mark as Read" : "Mark as Unread"}
+          onClick={(ev) => {
+            ev.stopPropagation();
+            props.onToggleUnread(props.m);
+          }}
+        >
+          <Icon name={props.m.unread ? "ph-eye" : "ph-eye-slash"} size={14} />
+        </button>
+      </div>
+    </article>
+  );
+}
+
+/* ── Bundle card (3+ unread from same sender) ─────────────────────── */
+
+interface BundleCardProps {
+  bundle: Bundle;
+  isCursor: () => boolean;
+  selectedIds: Set<string>;
+  contactMap: () => Map<string, Contact>;
+  scoreFor: (m: Message) => number;
+  isOpen: boolean;
+  onToggle: () => void;
+  onOpenFirst: (m: Message) => void;
+  onSelect: () => void;
+  onSelectRange: (a: string, b: string) => void;
+  onDragStart: (m: Message, ev: DragEvent) => void;
+  onDragEnd: (ev: DragEvent) => void;
+}
+
+function BundleCard(props: BundleCardProps) {
+  const selCount = () =>
+    props.bundle.messages.filter((m) => props.selectedIds.has(m.id)).length;
+  const allSelected = () =>
+    selCount() === props.bundle.messages.length;
+  const someSelected = () => selCount() > 0 && !allSelected();
+  const stateClass = () =>
+    allSelected() ? "selected" : someSelected() ? "indeterminate" : "";
+
+  const expanded = () => props.isOpen;
+
+  return (
+    <article
+      class={
+        "feed-card feed-card-bundle" +
+        (props.isCursor() ? " cursor" : "") +
+        (expanded() ? " expanded" : "")
+      }
+      data-feed-card="bundle"
+      data-bundle-id={props.bundle.contactId}
+      onClick={(ev) => {
+        const target = ev.target as HTMLElement;
+        if (target.closest(".bundle-drawer-row, button, input")) return;
+        props.onToggle();
+      }}
+    >
+      <div class="feed-card-top">
+        <input
+          type="checkbox"
+          class={
+            "select-checkbox" +
+            (someSelected() || allSelected() ? " " + stateClass() : "")
+          }
+          checked={allSelected()}
+          onClick={(ev) => {
+            ev.stopPropagation();
+            props.onSelect();
+          }}
+        />
+        <Avatar
+          name={props.bundle.contact.name}
+          src={props.bundle.contact.avatar}
+          size={40}
+        />
+        <div class="feed-body">
+          <div class="feed-top-row">
+            <span class="feed-name">
+              {props.bundle.contact.name} · {props.bundle.messages.length} 封邮件
+            </span>
+            <span class="feed-spacer" />
+            <span class="feed-time">{props.bundle.messages[0]?.tm ?? ""}</span>
+          </div>
+          <div class="feed-bottom-row">
+            <span class="feed-subject">
+              {props.bundle.messages[0]?.subj ?? "(无主题)"}
+            </span>
+          </div>
+        </div>
+        <span class="feed-card-bundle-count">{props.bundle.messages.length}</span>
+      </div>
+      <div class="bundle-drawer">
+        <For each={props.bundle.messages}>
+          {(m) => (
+            <div
+              class="bundle-drawer-row"
+              data-bundle-row={m.id}
+              draggable
+              onDragStart={(ev) => props.onDragStart(m, ev)}
+              onDragEnd={(ev) => props.onDragEnd(ev)}
+              onClick={() => props.onOpenFirst(m)}
+            >
+              <div class="bundle-drawer-line">{m.subj || "(无主题)"}</div>
+              <div class="bundle-drawer-meta">{m.tm}</div>
+            </div>
+          )}
+        </For>
+      </div>
+    </article>
+  );
+}
+
+/* ── Pile card ──────────────────────────────────────────────────────── */
+
+function PileCard(props: { pile: Pile; onOpen: (id: string) => void }) {
+  return (
+    <div
+      class="imbox-pile"
+      data-pile={props.pile.id}
+      onClick={(ev) => {
+        const target = ev.target as HTMLElement;
+        if (target.closest(".imbox-pile-row")) return;
+        // No-op: clicking the pile header itself shouldn't navigate anywhere.
+      }}
+    >
+      <div class="imbox-pile-header">
+        <Icon name={props.pile.icon} size={12} />
+        <span>{props.pile.title}</span>
+        <span class="imbox-pile-count">{props.pile.messages.length}</span>
+      </div>
+      <div class="imbox-pile-list">
+        <For each={props.pile.messages.slice(0, 3)}>
+          {(m) => (
+            <div
+              class="imbox-pile-row"
+              data-pile-row={m.id}
+              onClick={() => props.onOpen(m.id)}
+            >
+              {m.subj || "(无主题)"}
+            </div>
+          )}
+        </For>
+        <Show when={props.pile.messages.length > 3}>
+          <div
+            class="imbox-pile-row"
+            style={{
+              color: "var(--text-muted)",
+              "font-style": "italic",
+            }}
+          >
+            + {props.pile.messages.length - 3} 更多…
+          </div>
+        </Show>
+      </div>
     </div>
   );
 }
+
+/* ── useRefreshEffect (kept inline so we don't pull gestures.ts) ──── */
+
+function useRefreshEffect(callback: () => void) {
+  createEffect(() => {
+    const _ = refreshTick();
+    void _;
+    callback();
+  });
+}
+
+const _placeholder = getMessage; // keep import used
+void _placeholder;

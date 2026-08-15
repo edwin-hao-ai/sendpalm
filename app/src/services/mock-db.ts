@@ -153,7 +153,18 @@ function tokenize(sql: string): Token[] {
     tokens.push({ kind: "sym", value: c });
     i++;
   }
-  return tokens;
+  // Rewrite '?' placeholders into numbered $N tokens so the MockDb
+  // resolves them positionally the same way tauri-plugin-sql does.
+  // This lets listMessagesPaged's `WHERE bucket = ? AND direction = ?`
+  // hit the right bindValues entries instead of bindValues[0] every time.
+  let qIdx = 0;
+  return tokens.map((t) => {
+    if (t.kind === "op" && t.value === "?") {
+      qIdx++;
+      return { kind: "op", value: `$${qIdx}` } as Token;
+    }
+    return t;
+  });
 }
 
 /* ── Helpers ───────────────────────────────────────────── */
@@ -604,8 +615,16 @@ function runSelect(sql: string, bindValues: unknown[]): Row[] {
     rows = rows.slice(0, limit);
   }
 
-  if (columns.some((c) => c.startsWith("count("))) {
-    return [{ cnt: rows.length }];
+  if (columns.some((c) => c === "count" || c.startsWith("count("))) {
+    // COUNT(*) aggregate — return a single row with the aliased count.
+    // The MockDb tokenizer keeps `COUNT(*)` as just `count` (the parens
+    // come through as separate sym tokens), so we match either form.
+    // Skip the `AS` keyword that often follows the aggregate so we can
+    // honor the alias the SQL writer actually wanted.
+    const alias = columns.find(
+      (c) => c !== "count" && !c.startsWith("count(") && c !== "as",
+    );
+    return [{ [alias ?? "cnt"]: rows.length }];
   }
 
   if (allColumns) return rows;
