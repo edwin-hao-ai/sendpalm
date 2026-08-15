@@ -9,8 +9,10 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-  max-width: 720px;
+  /* Adaptive width: grow with the main column up to 880px, then cap.
+   * Below 480px the list is essentially full-bleed. */
   width: 100%;
+  max-width: clamp(360px, 100%, 880px);
   margin: 0 auto;
   padding: 0 20px 24px;
 }
@@ -88,9 +90,9 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   cursor: pointer;
-  transition: transform 0.15s var(--ease-out),, box-shadow 0.15s var(--ease-out);
-  max-width: 720px;
-  width: calc(100% - 40px);
+  transition: transform 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
+  width: clamp(280px, calc(100% - 40px), 880px);
+  max-width: 880px;
   margin-left: auto;
   margin-right: auto;
   box-sizing: border-box;
@@ -368,10 +370,10 @@
   gap: 12px;
   padding: 24px 20px 16px;
   margin-top: auto;
-  max-width: 720px;
+  width: clamp(280px, 100%, 880px);
+  max-width: 880px;
   margin-left: auto;
   margin-right: auto;
-  width: 100%;
   position: sticky;
   bottom: 0;
   background: linear-gradient(to top, var(--paper) 70%, transparent);

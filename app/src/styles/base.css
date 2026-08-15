@@ -124,10 +124,14 @@ hr {
   background: transparent;
 }
 
-/* App shell layout grid — 3-tier responsive */
+/* App shell layout grid — 3-tier responsive.
+ *  --main-pane-width and --detail-panel-width default to px tokens but can
+ *  be overridden inline by PanelResizeHandle. The minmax() wrappers
+ *  below let the main column absorb leftover space when the window is
+ *  wider than sidebar + detail + panel can fill. */
 #app {
   display: grid;
-  grid-template-columns: var(--sidebar-width) 1fr;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   grid-template-rows: calc(var(--topbar-height) + env(safe-area-inset-top)) 1fr;
   grid-template-areas:
     "sidebar  topbar"
@@ -136,30 +140,58 @@ hr {
 }
 
 #app.detail-open {
-  grid-template-columns: var(--sidebar-width) var(--main-pane-width) var(--detail-panel-width);
+  grid-template-columns:
+    var(--sidebar-width)
+    minmax(var(--main-pane-min, 360px), var(--main-pane-width))
+    var(--detail-panel-width);
   grid-template-areas:
     "sidebar  topbar   topbar"
     "sidebar  main     detail";
 }
 
 #app.agent-open {
-  grid-template-columns: var(--sidebar-width) var(--main-pane-width) var(--agent-panel-width);
+  grid-template-columns:
+    var(--sidebar-width)
+    minmax(var(--main-pane-min, 360px), var(--main-pane-width))
+    var(--agent-panel-width);
   grid-template-areas:
     "sidebar  topbar   topbar"
     "sidebar  main     agent";
 }
 
 #app.detail-open.agent-open {
-  grid-template-columns: var(--sidebar-width) var(--main-pane-width) var(--detail-panel-width) var(
-      --agent-panel-width
-    );
+  grid-template-columns:
+    var(--sidebar-width)
+    minmax(var(--main-pane-min, 360px), var(--main-pane-width))
+    var(--detail-panel-width)
+    var(--agent-panel-width);
   grid-template-areas:
     "sidebar  topbar   topbar   topbar"
     "sidebar  main     detail   agent";
 }
 
 #app:not(.detail-open):not(.agent-open) {
-  grid-template-columns: var(--sidebar-width) var(--main-pane-width);
+  grid-template-columns:
+    var(--sidebar-width)
+    minmax(var(--main-pane-min, 360px), var(--main-pane-width));
+}
+
+/* On narrow viewports the detail/agent panels cover the main column
+ * entirely so the content has room to breathe; drag handles still work. */
+@media (max-width: 1023px) {
+  #app.detail-open {
+    grid-template-columns: var(--sidebar-width) 0 var(--detail-panel-width);
+  }
+  #app.agent-open {
+    grid-template-columns: var(--sidebar-width) 0 var(--agent-panel-width);
+  }
+  #app.detail-open.agent-open {
+    grid-template-columns:
+      var(--sidebar-width)
+      0
+      var(--detail-panel-width)
+      var(--agent-panel-width);
+  }
 }
 
 #sidebar {

@@ -70,10 +70,12 @@ function updateRootVars() {
     "--agent-panel-width",
     `${agentPanelWidth()}px`,
   );
-  document.documentElement.style.setProperty(
-    "--main-pane-width",
-    `${mainPaneWidth()}px`,
-  );
+  // --main-pane-width is intentionally NOT touched here. The CSS default
+  // for it is `1fr` (token in styles/tokens.css), so the main column
+  // grows to fill leftover space on wide windows and shrinks to its
+  // --main-pane-min on narrow ones. The drag handle writes a px value
+  // directly during drag; if the user has never dragged, the variable
+  // stays at 1fr and the layout is fully responsive.
 }
 
 function persist(d: number, a: number, m: number) {
@@ -130,6 +132,14 @@ export function PanelResizeHandle(props: Props) {
       const next = Math.min(max, Math.max(min, startWidth + delta));
       setWidth(next);
       updateRootVars();
+      // For the Main column the CSS default is 1fr (responsive); the
+      // drag handle needs to write an explicit px value to override it.
+      if (props.panel === "main") {
+        document.documentElement.style.setProperty(
+          "--main-pane-width",
+          `${next}px`,
+        );
+      }
     };
 
     const onPointerUp = () => {
