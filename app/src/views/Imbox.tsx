@@ -429,10 +429,16 @@ export function Imbox() {
   const openAndMarkRead = async (m: Message) => {
     open(m.id);
     if (m.unread) {
+      // Optimistic — move the card to the read section instantly. The DB
+      // write is the source of truth; MessagePanel also patches on mount
+      // so this is idempotent. No refreshTick: patching one row in memory
+      // is all the list needs to re-derive its sections.
+      paged.patchMessage(m.id, { unread: false });
       try {
         await upsertMessage({ ...m, unread: false });
       } catch {
-        /* ignore — refetch on next refreshTick */
+        // Restore on failure so the list never lies about read state.
+        paged.patchMessage(m.id, { unread: true });
       }
     }
   };

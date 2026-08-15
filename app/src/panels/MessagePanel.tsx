@@ -53,6 +53,7 @@ import { trackerSummary } from "../utils/trackers";
 import type { Clip, Contact, FollowUp, Message, Sticky } from "../types";
 import { addCalendarEvent, getAttachmentContent, setImageSenderPolicy } from "../services/backend";
 import { useRefreshEffect, useViewport } from "../utils/gestures";
+import { notifyMessageUpdated } from "../services/sync-events";
 import { formatMessageSource, messagePreview } from "./message-source";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -112,7 +113,11 @@ export function MessagePanel(props: { messageId: string }) {
     const m = message();
     if (m && m.unread) {
       void upsertMessage({ ...m, unread: false }).then(() => {
-        bumpRefreshTick();
+        // Patch owning lists in place and refresh our own resource — no
+        // global refreshTick, so the Imbox list does not refetch its whole
+        // page when the user simply opens a message.
+        notifyMessageUpdated(m.id, { unread: false });
+        void refetchMessage();
       });
     }
   });
@@ -1132,17 +1137,49 @@ export function MessagePanel(props: { messageId: string }) {
                           <iframe
                             ref={(el) => {
                               currentIframe = el;
-                              el.onload = () => {
+                              const resize = () => {
                                 try {
                                   const doc = el.contentDocument;
-                                  if (doc) {
-                                    const height = doc.body.scrollHeight + 16;
+                                  if (doc && doc.body) {
+                                    const height = doc.body.scrollHeight + 24;
                                     el.style.height = `${height}px`;
                                   }
                                 } catch {
                                   // sandboxed or cross-origin iframe — keep default height
                                 }
                               };
+                              el.onload = resize;
+                              // Re-measure as content (images, fonts) finishes
+                              // loading — the iframe body resizes multiple times
+                              // before settling. ResizeObserver + a few timed
+                              // catches cover the common cases (track images,
+                              // Show images button).
+                              let rafs = 0;
+                              const tick = () => {
+                                resize();
+                                if (rafs++ < 30) requestAnimationFrame(tick);
+                              };
+                              requestAnimationFrame(tick);
+                              setTimeout(resize, 300);
+                              setTimeout(resize, 1200);
+                              setTimeout(resize, 3000);
+                              try {
+                                const ro = new ResizeObserver(resize);
+                                if (el.contentDocument?.body) {
+                                  ro.observe(el.contentDocument.body);
+                                }
+                                el.dataset.ro = "1";
+                                el.addEventListener(
+                                  "load",
+                                  () => {
+                                    const body = el.contentDocument?.body;
+                                    if (body) ro.observe(body);
+                                  },
+                                  { once: true },
+                                );
+                              } catch {
+                                /* sandbox denies */
+                              }
                             }}
                             srcdoc={htmlEmailSrcdoc(m.bodyHtml!)}
                             sandbox="allow-scripts allow-same-origin"

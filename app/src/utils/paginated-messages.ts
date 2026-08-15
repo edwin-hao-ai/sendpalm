@@ -15,6 +15,7 @@ import {
   createMemo,
   createResource,
   createSignal,
+  onCleanup,
   type Resource,
 } from "solid-js";
 import {
@@ -23,6 +24,7 @@ import {
   type ListMessagesOptions,
   type ListMessagesPage,
 } from "../stores/data";
+import { registerMessageUpdated } from "../services/sync-events";
 import type { Message } from "../types";
 
 const DEFAULT_PAGE_SIZE = 100;
@@ -49,6 +51,13 @@ export interface PaginatedMessagesHandle {
    * call later fails, call refresh() to resync truth from the DB.
    */
   removeByIds: (ids: string[]) => void;
+  /**
+   * Merge a partial patch into one loaded item in memory (no-op when the
+   * id is not in the loaded window). Use for single-row state changes like
+   * marking read — it moves the row between derived sections without a
+   * full paginated refetch.
+   */
+  patchMessage: (id: string, patch: Partial<Message>) => void;
   resource: Resource<ListMessagesPage | undefined>;
 }
 
@@ -141,6 +150,23 @@ export function usePaginatedMessages(
     setOffset(Math.max(0, offset() - (pages().length - next.length)));
   };
 
+  const patchMessage = (id: string, patch: Partial<Message>) => {
+    setPages((prev) => {
+      const idx = prev.findIndex((m) => m.id === id);
+      if (idx < 0) return prev;
+      const next = prev.slice();
+      next[idx] = { ...next[idx]!, ...patch };
+      return next;
+    });
+  };
+
+  // React to in-place single-row updates (read/unread toggles, etc.)
+  // without touching the global refreshTick — patching in memory avoids a
+  // full LIMIT 100 refetch per row change.
+  onCleanup(
+    registerMessageUpdated((id, patch) => patchMessage(id, patch)),
+  );
+
   return {
     items,
     total,
@@ -150,6 +176,7 @@ export function usePaginatedMessages(
     refresh,
     prependByIds,
     removeByIds,
+    patchMessage,
     resource,
   };
 }

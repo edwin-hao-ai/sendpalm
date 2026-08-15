@@ -26,6 +26,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { IS_BROWSER } from "./tauri-shim";
 import { bumpRefreshTick } from "../stores/ui";
+import type { Message } from "../types";
 
 export interface SyncReport {
   account_id: string;
@@ -69,6 +70,41 @@ function notifyBucket(bucket: string, ids: string[]): void {
       void h(ids);
     } catch (err) {
       console.warn(`[sync-events] prepend handler for ${bucket} threw`, err);
+    }
+  }
+}
+
+/**
+ * In-place patch registry — the incremental counterpart to prependByIds.
+ *
+ * When a view mutates a single message (e.g. marking it read after the
+ * DetailPanel opens) it must NOT bump the global refreshTick, because that
+ * makes every paginated list re-fetch its whole page just to update one
+ * row. Instead it calls notifyMessageUpdated(id, patch) and each owning
+ * list patches just that row in memory. See usePaginatedMessages, which
+ * auto-registers on mount.
+ */
+export type MessagePatchHandler = (id: string, patch: Partial<Message>) => void;
+const messageUpdatedRegistry = new Set<MessagePatchHandler>();
+
+export function registerMessageUpdated(
+  handler: MessagePatchHandler,
+): () => void {
+  messageUpdatedRegistry.add(handler);
+  return () => {
+    messageUpdatedRegistry.delete(handler);
+  };
+}
+
+export function notifyMessageUpdated(
+  id: string,
+  patch: Partial<Message>,
+): void {
+  for (const h of messageUpdatedRegistry) {
+    try {
+      h(id, patch);
+    } catch (err) {
+      console.warn("[sync-events] message-updated handler threw", err);
     }
   }
 }
