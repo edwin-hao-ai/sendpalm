@@ -13,7 +13,6 @@
 import {
   type Accessor,
   createMemo,
-  createEffect,
   createResource,
   createSignal,
   type Resource,
@@ -24,7 +23,6 @@ import {
   type ListMessagesOptions,
   type ListMessagesPage,
 } from "../stores/data";
-import { refreshTick } from "../stores/ui";
 import type { Message } from "../types";
 
 const DEFAULT_PAGE_SIZE = 100;
@@ -78,12 +76,12 @@ export function usePaginatedMessages(
     return page;
   });
 
-  // Refresh on global tick (e.g. sync:new-messages, manual refetch, or
-  // e2e seed bumps). Triggers a re-fetch so the list reflects DB state.
-  createEffect(() => {
-    refreshTick();
-    void refetch();
-  });
+  // NOTE: we deliberately do NOT auto-refetch on the global refreshTick
+  // signal. sync:new-messages is the high-frequency source of ticks and
+  // the prependByIds() path (called from the registered prepend handler
+  // in sync-events.ts) handles it with O(new_ids) IPC round-trips.
+  // Auto-refetch would reload all 100 rows of the current page just to
+  // add a few new entries at the top — visible jank, no upside.
 
   const items = createMemo(() => pages());
   const hasMore = createMemo(() => offset() < total());

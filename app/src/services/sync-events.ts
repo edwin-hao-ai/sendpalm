@@ -4,6 +4,24 @@
  *
  *  In browser mode (no Tauri runtime) this is a no-op because there is no
  *  background sync loop.
+ *
+ *  Two paths handle the data update:
+ *
+ *  1. **prependByIds (preferred for paginated lists).** The Rust sync
+ *     loop ships `new_message_ids` on every cycle. Views register a
+ *     handler per bucket (`registerPrepend("imbox", fn)`); we invoke
+ *     each one and the view fetches just those few new rows and prepends
+ *     them to its in-memory list. O(new_ids) IPC round-trips, no jank.
+ *
+ *  2. **refreshTick (only for non-paginated full-table resources).**
+ *     Piles, contact maps, full-text search index, etc. use
+ *     `createResource(listMessages)` and react to refreshTick via
+ *     `useRefreshEffect`. They have to refetch — there's no incremental
+ *     path for them. This tick fires every cycle.
+ *
+ *  The previous design refetched BOTH paths, which meant every 60s sync
+ *  reloaded all 100 paginated rows even when only one or two new mails
+ *  arrived. Now the paginated path uses prepend only.
  */
 import { listen } from "@tauri-apps/api/event";
 import { IS_BROWSER } from "./tauri-shim";
