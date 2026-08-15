@@ -16,6 +16,7 @@ if (import.meta.env.DEV) {
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/animations.css";
+import "./styles/imbox.css";
 
 render(() => <App />, document.getElementById("root") as HTMLElement);
 

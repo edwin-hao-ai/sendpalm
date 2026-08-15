@@ -17,6 +17,7 @@ import {
   listEvents,
   resetAllData,
 } from "./stores/data";
+import { bumpRefreshTick } from "./stores/ui";
 
 interface SeedPayload {
   contacts?: Contact[];
@@ -51,6 +52,10 @@ async function applySeed(payload: SeedPayload): Promise<void> {
   for (const m of payload.messages ?? []) await upsertMessage(m);
   for (const e of payload.events ?? []) await upsertEvent(e);
   for (const f of payload.files ?? []) await upsertFile(f);
+  // Bump the global refresh tick so any createResource that already
+  // fired with empty data refetches now that the seed has landed.
+  // Without this, view state and resource cache race the seed.
+  bumpRefreshTick();
 }
 
 if (IS_BROWSER() && typeof window !== "undefined") {
