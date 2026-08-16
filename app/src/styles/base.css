@@ -125,73 +125,54 @@ hr {
 }
 
 /* App shell layout grid — 3-tier responsive.
- *  --main-pane-width and --detail-panel-width default to px tokens but can
- *  be overridden inline by PanelResizeHandle. The minmax() wrappers
- *  below let the main column absorb leftover space when the window is
- *  wider than sidebar + detail + panel can fill. */
+ *  The grid always reserves four tracks (sidebar / main / detail / agent).
+ *  Closed panels sit in 0px tracks; opening one animates the track from
+ *  0px to its panel width. The main track stays minmax(0, 1fr) so it
+ *  absorbs leftover space — animating px tracks lets the browser
+ *  interpolate grid-template-columns reliably (no fr↔px mixing).
+ *  While a drag handle is active the transition is suppressed so the
+ *  panel follows the pointer 1:1. */
 #app {
   display: grid;
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-columns:
+    var(--sidebar-width)
+    minmax(0, 1fr)
+    0px
+    0px;
   grid-template-rows: calc(var(--topbar-height) + env(safe-area-inset-top)) 1fr;
   grid-template-areas:
-    "sidebar  topbar"
-    "sidebar  main";
+    "sidebar  topbar   topbar   topbar"
+    "sidebar  main     detail   agent";
   height: 100dvh;
+  transition: grid-template-columns 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html.panel-resizing #app {
+  transition: none;
 }
 
 #app.detail-open {
   grid-template-columns:
     var(--sidebar-width)
-    minmax(var(--main-pane-min, 360px), var(--main-pane-width))
-    var(--detail-panel-width);
-  grid-template-areas:
-    "sidebar  topbar   topbar"
-    "sidebar  main     detail";
+    minmax(0, 1fr)
+    var(--detail-panel-width)
+    0px;
 }
 
 #app.agent-open {
   grid-template-columns:
     var(--sidebar-width)
-    minmax(var(--main-pane-min, 360px), var(--main-pane-width))
+    minmax(0, 1fr)
+    0px
     var(--agent-panel-width);
-  grid-template-areas:
-    "sidebar  topbar   topbar"
-    "sidebar  main     agent";
 }
 
 #app.detail-open.agent-open {
   grid-template-columns:
     var(--sidebar-width)
-    minmax(var(--main-pane-min, 360px), var(--main-pane-width))
+    minmax(0, 1fr)
     var(--detail-panel-width)
     var(--agent-panel-width);
-  grid-template-areas:
-    "sidebar  topbar   topbar   topbar"
-    "sidebar  main     detail   agent";
-}
-
-#app:not(.detail-open):not(.agent-open) {
-  grid-template-columns:
-    var(--sidebar-width)
-    minmax(var(--main-pane-min, 360px), var(--main-pane-width));
-}
-
-/* On narrow viewports the detail/agent panels cover the main column
- * entirely so the content has room to breathe; drag handles still work. */
-@media (max-width: 1023px) {
-  #app.detail-open {
-    grid-template-columns: var(--sidebar-width) 0 var(--detail-panel-width);
-  }
-  #app.agent-open {
-    grid-template-columns: var(--sidebar-width) 0 var(--agent-panel-width);
-  }
-  #app.detail-open.agent-open {
-    grid-template-columns:
-      var(--sidebar-width)
-      0
-      var(--detail-panel-width)
-      var(--agent-panel-width);
-  }
 }
 
 #sidebar {
@@ -216,6 +197,8 @@ hr {
 
 #detail-panel {
   grid-area: detail;
+  position: relative;
+  min-width: 0;
   background: var(--surface-elevated);
   border-left: 0.5px solid var(--border);
   display: flex;
@@ -228,6 +211,8 @@ hr {
 
 #agent-panel {
   grid-area: agent;
+  position: relative;
+  min-width: 0;
   padding-bottom: env(safe-area-inset-bottom);
   padding-right: env(safe-area-inset-right);
 }
@@ -235,14 +220,21 @@ hr {
 /* Tablet — iPad portrait (>=768 includes iPad mini 744px in landscape, portrait 768px) */
 @media (min-width: 768px) and (max-width: 1023px) {
   #app {
-    grid-template-columns: var(--sidebar-width-tablet) 1fr;
+    grid-template-columns:
+      var(--sidebar-width-tablet)
+      minmax(0, 1fr)
+      0px
+      0px;
     grid-template-rows: calc(var(--topbar-height) + env(safe-area-inset-top)) 1fr;
   }
   /* On iPad, the detail panel overlays main instead of squeezing it.
      This preserves the full message-list width while still showing the
      selected item beside it. */
   #app.detail-open {
-    grid-template-columns: var(--sidebar-width-tablet) 1fr;
+    grid-template-columns: var(--sidebar-width-tablet) minmax(0, 1fr);
+    grid-template-areas:
+      "sidebar topbar"
+      "sidebar main";
   }
   #app.detail-open #detail-panel {
     position: fixed;
