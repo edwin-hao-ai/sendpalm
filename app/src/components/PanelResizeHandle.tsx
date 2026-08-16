@@ -1,5 +1,7 @@
-/** Resize handle for detail/agent side panels + the Main column boundary.
+/** Resize handle for the detail/agent side panels.
  *  Dragging updates the matching CSS variable and persists to localStorage.
+ *  While dragging, a `panel-resizing` class on <html> suppresses the #app
+ *  grid-template-columns transition so the panel tracks the pointer 1:1.
  */
 
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
@@ -8,14 +10,12 @@ import {
   setDetailPanelWidth,
   agentPanelWidth,
   setAgentPanelWidth,
-  mainPaneWidth,
-  setMainPaneWidth,
 } from "../stores/ui";
 
 type PanelSide = "left" | "right";
 
 interface Props {
-  panel: "detail" | "agent" | "main";
+  panel: "detail" | "agent";
   side?: PanelSide;
 }
 
@@ -23,14 +23,11 @@ const MIN_DETAIL = 280;
 const MAX_DETAIL = 720;
 const MIN_AGENT = 280;
 const MAX_AGENT = 720;
-const MIN_MAIN = 360;
-const MAX_MAIN = 1100;
 const STORAGE_KEY = "sendpalm.panelWidths";
 
 interface StoredWidths {
   detail: number;
   agent: number;
-  main: number;
 }
 
 function readStored(): StoredWidths | null {
@@ -40,8 +37,7 @@ function readStored(): StoredWidths | null {
     const parsed = JSON.parse(raw);
     if (
       typeof parsed.detail === "number" &&
-      typeof parsed.agent === "number" &&
-      typeof parsed.main === "number"
+      typeof parsed.agent === "number"
     ) {
       return parsed;
     }
@@ -56,7 +52,6 @@ export function initializePanelWidths(): void {
   if (stored) {
     setDetailPanelWidth(stored.detail);
     setAgentPanelWidth(stored.agent);
-    setMainPaneWidth(stored.main);
   }
   updateRootVars();
 }
@@ -70,20 +65,11 @@ function updateRootVars() {
     "--agent-panel-width",
     `${agentPanelWidth()}px`,
   );
-  // --main-pane-width is intentionally NOT touched here. The CSS default
-  // for it is `1fr` (token in styles/tokens.css), so the main column
-  // grows to fill leftover space on wide windows and shrinks to its
-  // --main-pane-min on narrow ones. The drag handle writes a px value
-  // directly during drag; if the user has never dragged, the variable
-  // stays at 1fr and the layout is fully responsive.
 }
 
-function persist(d: number, a: number, m: number) {
+function persist(d: number, a: number) {
   try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ detail: d, agent: a, main: m }),
-    );
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ detail: d, agent: a }));
   } catch {
     // ignore
   }
@@ -93,16 +79,10 @@ export function PanelResizeHandle(props: Props) {
   const [dragging, setDragging] = createSignal(false);
   const side = props.side ?? (props.panel === "agent" ? "left" : "right");
 
-  const width = () => {
-    if (props.panel === "detail") return detailPanelWidth();
-    if (props.panel === "agent") return agentPanelWidth();
-    return mainPaneWidth();
-  };
-  const setWidth = (n: number) => {
-    if (props.panel === "detail") setDetailPanelWidth(n);
-    else if (props.panel === "agent") setAgentPanelWidth(n);
-    else setMainPaneWidth(n);
-  };
+  const width = () =>
+    props.panel === "detail" ? detailPanelWidth() : agentPanelWidth();
+  const setWidth = (n: number) =>
+    props.panel === "detail" ? setDetailPanelWidth(n) : setAgentPanelWidth(n);
 
   onMount(() => {
     updateRootVars();
@@ -111,44 +91,28 @@ export function PanelResizeHandle(props: Props) {
   const onPointerDown = (e: PointerEvent) => {
     e.preventDefault();
     setDragging(true);
+    document.documentElement.classList.add("panel-resizing");
     const startX = e.clientX;
     const startWidth = width();
 
-    const min =
-      props.panel === "detail"
-        ? MIN_DETAIL
-        : props.panel === "agent"
-          ? MIN_AGENT
-          : MIN_MAIN;
-    const max =
-      props.panel === "detail"
-        ? MAX_DETAIL
-        : props.panel === "agent"
-          ? MAX_AGENT
-          : MAX_MAIN;
+    const min = props.panel === "detail" ? MIN_DETAIL : MIN_AGENT;
+    const max = props.panel === "detail" ? MAX_DETAIL : MAX_AGENT;
 
     const onPointerMove = (ev: PointerEvent) => {
       const delta = side === "left" ? startX - ev.clientX : ev.clientX - startX;
       const next = Math.min(max, Math.max(min, startWidth + delta));
       setWidth(next);
       updateRootVars();
-      // For the Main column the CSS default is 1fr (responsive); the
-      // drag handle needs to write an explicit px value to override it.
-      if (props.panel === "main") {
-        document.documentElement.style.setProperty(
-          "--main-pane-width",
-          `${next}px`,
-        );
-      }
     };
 
     const onPointerUp = () => {
       setDragging(false);
+      document.documentElement.classList.remove("panel-resizing");
       document.removeEventListener("pointermove", onPointerMove);
       document.removeEventListener("pointerup", onPointerUp);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
-      persist(detailPanelWidth(), agentPanelWidth(), mainPaneWidth());
+      persist(detailPanelWidth(), agentPanelWidth());
     };
 
     document.body.style.cursor = "col-resize";
@@ -158,6 +122,7 @@ export function PanelResizeHandle(props: Props) {
   };
 
   onCleanup(() => {
+    document.documentElement.classList.remove("panel-resizing");
     document.body.style.cursor = "";
     document.body.style.userSelect = "";
   });
