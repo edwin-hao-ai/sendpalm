@@ -125,54 +125,20 @@ hr {
 }
 
 /* App shell layout grid — 3-tier responsive.
- *  The grid always reserves four tracks (sidebar / main / detail / agent).
- *  Closed panels sit in 0px tracks; opening one animates the track from
- *  0px to its panel width. The main track stays minmax(0, 1fr) so it
- *  absorbs leftover space — animating px tracks lets the browser
- *  interpolate grid-template-columns reliably (no fr↔px mixing).
- *  While a drag handle is active the transition is suppressed so the
- *  panel follows the pointer 1:1. */
+ *  The main column never reflows when a side panel opens: detail/agent
+ *  panels are fixed overlays that slide in over main using transform/
+ *  opacity only (GPU-composited). Animating the grid track itself would
+ *  force a full list relayout every frame, which reads as jitter.
+ *  While a drag handle is active, only the panel width variable changes;
+ *  there is no grid transition to suppress. */
 #app {
   display: grid;
-  grid-template-columns:
-    var(--sidebar-width)
-    minmax(0, 1fr)
-    0px
-    0px;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   grid-template-rows: calc(var(--topbar-height) + env(safe-area-inset-top)) 1fr;
   grid-template-areas:
-    "sidebar  topbar   topbar   topbar"
-    "sidebar  main     detail   agent";
+    "sidebar  topbar"
+    "sidebar  main";
   height: 100dvh;
-  transition: grid-template-columns 0.32s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-html.panel-resizing #app {
-  transition: none;
-}
-
-#app.detail-open {
-  grid-template-columns:
-    var(--sidebar-width)
-    minmax(0, 1fr)
-    var(--detail-panel-width)
-    0px;
-}
-
-#app.agent-open {
-  grid-template-columns:
-    var(--sidebar-width)
-    minmax(0, 1fr)
-    0px
-    var(--agent-panel-width);
-}
-
-#app.detail-open.agent-open {
-  grid-template-columns:
-    var(--sidebar-width)
-    minmax(0, 1fr)
-    var(--detail-panel-width)
-    var(--agent-panel-width);
 }
 
 #sidebar {
@@ -196,9 +162,12 @@ html.panel-resizing #app {
 }
 
 #detail-panel {
-  grid-area: detail;
-  position: relative;
-  min-width: 0;
+  position: fixed;
+  top: calc(var(--topbar-height) + env(safe-area-inset-top));
+  right: 0;
+  bottom: 0;
+  width: var(--detail-panel-width);
+  z-index: var(--z-detail);
   background: var(--surface-elevated);
   border-left: 0.5px solid var(--border);
   display: flex;
@@ -207,43 +176,28 @@ html.panel-resizing #app {
   overflow: hidden;
   padding-bottom: env(safe-area-inset-bottom);
   padding-right: env(safe-area-inset-right);
+  animation: panel-slide 0.32s var(--ease-out) both;
 }
 
 #agent-panel {
-  grid-area: agent;
-  position: relative;
-  min-width: 0;
+  position: fixed;
+  top: calc(var(--topbar-height) + env(safe-area-inset-top));
+  right: 0;
+  bottom: 0;
+  width: var(--agent-panel-width);
+  z-index: var(--z-agent);
   padding-bottom: env(safe-area-inset-bottom);
   padding-right: env(safe-area-inset-right);
+  animation: panel-slide 0.32s var(--ease-out) both;
 }
 
 /* Tablet — iPad portrait (>=768 includes iPad mini 744px in landscape, portrait 768px) */
 @media (min-width: 768px) and (max-width: 1023px) {
   #app {
-    grid-template-columns:
-      var(--sidebar-width-tablet)
-      minmax(0, 1fr)
-      0px
-      0px;
-    grid-template-rows: calc(var(--topbar-height) + env(safe-area-inset-top)) 1fr;
-  }
-  /* On iPad, the detail panel overlays main instead of squeezing it.
-     This preserves the full message-list width while still showing the
-     selected item beside it. */
-  #app.detail-open {
     grid-template-columns: var(--sidebar-width-tablet) minmax(0, 1fr);
-    grid-template-areas:
-      "sidebar topbar"
-      "sidebar main";
   }
-  #app.detail-open #detail-panel {
-    position: fixed;
-    top: 0;
-    bottom: 0;
-    right: 0;
+  #detail-panel {
     width: min(420px, 60vw);
-    z-index: var(--z-detail);
-    animation: panel-slide 0.28s var(--ease-out) both;
   }
 }
 
@@ -270,31 +224,15 @@ html.panel-resizing #app {
        never sits flush against the safe-area edge. */
     padding-bottom: var(--space-4);
   }
-  #app.detail-open,
-  #app.agent-open,
-  #app.detail-open.agent-open {
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      "topbar"
-      "main"
-      "sidebar";
-  }
-  #app.detail-open #detail-panel,
-  #app.agent-open #agent-panel,
-  #app.detail-open.agent-open #detail-panel,
-  #app.detail-open.agent-open #agent-panel {
-    position: fixed;
+  #detail-panel,
+  #agent-panel {
     inset: 0;
-    z-index: var(--z-detail);
     width: 100vw;
     height: 100dvh;
-    grid-area: auto;
     padding: env(safe-area-inset-top) env(safe-area-inset-right)
       env(safe-area-inset-bottom) env(safe-area-inset-left);
-    animation: panel-slide 0.28s var(--ease-out) both;
   }
-  #app.agent-open #agent-panel,
-  #app.detail-open.agent-open #agent-panel {
+  #agent-panel {
     z-index: var(--z-agent);
   }
 }
