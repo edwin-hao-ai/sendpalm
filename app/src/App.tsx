@@ -21,7 +21,6 @@ import { ShortcutHelp } from "./components/ShortcutHelp";
 import { BulkActionMenu } from "./components/BulkActionMenu";
 import { initApp } from "./bootstrap";
 import {
-  detailOpen,
   agentPanelOpen,
   commandPaletteOpen,
   searchOpen,
@@ -65,13 +64,7 @@ export default function App() {
   return (
     <>
       <Show when={ready() && !initError()}>
-        <div
-          id="app"
-          classList={{
-            "detail-open": detailOpen(),
-            "agent-open": agentPanelOpen(),
-          }}
-        >
+        <div id="app">
           <Sidebar />
           <Topbar />
           <Main />

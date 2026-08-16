@@ -1,7 +1,7 @@
 /** Resize handle for the detail/agent side panels.
  *  Dragging updates the matching CSS variable and persists to localStorage.
- *  While dragging, a `panel-resizing` class on <html> suppresses the #app
- *  grid-template-columns transition so the panel tracks the pointer 1:1.
+ *  Panels are fixed overlays whose width comes from the variable, so the
+ *  drag tracks the pointer 1:1 with no grid transition to suppress.
  */
 
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
@@ -91,7 +91,6 @@ export function PanelResizeHandle(props: Props) {
   const onPointerDown = (e: PointerEvent) => {
     e.preventDefault();
     setDragging(true);
-    document.documentElement.classList.add("panel-resizing");
     const startX = e.clientX;
     const startWidth = width();
 
@@ -107,7 +106,6 @@ export function PanelResizeHandle(props: Props) {
 
     const onPointerUp = () => {
       setDragging(false);
-      document.documentElement.classList.remove("panel-resizing");
       document.removeEventListener("pointermove", onPointerMove);
       document.removeEventListener("pointerup", onPointerUp);
       document.body.style.cursor = "";
@@ -122,7 +120,6 @@ export function PanelResizeHandle(props: Props) {
   };
 
   onCleanup(() => {
-    document.documentElement.classList.remove("panel-resizing");
     document.body.style.cursor = "";
     document.body.style.userSelect = "";
   });
