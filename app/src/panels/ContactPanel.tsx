@@ -6,17 +6,18 @@
 import { For, Show, createMemo, createResource, createSignal } from "solid-js";
 import {
   getContact,
-  listMessages,
-  listEvents,
-  listFiles,
+  listContactMessages,
+  listContactEvents,
+  listContactFiles,
   listContactNotes,
   listContacts,
+  listEvents,
+  listContactTasks,
+  listContactFollowUps,
+  listContactClips,
   upsertContact,
   upsertContactNote,
   deleteContactNote,
-  listTasks,
-  listFollowUps,
-  listClips,
   upsertTask,
   upsertFollowUp,
   deleteTask,
@@ -37,9 +38,12 @@ import {
 } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
+import { SkeletonList } from "../components/Skeleton";
+import { Empty, ErrorState } from "../components/Empty";
 import { ContactEditModal } from "../components/ContactEditModal";
 import { STAGE_COLOR, STAGE_LABEL, STAGE_SUGGEST } from "../utils/labels";
 import { relativeTime } from "../utils/date";
+import { computeReplyTimeStats } from "../utils/reply-time";
 import type {
   Contact,
   ContactNote,
@@ -47,6 +51,8 @@ import type {
   FollowUp,
   Clip,
   Message,
+  FileItem,
+  CalendarEvent,
 } from "../types";
 import { uid } from "../utils/id";
 import { isoNow } from "../utils/date";
@@ -69,16 +75,34 @@ export function ContactPanel(props: { contactId: string }) {
     () => props.contactId,
     getContact,
   );
-  const [messages, { refetch: refetchMessages }] = createResource(listMessages);
-  const [events, { refetch: refetchEvents }] = createResource(listEvents);
-  const [files, { refetch: refetchFiles }] = createResource(listFiles);
+  const [messages, { refetch: refetchMessages }] = createResource(
+    () => props.contactId,
+    listContactMessages,
+  );
+  const [events, { refetch: refetchEvents }] = createResource(
+    () => props.contactId,
+    listContactEvents,
+  );
+  const [files, { refetch: refetchFiles }] = createResource(
+    () => props.contactId,
+    listContactFiles,
+  );
   const [notes, { mutate: setNotes, refetch: refetchNotes }] = createResource(
     () => props.contactId,
     (id) => listContactNotes(id),
   );
-  const [tasks, { refetch: refetchTasks }] = createResource(listTasks);
-  const [followUps, { refetch: refetchFU }] = createResource(listFollowUps);
-  const [clips, { refetch: refetchClips }] = createResource(listClips);
+  const [tasks, { refetch: refetchTasks }] = createResource(
+    () => props.contactId,
+    listContactTasks,
+  );
+  const [followUps, { refetch: refetchFU }] = createResource(
+    () => props.contactId,
+    listContactFollowUps,
+  );
+  const [clips, { refetch: refetchClips }] = createResource(
+    () => props.contactId,
+    listContactClips,
+  );
   const [editing, setEditing] = createSignal(false);
 
   useRefreshEffect(() => {
@@ -92,29 +116,42 @@ export function ContactPanel(props: { contactId: string }) {
     void refetchClips();
   });
 
-  const msgs = createMemo(() =>
-    (messages() ?? []).filter((m) => m.pid === props.contactId),
+  const msgs = createMemo(() => messages() ?? []);
+  const evts = createMemo(() => events() ?? []);
+  const fls = createMemo(() => files() ?? []);
+  const tks = createMemo(() => tasks() ?? []);
+  const fus = createMemo(() => followUps() ?? []);
+  const cls = createMemo(() => clips() ?? []);
+
+  const anyPending = createMemo(
+    () =>
+      messages.state === "pending" ||
+      events.state === "pending" ||
+      files.state === "pending" ||
+      notes.state === "pending" ||
+      tasks.state === "pending" ||
+      followUps.state === "pending" ||
+      clips.state === "pending",
   );
-  const evts = createMemo(() =>
-    (events() ?? []).filter((e) => e.pids.includes(props.contactId)),
+  const anyError = createMemo(
+    () =>
+      messages.state === "errored" ||
+      events.state === "errored" ||
+      files.state === "errored" ||
+      notes.state === "errored" ||
+      tasks.state === "errored" ||
+      followUps.state === "errored" ||
+      clips.state === "errored",
   );
-  const fls = createMemo(() =>
-    (files() ?? []).filter((f) => f.pid === props.contactId),
-  );
-  const tks = createMemo(() =>
-    (tasks() ?? []).filter((t) => t.relatedContactId === props.contactId),
-  );
-  const fus = createMemo(() => {
-    const contactMsgs = new Set(
-      (messages() ?? [])
-        .filter((m) => m.pid === props.contactId)
-        .map((m) => m.id),
-    );
-    return (followUps() ?? []).filter((f) => contactMsgs.has(f.msgId));
-  });
-  const cls = createMemo(() =>
-    (clips() ?? []).filter((c) => c.contactId === props.contactId),
-  );
+  const retryAll = () => {
+    void refetchMessages();
+    void refetchEvents();
+    void refetchFiles();
+    void refetchNotes();
+    void refetchTasks();
+    void refetchFU();
+    void refetchClips();
+  };
 
   return (
     <div
@@ -413,64 +450,78 @@ export function ContactPanel(props: { contactId: string }) {
           padding: "var(--space-4) var(--space-5)",
         }}
       >
-        <Show when={contactTab() === "Timeline"}>
-          <TimelineTab
-            messages={msgs()}
-            onOpen={(id) => {
-              setSelectedContactId(null);
-              setSelectedMessageId(id);
-            }}
+        <Show when={anyPending()}>
+          <SkeletonList count={6} />
+        </Show>
+        <Show when={anyError()}>
+          <ErrorState
+            title="加载失败"
+            message="无法读取联系人数据，请重试。"
+            retry={retryAll}
           />
         </Show>
-        <Show when={contactTab() === "Notes"}>
-          <NotesTab
-            notes={notes() ?? []}
-            contactId={props.contactId}
-            onAdd={(n) => setNotes((prev) => [n, ...(prev ?? [])])}
-            onRemove={(id) =>
-              setNotes((prev) => (prev ?? []).filter((x) => x.id !== id))
-            }
-            onPinChange={(n) =>
-              setNotes((prev) =>
-                (prev ?? []).map((x) => (x.id === n.id ? n : x)),
-              )
-            }
-          />
-        </Show>
-        <Show when={contactTab() === "Files"}>
-          <FilesTab
-            files={fls()}
-            onOpen={(id) => {
-              setSelectedContactId(null);
-              setSelectedFileId(id);
-            }}
-          />
-        </Show>
-        <Show when={contactTab() === "Insights"}>
-          <InsightsTab messages={msgs()} contact={contact() ?? null} />
-        </Show>
-        <Show when={contactTab() === "Network"}>
-          <NetworkTab contactId={props.contactId} />
-        </Show>
-        <Show when={contactTab() === "Calendar"}>
-          <CalendarTab events={evts()} />
-        </Show>
-        <Show when={contactTab() === "Tasks"}>
-          <TasksTab
-            tasks={tks()}
-            contactId={props.contactId}
-            onChange={refetchTasks}
-          />
-        </Show>
-        <Show when={contactTab() === "Follow-ups"}>
-          <FollowUpsTab
-            followUps={fus()}
-            messages={msgs()}
-            onChange={refetchFU}
-          />
-        </Show>
-        <Show when={contactTab() === "Clips"}>
-          <ClipsTab clips={cls()} onChange={refetchClips} />
+        <Show when={!anyPending() && !anyError()}>
+          <Show when={contactTab() === "Timeline"}>
+            <TimelineTab
+              messages={msgs()}
+              followUps={fus()}
+              onOpen={(id) => {
+                setSelectedContactId(null);
+                setSelectedMessageId(id);
+              }}
+              onFollowUpChange={() => void refetchFU()}
+            />
+          </Show>
+          <Show when={contactTab() === "Notes"}>
+            <NotesTab
+              notes={notes() ?? []}
+              contactId={props.contactId}
+              onAdd={(n) => setNotes((prev) => [n, ...(prev ?? [])])}
+              onRemove={(id) =>
+                setNotes((prev) => (prev ?? []).filter((x) => x.id !== id))
+              }
+              onPinChange={(n) =>
+                setNotes((prev) =>
+                  (prev ?? []).map((x) => (x.id === n.id ? n : x)),
+                )
+              }
+            />
+          </Show>
+          <Show when={contactTab() === "Files"}>
+            <FilesTab
+              files={fls()}
+              onOpen={(id) => {
+                setSelectedContactId(null);
+                setSelectedFileId(id);
+              }}
+            />
+          </Show>
+          <Show when={contactTab() === "Insights"}>
+            <InsightsTab messages={msgs()} contact={contact() ?? null} />
+          </Show>
+          <Show when={contactTab() === "Network"}>
+            <NetworkTab contactId={props.contactId} />
+          </Show>
+          <Show when={contactTab() === "Calendar"}>
+            <CalendarTab events={evts()} />
+          </Show>
+          <Show when={contactTab() === "Tasks"}>
+            <TasksTab
+              tasks={tks()}
+              contactId={props.contactId}
+              onChange={refetchTasks}
+            />
+          </Show>
+          <Show when={contactTab() === "Follow-ups"}>
+            <FollowUpsTab
+              followUps={fus()}
+              messages={msgs()}
+              onChange={refetchFU}
+            />
+          </Show>
+          <Show when={contactTab() === "Clips"}>
+            <ClipsTab clips={cls()} onChange={refetchClips} />
+          </Show>
         </Show>
       </div>
       <Show when={editing() && contact()}>
@@ -508,74 +559,216 @@ function Tag(props: { color?: string; children: string }) {
 }
 
 function TimelineTab(props: {
-  messages: ReturnType<typeof listMessages> extends Promise<infer T>
-    ? T
-    : never[];
+  messages: Message[];
+  followUps: FollowUp[];
   onOpen: (id: string) => void;
+  onFollowUpChange: () => void;
 }) {
+  const [filter, setFilter] = createSignal<"all" | "from" | "to">("all");
+
+  const followUpMap = createMemo(() => {
+    const map = new Map<string, FollowUp>();
+    for (const f of props.followUps) map.set(f.msgId, f);
+    return map;
+  });
+
+  const filtered = createMemo(() => {
+    switch (filter()) {
+      case "from":
+        return props.messages.filter((m) => m.direction !== "out");
+      case "to":
+        return props.messages.filter((m) => m.direction === "out");
+      default:
+        return props.messages;
+    }
+  });
+
   return (
     <div>
-      <For each={props.messages}>
+      <div
+        style={{
+          display: "flex",
+          gap: "var(--space-2)",
+          "margin-bottom": "var(--space-3)",
+        }}
+      >
+        <button
+          onClick={() => setFilter("all")}
+          style={{
+            padding: "4px 10px",
+            "border-radius": "var(--radius-pill)",
+            background: filter() === "all" ? "var(--palm-soft)" : "transparent",
+            color: filter() === "all" ? "var(--palm)" : "var(--text-secondary)",
+            "font-weight": filter() === "all" ? "700" : "500",
+            "font-size": "var(--text-micro)",
+            border: "none",
+            cursor: "pointer",
+          }}
+        >
+          All
+        </button>
+        <button
+          onClick={() => setFilter("from")}
+          style={{
+            padding: "4px 10px",
+            "border-radius": "var(--radius-pill)",
+            background:
+              filter() === "from" ? "var(--palm-soft)" : "transparent",
+            color:
+              filter() === "from" ? "var(--palm)" : "var(--text-secondary)",
+            "font-weight": filter() === "from" ? "700" : "500",
+            "font-size": "var(--text-micro)",
+            border: "none",
+            cursor: "pointer",
+          }}
+        >
+          From them
+        </button>
+        <button
+          onClick={() => setFilter("to")}
+          style={{
+            padding: "4px 10px",
+            "border-radius": "var(--radius-pill)",
+            background: filter() === "to" ? "var(--palm-soft)" : "transparent",
+            color: filter() === "to" ? "var(--palm)" : "var(--text-secondary)",
+            "font-weight": filter() === "to" ? "700" : "500",
+            "font-size": "var(--text-micro)",
+            border: "none",
+            cursor: "pointer",
+          }}
+        >
+          To them
+        </button>
+      </div>
+      <For each={filtered()}>
         {(m) => (
-          <div
-            onClick={() => props.onOpen(m.id)}
-            style={{
-              padding: "var(--space-3) 0",
-              "border-bottom": "0.5px solid var(--border)",
-              cursor: "pointer",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                "align-items": "center",
-                gap: "var(--space-2)",
-              }}
-            >
-              <span
-                style={{
-                  "font-size": "var(--text-micro)",
-                  "font-weight": "700",
-                  color:
-                    m.direction === "out" ? "var(--palm)" : "var(--text-muted)",
-                  "text-transform": "uppercase",
-                  "letter-spacing": "0.02em",
-                }}
-              >
-                {m.direction === "out" ? "To" : "From"}
-              </span>
-              <strong
-                style={{
-                  "font-weight": "700",
-                  "font-size": "var(--text-body-sm)",
-                }}
-              >
-                {m.subj}
-              </strong>
-            </div>
-            <p
-              style={{
-                margin: 0,
-                "margin-top": "2px",
-                color: "var(--text-secondary)",
-                "font-size": "var(--text-caption)",
-              }}
-            >
-              {m.prev}
-            </p>
-            <span
-              style={{
-                "font-size": "var(--text-micro)",
-                color: "var(--text-muted)",
-                "margin-top": "4px",
-                display: "block",
-              }}
-            >
-              {m.tm}
-            </span>
-          </div>
+          <TimelineRow
+            message={m}
+            followUpMap={followUpMap}
+            onOpen={props.onOpen}
+            onChange={props.onFollowUpChange}
+          />
         )}
       </For>
+    </div>
+  );
+}
+
+function TimelineRow(props: {
+  message: Message;
+  followUpMap: () => Map<string, FollowUp>;
+  onOpen: (id: string) => void;
+  onChange: () => void;
+}) {
+  const fu = createMemo(() => props.followUpMap().get(props.message.id));
+
+  const cycle = async (e: MouseEvent) => {
+    e.stopPropagation();
+    const existing = fu();
+    if (!existing) {
+      await upsertFollowUp({
+        id: uid("fu"),
+        msgId: props.message.id,
+        dueAt: isoNow().slice(0, 10),
+        status: "todo",
+        note: undefined,
+        surfacedAt: null,
+      });
+    } else if (existing.status === "todo") {
+      await upsertFollowUp({ ...existing, status: "wait" });
+    } else if (existing.status === "wait") {
+      await upsertFollowUp({ ...existing, status: "done" });
+    } else if (existing.status === "done") {
+      await deleteFollowUp(existing.id);
+    } else {
+      await upsertFollowUp({ ...existing, status: "todo" });
+    }
+    props.onChange();
+  };
+
+  return (
+    <div
+      onClick={() => props.onOpen(props.message.id)}
+      style={{
+        display: "flex",
+        "align-items": "flex-start",
+        gap: "var(--space-3)",
+        padding: "var(--space-3) 0",
+        "border-bottom": "0.5px solid var(--border)",
+        cursor: "pointer",
+      }}
+    >
+      <div style={{ flex: 1, "min-width": 0 }}>
+        <div
+          style={{
+            display: "flex",
+            "align-items": "center",
+            gap: "var(--space-2)",
+          }}
+        >
+          <span
+            style={{
+              "font-size": "var(--text-micro)",
+              "font-weight": "700",
+              color:
+                props.message.direction === "out"
+                  ? "var(--palm)"
+                  : "var(--text-muted)",
+              "text-transform": "uppercase",
+              "letter-spacing": "0.02em",
+            }}
+          >
+            {props.message.direction === "out" ? "To" : "From"}
+          </span>
+          <strong
+            style={{
+              "font-weight": "700",
+              "font-size": "var(--text-body-sm)",
+            }}
+          >
+            {props.message.subj}
+          </strong>
+        </div>
+        <p
+          style={{
+            margin: 0,
+            "margin-top": "2px",
+            color: "var(--text-secondary)",
+            "font-size": "var(--text-caption)",
+          }}
+        >
+          {props.message.prev}
+        </p>
+        <span
+          style={{
+            "font-size": "var(--text-micro)",
+            color: "var(--text-muted)",
+            "margin-top": "4px",
+            display: "block",
+          }}
+        >
+          {props.message.tm}
+        </span>
+      </div>
+      <button
+        onClick={(e) => void cycle(e)}
+        title={fu() ? `Follow-up: ${fu()!.status}` : "Add follow-up"}
+        aria-label={fu() ? `Follow-up: ${fu()!.status}` : "Add follow-up"}
+        style={{
+          "margin-top": "2px",
+          padding: "2px 8px",
+          "border-radius": "var(--radius-pill)",
+          background: fu() ? "var(--palm-soft)" : "var(--paper-mid)",
+          color: fu() ? "var(--palm)" : "var(--text-muted)",
+          "font-size": "var(--text-micro)",
+          "font-weight": "700",
+          border: "none",
+          cursor: "pointer",
+          "white-space": "nowrap",
+        }}
+      >
+        {fu()?.status ?? "+"}
+      </button>
     </div>
   );
 }
@@ -726,22 +919,31 @@ function NotesTab(props: {
 }
 
 function FilesTab(props: {
-  files: ReturnType<typeof listFiles> extends Promise<infer T> ? T : never[];
+  files: FileItem[];
   onOpen: (id: string) => void;
 }) {
+  const iconForType = (type: string) => {
+    if (type === "pdf") return "ph-file-pdf";
+    if (type === "image") return "ph-file-image";
+    return "ph-file-text";
+  };
+
   return (
-    <div>
+    <div
+      style={{
+        display: "grid",
+        "grid-template-columns": "repeat(auto-fill, minmax(160px, 1fr))",
+        gap: "var(--space-3)",
+      }}
+    >
       <For
         each={props.files}
         fallback={
-          <p
-            style={{
-              color: "var(--text-muted)",
-              "font-size": "var(--text-caption)",
-            }}
-          >
-            暂无附件
-          </p>
+          <Empty
+            icon="ph-files"
+            title="暂无附件"
+            description="该联系人没有附件。"
+          />
         }
       >
         {(f) => (
@@ -749,14 +951,14 @@ function FilesTab(props: {
             onClick={() => props.onOpen(f.id)}
             style={{
               display: "flex",
+              "flex-direction": "column",
               "align-items": "center",
               gap: "var(--space-3)",
               width: "100%",
               padding: "var(--space-3)",
               background: "var(--paper-mid)",
               "border-radius": "var(--radius-md)",
-              "margin-bottom": "var(--space-2)",
-              "text-align": "left",
+              "text-align": "center",
               cursor: "pointer",
               border: "none",
             }}
@@ -767,17 +969,8 @@ function FilesTab(props: {
               (e.currentTarget.style.background = "var(--paper-mid)")
             }
           >
-            <Icon
-              name={
-                f.type === "pdf"
-                  ? "ph-file-pdf"
-                  : f.type === "image"
-                    ? "ph-file-image"
-                    : "ph-file-text"
-              }
-              size={20}
-            />
-            <div style={{ flex: 1, "min-width": 0 }}>
+            <Icon name={iconForType(f.type)} size={40} />
+            <div style={{ width: "100%", "min-width": 0 }}>
               <div
                 style={{
                   "font-weight": "600",
@@ -792,12 +985,12 @@ function FilesTab(props: {
                 style={{
                   "font-size": "var(--text-micro)",
                   color: "var(--text-muted)",
+                  "margin-top": "var(--space-1)",
                 }}
               >
                 {(f.size / 1024).toFixed(0)} KB · {f.type}
               </div>
             </div>
-            <Icon name="ph-arrow-right" size={14} />
           </button>
         )}
       </For>
@@ -806,10 +999,8 @@ function FilesTab(props: {
 }
 
 function InsightsTab(props: {
-  messages: ReturnType<typeof listMessages> extends Promise<infer T>
-    ? T
-    : never[];
-  contact: ReturnType<typeof getContact> extends Promise<infer T> ? T : never;
+  messages: Message[];
+  contact: Contact | null;
 }) {
   const msgCount = () => props.messages.length;
   const last30d = createMemo(() => {
@@ -823,6 +1014,15 @@ function InsightsTab(props: {
     if (Array.isArray(ch)) for (const c of ch) set.add(c);
     return [...set];
   });
+  const replyStats = createMemo(() => computeReplyTimeStats(props.messages));
+  const replyTimeValue = () => {
+    const s = replyStats();
+    if (s.averageHours == null) return "—";
+    return `${s.averageHours}h 平均 / ${s.medianHours}h 中位`;
+  };
+  const health = () => props.contact?.health ?? null;
+  const healthColor = () =>
+    props.contact ? STAGE_COLOR[props.contact.stage] : undefined;
   return (
     <div style={{ display: "grid", gap: "var(--space-3)" }}>
       <Insight label="总消息数" value={String(msgCount())} icon="ph-envelope" />
@@ -840,6 +1040,57 @@ function InsightsTab(props: {
         label="回复周期"
         value={props.contact?.pattern ?? "—"}
         icon="ph-clock"
+      />
+      <Insight
+        label="回复时间"
+        value={replyTimeValue()}
+        icon="ph-clock-countdown"
+      />
+      <Show when={health() != null}>
+        <div
+          style={{
+            padding: "var(--space-3)",
+            background: healthColor()
+              ? `linear-gradient(to right, ${healthColor()} ${health()}%, transparent ${health()}%), var(--paper-mid)`
+              : "var(--paper-mid)",
+            "border-radius": "var(--radius-md)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              "align-items": "center",
+              gap: "var(--space-2)",
+              "margin-bottom": "var(--space-1)",
+            }}
+          >
+            <Icon name="ph-heart" size={14} />
+            <span
+              style={{
+                "font-size": "var(--text-micro)",
+                color: "var(--text-muted)",
+                "font-weight": "700",
+                "text-transform": "uppercase",
+                "letter-spacing": "0.06em",
+              }}
+            >
+              关系健康度
+            </span>
+          </div>
+          <div
+            style={{
+              "font-size": "var(--text-body-sm)",
+              color: "var(--text-primary)",
+            }}
+          >
+            {health()}%
+          </div>
+        </div>
+      </Show>
+      <Insight
+        label="最近联系"
+        value={props.contact?.lc ?? "—"}
+        icon="ph-calendar-check"
       />
     </div>
   );
@@ -999,7 +1250,7 @@ function NetworkTab(props: { contactId: string }) {
 }
 
 function CalendarTab(props: {
-  events: ReturnType<typeof listEvents> extends Promise<infer T> ? T : never[];
+  events: CalendarEvent[];
 }) {
   return (
     <div>

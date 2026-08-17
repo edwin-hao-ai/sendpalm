@@ -422,7 +422,7 @@ export interface Clip {
 
 /* ── Follow-up ──────────────────────────────────────────── */
 
-export type FollowUpStatus = "pending" | "done" | "cancelled";
+export type FollowUpStatus = "pending" | "todo" | "wait" | "done" | "cancelled";
 
 export interface FollowUp {
   id: ID;

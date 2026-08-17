@@ -28,6 +28,35 @@
 - [x] Conventional commit messages
 - [x] PROGRESS.md updated
 
+## 2026-08-18 — Contact / Company comprehensive improvement
+
+Completed the full contact/company surface: targeted per-contact queries, prototype-aligned Timeline/Files/Insights, full CompanyPanel tabs, richer ContactEditModal, and E2E coverage.
+
+### Fixed / added in this pass
+
+- **Root cause of empty contact Timeline/Files**: `ContactPanel` and `CompanyPanel` no longer load whole `messages`/`files`/`events` tables. New per-contact and per-company queries (`listContactMessages`, `listContactFiles`, `listContactEvents`, `listContactTasks`, `listContactFollowUps`, `listContactClips`, `listCompanyContacts`, `listCompanyMessages`, `listCompanyFiles`, `listCompanyEvents`) fetch only the rows scoped to the open contact/company.
+- **Per-tab loading/error states**: both panels now show skeleton placeholders while data loads and an `ErrorState` with retry when any resource fails.
+- **Contact Timeline prototype parity**: added `All / From them / To them` filters and a per-row follow-up marker that cycles `+ → todo → wait → done → delete`.
+- **Contact Files grid**: replaced the list layout with a responsive grid of file cards (icon, name, size, type).
+- **Contact Insights richer**: added reply-time statistics, relationship health bar, and last-contact card.
+- **CompanyPanel complete**: all five tabs (People, Communications, Files, Meetings, Insights) use company-scoped queries and have proper layouts.
+- **Contacts list polish**: filter pills now align with `healthToGroup` (`active/risk/cold`); company group headers are keyboard-accessible.
+- **ContactEditModal completeness**: added avatar URL, Blocked, Notify, First seen, and Screened fields.
+- **Data model**: widened `follow_ups.status` to include `todo`/`wait` via migration `0017_follow_up_statuses.sql`.
+
+### Verification matrix
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | ✅ |
+| `pnpm test` | ✅ 178 passed |
+| `pnpm e2e contact.spec.ts` | ✅ 3 passed |
+| `cargo test` | ✅ 77 passed |
+
+### Commits
+
+- (pending final commit)
+
 ## 2026-08-17 — Imbox performance + rustls CryptoProvider fix
 
 Fixed three performance blockers reported during real-mail usage and a startup crash exposed by a clean rebuild.

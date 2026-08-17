@@ -570,6 +570,15 @@ export async function listContacts(): Promise<Contact[]> {
   return rows.map(rowToContact);
 }
 
+export async function listCompanyContacts(companyName: string): Promise<Contact[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    "SELECT * FROM contacts WHERE company = $1 ORDER BY name",
+    [companyName],
+  );
+  return rows.map(rowToContact);
+}
+
 /** Count of contacts that still need screening at the Gate.
  *
  * Returns the number of rows in `contacts` where `first_seen=1 AND screened=0`.
@@ -587,6 +596,60 @@ export async function countGateCandidates(): Promise<number> {
     "SELECT id FROM contacts WHERE first_seen = 1 AND screened = 0",
   );
   return rows.length;
+}
+
+/** One card’s worth of data for the Gate screener. */
+export interface GateQueueItem {
+  contact: Contact;
+  message: Message;
+}
+
+/** Lightweight Gate queue query.
+ *
+ *  Avoids pulling the entire `messages` table (which can be many megabytes of
+ *  HTML bodies in a real mailbox). We only fetch the unscreened contacts and
+ *  the messages that belong to them, then pick the newest message per sender.
+ */
+export async function listGateQueue(): Promise<GateQueueItem[]> {
+  const db = await getDb();
+  const contactRows = await db.select<Record<string, unknown>[]>(
+    "SELECT * FROM contacts WHERE first_seen = 1 AND screened = 0 AND blocked = 0 ORDER BY name",
+  );
+  if (contactRows.length === 0) return [];
+
+  const contactIds = contactRows.map((r) => r.id as ID);
+  const placeholders = contactIds.map((_, i) => `$${i + 1}`).join(",");
+  const messageRows = await db.select<Record<string, unknown>[]>(
+    `SELECT * FROM messages WHERE pid IN (${placeholders}) ORDER BY st DESC`,
+    contactIds,
+  );
+
+  const messagesByContact = new Map<ID, Record<string, unknown>[]>();
+  for (const row of messageRows) {
+    // Outgoing messages (e.g. a Sent copy to a brand-new recipient) should not
+    // surface in the Gate screener, which is meant for incoming first-time
+    // senders. We filter here rather than in SQL so the in-memory MockDb used
+    // by tests doesn't need full multi-condition IN() parsing.
+    if ((row.direction as string | undefined ?? "in") === "out") continue;
+    const pid = row.pid as ID;
+    const existing = messagesByContact.get(pid);
+    if (existing) {
+      existing.push(row);
+    } else {
+      messagesByContact.set(pid, [row]);
+    }
+  }
+
+  const result: GateQueueItem[] = [];
+  for (const cRow of contactRows) {
+    const rows = messagesByContact.get(cRow.id as ID);
+    if (!rows || rows.length === 0) continue;
+    result.push({
+      contact: rowToContact(cRow),
+      message: rowToMessage(rows[0]!),
+    });
+  }
+  return result;
 }
 
 export async function getContact(id: ID): Promise<Contact | null> {
@@ -706,6 +769,27 @@ export async function listMessages(): Promise<Message[]> {
     "SELECT * FROM messages ORDER BY st DESC",
   );
   return rows.map(rowToMessage);
+}
+
+export async function listContactMessages(contactId: ID): Promise<Message[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    "SELECT * FROM messages WHERE pid = $1 ORDER BY st DESC",
+    [contactId],
+  );
+  return rows.map(rowToMessage);
+}
+
+export async function listCompanyMessages(contactIds: ID[]): Promise<Message[]> {
+  if (contactIds.length === 0) return [];
+  const db = await getDb();
+  const placeholders = contactIds.map((_, i) => `$${i + 1}`).join(",");
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT * FROM messages WHERE pid IN (${placeholders}) ORDER BY st DESC`,
+    contactIds,
+  );
+  const idSet = new Set(contactIds);
+  return rows.map(rowToMessage).filter((m) => idSet.has(m.pid));
 }
 
 export async function listMessagesPaged(
@@ -955,13 +1039,25 @@ export async function listSourceMessages(fileId: ID): Promise<Message[]> {
   return rows.map(rowToMessage);
 }
 
-export async function listContactAttachments(contactId: ID): Promise<FileItem[]> {
+export async function listContactFiles(contactId: ID): Promise<FileItem[]> {
   const db = await getDb();
   const rows = await db.select<Array<Record<string, unknown>>>(
     "SELECT * FROM files WHERE pid = $1 ORDER BY st DESC",
     [contactId],
   );
   return rows.map(rowToFile);
+}
+
+export async function listCompanyFiles(contactIds: ID[]): Promise<FileItem[]> {
+  if (contactIds.length === 0) return [];
+  const db = await getDb();
+  const placeholders = contactIds.map((_, i) => `$${i + 1}`).join(",");
+  const rows = await db.select<Array<Record<string, unknown>>>(
+    `SELECT * FROM files WHERE pid IN (${placeholders}) ORDER BY st DESC`,
+    contactIds,
+  );
+  const idSet = new Set(contactIds);
+  return rows.map(rowToFile).filter((f) => idSet.has(f.pid));
 }
 
 export async function addFileSourceMessage(fileId: ID, messageId: ID): Promise<void> {
@@ -1025,6 +1121,33 @@ export async function listEvents(): Promise<CalendarEvent[]> {
     "SELECT * FROM events ORDER BY dt ASC",
   );
   return rows.map(rowToEvent);
+}
+
+export async function listContactEvents(contactId: ID): Promise<CalendarEvent[]> {
+  const db = await getDb();
+  const pattern = `%"${contactId}"%`;
+  const rows = await db.select<Record<string, unknown>[]>(
+    "SELECT * FROM events WHERE pids_json LIKE $1 ORDER BY dt ASC",
+    [pattern],
+  );
+  return rows
+    .map(rowToEvent)
+    .filter((e) => e.pids.includes(contactId));
+}
+
+export async function listCompanyEvents(contactIds: ID[]): Promise<CalendarEvent[]> {
+  if (contactIds.length === 0) return [];
+  const db = await getDb();
+  const patterns = contactIds.map((id) => `%"${id}"%`);
+  const placeholders = patterns.map((_, i) => `$${i + 1}`).join(" OR pids_json LIKE ");
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT * FROM events WHERE pids_json LIKE ${placeholders} ORDER BY dt ASC`,
+    patterns,
+  );
+  const idSet = new Set(contactIds);
+  return rows
+    .map(rowToEvent)
+    .filter((e) => e.pids.some((pid) => idSet.has(pid)));
 }
 
 export async function upsertEvent(e: CalendarEvent): Promise<void> {
@@ -1096,6 +1219,15 @@ export async function listTasks(): Promise<Task[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
     "SELECT * FROM tasks ORDER BY created_at DESC",
+  );
+  return rows.map(rowToTask);
+}
+
+export async function listContactTasks(contactId: ID): Promise<Task[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    "SELECT * FROM tasks WHERE related_contact_id = $1 ORDER BY created_at DESC",
+    [contactId],
   );
   return rows.map(rowToTask);
 }
@@ -1452,6 +1584,15 @@ export async function listClips(): Promise<Clip[]> {
   return rows.map(rowToClip);
 }
 
+export async function listContactClips(contactId: ID): Promise<Clip[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    "SELECT * FROM clips WHERE contact_id = $1 ORDER BY created_at DESC",
+    [contactId],
+  );
+  return rows.map(rowToClip);
+}
+
 export async function upsertClip(c: Clip): Promise<void> {
   const db = await getDb();
   await db.execute(
@@ -1475,6 +1616,23 @@ export async function listFollowUps(): Promise<FollowUp[]> {
     "SELECT * FROM follow_ups ORDER BY due_at ASC",
   );
   return rows.map(rowToFollowUp);
+}
+
+export async function listContactFollowUps(contactId: ID): Promise<FollowUp[]> {
+  const db = await getDb();
+  const msgRows = await db.select<Array<{ id: ID }>>(
+    "SELECT id FROM messages WHERE pid = $1",
+    [contactId],
+  );
+  const msgIds = msgRows.map((r) => r.id);
+  if (msgIds.length === 0) return [];
+  const placeholders = msgIds.map((_, i) => `$${i + 1}`).join(",");
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT * FROM follow_ups WHERE msg_id IN (${placeholders}) ORDER BY due_at ASC`,
+    msgIds,
+  );
+  const idSet = new Set(msgIds);
+  return rows.map(rowToFollowUp).filter((f) => idSet.has(f.msgId));
 }
 
 export async function upsertFollowUp(f: FollowUp): Promise<void> {

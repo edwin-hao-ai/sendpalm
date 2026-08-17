@@ -4,10 +4,10 @@
 
 import { For, Show, createMemo, createResource, createSignal } from "solid-js";
 import {
-  listContacts,
-  listMessages,
-  listEvents,
-  listFiles,
+  listCompanyContacts,
+  listCompanyMessages,
+  listCompanyEvents,
+  listCompanyFiles,
 } from "../stores/data";
 import {
   setDetailOpen,
@@ -17,8 +17,9 @@ import {
   setSelectedFileId,
 } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
-import { Empty } from "../components/Empty";
+import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
+import { SkeletonList } from "../components/Skeleton";
 import { relativeTime, formatDate } from "../utils/date";
 import type { Contact, Message, FileItem, CalendarEvent } from "../types";
 
@@ -31,31 +32,53 @@ const TABS = [
 ] as const;
 
 export function CompanyPanel(props: { companyName: string }) {
-  const [contacts] = createResource(listContacts);
-  const [messages] = createResource(listMessages);
-  const [events] = createResource(listEvents);
-  const [files] = createResource(listFiles);
+  const [contacts, { refetch: refetchContacts }] = createResource(
+    () => props.companyName,
+    listCompanyContacts,
+  );
+
+  const people = createMemo(() => contacts() ?? []);
+  const contactIds = createMemo(() => people().map((c) => c.id));
+
+  const [messages, { refetch: refetchMessages }] = createResource(
+    contactIds,
+    listCompanyMessages,
+  );
+  const [files, { refetch: refetchFiles }] = createResource(
+    contactIds,
+    listCompanyFiles,
+  );
+  const [events, { refetch: refetchEvents }] = createResource(
+    contactIds,
+    listCompanyEvents,
+  );
+
   const [tab, setTab] = createSignal<(typeof TABS)[number]>("People");
 
-  const people = createMemo(() =>
-    (contacts() ?? []).filter(
-      (c) => (c.company || "(未分类)") === props.companyName,
-    ),
-  );
+  const msgs = createMemo(() => messages() ?? []);
+  const evts = createMemo(() => events() ?? []);
+  const fls = createMemo(() => files() ?? []);
 
-  const contactIds = createMemo(() => new Set(people().map((c) => c.id)));
-
-  const msgs = createMemo(() =>
-    (messages() ?? []).filter((m) => contactIds().has(m.pid)),
+  const anyPending = createMemo(
+    () =>
+      contacts.state === "pending" ||
+      messages.state === "pending" ||
+      files.state === "pending" ||
+      events.state === "pending",
   );
-
-  const evts = createMemo(() =>
-    (events() ?? []).filter((e) => e.pids.some((p) => contactIds().has(p))),
+  const anyError = createMemo(
+    () =>
+      contacts.state === "errored" ||
+      messages.state === "errored" ||
+      files.state === "errored" ||
+      events.state === "errored",
   );
-
-  const fls = createMemo(() =>
-    (files() ?? []).filter((f) => contactIds().has(f.pid)),
-  );
+  const retryAll = () => {
+    void refetchContacts();
+    void refetchMessages();
+    void refetchFiles();
+    void refetchEvents();
+  };
 
   const openContact = (id: string) => {
     setSelectedCompanyName(null);
@@ -197,36 +220,48 @@ export function CompanyPanel(props: { companyName: string }) {
           padding: "var(--space-4) var(--space-5)",
         }}
       >
-        <Show when={tab() === "People"}>
-          <PeopleTab people={people()} onOpen={openContact} />
+        <Show when={anyPending()}>
+          <SkeletonList count={6} />
         </Show>
-        <Show when={tab() === "Communications"}>
-          <CommunicationsTab
-            msgs={msgs()}
-            people={people()}
-            onOpen={(id) => {
-              setSelectedMessageId(id);
-            }}
+        <Show when={anyError()}>
+          <ErrorState
+            title="加载失败"
+            message="无法读取公司数据，请重试。"
+            retry={retryAll}
           />
         </Show>
-        <Show when={tab() === "Files"}>
-          <FilesTab
-            files={fls()}
-            onOpen={(id) => {
-              setSelectedFileId(id);
-            }}
-          />
-        </Show>
-        <Show when={tab() === "Meetings"}>
-          <MeetingsTab events={evts()} people={people()} />
-        </Show>
-        <Show when={tab() === "Insights"}>
-          <InsightsTab
-            people={people()}
-            msgs={msgs()}
-            events={evts()}
-            files={fls()}
-          />
+        <Show when={!anyPending() && !anyError()}>
+          <Show when={tab() === "People"}>
+            <PeopleTab people={people()} onOpen={openContact} />
+          </Show>
+          <Show when={tab() === "Communications"}>
+            <CommunicationsTab
+              msgs={msgs()}
+              people={people()}
+              onOpen={(id) => {
+                setSelectedMessageId(id);
+              }}
+            />
+          </Show>
+          <Show when={tab() === "Files"}>
+            <FilesTab
+              files={fls()}
+              onOpen={(id) => {
+                setSelectedFileId(id);
+              }}
+            />
+          </Show>
+          <Show when={tab() === "Meetings"}>
+            <MeetingsTab events={evts()} people={people()} />
+          </Show>
+          <Show when={tab() === "Insights"}>
+            <InsightsTab
+              people={people()}
+              msgs={msgs()}
+              events={evts()}
+              files={fls()}
+            />
+          </Show>
         </Show>
       </div>
     </div>
@@ -371,11 +406,28 @@ function CommunicationsTab(props: {
               </div>
               <div
                 style={{
+                  display: "flex",
+                  "align-items": "center",
+                  gap: "var(--space-2)",
                   "font-size": "var(--text-caption)",
                   color: "var(--text-secondary)",
                 }}
               >
-                {nameOf(m.pid)} · {m.prev}
+                <span
+                  style={{
+                    "font-size": "var(--text-micro)",
+                    "font-weight": "700",
+                    color:
+                      m.direction === "out"
+                        ? "var(--palm)"
+                        : "var(--text-muted)",
+                    "text-transform": "uppercase",
+                    "letter-spacing": "0.02em",
+                  }}
+                >
+                  {m.direction === "out" ? "To" : "From"}
+                </span>
+                <span>{nameOf(m.pid)}</span>
               </div>
             </button>
           )}
@@ -386,10 +438,18 @@ function CommunicationsTab(props: {
 }
 
 function FilesTab(props: { files: FileItem[]; onOpen: (id: string) => void }) {
+  const iconForType = (type: string) => {
+    if (type === "pdf") return "ph-file-pdf";
+    if (type === "image") return "ph-file-image";
+    return "ph-file-text";
+  };
+
   return (
     <Show
       when={props.files.length > 0}
-      fallback={<Empty icon="ph-paperclip" title="没有文件" />}
+      fallback={
+        <Empty icon="ph-files" title="暂无附件" description="该公司没有附件。" />
+      }
     >
       <div
         style={{
@@ -403,34 +463,46 @@ function FilesTab(props: { files: FileItem[]; onOpen: (id: string) => void }) {
             <button
               onClick={() => props.onOpen(f.id)}
               style={{
+                display: "flex",
+                "flex-direction": "column",
+                "align-items": "center",
+                gap: "var(--space-3)",
+                width: "100%",
                 padding: "var(--space-3)",
-                background: "var(--paper-light)",
-                border: "0.5px solid var(--border)",
-                "border-radius": "var(--radius-lg)",
+                background: "var(--paper-mid)",
+                "border-radius": "var(--radius-md)",
+                "text-align": "center",
                 cursor: "pointer",
-                "text-align": "left",
+                border: "none",
               }}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.background = "var(--paper-dark)")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.background = "var(--paper-mid)")
+              }
             >
-              <Icon name="ph-file" size={24} style={{ color: "var(--palm)" }} />
-              <div
-                style={{
-                  "margin-top": "var(--space-2)",
-                  "font-size": "var(--text-caption)",
-                  "font-weight": "600",
-                  overflow: "hidden",
-                  "text-overflow": "ellipsis",
-                  "white-space": "nowrap",
-                }}
-              >
-                {f.name}
-              </div>
-              <div
-                style={{
-                  "font-size": "var(--text-micro)",
-                  color: "var(--text-muted)",
-                }}
-              >
-                {f.type}
+              <Icon name={iconForType(f.type)} size={40} />
+              <div style={{ width: "100%", "min-width": 0 }}>
+                <div
+                  style={{
+                    "font-weight": "600",
+                    "white-space": "nowrap",
+                    overflow: "hidden",
+                    "text-overflow": "ellipsis",
+                  }}
+                >
+                  {f.name}
+                </div>
+                <div
+                  style={{
+                    "font-size": "var(--text-micro)",
+                    color: "var(--text-muted)",
+                    "margin-top": "var(--space-1)",
+                  }}
+                >
+                  {(f.size / 1024).toFixed(0)} KB · {f.type}
+                </div>
               </div>
             </button>
           )}
@@ -467,6 +539,7 @@ function MeetingsTab(props: { events: CalendarEvent[]; people: Contact[] }) {
                 padding: "var(--space-3) var(--space-4)",
                 background: "var(--paper-light)",
                 border: "0.5px solid var(--border)",
+                "border-left": `3px solid ${ev.color}`,
                 "border-radius": "var(--radius-lg)",
               }}
             >
@@ -496,11 +569,16 @@ function MeetingsTab(props: { events: CalendarEvent[]; people: Contact[] }) {
                     color: "var(--text-muted)",
                   }}
                 >
-                  参与者：{" "}
+                  {ev.pids.length} 位参与者
                   {ev.pids
                     .map((p: string) => nameOf(p))
                     .filter(Boolean)
-                    .join(", ")}
+                    .join(", ")
+                    ? ` · ${ev.pids
+                        .map((p: string) => nameOf(p))
+                        .filter(Boolean)
+                        .join(", ")}`
+                    : ""}
                 </div>
               </Show>
             </div>
@@ -518,20 +596,10 @@ function InsightsTab(props: {
   files: FileItem[];
 }) {
   const unread = () => props.msgs.filter((m) => m.unread).length;
-  const topSender = () => {
-    const counts = new Map<string, number>();
-    for (const m of props.msgs) {
-      counts.set(m.pid, (counts.get(m.pid) ?? 0) + 1);
-    }
-    let best = "";
-    let bestCount = 0;
-    for (const [pid, count] of counts) {
-      if (count > bestCount) {
-        best = pid;
-        bestCount = count;
-      }
-    }
-    return props.people.find((c) => c.id === best)?.name ?? "—";
+  const healthAverage = () => {
+    if (props.people.length === 0) return 0;
+    const sum = props.people.reduce((acc, c) => acc + (c.health ?? 0), 0);
+    return Math.round(sum / props.people.length);
   };
 
   return (
@@ -567,7 +635,11 @@ function InsightsTab(props: {
         value={props.files.length.toString()}
         icon="ph-paperclip"
       />
-      <InsightCard label="最活跃联系人" value={topSender()} icon="ph-user" />
+      <InsightCard
+        label="平均健康度"
+        value={`${healthAverage()}%`}
+        icon="ph-heart"
+      />
     </div>
   );
 }

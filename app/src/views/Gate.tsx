@@ -6,7 +6,7 @@
 import { For, Show, createMemo, createResource, createSignal } from "solid-js";
 import {
   listContacts,
-  listMessages,
+  listGateQueue,
   upsertContact,
   updateMessagesBucketByContact,
 } from "../stores/data";
@@ -16,7 +16,7 @@ import { Icon } from "../components/Icon";
 import { Empty } from "../components/Empty";
 import type { Contact, Message, MessageBucket } from "../types";
 import { showToast, setView } from "../stores/ui";
-import { useRefreshEffect, useViewport } from "../utils/gestures";
+import { useRefreshEffect, useSoftRefreshEffect, useViewport } from "../utils/gestures";
 import { SwipeActions } from "../components/SwipeActions";
 
 const BUCKETS: { id: MessageBucket; label: string; icon: string }[] = [
@@ -26,26 +26,29 @@ const BUCKETS: { id: MessageBucket; label: string; icon: string }[] = [
 ];
 
 export function Gate() {
-  const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
-  const [messages, { refetch: refetchMessages }] = createResource(listMessages);
+  const [queueItems, { refetch: refetchQueue }] = createResource(listGateQueue);
   const { isMobile } = useViewport();
 
+  let initialHardRefresh = true;
   useRefreshEffect(() => {
-    void refetchContacts();
-    void refetchMessages();
+    if (initialHardRefresh) {
+      initialHardRefresh = false;
+      return;
+    }
+    void refetchQueue();
+  });
+  let initialSoftRefresh = true;
+  useSoftRefreshEffect(() => {
+    if (initialSoftRefresh) {
+      initialSoftRefresh = false;
+      return;
+    }
+    void refetchQueue();
   });
 
-  const queue = createMemo<{ contact: Contact; message: Message }[]>(() => {
-    const cs = contacts() ?? [];
-    const ms = messages() ?? [];
-    return cs
-      .filter((c) => c.firstSeen && !c.screened && !c.blocked)
-      .map((c) => {
-        const msg = ms.find((m) => m.pid === c.id);
-        return msg ? { contact: c, message: msg } : null;
-      })
-      .filter((x): x is { contact: Contact; message: Message } => x !== null);
-  });
+  const queue = createMemo<{ contact: Contact; message: Message }[]>(
+    () => queueItems() ?? [],
+  );
 
   const [cursor, setCursor] = createSignal(0);
   const current = (): { contact: Contact; message: Message } | undefined =>
@@ -66,7 +69,8 @@ export function Gate() {
       message: `已批准 → ${bucket === "imbox" ? "Imbox" : bucket === "feed" ? "Stream" : "Records"}`,
       kind: "success",
     });
-    advance();
+    await refetchQueue();
+    setCursor(0);
   };
 
   const block = async () => {
@@ -81,11 +85,8 @@ export function Gate() {
     await upsertContact(updatedContact);
     await updateMessagesBucketByContact(cur.contact.id, "spam");
     showToast({ message: `已阻止 ${cur.contact.name}`, kind: "info" });
-    advance();
-  };
-
-  const advance = () => {
-    setCursor((c) => c + 1);
+    await refetchQueue();
+    setCursor(0);
   };
 
   return (

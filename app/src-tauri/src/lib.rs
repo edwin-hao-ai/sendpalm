@@ -125,6 +125,12 @@ pub fn run() {
             sql: include_str!("../migrations/0016_sent_direction_backfill.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 17,
+            description: "widen_follow_up_statuses",
+            sql: include_str!("../migrations/0017_follow_up_statuses.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     eprintln!("[sendpalm] starting tauri builder");

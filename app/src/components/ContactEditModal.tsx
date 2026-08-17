@@ -201,6 +201,16 @@ export function ContactEditModal(props: ContactEditModalProps) {
           style={{ ...inputStyle, color: "var(--text-muted)" }}
         />
       </Field>
+      <Field label="Avatar URL">
+        <input
+          value={draft().avatar}
+          onInput={(e) =>
+            setDraft({ ...draft(), avatar: e.currentTarget.value })
+          }
+          placeholder="https://…"
+          style={inputStyle}
+        />
+      </Field>
       <Field label="Title">
         <input
           value={draft().title}
@@ -427,6 +437,38 @@ export function ContactEditModal(props: ContactEditModalProps) {
           }}
         />
       </Field>
+
+      <div
+        style={{
+          display: "grid",
+          "grid-template-columns": "repeat(2, 1fr)",
+          gap: "var(--space-2)",
+          padding: "var(--space-3)",
+          background: "var(--paper-mid)",
+          "border-radius": "var(--radius-md)",
+        }}
+      >
+        <Flag
+          label="Blocked"
+          checked={draft().blocked}
+          onChange={(v) => setDraft({ ...draft(), blocked: v })}
+        />
+        <Flag
+          label="Notify"
+          checked={draft().notify}
+          onChange={(v) => setDraft({ ...draft(), notify: v })}
+        />
+        <Flag
+          label="First seen"
+          checked={draft().firstSeen}
+          onChange={(v) => setDraft({ ...draft(), firstSeen: v })}
+        />
+        <Flag
+          label="Screened"
+          checked={draft().screened}
+          onChange={(v) => setDraft({ ...draft(), screened: v })}
+        />
+      </div>
     </Modal>
   );
 }
@@ -468,6 +510,33 @@ function Field(props: {
         {props.label}
       </span>
       {props.children as never}
+    </label>
+  );
+}
+
+function Flag(props: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label
+      style={{
+        display: "flex",
+        "align-items": "center",
+        gap: "var(--space-2)",
+        "font-size": "var(--text-body-sm)",
+        color: "var(--text-primary)",
+        cursor: "pointer",
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={props.checked}
+        onChange={(e) => props.onChange(e.currentTarget.checked)}
+        style={{ "accent-color": "var(--palm)" }}
+      />
+      {props.label}
     </label>
   );
 }

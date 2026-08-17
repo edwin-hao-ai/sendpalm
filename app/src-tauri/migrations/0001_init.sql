@@ -264,7 +264,7 @@ CREATE TABLE IF NOT EXISTS follow_ups (
   id TEXT PRIMARY KEY,
   msg_id TEXT NOT NULL,
   due_at TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('pending', 'done', 'cancelled')),
+  status TEXT NOT NULL CHECK (status IN ('pending', 'todo', 'wait', 'done', 'cancelled')),
   note TEXT,
   FOREIGN KEY (msg_id) REFERENCES messages(id) ON DELETE CASCADE
 );

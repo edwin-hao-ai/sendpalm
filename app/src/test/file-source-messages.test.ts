@@ -4,7 +4,7 @@ vi.mock("../services/tauri-shim", () => ({ IS_BROWSER: () => true }));
 
 import {
   listSourceMessages,
-  listContactAttachments,
+  listContactFiles,
   addFileSourceMessage,
 } from "../stores/data";
 import { resetMockDb } from "../services/mock-db";
@@ -30,7 +30,7 @@ describe("file source messages", () => {
     expect(r.map((m) => m.id)).toEqual(["m2", "m1"]);
   });
 
-  it("listContactAttachments returns all files where pid matches", async () => {
+  it("listContactFiles returns all files where pid matches", async () => {
     const { MockDb } = await import("../services/mock-db");
     const db = new MockDb();
     await db.execute(
@@ -39,7 +39,7 @@ describe("file source messages", () => {
     await db.execute(
       `INSERT INTO files (id, pid, name, type, mime, size, url, st, source_message_ids) VALUES ('f2','p2','b.pdf','pdf','application/pdf',1,'','','[]')`,
     );
-    const r = await listContactAttachments("p1");
+    const r = await listContactFiles("p1");
     expect(r.map((f) => f.id)).toEqual(["f1"]);
   });
 

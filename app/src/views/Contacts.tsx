@@ -24,7 +24,7 @@ import type { Contact } from "../types";
 const FILTERS = [
   { id: "all", label: "全部" },
   { id: "active", label: "活跃" },
-  { id: "followup", label: "需跟进" },
+  { id: "risk", label: "需跟进" },
   { id: "cold", label: "冷淡" },
 ] as const;
 
@@ -47,7 +47,7 @@ export function Contacts() {
     let out = list;
     const f = filter();
     if (f === "active") out = out.filter((c) => c.grp === "active");
-    else if (f === "followup") out = out.filter((c) => c.grp === "risk");
+    else if (f === "risk") out = out.filter((c) => c.grp === "risk");
     else if (f === "cold") out = out.filter((c) => c.grp === "cold");
     const q = search().trim().toLowerCase();
     if (q) {
@@ -271,6 +271,8 @@ export function Contacts() {
                 <section style={{ "margin-bottom": "var(--space-5)" }}>
                   <Show when={group}>
                     <button
+                      data-testid="company-group-header"
+                      aria-label={`Open company ${group}`}
                       onClick={() => openCompanyDetail(group)}
                       style={{
                         "font-family": "var(--font-display)",
