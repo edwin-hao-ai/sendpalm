@@ -1,6 +1,6 @@
 /** Main — switches view by state.view(). */
 
-import { Show, Switch, Match, For, createSignal } from "solid-js";
+import { Show, Switch, Match, For, createSignal, JSX, createEffect } from "solid-js";
 import { view, loading, error, bumpRefreshTick } from "../stores/ui";
 import { Imbox } from "../views/Imbox";
 import { PullToRefresh } from "./PullToRefresh";
@@ -24,6 +24,131 @@ import { FocusReply } from "../views/FocusReply";
 import { ReadTogether } from "../views/ReadTogether";
 import { Agent } from "../views/Agent";
 import { Empty, Skeleton } from "../components/Empty";
+
+/** Keep a view mounted after its first visit and toggle visibility instead of
+ *  tearing it down. This matches the prototype (all view sections stay in the
+ *  DOM and get a hidden class) and avoids expensive re-fetch/re-render when
+ *  the user switches back to a previously visited view. */
+function KeepAlive(props: { active: boolean; children: JSX.Element }) {
+  const [mounted, setMounted] = createSignal(false);
+  createEffect(() => {
+    if (props.active) setMounted(true);
+  });
+  return (
+    <Show when={mounted()}>
+      <div style={{ display: props.active ? "contents" : "none" }}>
+        {props.children}
+      </div>
+    </Show>
+  );
+}
+
+function ViewSwitch() {
+  return (
+    <Switch>
+      <Match when={view() === "imbox"}>
+        <KeepAlive active={view() === "imbox"}>
+          <Imbox />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "screener"}>
+        <KeepAlive active={view() === "screener"}>
+          <Gate />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "screenerHistory"}>
+        <KeepAlive active={view() === "screenerHistory"}>
+          <ScreenerHistory />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "feed"}>
+        <KeepAlive active={view() === "feed"}>
+          <Stream />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "paperTrail"}>
+        <KeepAlive active={view() === "paperTrail"}>
+          <Records />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "trash"}>
+        <KeepAlive active={view() === "trash"}>
+          <Trash />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "spam"}>
+        <KeepAlive active={view() === "spam"}>
+          <Spam />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "contacts"}>
+        <KeepAlive active={view() === "contacts"}>
+          <Contacts />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "companies"}>
+        <KeepAlive active={view() === "companies"}>
+          <Companies />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "calendar"}>
+        <KeepAlive active={view() === "calendar"}>
+          <Calendar />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "files"}>
+        <KeepAlive active={view() === "files"}>
+          <Files />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "insights"}>
+        <KeepAlive active={view() === "insights"}>
+          <Insights />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "drafts"}>
+        <KeepAlive active={view() === "drafts"}>
+          <Drafts />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "followUps"}>
+        <KeepAlive active={view() === "followUps"}>
+          <FollowUps />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "clips"}>
+        <KeepAlive active={view() === "clips"}>
+          <Clips />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "search"}>
+        <KeepAlive active={view() === "search"}>
+          <Search />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "settings"}>
+        <KeepAlive active={view() === "settings"}>
+          <Settings />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "focusReply"}>
+        <KeepAlive active={view() === "focusReply"}>
+          <FocusReply />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "readTogether"}>
+        <KeepAlive active={view() === "readTogether"}>
+          <ReadTogether />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "agent"}>
+        <KeepAlive active={view() === "agent"}>
+          <Agent />
+        </KeepAlive>
+      </Match>
+    </Switch>
+  );
+}
 
 export function Main() {
   const viewport = useViewport();
@@ -53,68 +178,7 @@ export function Main() {
           />
         </Show>
         <Show when={!loading() && !error()}>
-          <Switch>
-            <Match when={view() === "imbox"}>
-              <Imbox />
-            </Match>
-            <Match when={view() === "screener"}>
-              <Gate />
-            </Match>
-            <Match when={view() === "screenerHistory"}>
-              <ScreenerHistory />
-            </Match>
-            <Match when={view() === "feed"}>
-              <Stream />
-            </Match>
-            <Match when={view() === "paperTrail"}>
-              <Records />
-            </Match>
-            <Match when={view() === "trash"}>
-              <Trash />
-            </Match>
-            <Match when={view() === "spam"}>
-              <Spam />
-            </Match>
-            <Match when={view() === "contacts"}>
-              <Contacts />
-            </Match>
-            <Match when={view() === "companies"}>
-              <Companies />
-            </Match>
-            <Match when={view() === "calendar"}>
-              <Calendar />
-            </Match>
-            <Match when={view() === "files"}>
-              <Files />
-            </Match>
-            <Match when={view() === "insights"}>
-              <Insights />
-            </Match>
-            <Match when={view() === "drafts"}>
-              <Drafts />
-            </Match>
-            <Match when={view() === "followUps"}>
-              <FollowUps />
-            </Match>
-            <Match when={view() === "clips"}>
-              <Clips />
-            </Match>
-            <Match when={view() === "search"}>
-              <Search />
-            </Match>
-            <Match when={view() === "settings"}>
-              <Settings />
-            </Match>
-            <Match when={view() === "focusReply"}>
-              <FocusReply />
-            </Match>
-            <Match when={view() === "readTogether"}>
-              <ReadTogether />
-            </Match>
-            <Match when={view() === "agent"}>
-              <Agent />
-            </Match>
-          </Switch>
+          <ViewSwitch />
         </Show>
       </PullToRefresh>
     </main>
