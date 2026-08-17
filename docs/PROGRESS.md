@@ -28,6 +28,36 @@
 - [x] Conventional commit messages
 - [x] PROGRESS.md updated
 
+## 2026-08-17 — Imbox performance + rustls CryptoProvider fix
+
+Fixed three performance blockers reported during real-mail usage and a startup crash exposed by a clean rebuild.
+
+### Fixed in this pass
+
+- **Imbox list no longer jitters when opening a message**: side panels are now `position: fixed` overlays animated with `transform/opacity`; the main column never reflows.
+- **Switching tabs and returning to Imbox is instant**: `Main.tsx` mounts each view once via `KeepAlive` and toggles `display: none` instead of tearing down and re-fetching on every tab switch.
+- **Imbox scroll is smooth**: replaced the full-table `listMessages()` used for piles with a lightweight `listPileMessages()` query that returns only the flags/columns piles need; card actions now refetch just the pile slice.
+- **Sync events no longer clear the paged list**: split the global refresh tick into `refreshTick` (hard refresh, seed/drag-down) and `softRefreshTick` (lightweight state only). Sync events use the soft tick; new messages are still prepended by the existing paginated path.
+- **`useRefreshEffect` skips its initial mount run**: removed the double-fetch on Imbox startup.
+- **rustls startup panic fixed**: installed the `ring` CryptoProvider once in `lib.rs::run()` so `rustls::ClientConfig::builder()` calls in the IMAP DoH fallback (and lettre/sqlx/reqwest) find a default provider.
+
+### Verification matrix
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | ✅ |
+| `pnpm test` | ✅ 160 passed |
+| `pnpm lint` | ✅ |
+| `pnpm e2e imbox.spec.ts` | ✅ 9 passed |
+| `cargo test` | ✅ 77 passed |
+| `cargo clippy` | ⚠️ 2 pre-existing warnings in `image_proxy.rs` (not touched) |
+
+### Commits
+
+- `116cc35` `perf(imbox): keep views alive, lightweight piles, split refresh ticks`
+- `49408bf` `Merge feat/imbox-refresh-resize: keep views alive + lightweight Imbox piles`
+- `61b46f0` `fix(rust): install rustls ring CryptoProvider at startup`
+
 ## 2026-08-04 — Prototype fidelity + workflow audit and critical fixes
 
 A full comparison against `prototype-v11.38` was run across UI fidelity, core email workflows, compose/calendar/agent/search, and data completeness (attachments, contacts, indexing). Critical blockers were fixed and all gates brought back to green.
