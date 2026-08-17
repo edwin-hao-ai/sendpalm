@@ -85,6 +85,14 @@ export function bumpRefreshTick(): void {
   setRefreshTick((n) => n + 1);
 }
 
+/** Lightweight refresh signal for "data changed but don't clear the active
+ *  view's scroll position". Used by sync events and single-row actions so
+ *  sidebar counters / pile slices update without re-rendering the main list. */
+export const [softRefreshTick, setSoftRefreshTick] = createSignal(0);
+export function bumpSoftRefreshTick(): void {
+  setSoftRefreshTick((n) => n + 1);
+}
+
 /** Live count of contacts that still need Gate screening.
  * Populated by `InboxEmptyState` from the `countGateCandidates` resource
  * (re-fetched on every `refreshTick`). Exposed so other surfaces — topbar

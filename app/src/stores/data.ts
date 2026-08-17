@@ -745,6 +745,42 @@ export async function listMessagesPaged(
   };
 }
 
+/** Lightweight query for the Imbox pile slices (Pending / Saved / Remind).
+ *  Only the rows and columns actually shown in a pile card are fetched,
+ *  avoiding the multi-megabyte full-table transfer when the mailbox is
+ *  large. */
+export interface PileMessage {
+  id: string;
+  subj: string;
+  replyLater: boolean;
+  setAside: boolean;
+  bubbleUpAt: boolean;
+}
+
+export async function listPileMessages(): Promise<PileMessage[]> {
+  const db = await getDb();
+  const rows = await db.select<
+    Array<{
+      id: string;
+      subj: string | null;
+      reply_later: number;
+      set_aside: number;
+      bubble_up_at: unknown;
+    }>
+  >(
+    `SELECT id, subj, reply_later, set_aside, bubble_up_at FROM messages
+     WHERE reply_later = 1 OR set_aside = 1 OR bubble_up_at IS NOT NULL
+     ORDER BY st DESC`,
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    subj: r.subj ?? "",
+    replyLater: r.reply_later === 1,
+    setAside: r.set_aside === 1,
+    bubbleUpAt: r.bubble_up_at != null,
+  }));
+}
+
 export async function getMessage(id: ID): Promise<Message | null> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(

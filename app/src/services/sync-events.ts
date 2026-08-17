@@ -13,19 +13,19 @@
  *     each one and the view fetches just those few new rows and prepends
  *     them to its in-memory list. O(new_ids) IPC round-trips, no jank.
  *
- *  2. **refreshTick (only for non-paginated full-table resources).**
- *     Piles, contact maps, full-text search index, etc. use
- *     `createResource(listMessages)` and react to refreshTick via
- *     `useRefreshEffect`. They have to refetch — there's no incremental
- *     path for them. This tick fires every cycle.
+ *  2. **softRefreshTick (only for lightweight non-paginated resources.)**
+ *     Pile slices and contact counts refetch via
+ *     `useSoftRefreshEffect`. This tick fires every cycle but does NOT
+ *     clear the active list or reset scroll position.
  *
- *  The previous design refetched BOTH paths, which meant every 60s sync
- *  reloaded all 100 paginated rows even when only one or two new mails
- *  arrived. Now the paginated path uses prepend only.
+ *  The previous design refetched BOTH paths with `refreshTick`, which meant
+ *  every 60s sync reloaded all 100 paginated rows even when only one or two
+ *  new mails arrived. Now the paginated path uses prepend only and the
+ *  lightweight path uses a soft tick.
  */
 import { listen } from "@tauri-apps/api/event";
 import { IS_BROWSER } from "./tauri-shim";
-import { bumpRefreshTick } from "../stores/ui";
+import { bumpSoftRefreshTick } from "../stores/ui";
 import type { Message } from "../types";
 
 export interface SyncReport {
@@ -118,11 +118,9 @@ export function startSyncEventBridge(): () => void {
 
   listen<SyncReport>("sync:new-messages", (event) => {
     const ids = event.payload.new_message_ids ?? [];
-    // Bump the global refresh tick so any non-paginated resource (full
-    // listMessages, contact map, pile slices) refetches. Views that opted
-    // into the prepend path will get the IDs too, so they can update
-    // without waiting for a LIMIT 100 round-trip.
-    bumpRefreshTick();
+    // Bump the soft refresh tick so lightweight resources (pile slices,
+    // contact counts) update. Paginated lists already get the new ids below.
+    bumpSoftRefreshTick();
     if (ids.length > 0) {
       notifyBucket("imbox", ids);
       notifyBucket("feed", ids);

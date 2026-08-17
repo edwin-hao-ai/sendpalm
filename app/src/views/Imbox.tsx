@@ -26,12 +26,13 @@ import {
 } from "solid-js";
 import {
   listContacts,
-  listMessages,
+  listPileMessages,
   moveMessageToBucket,
   upsertMessage,
   upsertContact,
   getMessage,
 } from "../stores/data";
+import type { PileMessage } from "../stores/data";
 import { usePaginatedMessages } from "../utils/paginated-messages";
 import type { Contact, Message, MessageBucket } from "../types";
 import {
@@ -43,6 +44,7 @@ import {
   setSelectedIds,
   showToast,
   refreshTick,
+  softRefreshTick,
 } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
@@ -63,7 +65,7 @@ interface Pile {
   id: "pending" | "saved" | "remind";
   icon: string;
   title: string;
-  messages: Message[];
+  messages: PileMessage[];
 }
 
 const BUNDLE_THRESHOLD = 3;
@@ -84,9 +86,11 @@ export function Imbox() {
   const refresh = paged.refresh;
   const total = paged.total;
 
-  // Pile slices still need every message to filter by flag, so a second
-  // resource keeps them accurate without slowing down the hot list.
-  const [allMessages, { refetch: refetchAll }] = createResource(listMessages);
+  // Pile slices: only the rows shown in the Pending / Saved / Remind piles.
+  // We deliberately do NOT load the full messages table here — real mailboxes
+  // have thousands of rows with large HTML bodies, and pulling them all on
+  // every refresh tick or tab return is the main source of scroll jank.
+  const [pileMessages, { refetch: refetchPiles }] = createResource(listPileMessages);
   const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
 
   // Live-prepend on sync:new-messages (O(new_ids) IPC round-trips).
@@ -96,9 +100,30 @@ export function Imbox() {
     }),
   );
 
+  // Hard refresh on the global tick: after seed, pull-to-refresh, or any
+  // other explicit "reload everything" signal. We skip the initial mount run
+  // because createResource already fetches page 1 on mount; without the skip
+  // we would double-fetch the whole page.
+  let initialHardRefresh = true;
   useRefreshEffect(() => {
+    if (initialHardRefresh) {
+      initialHardRefresh = false;
+      return;
+    }
     void refresh();
-    void refetchAll();
+    void refetchPiles();
+    void refetchContacts();
+  });
+
+  // Soft refresh: sync events and single-row actions only need counters and
+  // pile slices to update — never clear the paged list or reset scroll position.
+  let initialSoftRefresh = true;
+  useSoftRefreshEffect(() => {
+    if (initialSoftRefresh) {
+      initialSoftRefresh = false;
+      return;
+    }
+    void refetchPiles();
     void refetchContacts();
   });
 
@@ -180,7 +205,7 @@ export function Imbox() {
   /* ── Piles (Pending / Saved / Remind) ─────────────────────────────── */
 
   const piles = createMemo((): Pile[] => {
-    const all = allMessages() ?? [];
+    const all = pileMessages() ?? [];
     const all_piles: Pile[] = [
       {
         id: "pending",
@@ -205,7 +230,7 @@ export function Imbox() {
   });
 
   const remindedCount = createMemo(
-    () => (allMessages() ?? []).filter((m) => m.bubbleUpAt).length,
+    () => (pileMessages() ?? []).filter((m) => m.bubbleUpAt).length,
   );
 
   /* ── Bundle drawer state ─────────────────────────────────────────── */
@@ -306,14 +331,15 @@ export function Imbox() {
   /* ── Per-message optimistic actions ───────────────────────────────── */
 
   const refreshAll = async () => {
-    await Promise.all([refresh(), refetchAll()]);
+    await refresh();
+    await refetchPiles();
   };
 
   const replyLater = async (m: Message) => {
     paged.removeByIds([m.id]);
     try {
       await upsertMessage({ ...m, replyLater: true });
-      await refetchAll();
+      await refetchPiles();
       showToast({ message: "已 Reply Later", kind: "success" });
     } catch (err) {
       await refreshAll();
@@ -325,7 +351,7 @@ export function Imbox() {
     paged.removeByIds([m.id]);
     try {
       await upsertMessage({ ...m, setAside: true });
-      await refetchAll();
+      await refetchPiles();
       showToast({ message: "已 Set Aside", kind: "success" });
     } catch (err) {
       await refreshAll();
@@ -337,7 +363,7 @@ export function Imbox() {
     paged.removeByIds([m.id]);
     try {
       await moveMessageToBucket(m.id, "paperTrail");
-      await refetchAll();
+      await refetchPiles();
       showToast({ message: "已归档", kind: "success" });
     } catch (err) {
       await refreshAll();
@@ -349,7 +375,7 @@ export function Imbox() {
     paged.removeByIds([m.id]);
     try {
       await moveMessageToBucket(m.id, "trash");
-      await refetchAll();
+      await refetchPiles();
       showToast({ message: "已移到 Trash", kind: "info" });
     } catch (err) {
       await refreshAll();
@@ -361,7 +387,7 @@ export function Imbox() {
     paged.removeByIds([m.id]);
     try {
       await moveMessageToBucket(m.id, "spam");
-      await refetchAll();
+      await refetchPiles();
       showToast({ message: "已标为垃圾", kind: "info" });
     } catch (err) {
       await refreshAll();
@@ -372,7 +398,7 @@ export function Imbox() {
   const toggleUnread = async (m: Message) => {
     try {
       await upsertMessage({ ...m, unread: !m.unread });
-      await refetchAll();
+      await refetchPiles();
     } catch (err) {
       await refreshAll();
       showToast({ message: `标记失败：${String(err)}`, kind: "error" });
@@ -568,7 +594,7 @@ export function Imbox() {
           role="button"
           onClick={() => {
             /* navigate to first remind — same UX as prototype */
-            const first = (allMessages() ?? []).find((m) => m.bubbleUpAt);
+            const first = (pileMessages() ?? []).find((m) => m.bubbleUpAt);
             if (first) open(first.id);
           }}
         >
@@ -1244,11 +1270,19 @@ function PileCard(props: { pile: Pile; onOpen: (id: string) => void }) {
   );
 }
 
-/* ── useRefreshEffect (kept inline so we don't pull gestures.ts) ──── */
+/* ── useRefreshEffect helpers (kept inline so we don't pull gestures.ts) ──── */
 
 function useRefreshEffect(callback: () => void) {
   createEffect(() => {
     const _ = refreshTick();
+    void _;
+    callback();
+  });
+}
+
+function useSoftRefreshEffect(callback: () => void) {
+  createEffect(() => {
+    const _ = softRefreshTick();
     void _;
     callback();
   });

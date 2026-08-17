@@ -270,9 +270,10 @@ function compareRows(
 function matchRow(
   row: Row,
   conditions: Condition[],
+  combine: "and" | "or",
   _bindValues: unknown[],
 ): boolean {
-  return conditions.every((cond) => {
+  const tester = (cond: Condition) => {
     const colVal = row[cond.col];
     switch (cond.op) {
       case "=":
@@ -314,7 +315,10 @@ function matchRow(
       default:
         return true;
     }
-  });
+  };
+  return combine === "or"
+    ? conditions.some(tester)
+    : conditions.every(tester);
 }
 
 function matchFts(query: unknown, row: Row): boolean {
@@ -365,8 +369,9 @@ function parseWhere(
   start: number,
   bindValues: unknown[],
   jsonColumn?: string,
-): { conditions: Condition[]; next: number } {
+): { conditions: Condition[]; combine: "and" | "or"; next: number } {
   const conditions: Condition[] = [];
+  let combine: "and" | "or" = "and";
   let i = start;
   while (i < tokens.length) {
     const t = tokens[i];
@@ -447,13 +452,15 @@ function parseWhere(
         i = next;
       }
     }
-    if (normalizeId(tokens[i]) === "and") {
+    const joiner = normalizeId(tokens[i]);
+    if (joiner === "and" || joiner === "or") {
+      if (conditions.length === 1) combine = joiner;
       i++;
     } else {
       break;
     }
   }
-  return { conditions, next: i };
+  return { conditions, combine, next: i };
 }
 
 interface SelectSource {
@@ -558,6 +565,7 @@ function runSelect(sql: string, bindValues: unknown[]): Row[] {
   if (!mainTable) return [];
 
   let conditions: Condition[] = [];
+  let combine: "and" | "or" = "and";
   let orderBy: { col: string; desc: boolean }[] = [];
   let limit: number | null = null;
 
@@ -571,6 +579,7 @@ function runSelect(sql: string, bindValues: unknown[]): Row[] {
         ...c,
         col: stripTableAlias(c.col, mainAlias),
       }));
+      combine = parsed.combine;
       i = parsed.next;
     } else if (kw === "order") {
       i++;
@@ -607,7 +616,7 @@ function runSelect(sql: string, bindValues: unknown[]): Row[] {
   }
 
   const table = getTable(mainTable);
-  let rows = table.filter((row) => matchRow(row, conditions, bindValues));
+  let rows = table.filter((row) => matchRow(row, conditions, combine, bindValues));
   if (orderBy.length > 0) {
     rows = [...rows].sort((a, b) => compareRows(a, b, orderBy));
   }
@@ -763,16 +772,18 @@ function runUpdate(sql: string, bindValues: unknown[]): QueryResult {
   i = next;
 
   let conditions: Condition[] = [];
+  let combine: "and" | "or" = "and";
   if (normalizeId(tokens[i]) === "where") {
     i++;
     const parsed = parseWhere(tokens, i, bindValues);
     conditions = parsed.conditions;
+    combine = parsed.combine;
   }
 
   const table = getTable(tableName);
   let rowsAffected = 0;
   for (const row of table) {
-    if (!matchRow(row, conditions, bindValues)) continue;
+    if (!matchRow(row, conditions, combine, bindValues)) continue;
     for (const { col, value } of assignments) {
       row[col] = value;
     }
@@ -792,10 +803,12 @@ function runDelete(sql: string, bindValues: unknown[]): QueryResult {
   if (!tableName) return { rowsAffected: 0 };
 
   let conditions: Condition[] = [];
+  let combine: "and" | "or" = "and";
   if (normalizeId(tokens[i]) === "where") {
     i++;
     const parsed = parseWhere(tokens, i, bindValues);
     conditions = parsed.conditions;
+    combine = parsed.combine;
   }
 
   const table = getTable(tableName);
@@ -806,7 +819,7 @@ function runDelete(sql: string, bindValues: unknown[]): QueryResult {
   }
   const before = table.length;
   tables[tableName] = table.filter(
-    (row) => !matchRow(row, conditions, bindValues),
+    (row) => !matchRow(row, conditions, combine, bindValues),
   );
   return { rowsAffected: before - tables[tableName].length };
 }

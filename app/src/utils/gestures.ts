@@ -3,13 +3,23 @@
  */
 
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
-import { refreshTick } from "../stores/ui";
+import { refreshTick, softRefreshTick } from "../stores/ui";
 
 /** React to a global refresh tick (e.g. backend sync events). */
 export function useRefreshEffect(callback: () => void) {
   createEffect(() => {
     // Access the tick so this effect re-runs when it changes.
     const _ = refreshTick();
+    void _;
+    callback();
+  });
+}
+
+/** React to a lightweight refresh tick that should not tear down the current
+ *  view (e.g. a sync event that only affects counters/pile slices). */
+export function useSoftRefreshEffect(callback: () => void) {
+  createEffect(() => {
+    const _ = softRefreshTick();
     void _;
     callback();
   });
