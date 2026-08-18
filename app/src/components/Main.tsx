@@ -22,6 +22,7 @@ import { Search } from "../views/Search";
 import { Settings } from "../views/Settings";
 import { FocusReply } from "../views/FocusReply";
 import { ReadTogether } from "../views/ReadTogether";
+import { PileBoard } from "../views/PileBoard";
 import { Agent } from "../views/Agent";
 import { Empty, Skeleton } from "../components/Empty";
 
@@ -139,6 +140,21 @@ function ViewSwitch() {
       <Match when={view() === "readTogether"}>
         <KeepAlive active={view() === "readTogether"}>
           <ReadTogether />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "replyLater"}>
+        <KeepAlive active={view() === "replyLater"}>
+          <PileBoard pileId="replyLater" />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "setAside"}>
+        <KeepAlive active={view() === "setAside"}>
+          <PileBoard pileId="setAside" />
+        </KeepAlive>
+      </Match>
+      <Match when={view() === "bubbleUp"}>
+        <KeepAlive active={view() === "bubbleUp"}>
+          <PileBoard pileId="bubbleUp" />
         </KeepAlive>
       </Match>
       <Match when={view() === "agent"}>

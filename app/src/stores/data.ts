@@ -752,6 +752,9 @@ export interface ListMessagesOptions {
   bucket?: MessageBucket;
   direction?: "in" | "out";
   unreadOnly?: boolean;
+  replyLaterOnly?: boolean;
+  setAsideOnly?: boolean;
+  bubbleUpOnly?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -810,6 +813,15 @@ export async function listMessagesPaged(
   if (options.unreadOnly) {
     where.push("unread = 1");
   }
+  if (options.replyLaterOnly) {
+    where.push("reply_later = 1");
+  }
+  if (options.setAsideOnly) {
+    where.push("set_aside = 1");
+  }
+  if (options.bubbleUpOnly) {
+    where.push("bubble_up_at IS NOT NULL");
+  }
   const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const db = await getDb();
   const totalRow = await db.select<Array<{ total: number }>>(
@@ -835,7 +847,10 @@ export async function listMessagesPaged(
  *  large. */
 export interface PileMessage {
   id: string;
+  pid: string;
   subj: string;
+  tm: string;
+  st: string;
   replyLater: boolean;
   setAside: boolean;
   bubbleUpAt: boolean;
@@ -846,19 +861,26 @@ export async function listPileMessages(): Promise<PileMessage[]> {
   const rows = await db.select<
     Array<{
       id: string;
+      pid: string;
       subj: string | null;
+      tm: string | null;
+      st: string;
       reply_later: number;
       set_aside: number;
       bubble_up_at: unknown;
     }>
   >(
-    `SELECT id, subj, reply_later, set_aside, bubble_up_at FROM messages
+    `SELECT id, pid, subj, tm, st, reply_later, set_aside, bubble_up_at
+     FROM messages
      WHERE reply_later = 1 OR set_aside = 1 OR bubble_up_at IS NOT NULL
      ORDER BY st DESC`,
   );
   return rows.map((r) => ({
     id: r.id,
+    pid: r.pid,
     subj: r.subj ?? "",
+    tm: r.tm ?? "",
+    st: r.st,
     replyLater: r.reply_later === 1,
     setAside: r.set_aside === 1,
     bubbleUpAt: r.bubble_up_at != null,
