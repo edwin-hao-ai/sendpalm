@@ -55,7 +55,31 @@ Completed the full contact/company surface: targeted per-contact queries, protot
 
 ### Commits
 
-- (pending final commit)
+- `7d20142` `feat(contact): per-contact queries, prototype-aligned Timeline/Files/Insights, complete CompanyPanel, E2E tests`
+
+## 2026-08-18 (later) — Gate HTML email body rendering fix
+
+While smoke-testing the contact improvements against real mail, the Gate screener card was showing raw/blank HTML instead of rendered email content.
+
+### Fixed in this pass
+
+- **Gate card now renders HTML bodies**: replaced the escaped-text `<p>{body}</p>` with a sanitized `innerHTML` preview using the new `emailBodyPreview()` helper, falling back to linked plain text when no HTML body is available.
+- **Link safety**: clicks on `<a>` inside the preview are intercepted and opened via `openUrl()` in the OS browser, matching MessagePanel behavior.
+- **External images hidden by default**: added a global `.sp-img-hidden` rule so direct innerHTML previews (Gate) don't leak tracking pixels before the user chooses to show images.
+- **Regression tests**: added unit tests for `emailBodyPreview` covering HTML sanitization, plain-text fallback, and whitespace-only bodyHtml handling.
+
+### Verification matrix
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | ✅ |
+| `pnpm test` | ✅ 181 passed |
+| `pnpm lint` (changed files) | ✅ |
+| `pnpm format:check` (changed files) | ✅ |
+
+### Commits
+
+- `fe81e2a` `fix(gate): render sanitized HTML email body in screener card`
 
 ## 2026-08-17 — Imbox performance + rustls CryptoProvider fix
 

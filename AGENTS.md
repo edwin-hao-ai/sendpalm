@@ -424,6 +424,7 @@ Captures the recurring traps the next agent should avoid. Detailed explanations 
 - **`useRefreshEffect` should skip its initial mount run** — otherwise it double-fetches resources that already fetch on mount. Use an initial-skip guard or merge the refresh logic into the resource itself.
 - **rustls 0.23 requires an explicit process-level CryptoProvider** — calling `rustls::ClientConfig::builder()` without a provider panics at runtime. Install `rustls::crypto::ring::default_provider()` once at app startup in `lib.rs::run()` so IMAP DoH, lettre, sqlx, and reqwest all find a default. `AlreadySet` is harmless; log it and continue.
 - **Restarting `pnpm tauri dev` can leave orphan processes** — Vite on `:1420` and the `sendpalm-app` binary may survive `kill`. Before starting a fresh dev server, run `lsof -ti :1420 | xargs kill -9` and `ps aux | grep sendpalm-app` to clean up, or use a single `pnpm tauri dev` session and let Playwright reuse it.
+- **Direct `innerHTML` email previews need the same `.sp-img-hidden` rule as the MessagePanel iframe** — the DOMPurify hook hides external images by adding `class="sp-img-hidden"`, but that class only works if it is defined in the host document (not just inside an iframe srcdoc). Add it to `base.css` so Gate and any other non-iframe preview paths hide tracking pixels by default.
 
 ---
 
