@@ -92,6 +92,7 @@ export function Imbox() {
     {
       bucket: "imbox",
       direction: "in",
+      lightweight: true,
     },
     PAGE_SIZE,
   );

@@ -77,6 +77,7 @@ export function PileBoard(props: { pileId: PileId }) {
       bucket: "imbox",
       direction: "in",
       ...meta.options,
+      lightweight: true,
     },
     100,
   );

@@ -177,6 +177,19 @@ function rowToMessage(r: Record<string, unknown>): Message {
   };
 }
 
+/** Lightweight projection — same shape as `Message` but `body` and `bodyHtml`
+ *  are empty strings because the SELECT omitted them. The list view falls
+ *  back to `prev` for its preview, which is the first 140 chars of the
+ *  plain-text body (see sync_loop.rs `prev_excerpt`). Detail views still
+ *  call `getMessage(id)` which does a full SELECT for the one row. */
+function rowToMessageLight(r: Record<string, unknown>): Message {
+  return {
+    ...rowToMessage(r),
+    body: "",
+    bodyHtml: null,
+  };
+}
+
 function rowToContact(r: Record<string, unknown>): Contact {
   return {
     id: r.id as string,
@@ -755,6 +768,13 @@ export interface ListMessagesOptions {
   replyLaterOnly?: boolean;
   setAsideOnly?: boolean;
   bubbleUpOnly?: boolean;
+  /** When true, the SELECT omits the `body` and `body_html` columns — list
+   *  views don't render either. Excluding them shrinks the IPC payload by
+   *  ~85 KB per row (the Feishu account averages 80 KB body_html per email
+   *  and 6 KB plain-text body), which makes the page render ~13× faster
+   *  (1.95 s → 0.15 s on the same device). The detail view uses
+   *  `getMessage(id)` which still does a full SELECT for one row. */
+  lightweight?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -830,11 +850,18 @@ export async function listMessagesPaged(
   );
   const total = totalRow[0]?.total ?? 0;
   const rows = await db.select<Record<string, unknown>[]>(
-    `SELECT * FROM messages ${whereClause} ORDER BY st DESC LIMIT ? OFFSET ?`,
+    options.lightweight
+      ? `SELECT id, pid, subj, prev, tm, st, ac, bucket, direction, unread,
+                labels_json, attachments_json, trackers_json,
+                reply_later, set_aside, bubble_up_at, remind_at, deleted_at,
+                to_addr, cc_json, bcc_json, thread_id, calendar_json
+           FROM messages ${whereClause}
+           ORDER BY st DESC LIMIT ? OFFSET ?`
+      : `SELECT * FROM messages ${whereClause} ORDER BY st DESC LIMIT ? OFFSET ?`,
     [...params, limit, offset],
   );
   return {
-    items: rows.map(rowToMessage),
+    items: rows.map(options.lightweight ? rowToMessageLight : rowToMessage),
     total,
     limit,
     offset,
