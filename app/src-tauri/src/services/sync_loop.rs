@@ -590,6 +590,7 @@ async fn sync_one(
             start_uid,
             // Only trigger vacation replies for new mail in INBOX.
             if is_inbox { previous_last_uid } else { 0 },
+            &state_key,
         )
         .await
         {
@@ -599,19 +600,22 @@ async fn sync_one(
                     "[sync] folder={folder} failed for {}: {e}",
                     account.account_id
                 );
-                // Persist the previous cursor so a fixed folder can resume cleanly.
-                let _ = save_folder_sync_state(pool, &state_key, start_uid, 0).await;
+                // sync_folder persists the cursor after every successful chunk,
+                // so on error the highest successfully-inserted UID is already
+                // saved and the next tick resumes from there. Nothing to do.
                 continue;
             }
         };
         total_inserted += inserted;
         new_message_ids.append(&mut folder_new_ids);
 
-        save_folder_sync_state(pool, &state_key, cursor, uid_validity).await?;
+        // sync_folder persists the cursor per-chunk (so a mid-backfill
+        // error doesn't lose progress). Here we just keep the legacy
+        // account-level state in sync for INBOX, which the on-boot
+        // cursor-restore path reads.
         if is_inbox {
             inbox_cursor = cursor;
             inbox_uid_validity = uid_validity;
-            // Keep the legacy account-level state in sync as well.
             save_folder_sync_state(
                 pool,
                 &format!("sync_state::{}", account.account_id),
@@ -680,6 +684,36 @@ async fn save_folder_sync_state(
     Ok(())
 }
 
+/// Decide whether the chunk-walking loop should fetch another range.
+///
+/// Termination rules:
+/// 1. If the server reported `uid_next`, keep going while the cursor hasn't
+///    reached `uid_next - 1` (the last existing UID on the server). This is
+///    the only correct condition — a "partial" chunk just means the requested
+///    range had holes (UIDs that were deleted/expired) and there can still be
+///    messages at much higher UIDs. The Feishu mailbox we're testing against
+///    has ~3900 messages spread across UIDs 1..7228, so density is roughly
+///    0.5 messages per UID; stopping on the first partial chunk would leave
+///    ~3500 messages unfetched.
+/// 2. If the server did NOT report `uid_next` (some IMAP servers omit it),
+///    fall back to the old behaviour: stop when the chunk isn't full. This
+///    matches the pre-fix behaviour for those servers.
+pub fn should_continue_after_chunk(
+    cursor: u32,
+    uid_next: Option<u32>,
+    chunk_size: u32,
+) -> bool {
+    if let Some(un) = uid_next {
+        // uid_next is "the UID that will be assigned to the next new
+        // message", so existing UIDs are < uid_next. The cursor sits at the
+        // highest successful UID we've inserted, so we stop when cursor
+        // reaches uid_next - 1.
+        return cursor < un.saturating_sub(1);
+    }
+    // No UIDNEXT available — fall back to the legacy heuristic.
+    chunk_size >= crate::services::imap::MAX_PER_TICK
+}
+
 /// Test seam: given a starting cursor and a list of `(uid, success)`
 /// outcomes, return `(inserted, new_cursor)`. The cursor is the largest UID
 /// whose outcome was `success`; it never advances past a failed UID.
@@ -712,6 +746,7 @@ async fn sync_folder(
     folder: &str,
     start_uid: u32,
     previous_last_uid: u32,
+    state_key: &str,
 ) -> Result<(u32, u32, u32, Vec<String>), String> {
     let folder_kind = crate::services::mailbox_resolver::folder_kind_for_name(folder);
     let mut inserted = 0u32;
@@ -723,9 +758,20 @@ async fn sync_folder(
     loop {
         let bundle = client.sync(folder, cursor).await?;
         uid_validity = bundle.uid_validity;
+        // Empty chunk means every UID in the requested range was deleted/expired
+        // — skip past it and try the next range. The previous implementation
+        // broke here, which is what left ~3500 messages unbackfilled on the
+        // Feishu account (most chunks after the first hit a sparse range).
         if bundle.messages.is_empty() {
-            cursor = bundle.highest_uid;
-            break;
+            cursor = cursor
+                .saturating_add(crate::services::imap::MAX_PER_TICK);
+            // Persist so we resume from the new cursor even if a later chunk
+            // fails.
+            let _ = save_folder_sync_state(pool, state_key, cursor, uid_validity).await;
+            if !should_continue_after_chunk(cursor, bundle.uid_next, 0) {
+                break;
+            }
+            continue;
         }
         let mut chunk_outcomes: Vec<(u32, bool)> = Vec::with_capacity(bundle.messages.len());
         for (uid, parsed) in &bundle.messages {
@@ -755,12 +801,19 @@ async fn sync_folder(
         // advance_cursor already returns the highest successful UID; on a partial chunk
         // we deliberately stay below bundle.highest_uid so the next tick retries the rest.
         cursor = chunk_last_ok;
+        // Persist the cursor after every chunk so a mid-backfill error
+        // (e.g. transient IMAP stream error) doesn't lose the progress we
+        // already made. Previously this was only saved at the very end of
+        // `sync_one`, so any chunk that failed mid-backfill reset the
+        // persisted cursor to the pre-sync value and the next app restart
+        // re-fetched (and re-failed on) the same UIDs.
+        let _ = save_folder_sync_state(pool, state_key, cursor, uid_validity).await;
         if !chunk_outcomes.iter().all(|(_, ok)| *ok) {
             // Short-circuit: don't fetch another chunk after a partial failure
             // (the cursor is already pinned to the last successful UID above).
             break;
         }
-        if (bundle.messages.len() as u32) < crate::services::imap::MAX_PER_TICK {
+        if !should_continue_after_chunk(cursor, bundle.uid_next, bundle.messages.len() as u32) {
             break;
         }
     }
@@ -1680,5 +1733,30 @@ mod tests {
         // either a brand-new account or a wiped cursor — treat as initial sync.
         assert_eq!(detect_uid_validity_change(0, 123), None);
         assert_eq!(detect_uid_validity_change(0, 0), None);
+    }
+
+    #[test]
+    fn continue_when_uid_next_known_and_more_messages_remain() {
+        // Regression for the user-reported "Imbox only shows 2022 emails"
+        // bug: with uid_next known, a partial chunk MUST NOT stop the loop
+        // as long as more UIDs exist on the server.
+        assert!(should_continue_after_chunk(1152, Some(7229), 158));
+        assert!(should_continue_after_chunk(1352, Some(7229), 42));
+        assert!(should_continue_after_chunk(7227, Some(7229), 50));
+    }
+
+    #[test]
+    fn stop_when_uid_next_known_and_cursor_at_last_uid() {
+        // Reached the last existing UID — stop even if the chunk is full.
+        assert!(!should_continue_after_chunk(7228, Some(7229), 200));
+        assert!(!should_continue_after_chunk(200, Some(201), 1));
+    }
+
+    #[test]
+    fn fallback_to_legacy_heuristic_when_uid_next_unknown() {
+        // Some servers don't expose UIDNEXT — fall back to "stop on partial".
+        assert!(should_continue_after_chunk(1152, None, 200));
+        assert!(!should_continue_after_chunk(1152, None, 158));
+        assert!(!should_continue_after_chunk(0, None, 0));
     }
 }

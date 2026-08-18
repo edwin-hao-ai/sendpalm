@@ -197,6 +197,7 @@ impl ImapClient {
             .map_err(|e| format!("select {mailbox_name} ({wire_name}): {e}"))?;
 
         let uid_validity = mailbox.uid_validity.unwrap_or(0);
+        let uid_next = mailbox.uid_next;
 
         // UID-range fetch via UID FETCH command (RFC 3501 §6.4.8); Session::fetch is
         // sequence-based and would break after any expunge (sequence ≠ UID).
@@ -236,6 +237,7 @@ impl ImapClient {
         Ok(SyncBundle {
             mailbox: mailbox_name.to_string(),
             uid_validity,
+            uid_next,
             highest_uid,
             messages,
         })
@@ -247,6 +249,7 @@ impl ImapClient {
 pub struct SyncBundle {
     pub mailbox: String,
     pub uid_validity: u32,
+    pub uid_next: Option<u32>,
     pub highest_uid: u32,
     pub messages: Vec<(u32, super::parser::ParsedMessage)>,
 }
