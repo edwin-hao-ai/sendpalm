@@ -45,12 +45,17 @@ import {
   showToast,
   refreshTick,
   softRefreshTick,
+  setView,
+  getSortMode,
+  type ViewName,
 } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { SkeletonList } from "../components/Skeleton";
 import { priorityScore } from "../utils/priority";
+import { SORT_LABELS, type SortMode } from "../utils/sort-imbox";
 import { registerPrepend } from "../services/sync-events";
+import { FilterPanel } from "../components/FilterPanel";
 
 interface Bundle {
   contactId: string;
@@ -66,6 +71,14 @@ interface Pile {
   icon: string;
   title: string;
   messages: PileMessage[];
+  /** View name to navigate to from the drawer's "Open board" button.
+   *  "focusReply" for Pending (it's the de facto Pending board), dedicated
+   *  pile board views for Saved / Remind. */
+  openBoardView: ViewName;
+  /** True when the pile's destination view is the Focus & Reply flow
+   *  (i.e. Pending) — we surface a "Focus & Reply" action button next
+   *  to the title in addition to the regular "Open board" link. */
+  hasFocusAction: boolean;
 }
 
 const BUNDLE_THRESHOLD = 3;
@@ -150,7 +163,10 @@ export function Imbox() {
     return priorityScore(m, c);
   };
 
-  // Group unread by sender for bundle detection.
+  // Group unread by sender for bundle detection. Sort honors the user's
+  // selected sort mode (default = newest first — see utils/sort-imbox.ts).
+  // Priority sort stays available as "most_relevant" for users who want
+  // HEY-style ordering.
   const renderList = createMemo<ItemList>(() => {
     const list = items()
       .filter((m) => !m.setAside && !m.replyLater)
@@ -164,7 +180,6 @@ export function Imbox() {
     }
 
     const out: Item[] = [];
-    const standalone: Message[] = [];
     for (const [pid, msgs] of bySender) {
       if (msgs.length >= BUNDLE_THRESHOLD) {
         const c = contactMap().get(pid);
@@ -173,33 +188,51 @@ export function Imbox() {
           continue;
         }
       }
-      for (const m of msgs) standalone.push(m);
+      for (const m of msgs) out.push(m);
     }
-    // Standalone messages sort by priority desc, then date desc.
-    standalone.sort(
-      (a, b) =>
-        scoreFor(b) - scoreFor(a) ||
-        new Date(b.st).getTime() - new Date(a.st).getTime(),
-    );
-    // Bundle rows interleaved by highest member priority.
-    const bundleItems = out.filter(
-      (x): x is Bundle => "messages" in x,
-    );
-    bundleItems.sort((a, b) => {
-      const sa = Math.max(...a.messages.map(scoreFor));
-      const sb = Math.max(...b.messages.map(scoreFor));
-      return sb - sa;
-    });
-    return [...bundleItems, ...standalone];
+
+    const mode = getSortMode("imbox");
+    if (mode === "most_relevant") {
+      out.sort((a, b) => {
+        const sa = "messages" in a
+          ? Math.max(...a.messages.map(scoreFor))
+          : scoreFor(a);
+        const sb = "messages" in b
+          ? Math.max(...b.messages.map(scoreFor))
+          : scoreFor(b);
+        if (sb !== sa) return sb - sa;
+        const da = "messages" in a
+          ? Math.max(...a.messages.map((m) => new Date(m.st).getTime()))
+          : new Date(a.st).getTime();
+        const db = "messages" in b
+          ? Math.max(...b.messages.map((m) => new Date(m.st).getTime()))
+          : new Date(b.st).getTime();
+        return db - da;
+      });
+    } else {
+      const timeOf = (it: Item) =>
+        "messages" in it
+          ? Math.max(...it.messages.map((m) => new Date(m.st).getTime()))
+          : new Date(it.st).getTime();
+      const dir = mode === "oldest" ? 1 : -1;
+      out.sort((a, b) => dir * (timeOf(a) - timeOf(b)));
+    }
+    return out;
   });
 
   const newForYou = createMemo<ItemList>(() => renderList());
 
   const previouslySeen = createMemo<Message[]>(() => {
+    const mode = getSortMode("imbox");
+    const dir = mode === "oldest" ? 1 : -1;
     return items()
       .filter((m) => !m.setAside && !m.replyLater)
       .filter((m) => !m.unread)
-      .sort((a, b) => new Date(b.st).getTime() - new Date(a.st).getTime());
+      .sort(
+        (a, b) =>
+          dir *
+          (new Date(a.st).getTime() - new Date(b.st).getTime()),
+      );
   });
 
   /* ── Piles (Pending / Saved / Remind) ─────────────────────────────── */
@@ -212,18 +245,24 @@ export function Imbox() {
         icon: "ph-clock",
         title: "Pending",
         messages: all.filter((m) => m.replyLater),
+        openBoardView: "focusReply",
+        hasFocusAction: true,
       },
       {
         id: "saved",
         icon: "ph-push-pin",
         title: "Saved",
         messages: all.filter((m) => m.setAside),
+        openBoardView: "setAside",
+        hasFocusAction: false,
       },
       {
         id: "remind",
         icon: "ph-arrow-fat-line-up",
         title: "Remind",
         messages: all.filter((m) => m.bubbleUpAt),
+        openBoardView: "bubbleUp",
+        hasFocusAction: false,
       },
     ];
     return all_piles.filter((p) => p.messages.length > 0);
@@ -243,6 +282,9 @@ export function Imbox() {
     setOpenBundles(next);
   };
 
+  /* ── Filter modal state ──────────────────────────────────────────── */
+
+  const [filterOpen, setFilterOpen] = createSignal(false);
   /* ── Selection (multi-select with x) ─────────────────────────────── */
 
   const [lastSelectedId, setLastSelectedId] = createSignal<string | null>(
@@ -586,6 +628,14 @@ export function Imbox() {
           await refresh();
           showToast({ message: "已刷新", kind: "info", ttlMs: 1500 });
         }}
+        onOpenFilters={() => setFilterOpen(true)}
+        activeSort={getSortMode("imbox")}
+      />
+
+      <FilterPanel
+        open={filterOpen()}
+        viewName="imbox"
+        onClose={() => setFilterOpen(false)}
       />
 
       <Show when={remindedCount() > 0}>
@@ -624,7 +674,7 @@ export function Imbox() {
             <SectionHeader
               title="New for you"
               variant="new"
-              action={{ label: "一起读", onClick: () => undefined }}
+              action={{ label: "一起读", onClick: () => setView("readTogether") }}
             />
             <For each={newForYou()}>
               {(item, i) => (
@@ -696,7 +746,13 @@ export function Imbox() {
         <Show when={piles().length > 0}>
           <div class="imbox-piles" data-imbox-piles>
             <For each={piles()}>
-              {(p) => <PileCard pile={p} onOpen={(id) => open(id)} />}
+              {(p) => (
+                <PileCard
+                  pile={p}
+                  contacts={contacts() ?? []}
+                  onOpen={(id) => open(id)}
+                />
+              )}
             </For>
           </div>
         </Show>
@@ -712,6 +768,8 @@ function ImboxHeader(props: {
   newCount: number;
   previouslySeenCount: number;
   onSync: () => void | Promise<void>;
+  onOpenFilters: () => void;
+  activeSort: SortMode;
 }) {
   return (
     <header
@@ -740,7 +798,41 @@ function ImboxHeader(props: {
       >
         {props.newCount} 待读 · {props.previouslySeenCount} 已读 · {props.total} 总数
       </span>
+      <span
+        style={{
+          "font-size": "var(--text-micro)",
+          color: "var(--text-muted)",
+          padding: "2px 8px",
+          background: "var(--paper-mid)",
+          "border-radius": "var(--radius-pill)",
+          "font-weight": "700",
+        }}
+        data-active-sort
+      >
+        {SORT_LABELS[props.activeSort]}
+      </span>
       <div style={{ flex: 1 }} />
+      <button
+        onClick={() => props.onOpenFilters()}
+        data-open-filters
+        title="More filters"
+        aria-label="More filters"
+        style={{
+          display: "inline-flex",
+          "align-items": "center",
+          gap: "4px",
+          padding: "4px 10px",
+          background: "transparent",
+          color: "var(--text-secondary)",
+          "border-radius": "var(--radius-pill)",
+          "font-size": "var(--text-micro)",
+          "font-weight": "700",
+          border: "0.5px solid var(--border)",
+          cursor: "pointer",
+        }}
+      >
+        <Icon name="ph-sliders-horizontal" size={12} /> 筛选
+      </button>
       <button
         onClick={() => void props.onSync()}
         data-sync-now
@@ -1226,46 +1318,123 @@ function BundleCard(props: BundleCardProps) {
 
 /* ── Pile card ──────────────────────────────────────────────────────── */
 
-function PileCard(props: { pile: Pile; onOpen: (id: string) => void }) {
+function PileCard(props: {
+  pile: Pile;
+  contacts: Contact[];
+  onOpen: (id: string) => void;
+}) {
+  // Default collapsed — matches prototype §renderImboxPile (line 2993:
+  // `state.expandedPile === pileId` is false on first render).
+  const [expanded, setExpanded] = createSignal(false);
+  const toggle = (ev: MouseEvent) => {
+    const target = ev.target as HTMLElement;
+    if (target.closest(".pile-drawer-row, .pile-drawer-action, button")) return;
+    setExpanded((v) => !v);
+  };
+
+  const contactMap = createMemo<Map<string, Contact>>(() => {
+    const map = new Map<string, Contact>();
+    for (const c of props.contacts) map.set(c.id, c);
+    return map;
+  });
+
+  const previewRows = createMemo(() => props.pile.messages.slice(0, 5));
+
   return (
     <div
-      class="imbox-pile"
+      class={"imbox-pile" + (expanded() ? " expanded" : "")}
       data-pile={props.pile.id}
-      onClick={(ev) => {
-        const target = ev.target as HTMLElement;
-        if (target.closest(".imbox-pile-row")) return;
-        // No-op: clicking the pile header itself shouldn't navigate anywhere.
-      }}
+      data-expanded={expanded() ? "true" : "false"}
+      onClick={toggle}
     >
       <div class="imbox-pile-header">
         <Icon name={props.pile.icon} size={12} />
-        <span>{props.pile.title}</span>
+        <span class="imbox-pile-title">{props.pile.title}</span>
         <span class="imbox-pile-count">{props.pile.messages.length}</span>
-      </div>
-      <div class="imbox-pile-list">
-        <For each={props.pile.messages.slice(0, 3)}>
-          {(m) => (
-            <div
-              class="imbox-pile-row"
-              data-pile-row={m.id}
-              onClick={() => props.onOpen(m.id)}
-            >
-              {m.subj || "(无主题)"}
-            </div>
-          )}
-        </For>
-        <Show when={props.pile.messages.length > 3}>
-          <div
-            class="imbox-pile-row"
-            style={{
-              color: "var(--text-muted)",
-              "font-style": "italic",
+        <Show when={props.pile.hasFocusAction}>
+          <button
+            type="button"
+            class="imbox-pile-focus-btn"
+            data-pile-focus-btn
+            title="Focus & Reply (o)"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              setView(props.pile.openBoardView);
             }}
           >
-            + {props.pile.messages.length - 3} 更多…
-          </div>
+            <Icon name="ph-target" size={12} />
+            <span>Focus & Reply</span>
+          </button>
         </Show>
       </div>
+
+      <Show when={expanded()}>
+        <div class="pile-drawer" data-pile-drawer>
+          <For each={previewRows()}>
+            {(m) => {
+              const c = contactMap().get(m.pid);
+              return (
+                <div
+                  class="pile-drawer-row"
+                  data-pile-drawer-row={m.id}
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    props.onOpen(m.id);
+                  }}
+                >
+                  <div class="pile-drawer-avatar">
+                    {(c?.name ?? "?").charAt(0).toUpperCase()}
+                  </div>
+                  <div class="pile-drawer-body">
+                    <div class="pile-drawer-subj">
+                      {m.subj || "(无主题)"}
+                    </div>
+                    <div class="pile-drawer-from">
+                      {c?.name ?? m.pid}
+                    </div>
+                  </div>
+                  <span class="pile-drawer-time">{m.tm}</span>
+                </div>
+              );
+            }}
+          </For>
+          <Show when={props.pile.messages.length > 5}>
+            <div
+              class="pile-drawer-more"
+              data-pile-drawer-more
+            >
+              + {props.pile.messages.length - 5} more
+            </div>
+          </Show>
+          <div class="pile-drawer-actions">
+            <Show when={props.pile.hasFocusAction}>
+              <button
+                type="button"
+                class="pile-drawer-action pile-focus-btn"
+                data-pile-focus-drawer
+                onClick={(ev) => {
+                  ev.stopPropagation();
+                  setView(props.pile.openBoardView);
+                }}
+              >
+                <Icon name="ph-target" size={12} />
+                <span>Focus & Reply</span>
+              </button>
+            </Show>
+            <button
+              type="button"
+              class="pile-drawer-action pile-board-btn"
+              data-pile-open-board
+              onClick={(ev) => {
+                ev.stopPropagation();
+                setView(props.pile.openBoardView);
+              }}
+            >
+              Open {props.pile.title} board
+            </button>
+          </div>
+        </div>
+      </Show>
     </div>
   );
 }
