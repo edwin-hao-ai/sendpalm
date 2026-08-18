@@ -29,6 +29,9 @@ export type ViewName =
   | "agent"
   | "focusReply"
   | "readTogether"
+  | "replyLater"
+  | "setAside"
+  | "bubbleUp"
   | "onboarding";
 
 export type ContactTab =
@@ -58,6 +61,38 @@ export const [view, setView] = createSignal<ViewName>("imbox");
 export const [previousView, setPreviousView] = createSignal<ViewName | null>(
   null,
 );
+
+/** Per-view sort mode for list views (Imbox and friends).
+ *  Defaults to "newest" — prototype-v11.js:442 (`const sort = f.sort || 'newest'`).
+ *  The user can flip to "oldest" or "most_relevant" from the More Filters modal.
+ *  Lives in a plain signal (not persisted to disk) so it resets to default per
+ *  session — matches the prototype, which keeps filters in-memory too.
+ */
+import { DEFAULT_SORT, type SortMode } from "../utils/sort-imbox";
+
+const SORTABLE_VIEWS = new Set<ViewName>([
+  "imbox",
+  "feed",
+  "paperTrail",
+  "trash",
+  "spam",
+  "replyLater",
+  "setAside",
+  "bubbleUp",
+]);
+
+export const [sortMode, setSortMode] = createSignal<
+  Record<string, SortMode>
+>({});
+
+export function getSortMode(viewName: ViewName): SortMode {
+  if (!SORTABLE_VIEWS.has(viewName)) return DEFAULT_SORT;
+  return sortMode()[viewName] ?? DEFAULT_SORT;
+}
+
+export function updateSortMode(viewName: ViewName, mode: SortMode): void {
+  setSortMode((prev) => ({ ...prev, [viewName]: mode }));
+}
 
 export const [selectedContactId, setSelectedContactId] =
   createSignal<ID | null>(null);

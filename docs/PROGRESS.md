@@ -1752,3 +1752,34 @@ Two follow-up commits completing the performance series.
 | `pnpm typecheck` | ✅ |
 | `pnpm test` | ✅ 156 passed |
 | `cargo test --lib` | ✅ 29 passed |
+
+## 2026-08-18 (Imbox UX fixes) — sort filter, Read Together wiring, pile drawer redesign
+
+Three user-reported gaps in the Imbox surface, all closed in one branch.
+
+### Fixed in this pass
+
+- **"一起读" button now opens Read Together**: the New for you section header's action was wired to a literal `() => undefined` no-op. Now calls `setView("readTogether")` so the existing `ReadTogether` view actually opens.
+- **Imbox default sort is now newest first**: the previous implementation sorted "New for you" by `priorityScore` only (date as a tiebreaker), which let high-score OLD unread block new mail from lower-score senders — the prototype defaults to `const sort = f.sort || 'newest'` (`js/prototype-v11.js:442`) and only sorts by priority when the user explicitly picks "Most relevant". Added a `FilterPanel` modal mirroring the prototype's `renderFilterPanelBody` (sort dropdown + Unread only toggle); Imbox header gets a "筛选" button and an active-sort badge. Users can still opt into `most_relevant` from the modal.
+- **Bottom pile bar matches the prototype**: Pending / Saved / Remind piles are now collapsed by default — the prototype's `renderImboxPile` (`js/prototype-v11.js:2992-3049`) keeps them collapsed and pops a drawer on header click. The previous implementation always rendered up to 3 messages inline and dominated the sticky-bottom area. New behavior:
+  - Default collapsed; click header expands a popup drawer above the pile (`position: absolute; bottom: calc(100% + 8px)`) with the same fan-in animation the prototype uses.
+  - Pending pile shows a "Focus & Reply" pill button next to its title and inside the drawer — both navigate to the existing `focusReply` view (HEY-style distraction-free reply flow).
+  - Every pile drawer ends with an "Open <title> board" link to a dedicated full-page view. Pending reuses `focusReply`; Saved and Remind now have dedicated `setAside` / `bubbleUp` views via the new generic `PileBoard` component.
+- **New PileBoard view**: single component handles all three pile IDs (`replyLater` / `setAside` / `bubbleUp`) by reusing `usePaginatedMessages` with three new WHERE filters (`replyLaterOnly` / `setAsideOnly` / `bubbleUpOnly`) on `listMessagesPaged` — no new SQL, no extra round-trips.
+- **Command palette + view routing**: `⌘K` now exposes Go to Pending / Saved / Remind / Focus & Reply; `Main.tsx` Switch routes the three new views. `PileMessage` carries `pid`/`tm`/`st` so the drawer rows render avatar + sender + time without re-fetching the contact table.
+- **Sort regression test**: `sort-imbox.test.ts` includes the specific user-reported scenario — an old VIP unread (180 days, score ≈ 42.75) must NOT out-rank a new cold unread (today, score ≈ −12.5) under the default newest-first sort.
+
+### Verification matrix
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | ✅ |
+| `pnpm test` | ✅ 187 passed (was 181; +6 sort cases) |
+| `pnpm build` | ✅ |
+| `cargo check` | ✅ no Rust changes |
+| `pnpm lint` | �️ 4 pre-existing e2e errors not touched by this branch |
+
+### Commits
+
+- `d4f0b7b` `fix(imbox): default newest-first sort + wire 一起读 button`
+- `22c2a6d` `feat(imbox): collapsible pile drawer, Focus & Reply, Open board`
