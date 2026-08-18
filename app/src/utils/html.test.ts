@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeEmailHtml, analyzeImages } from "./html";
+import { sanitizeEmailHtml, analyzeImages, emailBodyPreview } from "./html";
 
 describe("sanitizeEmailHtml", () => {
   it("strips <script> blocks", () => {
@@ -83,6 +83,30 @@ describe("sanitizeEmailHtml", () => {
     expect(result).toContain('href="https://example.com"');
     expect(result).toContain('target="_blank"');
     expect(result).toContain('rel="noopener noreferrer"');
+  });
+});
+
+describe("emailBodyPreview", () => {
+  it("returns sanitized HTML when bodyHtml is present", () => {
+    const bodyHtml = `<p>Hello <b>Gate</b></p><script>alert(1)</script>`;
+    const result = emailBodyPreview("plain fallback", bodyHtml);
+    expect(result).toContain("<p>Hello <b>Gate</b></p>");
+    expect(result).not.toContain("<script");
+    expect(result).not.toContain("alert(1)");
+  });
+
+  it("falls back to escaped linked plain text when bodyHtml is absent", () => {
+    const body = "Line one\nLine two\nVisit https://example.com";
+    const result = emailBodyPreview(body);
+    expect(result).toContain("Line one<br>Line two<br>Visit");
+    expect(result).toContain('<a href="https://example.com"');
+    expect(result).not.toContain("\n");
+  });
+
+  it("treats whitespace-only bodyHtml as absent", () => {
+    const body = "plain";
+    const result = emailBodyPreview(body, "   ");
+    expect(result).toBe("plain");
   });
 });
 

@@ -111,6 +111,16 @@ export function plainTextToHtml(text: string): string {
   return withLinks;
 }
 
+/** Render a message body for short-form previews (Gate card, list rows, etc.).
+ *  Prefers the sanitized HTML body; falls back to escaped, linkified plain text.
+ */
+export function emailBodyPreview(body: string, bodyHtml?: string | null): string {
+  if (bodyHtml?.trim()) {
+    return sanitizeEmailHtml(bodyHtml);
+  }
+  return plainTextToHtml(body);
+}
+
 /** Build a self-contained srcdoc for an isolated iframe rendering a sanitized
  *  email body. Used by MessagePanel (right-side detail) and Stream (inline
  *  card expand). The click interceptor posts a message up to the parent so

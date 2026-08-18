@@ -95,6 +95,14 @@ svg {
   max-width: 100%;
 }
 
+/* External images in direct innerHTML previews are hidden by default until the
+ * user chooses to show images (tracked pixels / privacy). The iframe srcdoc
+ * used by MessagePanel has its own copy; this rule covers Gate and other
+ * direct innerHTML render paths. */
+.sp-img-hidden {
+  display: none !important;
+}
+
 hr {
   border: 0;
   border-top: 0.5px solid var(--border);

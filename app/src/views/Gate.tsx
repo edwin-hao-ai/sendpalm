@@ -10,6 +10,8 @@ import {
   upsertContact,
   updateMessagesBucketByContact,
 } from "../stores/data";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { emailBodyPreview } from "../utils/html";
 
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
@@ -28,6 +30,16 @@ const BUCKETS: { id: MessageBucket; label: string; icon: string }[] = [
 export function Gate() {
   const [queueItems, { refetch: refetchQueue }] = createResource(listGateQueue);
   const { isMobile } = useViewport();
+
+  const handleBodyClick = (e: MouseEvent) => {
+    const target = e.target as HTMLElement | null;
+    const a = target?.closest?.("a[href]") as HTMLAnchorElement | null;
+    if (!a) return;
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openUrl(a.href).catch(() => {});
+  };
 
   let initialHardRefresh = true;
   useRefreshEffect(() => {
@@ -247,19 +259,20 @@ export function Gate() {
                   >
                     {m().subj}
                   </strong>
-                  <p
+                  <div
+                    onClick={handleBodyClick}
                     style={{
                       "margin-top": "var(--space-2)",
                       "font-size": "var(--text-body-sm)",
                       color: "var(--text-secondary)",
                       "line-height": 1.5,
-                      "white-space": "pre-wrap",
                       "overflow-wrap": "anywhere",
                       "word-break": "break-word",
+                      "max-height": "240px",
+                      "overflow-y": "auto",
                     }}
-                  >
-                    {m().body}
-                  </p>
+                    innerHTML={emailBodyPreview(m().body, m().bodyHtml)}
+                  />
                 </div>
 
                 <div
