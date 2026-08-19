@@ -90,7 +90,11 @@ export function MessagePanel(props: { messageId: string }) {
     },
     async (key) => {
       if (!key) return [];
-      const list = await listThreadMessages({ ...key, lightweight: true });
+      // Pull full body — thread messages default to expanded (≤3) and
+      // a missing body on the older sibling would blank the rendered
+      // view. Threads are short by design so the extra bytes per row
+      // are negligible compared to the message-panel scoped queries.
+      const list = await listThreadMessages({ ...key, lightweight: false });
       // For the no-threadId case the SQL can't filter by
       // baseSubject() (no normalised-subject column yet). Filter in
       // TS against a much smaller set — only the same sender, not
@@ -337,9 +341,14 @@ export function MessagePanel(props: { messageId: string }) {
       action: {
         label: "撤销",
         run: async () => {
+          // Fetch the fresh row — `m` was captured before the trash write,
+          // so it still has the pre-trash deletedAt; using it as the
+          // upsert base would persist trash's deletedAt back onto the
+          // message and silently hide it from list views that filter on
+          // deleted_at IS NULL.
           const current = await getMessage(m.id);
           if (!current) return;
-          await upsertMessage({ ...current, bucket: previousBucket });
+          await upsertMessage({ ...current, bucket: previousBucket, deletedAt: null });
           // (no local list to refresh — global bumpRefreshTick below covers other views)
           bumpRefreshTick();
           showToast({ message: "已恢复到原位置", kind: "success" });
