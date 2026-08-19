@@ -17,16 +17,20 @@ because the corresponding real backend isn't built yet. There are no
 "half-wired" features hiding behind a `showToast` admission-of-defeat — those
 were all removed in earlier cleanup rounds.
 
-| # | Severity | Area | Symptom |
-|---|---|---|---|
-| B1 | **HIGH** | Insights | "Replied (last 30 days)" card returns read-inbox count, not reply time |
-| B2 | **HIGH** | Files | PRD §3.6 advanced filters (date / sender / size) are not in the UI |
-| B3 | MEDIUM | Imbox | `const _placeholder = getMessage` dead-code hack |
-| A1 | LOW (deferred M10) | Agent | "（M6 接入真实 LLM）" hardcoded response in `useAgent.sendChat` |
-| A2 | LOW (deferred M6/M10) | Settings | "M6 实装" / "M10 实装" copy in Agent / IM accounts tabs |
-| A3 | LOW (misleading) | Onboarding | Shows "IMAP IDLE" but actually polls every 60s |
-| C1 | LOW (perf) | Topbar | Two 10-second `setInterval`s for state that has a push event |
-| C2 | LOW (perf) | FollowUps, Insights, Companies, Files | Still use full-table `listMessages`/`listContacts`/`listEvents`/`listFiles` |
+> **Update 2026-08-19** — B1, B2, B3, and A3 were fixed in branch
+> `fix/insights-fs-onboarding` (commits `706825b` `989e865` `4c6e230` `0a44d5e`,
+> pushed to origin, 233 tests passing). A1/A2/C1/C2 remain open.
+
+| # | Severity | Area | Symptom | Status |
+|---|---|---|---|---|
+| B1 | **HIGH** | Insights | "Replied (last 30 days)" card returns read-inbox count, not reply time | ✅ fixed in `0a44d5e` |
+| B2 | **HIGH** | Files | PRD §3.6 advanced filters (date / sender / size) are not in the UI | ✅ fixed in `4c6e230` |
+| B3 | MEDIUM | Imbox | `const _placeholder = getMessage` dead-code hack | ✅ fixed in `706825b` |
+| A1 | LOW (deferred M10) | Agent | "（M6 接入真实 LLM）" hardcoded response in `useAgent.sendChat` | ⏳ M10 |
+| A2 | LOW (deferred M6/M10) | Settings | "M6 实装" / "M10 实装" copy in Agent / IM accounts tabs | ⏳ M10 |
+| A3 | LOW (misleading) | Onboarding | Shows "IMAP IDLE" but actually polls every 60s | ✅ fixed in `989e865` |
+| C1 | LOW (perf) | Topbar | Two 10-second `setInterval`s for state that has a push event | ⏳ P2 backlog |
+| C2 | LOW (perf) | FollowUps, Insights, Companies, Files | Still use full-table `listMessages`/`listContacts`/`listEvents`/`listFiles` | ⏳ P2 backlog |
 | D1 | N/A (by design) | Spam | Manual bucket only; no auto-classification (M10 backend) |
 
 ---
