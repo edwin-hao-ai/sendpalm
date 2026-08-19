@@ -143,6 +143,49 @@ export function sameDate(a: Date, b: Date): boolean {
   );
 }
 
+/** Group emails into date buckets for the Imbox tabs. The keys are
+ *  stable across renders (same date → same key) so SolidJS For can
+ *  reuse DOM nodes. Use `bucketLabel()` for the user-facing string. */
+export type DateBucketKey =
+  | "today"
+  | "yesterday"
+  | "this-week"
+  | "this-month"
+  | { kind: "month"; year: number; month: number };
+
+export function dateBucket(iso: string, now: Date = new Date()): DateBucketKey {
+  const d = new Date(iso);
+  if (sameDate(d, now)) return "today";
+  const yest = new Date(now);
+  yest.setDate(now.getDate() - 1);
+  if (sameDate(d, yest)) return "yesterday";
+  if (d >= startOfWeek(now)) return "this-week";
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()) {
+    return "this-month";
+  }
+  return { kind: "month", year: d.getFullYear(), month: d.getMonth() };
+}
+
+/** Human label for a DateBucketKey. Localised Chinese labels for the
+ *  "today/yesterday/this-week/this-month" cases; older months use the
+ *  Intl.DateTimeFormat zh-CN "long month" form (e.g. "2026年7月"). */
+export function bucketLabel(bucket: DateBucketKey, now: Date = new Date()): string {
+  if (bucket === "today") return "今天";
+  if (bucket === "yesterday") return "昨天";
+  if (bucket === "this-week") return "本周早些";
+  if (bucket === "this-month") return "本月早些";
+  const d = new Date(bucket.year, bucket.month, 1);
+  const sameYear = d.getFullYear() === now.getFullYear();
+  const m = new Intl.DateTimeFormat("zh-CN", {
+    year: sameYear ? undefined : "numeric",
+    month: "long",
+  }).format(d);
+  // For same-year buckets, strip the year prefix the formatter adds
+  // (e.g. "2026年1月" → "1月"); cross-year buckets keep the year.
+  if (!sameYear) return m;
+  return m.replace(/^\d+\s*年/, "").trim();
+}
+
 export function timeToMinutes(tm: string): number {
   const parts = tm.split(":").map(Number);
   const h = parts[0] ?? 0;
