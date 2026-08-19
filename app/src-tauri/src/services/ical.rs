@@ -41,8 +41,23 @@ pub struct IcalEvent {
     /// Attendees as their MAILTO values. For a REPLY message this is
     /// typically a single entry: the responder.
     pub attendees: Vec<String>,
+    /// Per-attendee PARTSTAT extracted from the ATTENDEE lines. Populated
+    /// for any method; empty for events where the source didn't carry
+    /// PARTSTAT. The first entry typically corresponds to the message's
+    /// author (the responder in a REPLY).
+    pub attendee_responses: Vec<AttendeeResponse>,
     /// SEQUENCE number from the VEVENT. Used to detect updates.
     pub sequence: Option<u32>,
+}
+
+/// One (email, partstat) pair parsed from an ATTENDEE line.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AttendeeResponse {
+    pub email: String,
+    /// RFC 5545 §3.2.12 partstat: ACCEPTED, DECLINED, TENTATIVE,
+    /// NEEDS-ACTION, DELEGATED. Empty string when the ATTENDEE line had
+    /// no PARTSTAT (a REQUEST invite typically does; a REPLY must).
+    pub partstat: String,
 }
 
 /// Parse an iCalendar text body. Returns the first VEVENT found, or `None`.
@@ -119,6 +134,7 @@ pub fn parse_vevent(ics: &str) -> Option<IcalEvent> {
     let mut description = None;
     let mut organizer: Option<String> = None;
     let mut attendees: Vec<String> = Vec::new();
+    let mut attendee_responses: Vec<AttendeeResponse> = Vec::new();
     let mut sequence: Option<u32> = None;
 
     for line in lines {
@@ -154,10 +170,18 @@ pub fn parse_vevent(ics: &str) -> Option<IcalEvent> {
             }
             "ATTENDEE" => {
                 // ATTENDEE;CN=Bob;RSVP=TRUE:mailto:bob@example.com
+                // ATTENDEE;CN=Bob;PARTSTAT=ACCEPTED:mailto:bob@example.com
                 let addr = extract_mailto(&value);
-                if !addr.is_empty() {
-                    attendees.push(addr);
+                if addr.is_empty() {
+                    continue;
                 }
+                attendees.push(addr.clone());
+                let partstat = extract_param(&name_and_params, "PARTSTAT")
+                    .unwrap_or_default();
+                attendee_responses.push(AttendeeResponse {
+                    email: addr,
+                    partstat,
+                });
             }
             "SEQUENCE" => {
                 if let Ok(n) = value.trim().parse::<u32>() {
@@ -188,6 +212,7 @@ pub fn parse_vevent(ics: &str) -> Option<IcalEvent> {
         method,
         organizer,
         attendees,
+        attendee_responses,
         sequence,
     })
 }
@@ -550,6 +575,11 @@ END:VCALENDAR\r\n";
         assert_eq!(ev.organizer.as_deref(), Some("alice@example.com"));
         assert_eq!(ev.attendees, vec!["bob@example.com", "carol@example.com"]);
         assert_eq!(ev.sequence, Some(0));
+        // REQUEST invites don't carry PARTSTAT — both ATTENDEE rows
+        // have empty partstat fields.
+        for ar in &ev.attendee_responses {
+            assert_eq!(ar.partstat, "", "REQUEST attendee has no partstat");
+        }
     }
 
     #[test]
@@ -665,6 +695,52 @@ END:VCALENDAR\r\n";
         let ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20260101T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         let original = parse_vevent(ics).unwrap();
         assert!(build_itip_reply(&original, "me@example.com", RsvpStatus::Accepted).is_none());
+    }
+
+    #[test]
+    fn parses_attendee_partstat_in_reply() {
+        // A REPLY message has exactly one ATTENDEE line carrying the
+        // responder's PARTSTAT. The parser must surface both the email
+        // AND the partstat so the sync loop can record the response.
+        let ics = "BEGIN:VCALENDAR\r\n\
+METHOD:REPLY\r\n\
+BEGIN:VEVENT\r\n\
+UID:meeting-42\r\n\
+SUMMARY:Design review\r\n\
+DTSTART:20260101T100000Z\r\n\
+ORGANIZER:mailto:boss@example.com\r\n\
+ATTENDEE;CN=Bob;PARTSTAT=ACCEPTED;RSVP=TRUE:mailto:bob@example.com\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let ev = parse_vevent(ics).unwrap();
+        assert_eq!(ev.method.as_deref(), Some("REPLY"));
+        assert_eq!(ev.attendees, vec!["bob@example.com"]);
+        assert_eq!(ev.attendee_responses.len(), 1);
+        let ar = &ev.attendee_responses[0];
+        assert_eq!(ar.email, "bob@example.com");
+        assert_eq!(ar.partstat, "ACCEPTED");
+    }
+
+    #[test]
+    fn parses_multiple_attendee_partstats() {
+        // Rare for REPLY but possible for forwarding scenarios or
+        // when an organizer delegates one attendee's response to
+        // another. The parser keeps them in order.
+        let ics = "BEGIN:VCALENDAR\r\n\
+METHOD:REPLY\r\n\
+BEGIN:VEVENT\r\n\
+UID:meeting-43\r\n\
+SUMMARY:Multi\r\n\
+DTSTART:20260101T100000Z\r\n\
+ORGANIZER:mailto:boss@example.com\r\n\
+ATTENDEE;PARTSTAT=DECLINED:mailto:bob@example.com\r\n\
+ATTENDEE;PARTSTAT=TENTATIVE:mailto:carol@example.com\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let ev = parse_vevent(ics).unwrap();
+        assert_eq!(ev.attendee_responses.len(), 2);
+        assert_eq!(ev.attendee_responses[0].partstat, "DECLINED");
+        assert_eq!(ev.attendee_responses[1].partstat, "TENTATIVE");
     }
 
     #[test]
