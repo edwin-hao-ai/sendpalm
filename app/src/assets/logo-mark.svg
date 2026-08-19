@@ -1,24 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="SendPalm mark">
-  <!-- Compact mark for use inside headers / chrome.
-       Same paper-plane + palm-leaf composition as the full logo,
-       transparent background so it inherits the surrounding surface color. -->
-
-  <!-- paper plane -->
-  <g transform="translate(64 70)">
-    <path d="M-38 -3 L46 -28 L20 18 L6 4 L-38 -3 Z M6 4 L20 18"
-          fill="#0a8f63" stroke="#0a8f63" stroke-width="1.6"
-          stroke-linejoin="round" stroke-linecap="round"/>
-    <path d="M-50 10 L-32 10 M-50 18 L-38 18 M-50 26 L-44 26"
-          stroke="#0a8f63" stroke-width="2.2" stroke-linecap="round" stroke-opacity="0.55"/>
-  </g>
-
-  <!-- palm leaf -->
-  <g transform="translate(96 32) rotate(22)">
-    <path d="M0 22 Q14 8 36 -8" stroke="#0cb87d" stroke-width="2"
-          stroke-linecap="round" fill="none"/>
-    <path d="M36 -8 Q28 -18 20 -12 Q28 -8 36 -8 Z" fill="#0cb87d"/>
-    <path d="M28 -2 Q18 -10 14 -2 Q24 -2 28 -2 Z" fill="#0cb87d" transform="translate(0 4)"/>
-    <path d="M20 6 Q10 0 8 8 Q18 8 20 6 Z" fill="#0cb87d" transform="translate(0 8)"/>
-  </g>
+<!--
+  SendPalm mark (32 viewBox, transparent background)
+  Used by the topbar (BrandMark.tsx) and any other inline embed.
+  Exact mirror of the prototype-v11 topbar-logo-mark:
+    - 26px-ish rounded green plate (rx 7)
+    - Phosphor paper-plane-tilt, white
+    - Canary dot in the top-right with a 1.5px white border
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="SendPalm mark">
+  <rect x="0" y="0" width="32" height="32" rx="7" fill="#0a8f63"/>
+  <svg x="6" y="6" width="20" height="20" viewBox="0 0 256 256">
+    <path d="M231.4,44.34s0,.1,0,.15l-58.2,191.94a15.88,15.88,0,0,1-14,11.51q-.69.06-1.38.06a15.86,15.86,0,0,1-14.42-9.15L107,164.15a4,4,0,0,1,.77-4.58l57.92-57.92a8,8,0,0,0-11.31-11.31L96.43,148.26a4,4,0,0,1-4.58.77L17.08,112.64a16,16,0,0,1,2.49-29.8l191.94-58.2.15,0A16,16,0,0,1,231.4,44.34Z" fill="#ffffff"/>
+  </svg>
+  <circle cx="25" cy="5" r="4" fill="#fff5ca" stroke="#ffffff" stroke-width="1.2"/>
 </svg>
