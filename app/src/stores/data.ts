@@ -335,6 +335,10 @@ function rowToEvent(r: Record<string, unknown>): CalendarEvent {
     organizerEmail: (r.organizer_email as string | undefined) ?? undefined,
     attendeeResponse: (r.attendee_response as CalendarEvent["attendeeResponse"]) ?? undefined,
     attendeeResponseAt: (r.attendee_response_at as string | undefined) ?? undefined,
+    attendeeResponses: safeParse<CalendarEvent["attendeeResponses"]>(
+      r.attendee_responses_json as string,
+      {},
+    ),
   };
 }
 

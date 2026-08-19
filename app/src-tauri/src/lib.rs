@@ -137,6 +137,12 @@ pub fn run() {
             sql: include_str!("../migrations/0018_calendar_rsvp.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 19,
+            description: "attendee_responses_json",
+            sql: include_str!("../migrations/0019_attendee_responses.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     eprintln!("[sendpalm] starting tauri builder");

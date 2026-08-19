@@ -190,12 +190,22 @@ export interface IcalEvent {
   /** Attendee email list, mailto: stripped. For REPLY messages this is
    *  typically the single responder. */
   attendees?: string[];
+  /** Per-attendee PARTSTAT extracted from ATTENDEE lines. For a REPLY
+   *  message this carries the responder's choice (e.g. ACCEPTED). */
+  attendeeResponses?: { email: string; partstat: string }[];
   /** SEQUENCE number — used to detect updates from the organizer. */
   sequence?: number;
 }
 
 /** RSVP partstat value (RFC 5545 §3.2.12). */
 export type RsvpStatus = "ACCEPTED" | "DECLINED" | "TENTATIVE" | "NEEDS-ACTION" | "DELEGATED";
+
+/** One row in the per-attendee response map. */
+export interface AttendeeResponseEntry {
+  partstat: RsvpStatus | string;
+  /** ISO 8601 timestamp when the response was recorded. */
+  at: string;
+}
 
 /* ── File ──────────────────────────────────────────── */
 
@@ -272,6 +282,10 @@ export interface CalendarEvent {
   /** Last RSVP the local user sent back to the organizer. */
   attendeeResponse?: RsvpStatus;
   attendeeResponseAt?: string;
+  /** Per-attendee RSVP map for invites the user is organizing.
+   *  Keyed by attendee email. Populated by the sync loop when an
+   *  incoming REPLY message is processed. */
+  attendeeResponses?: Record<string, AttendeeResponseEntry>;
 }
 
 /* ── Task ──────────────────────────────────────────── */

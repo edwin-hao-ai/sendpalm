@@ -74,6 +74,7 @@ fn sample_invite() -> sendpalm_app_lib::services::ical::IcalEvent {
         method: Some("REQUEST".to_string()),
         organizer: Some("noreply@example.com".to_string()),
         attendees: vec![],
+        attendee_responses: vec![],
         sequence: Some(0),
     }
 }

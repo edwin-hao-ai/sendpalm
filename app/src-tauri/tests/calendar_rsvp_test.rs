@@ -192,6 +192,7 @@ async fn cancel_for_unknown_uid_returns_empty() {
         method: Some("CANCEL".to_string()),
         organizer: None,
         attendees: vec![],
+        attendee_responses: vec![],
         sequence: Some(0),
     };
     let r = upsert_calendar_event(&pool, &cancel, None).await.unwrap();

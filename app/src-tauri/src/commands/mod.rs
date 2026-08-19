@@ -462,6 +462,7 @@ pub async fn respond_to_calendar_invite(
         method: Some("REPLY".to_string()),
         organizer: Some(organizer.clone()),
         attendees: Vec::new(),
+        attendee_responses: Vec::new(),
         sequence: seq.map(|n| n as u32),
     };
 
