@@ -11,7 +11,7 @@ use crate::services::providers;
 use crate::services::vault;
 use crate::services::{load_test_credentials, EmailCredentials};
 use lettre::message::Mailbox;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePool};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -1633,8 +1633,23 @@ pub async fn open_pool() -> Result<SqlitePool, String> {
     let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", path.display()))
         .map_err(|e| format!("parse db url: {e}"))?
         .create_if_missing(true)
-        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
-    SqlitePool::connect_with(opts)
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+        // 5s busy timeout: if a writer holds the lock, wait up to 5s
+        // before returning SQLITE_BUSY. The default is 0 (immediate
+        // failure), which means concurrent writers fail spuriously even
+        // though one would have released its lock milliseconds later.
+        .busy_timeout(Duration::from_secs(5));
+    // max_connections(8) is the actual fix for the freeze. With the
+    // default 1 connection, the IMAP sync loop's long write transaction
+    // (a chunk of 200 UIDs takes seconds on the Feishu account) holds
+    // the only connection — every frontend read (topbar polls, message
+    // click, scroll-driven queries) blocks on the same connection,
+    // even though WAL would allow concurrent readers in a separate
+    // SQLite session. With 8 connections, sync keeps one, the rest are
+    // free for IPC handlers. Tweak up if load grows.
+    SqlitePoolOptions::new()
+        .max_connections(8)
+        .connect_with(opts)
         .await
         .map_err(|e| format!("connect db: {e}"))
 }
