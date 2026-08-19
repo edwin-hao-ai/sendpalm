@@ -29,8 +29,8 @@ were all removed in earlier cleanup rounds.
 | A1 | LOW (deferred M10) | Agent | "（M6 接入真实 LLM）" hardcoded response in `useAgent.sendChat` | ⏳ M10 |
 | A2 | LOW (deferred M6/M10) | Settings | "M6 实装" / "M10 实装" copy in Agent / IM accounts tabs | ⏳ M10 |
 | A3 | LOW (misleading) | Onboarding | Shows "IMAP IDLE" but actually polls every 60s | ✅ fixed in `989e865` |
-| C1 | LOW (perf) | Topbar | Two 10-second `setInterval`s for state that has a push event | ⏳ P2 backlog |
-| C2 | LOW (perf) | FollowUps, Insights, Companies, Files | Still use full-table `listMessages`/`listContacts`/`listEvents`/`listFiles` | ⏳ P2 backlog |
+| C1 | LOW (perf) | Topbar | Two 10-second `setInterval`s for state that has a push event | ✅ fixed in `3b6a390` |
+| C2 | LOW (perf) | FollowUps, Insights, Companies, Files | Still use full-table `listMessages`/`listContacts`/`listEvents`/`listFiles` | ✅ fixed in `46e84d4` / `6c62b6f` |
 | D1 | N/A (by design) | Spam | Manual bucket only; no auto-classification (M10 backend) |
 
 ---
