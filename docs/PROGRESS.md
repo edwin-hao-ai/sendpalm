@@ -1783,3 +1783,115 @@ Three user-reported gaps in the Imbox surface, all closed in one branch.
 
 - `d4f0b7b` `fix(imbox): default newest-first sort + wire 一起读 button`
 - `22c2a6d` `feat(imbox): collapsible pile drawer, Focus & Reply, Open board`
+
+## 2026-08-18 — Brand + view-health fixes (splash, topbar, error/empty states)
+
+Two parallel audits (brand, view health) found one P0 and several P1/P2
+gaps across the launch surface, the topbar, and 22 views. All P0/P1
+items addressed; a handful of complex views deferred to follow-up.
+
+### Fixed in this pass
+
+**Brand & launch (P0/P1)**
+- `BrandMark.tsx` no longer renders a stock Phosphor `ph-leaf`. The
+  topbar now shows the bespoke `logo-mark.svg` (paper-plane + palm)
+  at 22×22, matching the splash and the Tauri bundle icons. The
+  unused `Icon` import is gone.
+- `index.html` had a duplicate `body.app-ready #splash { opacity: 0; pointer-events: none }`
+  rule. The first wins, the second is dead; deleted.
+- `index.html` `color-scheme` is now `dark` so the iOS status bar
+  matches the deep-palm splash background.
+- Splash `<img>` for `logo.svg` got an `onerror` fallback that hides
+  itself if the asset fails to fetch, so the rest of the splash still
+  renders.
+
+**Settings (P1)**
+- `Settings.tsx` AccountsTab and ShortcutsTab had `For each={...() ?? []}`
+  with NO fallback. A fresh install hit empty Connected accounts and
+  zero shortcut rows with nothing to click. Both now render an
+  `<Empty .../>` above the For loop; AccountsTab's CTA reuses the
+  same `setAdding(true)` handler that the existing 'Add account'
+  button uses.
+
+**Records (P2)**
+- Removed the unwired "导出为 CSV" per-row quick action that
+  hard-coded `showToast({ message: '导出为 CSV（M7 实装）' })`.
+  It literally admitted the action wasn't implemented (M7 = a future
+  milestone). Anyone clicking it got a toast and nothing else, which
+  is worse than not having the button.
+
+**ResourceGate helper (P1, with TDD)**
+- New `app/src/components/ResourceGate.tsx` centralises the
+  `createResource` guard pattern (loading / error / empty) so views
+  stop forgetting the error check. The default predicates treat
+  arrays of length 0 as empty and any other value as non-empty;
+  override via `isEmpty` for non-list resources.
+- 7 unit tests on the pure `isResourceEmpty` predicate covering:
+  undefined / null, empty array, non-empty array, non-array values,
+  custom predicate, custom on undefined, custom on empty array.
+  Total: 194 frontend tests, 80 cargo tests.
+
+**View error fallbacks (P1) — wrapped 13 views**
+- Each of these previously showed an empty page on resource failure
+  with no error indicator. Each now wraps the existing render in a
+  `<Show>` that falls back to `<ErrorState>` with `重试` wired to
+  the resource's `refetch()`:
+  - `Stream.tsx` (paged.resource.error)
+  - `Files.tsx` (files.error)
+  - `Drafts.tsx` (drafts.error || scheduled.error)
+  - `FollowUps.tsx` (followUps.error)
+  - `Clips.tsx` (clips.error)
+  - `Contacts.tsx` (contacts.error)
+  - `Companies.tsx` (any of contacts/messages/events/files.error)
+  - `Search.tsx` (ftsResults.error)
+  - `ReadTogether.tsx` (messages.error)
+  - `FocusReply.tsx` (messages.error)
+  - `Trash.tsx` (paged.resource.error)
+  - `Spam.tsx` (paged.resource.error)
+  - `Records.tsx` (paged.resource.error)
+
+Existing bespoke Empty / Skeleton sub-components stay in place;
+the gate only adds the missing error case.
+
+### Deferred to follow-up
+
+The 2026-08-18 audit also flagged these views but their render
+graphs are too complex to wrap in a single inline Show without
+refactoring. Will be addressed in a separate pass:
+
+- **Imbox** — the main render is 14+ Show blocks; needs a deeper
+  restructure of the data flow before the gate can slot in cleanly.
+- **Gate / ScreenerHistory** — same pattern, also has nested
+  resource fetches (queueItems + contacts).
+- **Insights** — six `createResource` calls; needs an aggregate
+  error boundary rather than a per-resource check.
+- **Agent** — `useAgent` hook owns the resources, not the view;
+  the error gate belongs in the hook, not the view.
+- **Calendar** — 14+ Show blocks across two return statements.
+- **PileBoard** — already has bespoke empty/loading via
+  `SkeletonList` + `<Empty>`; the audit flagged it as
+  technically missing ErrorState but its failure mode is rare
+  (single-resource paginated loader with retry-by-restart).
+
+### Verification matrix
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | ✅ |
+| `pnpm test` | ✅ 194 passed (was 187, +7 for ResourceGate) |
+| `cargo test` | ✅ 80 passed |
+| `pnpm lint` | ⚠️ 4 pre-existing e2e errors unchanged |
+
+### Commits (this branch)
+
+- `fix(brand): topbar BrandMark uses logo-mark.svg`
+- `fix(splash): dedup CSS, color-scheme dark, logo onerror fallback`
+- `fix(records): remove unwired '导出为 CSV' placeholder button`
+- `fix(settings): add Empty fallbacks to AccountsTab and ShortcutsTab`
+- `feat(ui): ResourceGate wrapper for empty/loading/error states`
+- `fix(stream): add error fallback for paginated message resource`
+- `fix(files): error fallback for listFiles resource`
+- `fix(drafts,followups): error fallbacks for createResource views`
+- `fix(views): add error fallbacks to 8 createResource views`
+- `fix(records): error fallback for paginated message resource`
+- `docs(progress): record Brand + view-health fixes`
