@@ -157,6 +157,27 @@ export function ReadTogether() {
     }
   });
 
+  // Deferred iframe src: htmlEmailSrcdoc runs DOMPurify synchronously,
+  // blocking the main thread for 200-600ms on an 80KB HTML body. Defer
+  // the sanitize so the next-card click path (Next / n / space) doesn't
+  // stall on the previous card's iframe. Stale-closure guard cancels a
+  // slow sanitize from the previous card if the user advances again
+  // before the first one finishes.
+  const [iframeSrc, setIframeSrc] = createSignal("");
+  let pendingSanitize = 0;
+  createEffect(() => {
+    const html = current()?.bodyHtml;
+    if (!html || !html.trim()) {
+      setIframeSrc("");
+      return;
+    }
+    const myId = ++pendingSanitize;
+    setTimeout(() => {
+      if (myId !== pendingSanitize) return;
+      setIframeSrc(htmlEmailSrcdoc(html));
+    }, 0);
+  });
+
   const handleKey = (e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
     if (tag === "input" || tag === "textarea") return;
@@ -357,7 +378,7 @@ export function ReadTogether() {
               <iframe
                 data-render-mode="html"
                 title={`Message body: ${current()!.subj}`}
-                srcdoc={htmlEmailSrcdoc(current()!.bodyHtml!)}
+                srcdoc={iframeSrc()}
                 sandbox=""
                 referrerpolicy="no-referrer"
                 loading="lazy"

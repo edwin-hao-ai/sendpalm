@@ -89,6 +89,28 @@ export function MessagePanel(props: { messageId: string }) {
   const [viewMode, setViewMode] = createSignal<ViewMode>("rendered");
   const [expandedIds, setExpandedIds] = createSignal<Set<string>>(new Set());
 
+  // Deferred iframe src: htmlEmailSrcdoc runs DOMPurify synchronously, which
+  // blocks the main thread for 200-600ms on a real 80KB body_html. Defer
+  // the sanitize to the next tick so the click path (open message →
+  // paint panel chrome) completes first; the iframe starts empty for one
+  // frame, then populates. The stale-closure guard cancels a slow
+  // sanitize from the previous message if the user clicks another before
+  // the first one finishes.
+  const [iframeSrc, setIframeSrc] = createSignal("");
+  let pendingSanitize = 0;
+  createEffect(() => {
+    const html = message()?.bodyHtml;
+    if (!html || !html.trim()) {
+      setIframeSrc("");
+      return;
+    }
+    const myId = ++pendingSanitize;
+    setTimeout(() => {
+      if (myId !== pendingSanitize) return; // stale
+      setIframeSrc(htmlEmailSrcdoc(html));
+    }, 0);
+  });
+
   const handlePlainTextLinkClick = (e: MouseEvent) => {
     const target = e.target as HTMLElement | null;
     const a = target?.closest?.("a[href]") as HTMLAnchorElement | null;
@@ -1181,7 +1203,7 @@ export function MessagePanel(props: { messageId: string }) {
                                 /* sandbox denies */
                               }
                             }}
-                            srcdoc={htmlEmailSrcdoc(m.bodyHtml!)}
+                            srcdoc={iframeSrc()}
                             sandbox="allow-scripts allow-same-origin"
                             style={{
                               width: "100%",
