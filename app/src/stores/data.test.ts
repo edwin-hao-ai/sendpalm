@@ -23,6 +23,13 @@ import {
   upsertTask,
   upsertFollowUp,
   upsertClip,
+  listThreadMessages,
+  listMessageNeighbours,
+  listStickiesForMessage,
+  listFollowUpsForMessage,
+  listFilesByIds,
+  listContactsByIds,
+  upsertSticky,
 } from "./data";
 import { resetMockDb } from "../services/mock-db";
 import type { Contact, Message, FileItem, CalendarEvent, Task, FollowUp, Clip } from "../types";
@@ -356,5 +363,121 @@ describe("per-company queries", () => {
     const evts = await listCompanyEvents(["c1", "c2"]);
     expect(evts).toHaveLength(2);
     expect(evts.map((e) => e.id).sort()).toEqual(["e1", "e2"]);
+  });
+});
+
+/* ── Scoped MessagePanel queries (replaces 5 full-table calls) ─── */
+
+describe("scoped MessagePanel queries", () => {
+  beforeEach(() => {
+    resetMockDb();
+  });
+
+  it("listThreadMessages returns siblings with same threadId", async () => {
+    const m1 = makeMessage("m1", "c1", { threadId: "t1", st: "2026-01-01T00:00:00Z" });
+    const m2 = makeMessage("m2", "c1", { threadId: "t1", st: "2026-01-02T00:00:00Z" });
+    const m3 = makeMessage("m3", "c2", { threadId: "t2", st: "2026-01-03T00:00:00Z" });
+    await upsertMessage(m1);
+    await upsertMessage(m2);
+    await upsertMessage(m3);
+    const sibs = await listThreadMessages({
+      messageId: "m1",
+      threadId: "t1",
+      pid: "c1",
+      lightweight: true,
+    });
+    expect(sibs.map((m) => m.id)).toEqual(["m2"]);
+  });
+
+  it("listThreadMessages returns no-threadId + same pid rows when threadId is null", async () => {
+    const m1 = makeMessage("m1", "c1", { st: "2026-01-01T00:00:00Z" });
+    const m2 = makeMessage("m2", "c1", { st: "2026-01-02T00:00:00Z" });
+    const m3 = makeMessage("m3", "c2", { st: "2026-01-03T00:00:00Z" });
+    await upsertMessage(m1);
+    await upsertMessage(m2);
+    await upsertMessage(m3);
+    const sibs = await listThreadMessages({
+      messageId: "m1",
+      threadId: null,
+      pid: "c1",
+      lightweight: true,
+    });
+    // m3 has different pid, must be excluded
+    expect(sibs.map((m) => m.id)).toEqual(["m2"]);
+  });
+
+  it("listThreadMessages excludes the current message", async () => {
+    const m1 = makeMessage("m1", "c1", { threadId: "t1" });
+    await upsertMessage(m1);
+    const sibs = await listThreadMessages({
+      messageId: "m1",
+      threadId: "t1",
+      pid: "c1",
+    });
+    expect(sibs).toHaveLength(0);
+  });
+
+  it("listMessageNeighbours returns prev/next by timestamp", async () => {
+    await upsertMessage(makeMessage("m1", "c1", { st: "2026-01-01T00:00:00Z" }));
+    await upsertMessage(makeMessage("m2", "c1", { st: "2026-01-02T00:00:00Z" }));
+    await upsertMessage(makeMessage("m3", "c1", { st: "2026-01-03T00:00:00Z" }));
+    const { prev, next } = await listMessageNeighbours("m2");
+    expect(prev?.id).toBe("m1");
+    expect(next?.id).toBe("m3");
+  });
+
+  it("listMessageNeighbours returns null at the table boundaries", async () => {
+    await upsertMessage(makeMessage("m1", "c1", { st: "2026-01-01T00:00:00Z" }));
+    const first = await listMessageNeighbours("m1");
+    expect(first.prev).toBeNull();
+    expect(first.next).toBeNull();
+  });
+
+  it("listStickiesForMessage returns only stickies for the message id", async () => {
+    await upsertSticky({ id: "s1", msgId: "m1", body: "a", createdAt: "2026-01-01T00:00:00Z" });
+    await upsertSticky({ id: "s2", msgId: "m2", body: "b", createdAt: "2026-01-02T00:00:00Z" });
+    await upsertSticky({ id: "s3", msgId: "m1", body: "c", createdAt: "2026-01-03T00:00:00Z" });
+    const s = await listStickiesForMessage("m1");
+    expect(s.map((x) => x.id).sort()).toEqual(["s1", "s3"]);
+  });
+
+  it("listFollowUpsForMessage returns only follow-ups for the message id", async () => {
+    await upsertFollowUp({
+      id: "f1",
+      msgId: "m1",
+      dueAt: "2026-02-01T00:00:00Z",
+      status: "pending",
+      note: "follow up",
+    });
+    await upsertFollowUp({
+      id: "f2",
+      msgId: "m2",
+      dueAt: "2026-02-02T00:00:00Z",
+      status: "pending",
+      note: "other",
+    });
+    const f = await listFollowUpsForMessage("m1");
+    expect(f.map((x) => x.id)).toEqual(["f1"]);
+  });
+
+  it("listFilesByIds returns files for the given ids", async () => {
+    await upsertFile(makeFile("f1", "c1"));
+    await upsertFile(makeFile("f2", "c2"));
+    await upsertFile(makeFile("f3", "c3"));
+    const f = await listFilesByIds(["f1", "f3"]);
+    expect(f.map((x) => x.id).sort()).toEqual(["f1", "f3"]);
+  });
+
+  it("listFilesByIds returns empty array for empty input", async () => {
+    const f = await listFilesByIds([]);
+    expect(f).toEqual([]);
+  });
+
+  it("listContactsByIds returns contacts for the given ids", async () => {
+    await upsertContact(makeContact("c1"));
+    await upsertContact(makeContact("c2"));
+    await upsertContact(makeContact("c3"));
+    const c = await listContactsByIds(["c1", "c3"]);
+    expect(c.map((x) => x.id).sort()).toEqual(["c1", "c3"]);
   });
 });

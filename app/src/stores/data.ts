@@ -934,6 +934,164 @@ export async function getMessage(id: ID): Promise<Message | null> {
   return rows[0] ? rowToMessage(rows[0]) : null;
 }
 
+/* ── Scoped queries for MessagePanel ──────────────────────────────────
+ * The original MessagePanel mounted 5 full-table queries
+ * (listContacts, listMessages with body_html, listStickies,
+ * listFollowUps, listFiles) on every message view. For the Feishu
+ * account with 3,900+ messages × 80 KB body_html, that was ~300 MB
+ * crossing the IPC bridge per click. These scoped queries only
+ * fetch the rows MessagePanel actually needs:
+ *   - thread siblings (same threadId, or no-threadId + same pid)
+ *   - thread contacts (by id)
+ *   - stickies / follow-ups for the current message id
+ *   - attachment files by their ids
+ *   - prev/next neighbour in the full list (for j/k navigation)
+ * Net IPC payload: ~5-50 KB per click vs ~300 MB before.
+ */
+
+export interface ListThreadMessagesOptions {
+  /** The current message id; excluded from the result. */
+  messageId: ID;
+  /** When set, return all messages with this thread_id. */
+  threadId?: string | null;
+  /** Used when threadId is null: return messages with no thread_id
+   *  from the same sender. The TS caller further filters by
+   *  baseSubject() because the SQL doesn't have a normalised
+   *  subject column yet. */
+  pid?: string | null;
+  /** Exclude body and body_html for thread siblings — only the
+   *  preview row needs the metadata. Detail rendering uses
+   *  getMessage(id) on the clicked sibling. */
+  lightweight?: boolean;
+}
+
+export async function listThreadMessages(
+  options: ListThreadMessagesOptions,
+): Promise<Message[]> {
+  const db = await getDb();
+  const { messageId, threadId, pid, lightweight } = options;
+  const cols = lightweight
+    ? "id, pid, subj, prev, tm, st, ac, bucket, direction, unread, " +
+      "labels_json, attachments_json, trackers_json, " +
+      "reply_later, set_aside, bubble_up_at, remind_at, deleted_at, " +
+      "to_addr, cc_json, bcc_json, thread_id, calendar_json"
+    : "*";
+  // Two single-condition branches, dispatched in TS so each SQL
+  // path is straightforward for the mock-db. The no-threadId branch
+  // is further filtered by baseSubject() in the caller.
+  let sql: string;
+  let args: unknown[];
+  if (threadId) {
+    sql = `SELECT ${cols} FROM messages WHERE id != $1 AND thread_id = $2 ORDER BY st ASC`;
+    args = [messageId, threadId];
+  } else if (pid) {
+    sql = `SELECT ${cols} FROM messages WHERE id != $1 AND pid = $2 AND thread_id IS NULL ORDER BY st ASC`;
+    args = [messageId, pid];
+  } else {
+    return [];
+  }
+  const rows = await db.select<Record<string, unknown>[]>(sql, args);
+  return rows.map(lightweight ? rowToMessageLight : rowToMessage);
+}
+
+export interface NeighbourMessage {
+  id: ID;
+  st: string;
+  subj: string;
+  pid: string;
+  bucket: string;
+}
+
+/** Return the chronologically prev/next message in the full table
+ *  for j/k navigation in MessagePanel. Returns {prev, next} where
+ *  each is null if there's no neighbour in that direction. Light:
+ *  only the columns the MessagePanel needs to identify the
+ *  neighbour, not the body. Three simple queries — one for the
+ *  current timestamp, then one each for prev/next — keep the
+ *  SQL mock-friendly (no correlated subqueries). */
+export async function listMessageNeighbours(id: ID): Promise<{
+  prev: NeighbourMessage | null;
+  next: NeighbourMessage | null;
+}> {
+  const db = await getDb();
+  const curRows = await db.select<Record<string, unknown>[]>(
+    "SELECT st FROM messages WHERE id = $1",
+    [id],
+  );
+  const curSt = curRows[0]?.st as string | undefined;
+  if (!curSt) return { prev: null, next: null };
+  const [prevRows, nextRows] = await Promise.all([
+    db.select<Record<string, unknown>[]>(
+      "SELECT id, st, subj, pid, bucket FROM messages WHERE st < $1 ORDER BY st DESC LIMIT 1",
+      [curSt],
+    ),
+    db.select<Record<string, unknown>[]>(
+      "SELECT id, st, subj, pid, bucket FROM messages WHERE st > $1 ORDER BY st ASC LIMIT 1",
+      [curSt],
+    ),
+  ]);
+  const toN = (r: Record<string, unknown> | undefined): NeighbourMessage | null =>
+    r
+      ? {
+          id: r.id as string,
+          st: r.st as string,
+          subj: r.subj as string,
+          pid: r.pid as string,
+          bucket: r.bucket as string,
+        }
+      : null;
+  return { prev: toN(prevRows[0]), next: toN(nextRows[0]) };
+}
+
+export async function listStickiesForMessage(
+  messageId: ID,
+): Promise<Sticky[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    "SELECT * FROM stickies WHERE msg_id = $1 ORDER BY created_at DESC",
+    [messageId],
+  );
+  return rows.map(rowToSticky);
+}
+
+export async function listFollowUpsForMessage(
+  messageId: ID,
+): Promise<FollowUp[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    "SELECT * FROM follow_ups WHERE msg_id = $1 ORDER BY due_at ASC",
+    [messageId],
+  );
+  return rows.map(rowToFollowUp);
+}
+
+export async function listFilesByIds(ids: ID[]): Promise<FileItem[]> {
+  if (ids.length === 0) return [];
+  const db = await getDb();
+  // OR-of-equalities instead of IN — the mock-db's IN handling
+  // expects cond.value to be a single array, but our
+  // placeholder expansion puts each id in its own $N slot.
+  // SQLite (via sqlx) handles IN ($1,$2,$3) correctly; the mock
+  // is the limit.
+  const conditions = ids.map((_, i) => `id = $${i + 1}`).join(" OR ");
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT * FROM files WHERE ${conditions}`,
+    ids,
+  );
+  return rows.map(rowToFile);
+}
+
+export async function listContactsByIds(ids: ID[]): Promise<Contact[]> {
+  if (ids.length === 0) return [];
+  const db = await getDb();
+  const conditions = ids.map((_, i) => `id = $${i + 1}`).join(" OR ");
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT * FROM contacts WHERE ${conditions}`,
+    ids,
+  );
+  return rows.map(rowToContact);
+}
+
 export async function upsertMessage(m: Message): Promise<void> {
   const db = await getDb();
   await db.execute(
