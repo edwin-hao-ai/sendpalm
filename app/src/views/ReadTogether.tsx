@@ -1,17 +1,27 @@
 /** Read Together view — triage unread emails one at a time.
  * Mirrors prototype-v11's read-together flow.
+ *
+ * Data shape: the unread list comes from `listMessagesPaged` with
+ * `lightweight: true` so the IPC payload omits `body` and `body_html`
+ * (the previous full `listMessages()` pulled ~80 KB/row of HTML into
+ * the list even though only one card was on screen). The current
+ * message's full body is fetched lazily via `getMessage(id)` and
+ * rendered as a sanitized iframe when `body_html` is present, falling
+ * back to the plain-text body otherwise.
  */
 
 import {
   For,
   Show,
+  createEffect,
   createMemo,
   createResource,
   createSignal,
   onCleanup,
 } from "solid-js";
 import {
-  listMessages,
+  listMessagesPaged,
+  getMessage,
   listContacts,
   upsertMessage,
   moveMessageToBucket,
@@ -26,26 +36,52 @@ import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { Empty, ErrorState } from "../components/Empty";
 import { getReadTogetherCandidates } from "../utils/triage";
+import { htmlEmailSrcdoc } from "../utils/html";
 import type { Contact, Message } from "../types";
+
+const READ_TOGETHER_PAGE = 200;
 
 export function ReadTogether() {
   const [contacts] = createResource(listContacts);
-  const [messages, { refetch: refetchMessages }] = createResource(listMessages);
+  // Lightweight list (no body) — fast page load even for a busy mailbox.
+  const [unreadRaw, { refetch: refetchUnread }] = createResource(async () => {
+    const page = await listMessagesPaged({
+      bucket: "imbox",
+      direction: "in",
+      unreadOnly: true,
+      lightweight: true,
+      limit: READ_TOGETHER_PAGE,
+      offset: 0,
+    });
+    return page.items;
+  });
   const [index, setIndex] = createSignal(0);
+
+  // Apply the same workflow / Gate filters the prototype uses so a
+  // message the user has set aside, marked reply-later, or bubble-up'd
+  // doesn't reappear here.
+  const unread = createMemo<Message[]>(() => {
+    const list = unreadRaw() ?? [];
+    return getReadTogetherCandidates(list, contacts() ?? []);
+  });
+
+  // The current card. The lightweight row is enough for the index/cursor
+  // + sender info; we re-fetch the full row (with body/body_html) so the
+  // iframe can render the real content.
+  const currentId = createMemo(() => unread()[index()]?.id);
+  const [currentFull] = createResource(
+    currentId,
+    async (id) => (id ? await getMessage(id) : null),
+  );
+
+  const current = createMemo<Message | undefined>(
+    () => currentFull() ?? unread()[index()],
+  );
 
   const contactMap = createMemo(() => {
     const map = new Map<string, Contact>();
     for (const c of contacts() ?? []) map.set(c.id, c);
     return map;
-  });
-
-  const unread = createMemo<Message[]>(() =>
-    getReadTogetherCandidates(messages() ?? [], contacts() ?? []),
-  );
-
-  const current = createMemo<Message | undefined>(() => {
-    const list = unread();
-    return list[index()];
   });
 
   const currentContact = createMemo<Contact | undefined>(() => {
@@ -59,8 +95,9 @@ export function ReadTogether() {
   };
 
   const advance = () => {
+    const list = unread();
     const next = index() + 1;
-    if (next >= unread().length) {
+    if (next >= list.length) {
       close();
       showToast({ message: "All caught up", kind: "success" });
     } else {
@@ -72,7 +109,7 @@ export function ReadTogether() {
     const m = current();
     if (!m) return;
     await upsertMessage({ ...m, unread: false });
-    await refetchMessages();
+    await refetchUnread();
     advance();
   };
 
@@ -80,7 +117,7 @@ export function ReadTogether() {
     const m = current();
     if (!m) return;
     await upsertMessage({ ...m, replyLater: true, unread: false });
-    await refetchMessages();
+    await refetchUnread();
     advance();
   };
 
@@ -96,7 +133,7 @@ export function ReadTogether() {
     const m = current();
     if (!m) return;
     await moveMessageToBucket(m.id, "paperTrail");
-    await refetchMessages();
+    await refetchUnread();
     advance();
   };
 
@@ -104,9 +141,21 @@ export function ReadTogether() {
     const m = current();
     if (!m) return;
     await moveMessageToBucket(m.id, "trash");
-    await refetchMessages();
+    await refetchUnread();
     advance();
   };
+
+  // When the user advances past the current message, prefetch the next
+  // one's full body in the background. Cuts the perceived wait for
+  // body_html to appear on the next click.
+  createEffect(() => {
+    const list = unread();
+    const nextIdx = index() + 1;
+    const nextId = list[nextIdx]?.id;
+    if (nextId) {
+      void getMessage(nextId).catch(() => undefined);
+    }
+  });
 
   const handleKey = (e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
@@ -140,12 +189,12 @@ export function ReadTogether() {
       }}
     >
       <Show
-        when={!messages.error}
+        when={!unreadRaw.error}
         fallback={
           <ErrorState
             title="加载失败"
-            message={String(messages.error ?? "")}
-            retry={() => void refetchMessages()}
+            message={String(unreadRaw.error ?? "")}
+            retry={() => void refetchUnread()}
           />
         }
       >
@@ -278,22 +327,61 @@ export function ReadTogether() {
               {current()!.subj}
             </h2>
 
-            <div
-              style={{
-                color: "var(--text-secondary)",
-                "font-size": "var(--text-body)",
-                "line-height": "1.7",
-                "overflow-wrap": "anywhere",
-              }}
+            <Show
+              when={current()!.bodyHtml && current()!.bodyHtml!.trim().length > 0}
+              fallback={
+                <div
+                  data-render-mode="plain"
+                  style={{
+                    color: "var(--text-secondary)",
+                    "font-size": "var(--text-body)",
+                    "line-height": "1.7",
+                    "overflow-wrap": "anywhere",
+                  }}
+                >
+                  <For each={current()!.body.split(/\n\s*\n/)}>
+                    {(p) =>
+                      p.trim() ? (
+                        <p style={{ margin: "0 0 14px" }}>{p.trim()}</p>
+                      ) : null
+                    }
+                  </For>
+                  <Show when={!current()!.body.trim()}>
+                    <p style={{ color: "var(--text-muted)", "font-style": "italic" }}>
+                      这封邮件没有纯文本正文。
+                    </p>
+                  </Show>
+                </div>
+              }
             >
-              <For each={current()!.body.split(/\n\s*\n/)}>
-                {(p) =>
-                  p.trim() ? (
-                    <p style={{ margin: "0 0 14px" }}>{p.trim()}</p>
-                  ) : null
-                }
-              </For>
-            </div>
+              <iframe
+                data-render-mode="html"
+                title={`Message body: ${current()!.subj}`}
+                srcdoc={htmlEmailSrcdoc(current()!.bodyHtml!)}
+                sandbox=""
+                referrerpolicy="no-referrer"
+                loading="lazy"
+                style={{
+                  width: "100%",
+                  border: "none",
+                  "min-height": "240px",
+                  background: "transparent",
+                }}
+                onLoad={(ev) => {
+                  // Auto-size to the iframe body's scrollHeight so
+                  // long emails don't need a scrollbar inside the card.
+                  const el = ev.currentTarget;
+                  try {
+                    const doc = el.contentDocument;
+                    if (doc?.body) {
+                      el.style.height = `${doc.body.scrollHeight + 24}px`;
+                    }
+                  } catch {
+                    // Cross-origin or sandboxed — leave min-height.
+                  }
+                }}
+              />
+            </Show>
           </div>
         </div>
 
