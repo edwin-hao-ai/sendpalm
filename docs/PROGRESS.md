@@ -28,6 +28,62 @@
 - [x] Conventional commit messages
 - [x] PROGRESS.md updated
 
+## 2026-08-19 — v2 Phase 1: ship-it fixes (Imbox H1, drag wiring, Read Together)
+
+Closed the three user-reported bugs from the prototype-v11.38 session and
+shipped the first three commits of the v2-usable roadmap
+(`docs/ROADMAP-v2-usable.md`).
+
+### Fixed in this pass
+
+- **Imbox page H1 promoted to a real big title** — `ImboxHeader` now puts
+  the `<h1>Imbox</h1>` on its own block at the top of the view at
+  `--text-h1` (clamp 32-44px) with `letter-spacing: -0.02em` and
+  `line-height: 1.1`. Counts, sort badge, filter and sync controls
+  moved to a second row below. Three sibling views (Agent, FocusReply,
+  PileBoard) use the same `--text-h3` pattern; same fix can be applied
+  in follow-up commits per view.
+- **Drag → DropBar wired end-to-end + 3 missing workflow targets** —
+  the previous Imbox `onDragStart` set `dataTransfer.setData(...)` but
+  never called `startDrag()` from the Solid-signal drag context, so
+  the DropBar never appeared. `startDrag(m, commit)` is now called
+  with a switch on `DragTarget` (extended to `MessageBucket |
+  "pending" | "saved" | "remind"`). The DropBar grew from 5 bucket
+  buttons to 8 (5 buckets + 3 workflow pills in `var(--palm-soft)`
+  for visual separation). `endDrag` is now called in both the
+  DropBar's commit `finally` block and the Imbox `onDragEnd` so
+  drops that miss every target also close the bar.
+- **Read Together now lightweight + renders body_html via iframe** —
+  the unread list is now loaded via `listMessagesPaged({ bucket:
+  'imbox', direction: 'in', unreadOnly: true, lightweight: true })`
+  instead of the full `listMessages()`. The current message's full
+  row is fetched lazily via `getMessage(id)`; `body_html` is
+  rendered in a sandboxed `<iframe srcdoc>` using the existing
+  `htmlEmailSrcdoc()` helper (with `sandbox=""` for full isolation,
+  click interceptor posts a `sendpalm:open-url` message to the
+  parent for OS-browser navigation, onLoad auto-sizes the iframe
+  to `body.scrollHeight + 24px`). Plain-text body is the fallback
+  with a small italic note when both are empty. A `createEffect`
+  prefetches the next message's full row in the background so the
+  perceived wait between cards is negligible.
+
+### Verification matrix
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | ✅ |
+| `pnpm test` | ✅ 207 passed (28 files) |
+| `pnpm lint` (changed files: `Imbox.tsx`, `DropBar.tsx`, `drag.ts`, `ReadTogether.tsx`) | ✅ |
+| `pnpm lint` (full project) | ⚠️ 4 pre-existing errors in `app/e2e/*.spec.ts` (`BrowserContext` unused, `ScrollBehavior` undef, `sidebarWidth` unused) — verified on `origin/main` to be pre-existing, not from this pass. Out of scope per AGENTS §11.1. |
+| `pnpm e2e` | ⏭️ skipped this turn — Tauri dev server not running; will run on next Tauri build |
+| `cargo test` | ⏭️ skipped this turn — same reason |
+
+### Commits
+
+- `72e4b45` `fix(imbox): promote page H1 to a real big title`
+- `c44aeda` `fix(imbox): wire drag→DropBar end-to-end and add workflow drop targets`
+- `fed6f67` `fix(read-together): use lightweight list + render body_html via iframe`
+
 ## 2026-08-18 — Contact / Company comprehensive improvement
 
 Completed the full contact/company surface: targeted per-contact queries, prototype-aligned Timeline/Files/Insights, full CompanyPanel tabs, richer ContactEditModal, and E2E coverage.

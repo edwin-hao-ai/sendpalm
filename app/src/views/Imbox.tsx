@@ -36,6 +36,7 @@ import {
 import type { PileMessage } from "../stores/data";
 import { usePaginatedMessages } from "../utils/paginated-messages";
 import type { Contact, Message, MessageBucket } from "../types";
+import { startDrag, endDrag, type DragTarget } from "../utils/drag";
 import {
   setDetailOpen,
   setSelectedMessageId,
@@ -550,15 +551,93 @@ export function Imbox() {
     }
   };
 
-  /* ── Drag and drop (HTMl5 DnD → DropBar) ──────────────────────────── */
+  /* ── Drag and drop (HTML5 DnD → DropBar) ───────────────────────────
+   * Two parallel channels carry the drag:
+   *   1. HTML5 native — dataTransfer.setData("text/plain", m.id) so
+   *      a future native drop handler can read the id.
+   *   2. Solid signal — startDrag lights up DropBar; the bar's commit
+   *      callback handles the actual move (bucket or workflow flag).
+   * Both must be set in onDragStart; both are cleared in onDragEnd.
+   * The HTML5 channel alone used to leave the DropBar invisible
+   * because nothing ever called startDrag — the bar's <Show when=
+   * drag().active> was always false. Wiring both channels is what
+   * makes the bar appear and lets the 8 drop targets actually fire.
+   */
 
   const onDragStart = (m: Message, ev: DragEvent) => {
     ev.dataTransfer?.setData("text/plain", m.id);
     if (ev.dataTransfer) ev.dataTransfer.effectAllowed = "move";
     (ev.currentTarget as HTMLElement).classList.add("dragging");
+
+    startDrag(m, async (target: DragTarget) => {
+      // Workflow targets reuse the existing per-message actions
+      // (which already do optimistic remove + DB write + toast).
+      // Bucket targets go through moveMessageToBucket directly.
+      switch (target) {
+        case "pending":
+          await replyLater(m);
+          break;
+        case "saved":
+          await setAside(m);
+          break;
+        case "remind": {
+          // Default remind time = tomorrow 9am local, matching the
+          // existing `message:bubble-up` shortcut behavior.
+          const tomorrow = new Date();
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          tomorrow.setHours(9, 0, 0, 0);
+          removeFromBoth(m.id);
+          try {
+            await upsertMessage({ ...m, bubbleUpAt: tomorrow.toISOString() });
+            await refetchPiles();
+            showToast({
+              message: `已 Bubble Up 到 ${tomorrow.toLocaleString()}`,
+              kind: "success",
+            });
+          } catch (err) {
+            await refreshAll();
+            showToast({
+              message: `Bubble Up 失败：${String(err)}`,
+              kind: "error",
+            });
+          }
+          break;
+        }
+        case "paperTrail":
+          await archive(m);
+          break;
+        case "trash":
+          await trash(m);
+          break;
+        case "spam":
+          await spam(m);
+          break;
+        case "imbox":
+        case "feed": {
+          removeFromBoth(m.id);
+          try {
+            await moveMessageToBucket(m.id, target);
+            await refetchPiles();
+            const label = target === "imbox" ? "Inbox" : "Stream";
+            showToast({ message: `已移到 ${label}`, kind: "info" });
+          } catch (err) {
+            await refreshAll();
+            showToast({
+              message: `移动失败：${String(err)}`,
+              kind: "error",
+            });
+          }
+          break;
+        }
+      }
+    });
   };
   const onDragEnd = (ev: DragEvent) => {
     (ev.currentTarget as HTMLElement).classList.remove("dragging");
+    // DropBar also calls endDrag after the commit fires; we call it
+    // here too so drops that miss every target (no commit fires)
+    // also close the bar.
+    endDrag();
   };
 
   /* ── Keyboard shortcuts (j/k/x/Enter/l/s/a/r/t/b/o/u) ─────────────── */
@@ -798,84 +877,92 @@ function ImboxHeader(props: {
   return (
     <header
       style={{
-        display: "flex",
-        "align-items": "center",
-        gap: "var(--space-2)",
-        padding: "var(--space-4) var(--space-5) var(--space-2)",
+        padding: "var(--space-5) var(--space-5) var(--space-3)",
       }}
     >
       <h1
         style={{
           "font-family": "var(--font-display)",
-          "font-size": "var(--text-h3)",
+          "font-size": "var(--text-h1)",
           "font-weight": "800",
+          "letter-spacing": "-0.02em",
+          "line-height": "1.1",
           margin: 0,
         }}
       >
         Imbox
       </h1>
-      <span
+      <div
         style={{
-          "font-size": "var(--text-caption)",
-          color: "var(--text-muted)",
-        }}
-      >
-        {props.newCount} 待读 · {props.previouslySeenCount} 已读 · {props.total} 总数
-      </span>
-      <span
-        style={{
-          "font-size": "var(--text-micro)",
-          color: "var(--text-muted)",
-          padding: "2px 8px",
-          background: "var(--paper-mid)",
-          "border-radius": "var(--radius-pill)",
-          "font-weight": "700",
-        }}
-        data-active-sort
-      >
-        {SORT_LABELS[props.activeSort]}
-      </span>
-      <div style={{ flex: 1 }} />
-      <button
-        onClick={() => props.onOpenFilters()}
-        data-open-filters
-        title="More filters"
-        aria-label="More filters"
-        style={{
-          display: "inline-flex",
+          display: "flex",
           "align-items": "center",
-          gap: "4px",
-          padding: "4px 10px",
-          background: "transparent",
-          color: "var(--text-secondary)",
-          "border-radius": "var(--radius-pill)",
-          "font-size": "var(--text-micro)",
-          "font-weight": "700",
-          border: "0.5px solid var(--border)",
-          cursor: "pointer",
+          gap: "var(--space-2)",
+          "margin-top": "var(--space-2)",
         }}
       >
-        <Icon name="ph-sliders-horizontal" size={12} /> 筛选
-      </button>
-      <button
-        onClick={() => void props.onSync()}
-        data-sync-now
-        style={{
-          display: "inline-flex",
-          "align-items": "center",
-          gap: "4px",
-          padding: "4px 10px",
-          background: "var(--palm-soft)",
-          color: "var(--palm)",
-          "border-radius": "var(--radius-pill)",
-          "font-size": "var(--text-micro)",
-          "font-weight": "700",
-          border: "0",
-          cursor: "pointer",
-        }}
-      >
-        <Icon name="arrows-clockwise" size={12} /> 同步
-      </button>
+        <span
+          style={{
+            "font-size": "var(--text-caption)",
+            color: "var(--text-muted)",
+          }}
+        >
+          {props.newCount} 待读 · {props.previouslySeenCount} 已读 · {props.total} 总数
+        </span>
+        <span
+          style={{
+            "font-size": "var(--text-micro)",
+            color: "var(--text-muted)",
+            padding: "2px 8px",
+            background: "var(--paper-mid)",
+            "border-radius": "var(--radius-pill)",
+            "font-weight": "700",
+          }}
+          data-active-sort
+        >
+          {SORT_LABELS[props.activeSort]}
+        </span>
+        <div style={{ flex: 1 }} />
+        <button
+          onClick={() => props.onOpenFilters()}
+          data-open-filters
+          title="More filters"
+          aria-label="More filters"
+          style={{
+            display: "inline-flex",
+            "align-items": "center",
+            gap: "4px",
+            padding: "4px 10px",
+            background: "transparent",
+            color: "var(--text-secondary)",
+            "border-radius": "var(--radius-pill)",
+            "font-size": "var(--text-micro)",
+            "font-weight": "700",
+            border: "0.5px solid var(--border)",
+            cursor: "pointer",
+          }}
+        >
+          <Icon name="ph-sliders-horizontal" size={12} /> 筛选
+        </button>
+        <button
+          onClick={() => void props.onSync()}
+          data-sync-now
+          style={{
+            display: "inline-flex",
+            "align-items": "center",
+            gap: "4px",
+            padding: "4px 10px",
+            background: "var(--palm-soft)",
+            color: "var(--palm)",
+            "border-radius": "var(--radius-pill)",
+            "font-size": "var(--text-micro)",
+            "font-weight": "700",
+            border: "0",
+            cursor: "pointer",
+          }}
+        >
+          <Icon name="arrows-clockwise" size={12} /> 同步
+        </button>
+      </div>
     </header>
   );
 }
