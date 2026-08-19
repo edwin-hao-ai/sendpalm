@@ -1,14 +1,20 @@
 /** Files view — grid with type filters + advanced filters.
  * Spec: prototype-v11 §3.6.
+ *
+ * Filters: name search, type, date range, sender, size. All apply on the
+ * client to the listFiles() result; no extra IPC round-trips per filter
+ * change. The advanced controls are collapsed by default to keep the
+ * default state visually clean.
  */
 
-import { For, Show, createMemo, createResource, createSignal } from "solid-js";
+import { For, Show, createMemo, createResource, createSignal, type JSX } from "solid-js";
 import { listFiles, listContacts, listMessages } from "../stores/data";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { setDetailOpen, setSelectedFileId } from "../stores/ui";
 import { relativeTime } from "../utils/date";
 import { useRefreshEffect } from "../utils/gestures";
+import { applyFileFilters, type FileFilterState } from "../utils/file-filters";
 
 export function Files() {
   const [files, { refetch: refetchFiles }] = createResource(listFiles);
@@ -25,16 +31,45 @@ export function Files() {
     "all" | "pdf" | "image" | "doc" | "spreadsheet"
   >("all");
   const [search, setSearch] = createSignal("");
+  // Advanced filters (PRD §3.6): date range, sender, size.
+  const [showAdvanced, setShowAdvanced] = createSignal(false);
+  const [dateFrom, setDateFrom] = createSignal(""); // YYYY-MM-DD
+  const [dateTo, setDateTo] = createSignal("");
+  const [senderId, setSenderId] = createSignal(""); // contact id or "" = any
+  const [sizeMinKb, setSizeMinKb] = createSignal("");
+  const [sizeMaxKb, setSizeMaxKb] = createSignal("");
+
+  const senderOptions = createMemo(() => {
+    const seen = new Set<string>();
+    for (const f of files() ?? []) if (f.pid) seen.add(f.pid);
+    return [...seen]
+      .map((id) => contacts()?.find((c) => c.id === id))
+      .filter((c): c is NonNullable<typeof c> => Boolean(c))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  });
+
+  const advancedActive = () =>
+    Boolean(dateFrom() || dateTo() || senderId() || sizeMinKb() || sizeMaxKb());
+
+  const clearAdvanced = () => {
+    setDateFrom("");
+    setDateTo("");
+    setSenderId("");
+    setSizeMinKb("");
+    setSizeMaxKb("");
+  };
 
   const items = createMemo(() => {
-    let out = (files() ?? []).slice();
-    if (typeFilter() !== "all")
-      out = out.filter((f) => f.type === typeFilter());
-    const q = search().trim().toLowerCase();
-    if (q) out = out.filter((f) => f.name.toLowerCase().includes(q));
-    return out.sort(
-      (a, b) => new Date(b.st).getTime() - new Date(a.st).getTime(),
-    );
+    const state: FileFilterState = {
+      type: typeFilter(),
+      query: search(),
+      dateFrom: dateFrom(),
+      dateTo: dateTo(),
+      senderId: senderId(),
+      sizeMinKb: sizeMinKb(),
+      sizeMaxKb: sizeMaxKb(),
+    };
+    return applyFileFilters(files() ?? [], state);
   });
 
   const contactById = (id: string) =>
@@ -75,7 +110,7 @@ export function Files() {
 
       <div
         style={{
-          padding: "0 var(--space-5) var(--space-4)",
+          padding: "0 var(--space-5) var(--space-3)",
           display: "flex",
           gap: "var(--space-2)",
           "flex-wrap": "wrap",
@@ -122,7 +157,135 @@ export function Files() {
             </button>
           )}
         </For>
+        <button
+          onClick={() => setShowAdvanced((v) => !v)}
+          aria-expanded={showAdvanced()}
+          title="高级筛选"
+          style={{
+            padding: "4px 12px",
+            "border-radius": "var(--radius-pill)",
+            background: showAdvanced() || advancedActive()
+              ? "var(--palm-soft)"
+              : "var(--paper-mid)",
+            color: showAdvanced() || advancedActive()
+              ? "var(--palm)"
+              : "var(--text-secondary)",
+            "font-size": "var(--text-caption)",
+            "font-weight": advancedActive() ? "700" : "500",
+            display: "flex",
+            "align-items": "center",
+            gap: "4px",
+            "margin-left": "auto",
+          }}
+        >
+          <Icon name="ph-funnel" size={11} />
+          高级
+          <Show when={advancedActive()}>
+            <span
+              style={{
+                "font-size": "10px",
+                "font-weight": "800",
+                background: "var(--palm)",
+                color: "white",
+                "border-radius": "999px",
+                padding: "0 6px",
+                "min-width": "16px",
+                "text-align": "center",
+              }}
+            >
+              ·
+            </span>
+          </Show>
+        </button>
       </div>
+
+      <Show when={showAdvanced()}>
+        <div
+          data-testid="files-advanced"
+          style={{
+            display: "flex",
+            gap: "var(--space-3)",
+            "flex-wrap": "wrap",
+            "align-items": "center",
+            background: "var(--paper-mid)",
+            "border-radius": "var(--radius-md)",
+            margin: "0 var(--space-5) var(--space-3)",
+            padding: "var(--space-3)",
+          }}
+        >
+          <label style={advancedLabel}>
+            <span>从</span>
+            <input
+              type="date"
+              value={dateFrom()}
+              onInput={(e) => setDateFrom(e.currentTarget.value)}
+              style={advancedInput}
+            />
+          </label>
+          <label style={advancedLabel}>
+            <span>到</span>
+            <input
+              type="date"
+              value={dateTo()}
+              onInput={(e) => setDateTo(e.currentTarget.value)}
+              style={advancedInput}
+            />
+          </label>
+          <label style={advancedLabel}>
+            <span>发件人</span>
+            <select
+              value={senderId()}
+              onChange={(e) => setSenderId(e.currentTarget.value)}
+              style={advancedInput}
+            >
+              <option value="">全部</option>
+              <For each={senderOptions()}>
+                {(c) => <option value={c.id}>{c.name}</option>}
+              </For>
+            </select>
+          </label>
+          <label style={advancedLabel}>
+            <span>大小 ≥ KB</span>
+            <input
+              type="number"
+              min="0"
+              inputmode="numeric"
+              value={sizeMinKb()}
+              onInput={(e) => setSizeMinKb(e.currentTarget.value)}
+              placeholder="0"
+              style={advancedInput}
+            />
+          </label>
+          <label style={advancedLabel}>
+            <span>大小 ≤ KB</span>
+            <input
+              type="number"
+              min="0"
+              inputmode="numeric"
+              value={sizeMaxKb()}
+              onInput={(e) => setSizeMaxKb(e.currentTarget.value)}
+              placeholder="∞"
+              style={advancedInput}
+            />
+          </label>
+          <Show when={advancedActive()}>
+            <button
+              onClick={clearAdvanced}
+              style={{
+                padding: "4px 12px",
+                "border-radius": "var(--radius-pill)",
+                background: "transparent",
+                color: "var(--text-muted)",
+                "font-size": "var(--text-caption)",
+                "font-weight": "600",
+                "margin-left": "auto",
+              }}
+            >
+              清除
+            </button>
+          </Show>
+        </div>
+      </Show>
 
       <Show
         when={!files.error}
@@ -242,3 +405,22 @@ export function Files() {
     </div>
   );
 }
+
+const advancedLabel: JSX.CSSProperties = {
+  display: "flex",
+  "flex-direction": "column",
+  gap: "2px",
+  "font-size": "var(--text-micro)",
+  color: "var(--text-muted)",
+  "font-weight": "600",
+};
+
+const advancedInput: JSX.CSSProperties = {
+  padding: "6px 10px",
+  background: "var(--paper-light)",
+  border: "0.5px solid var(--border)",
+  "border-radius": "var(--radius-sm)",
+  "font-size": "var(--text-body-sm)",
+  color: "var(--text-primary)",
+  "min-width": "120px",
+};
