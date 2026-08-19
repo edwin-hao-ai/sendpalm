@@ -1,8 +1,20 @@
 /** MeetingPanel — full meeting detail with brief, agenda, notes, action items, materials.
  * Spec: prototype-v11 §3.3.
+ *
+ * For events that came in as iCal invites (have `icalUid`), shows
+ * Accept / Decline / Tentative RSVP buttons that send an iTip REPLY
+ * to the organizer via SMTP. The sent response is recorded on the
+ * event row and surfaced in the header as "已回复" with the timestamp.
  */
 
-import { Show, For, createResource, createMemo } from "solid-js";
+import {
+  Show,
+  For,
+  createResource,
+  createMemo,
+  createSignal,
+  type JSX,
+} from "solid-js";
 import {
   getEvent,
   listContacts,
@@ -14,12 +26,17 @@ import {
   setDetailOpen,
   setSelectedMeetingId,
   setSelectedFileId,
+  showToast,
 } from "../stores/ui";
 import { Icon } from "../components/Icon";
 import { uid } from "../utils/id";
 import { generateMeetingBrief, linkedMaterialIds } from "../utils/meeting";
 import { fileIconName } from "../utils/labels";
 import { formatBytes } from "../utils/date";
+import {
+  respondToCalendarInvite,
+  type RsvpResponse,
+} from "../services/backend";
 import type { CalendarEvent, ActionItem, AgendaItem } from "../types";
 import { useRefreshEffect } from "../utils/gestures";
 
@@ -31,6 +48,7 @@ export function MeetingPanel(props: { meetingId: string }) {
   const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
   const [messages, { refetch: refetchMessages }] = createResource(listMessages);
   const [files, { refetch: refetchFiles }] = createResource(listFiles);
+  const [rsvpBusy, setRsvpBusy] = createSignal(false);
 
   useRefreshEffect(() => {
     void refetchEvent();
@@ -38,6 +56,35 @@ export function MeetingPanel(props: { meetingId: string }) {
     void refetchMessages();
     void refetchFiles();
   });
+
+  const sendRsvp = async (response: RsvpResponse) => {
+    const ev = event();
+    if (!ev) return;
+    setRsvpBusy(true);
+    try {
+      const r = await respondToCalendarInvite(ev.id, response);
+      if (r) {
+        const label =
+          response === "ACCEPTED"
+            ? "已接受"
+            : response === "DECLINED"
+              ? "已拒绝"
+              : "已标记为暂定";
+        showToast({ message: `${label} · 已通过 iTip 回信给组织者`, kind: "success" });
+        await refetchEvent();
+      } else {
+        showToast({
+          message: "未配置 Tauri 运行时，无法发送回信",
+          kind: "info",
+        });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showToast({ message: `RSVP 发送失败：${msg}`, kind: "error" });
+    } finally {
+      setRsvpBusy(false);
+    }
+  };
 
   const brief = createMemo(() => {
     const ev = event();
@@ -175,6 +222,79 @@ export function MeetingPanel(props: { meetingId: string }) {
                     <Icon name="ph-map-pin" size={12} /> {ev()!.location}
                   </Show>
                 </p>
+
+                <Show when={ev()!.icalUid && ev()!.organizerEmail}>
+                  <div
+                    data-rsvp-row
+                    style={{
+                      "margin-top": "var(--space-3)",
+                      display: "flex",
+                      "flex-wrap": "wrap",
+                      gap: "var(--space-2)",
+                      "align-items": "center",
+                    }}
+                  >
+                    <span
+                      style={{
+                        "font-size": "var(--text-micro)",
+                        "font-weight": "700",
+                        color: "var(--text-muted)",
+                        "margin-right": "var(--space-2)",
+                        "text-transform": "uppercase",
+                        "letter-spacing": "0.04em",
+                      }}
+                    >
+                      <Icon name="ph-envelope-simple-open" size={11} /> RSVP
+                    </span>
+                    <button
+                      data-testid="rsvp-accept"
+                      onClick={() => void sendRsvp("ACCEPTED")}
+                      disabled={rsvpBusy()}
+                      style={rsvpBtn("var(--palm)", true)}
+                    >
+                      <Icon name="ph-check" size={12} /> 接受
+                    </button>
+                    <button
+                      data-testid="rsvp-tentative"
+                      onClick={() => void sendRsvp("TENTATIVE")}
+                      disabled={rsvpBusy()}
+                      style={rsvpBtn("var(--yellow)", false)}
+                    >
+                      <Icon name="ph-question" size={12} /> 暂定
+                    </button>
+                    <button
+                      data-testid="rsvp-decline"
+                      onClick={() => void sendRsvp("DECLINED")}
+                      disabled={rsvpBusy()}
+                      style={rsvpBtn("var(--coral)", false)}
+                    >
+                      <Icon name="ph-x" size={12} /> 拒绝
+                    </button>
+                    <Show when={ev()!.attendeeResponse}>
+                      <span
+                        data-testid="rsvp-status"
+                        style={{
+                          "margin-left": "auto",
+                          "font-size": "var(--text-micro)",
+                          color: "var(--palm)",
+                          "font-weight": "700",
+                        }}
+                      >
+                        <Icon name="ph-check-circle" size={11} /> 已回复
+                        {ev()!.attendeeResponse === "ACCEPTED"
+                          ? " 接受"
+                          : ev()!.attendeeResponse === "DECLINED"
+                            ? " 拒绝"
+                            : ev()!.attendeeResponse === "TENTATIVE"
+                              ? " 暂定"
+                              : ""}
+                        {ev()!.attendeeResponseAt
+                          ? ` · ${new Date(ev()!.attendeeResponseAt!).toLocaleString()}`
+                          : ""}
+                      </span>
+                    </Show>
+                  </div>
+                </Show>
                 <div
                   style={{
                     display: "flex",
@@ -514,3 +634,19 @@ function SectionHeader(props: { icon: string; title: string }) {
     </h4>
   );
 }
+
+const rsvpBtn = (accent: string, primary: boolean): JSX.CSSProperties => ({
+  display: "inline-flex",
+  "align-items": "center",
+  gap: "4px",
+  padding: "6px 12px",
+  "border-radius": "var(--radius-pill)",
+  background: primary ? accent : "transparent",
+  color: primary ? "white" : accent,
+  border: `1px solid ${accent}`,
+  "font-size": "var(--text-micro)",
+  "font-weight": "700",
+  cursor: "pointer",
+  opacity: 1,
+  transition: "transform 0.15s var(--ease-out)",
+});

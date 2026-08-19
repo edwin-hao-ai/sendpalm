@@ -1,0 +1,41 @@
+From: "Alice Example" <alice@example.com>
+To: "Bob Receiver" <bob@example.com>
+Subject: Project sync
+Date: Mon, 1 Jan 2024 10:00:00 +0000
+Message-ID: <invite-001@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="NEXTBOUND"
+
+--NEXTBOUND
+Content-Type: text/plain; charset=utf-8
+
+Hi Bob,
+
+Please find the meeting invite below.
+
+Alice
+
+--NEXTBOUND
+Content-Type: text/calendar; charset=utf-8; method=REQUEST
+Content-Disposition: attachment; filename="invite.ics"
+
+BEGIN:VCALENDAR
+PRODID:-//Example//MeetingInvite//EN
+VERSION:2.0
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:alice-meeting-2026-01-15@example.com
+SEQUENCE:0
+DTSTAMP:20260101T100000Z
+DTSTART:20260115T100000Z
+DTEND:20260115T110000Z
+SUMMARY:Project sync
+LOCATION:Room 42
+DESCRIPTION:Weekly status meeting.\nAgenda: progress, blockers, next steps.
+ORGANIZER;CN=Alice Example:mailto:alice@example.com
+ATTENDEE;CN=Bob Receiver;RSVP=TRUE:mailto:bob@example.com
+ATTENDEE;CN=Carol Lee:mailto:carol@example.com
+END:VEVENT
+END:VCALENDAR
+
+--NEXTBOUND--

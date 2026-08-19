@@ -242,6 +242,38 @@ impl ImapClient {
             messages,
         })
     }
+
+    /// Fetch the raw RFC822 bytes of a single message by UID. Used by the
+    /// real-data iTip E2E test to retrieve the exact wire format of a
+    /// self-sent invite. Don't call from the hot path; this is a one-shot
+    /// helper for diagnostics + tests.
+    pub async fn fetch_raw(
+        &self,
+        mailbox_name: &str,
+        uid: u32,
+    ) -> Result<Vec<u8>, String> {
+        let mut session = self.connect().await?;
+        let wire_name = encode_utf7_imap(mailbox_name);
+        session
+            .select(&wire_name)
+            .await
+            .map_err(|e| format!("select {mailbox_name}: {e}"))?;
+        let mut stream = session
+            .uid_fetch(uid.to_string(), "(BODY.PEEK[])")
+            .await
+            .map_err(|e| format!("fetch_raw: {e}"))?;
+        let mut out: Option<Vec<u8>> = None;
+        while let Some(msg) = stream.next().await {
+            let msg = msg.map_err(|e| format!("fetch_raw item: {e}"))?;
+            if let Some(body) = msg.body() {
+                out = Some(body.to_vec());
+                break;
+            }
+        }
+        drop(stream);
+        let _ = session.logout().await;
+        out.ok_or_else(|| format!("no body for uid {uid} in {mailbox_name}"))
+    }
 }
 
 /// One fetch round result.

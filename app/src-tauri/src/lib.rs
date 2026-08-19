@@ -131,6 +131,12 @@ pub fn run() {
             sql: include_str!("../migrations/0017_follow_up_statuses.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 18,
+            description: "calendar_rsvp",
+            sql: include_str!("../migrations/0018_calendar_rsvp.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     eprintln!("[sendpalm] starting tauri builder");
@@ -172,6 +178,7 @@ pub fn run() {
             commands::vault_load,
             commands::vault_delete,
             commands::add_calendar_event,
+            commands::respond_to_calendar_invite,
             commands::get_attachment_content,
             commands::get_attachment_path,
             commands::notification_settings::notify_settings_changed,

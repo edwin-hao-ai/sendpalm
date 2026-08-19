@@ -329,6 +329,12 @@ function rowToEvent(r: Record<string, unknown>): CalendarEvent {
     photoUrl: (r.photo_url as string | undefined) ?? undefined,
     circled: !!r.circled,
     dayNote: (r.day_note as string | undefined) ?? undefined,
+    icalUid: (r.ical_uid as string | undefined) ?? undefined,
+    icalMethod: (r.ical_method as string | undefined) ?? undefined,
+    icalSequence: (r.ical_sequence as number | undefined) ?? undefined,
+    organizerEmail: (r.organizer_email as string | undefined) ?? undefined,
+    attendeeResponse: (r.attendee_response as CalendarEvent["attendeeResponse"]) ?? undefined,
+    attendeeResponseAt: (r.attendee_response_at as string | undefined) ?? undefined,
   };
 }
 

@@ -180,7 +180,22 @@ export interface IcalEvent {
   dtendTzid?: string;
   location?: string;
   description?: string;
+  /** iTip METHOD (RFC 5546). REQUEST = new invite, CANCEL = organizer
+   *  cancelled, REPLY = attendee response. Undefined is treated as
+   *  implicit REQUEST (the most common case for emails that omit the
+   *  VCALENDAR-level METHOD line). */
+  method?: "REQUEST" | "CANCEL" | "REPLY" | "ADD" | "COUNTER" | "DECLINECOUNTER" | string;
+  /** Organizer's email (mailto: stripped). Drives the iTip REPLY To: line. */
+  organizer?: string;
+  /** Attendee email list, mailto: stripped. For REPLY messages this is
+   *  typically the single responder. */
+  attendees?: string[];
+  /** SEQUENCE number — used to detect updates from the organizer. */
+  sequence?: number;
 }
+
+/** RSVP partstat value (RFC 5545 §3.2.12). */
+export type RsvpStatus = "ACCEPTED" | "DECLINED" | "TENTATIVE" | "NEEDS-ACTION" | "DELEGATED";
 
 /* ── File ──────────────────────────────────────────── */
 
@@ -249,6 +264,14 @@ export interface CalendarEvent {
   photoUrl?: string;
   circled?: boolean;
   dayNote?: string;
+  // iCal/RSVP extension fields (M10 calendar invitation).
+  icalUid?: string;
+  icalMethod?: string;
+  icalSequence?: number;
+  organizerEmail?: string;
+  /** Last RSVP the local user sent back to the organizer. */
+  attendeeResponse?: RsvpStatus;
+  attendeeResponseAt?: string;
 }
 
 /* ── Task ──────────────────────────────────────────── */
