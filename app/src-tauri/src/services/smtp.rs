@@ -3,6 +3,7 @@
 
 use super::EmailCredentials;
 use lettre::{
+    address::Envelope,
     message::{header::ContentType, Attachment, Mailbox, MultiPart, SinglePart},
     transport::smtp::authentication::Credentials,
     AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
@@ -163,6 +164,56 @@ impl SmtpClient {
             .build();
         *guard = Some(t.clone());
         Ok(t)
+    }
+
+    /// Send an iTip REPLY (or any other iTip method) email to the organizer.
+    /// The body is a full VCALENDAR payload sent as the only MIME part with
+    /// Content-Type: text/calendar; method=REPLY; charset=utf-8.
+    pub async fn send_itip_reply(
+        &self,
+        from: &str,
+        to: &str,
+        subject: &str,
+        ics_body: &str,
+        responder_email: &str,
+    ) -> Result<String, String> {
+        let from_addr: lettre::Address = from
+            .parse()
+            .map_err(|e| format!("bad from: {e}"))?;
+        let to_addr: lettre::Address = to.parse().map_err(|e| format!("bad to: {e}"))?;
+        let message_id = format!("<sendpalm-itip-{}@sendpalm>", uuid::Uuid::new_v4());
+
+        // Hand-build the raw RFC822 message so we can pin the
+        // `Content-Type: text/calendar; method=REPLY` header exactly.
+        // lettre's `Message::builder` API doesn't expose per-MIME-part
+        // headers cleanly enough for this.
+        let raw = format!(
+            "From: {from}\r\n\
+To: {to}\r\n\
+Subject: {subject}\r\n\
+Date: {date}\r\n\
+Message-ID: {message_id}\r\n\
+MIME-Version: 1.0\r\n\
+Content-Type: text/calendar; charset=utf-8; method=REPLY\r\n\
+Content-Transfer-Encoding: 8bit\r\n\
+\r\n\
+{ics_body}",
+            date = chrono::Utc::now().format("%a, %d %b %Y %H:%M:%S +0000"),
+        );
+
+        let transport = self.transport().await?;
+        let envelope = Envelope::new(Some(from_addr), vec![to_addr])
+            .map_err(|e| format!("itip envelope: {e}"))?;
+        transport
+            .send_raw(&envelope, raw.as_bytes())
+            .await
+            .map(|_| {
+                // Touch `responder_email` so the parameter isn't unused
+                // — callers pass it explicitly for logging/correlation.
+                let _ = responder_email;
+                message_id
+            })
+            .map_err(|e| format!("smtp itip send: {e}"))
     }
 }
 

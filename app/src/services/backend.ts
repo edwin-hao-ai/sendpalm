@@ -156,6 +156,18 @@ export async function addCalendarEvent(
   return safeInvoke<string>("add_calendar_event", { invite, contactId });
 }
 
+export type RsvpResponse = "ACCEPTED" | "DECLINED" | "TENTATIVE";
+
+export async function respondToCalendarInvite(
+  eventId: string,
+  response: RsvpResponse,
+): Promise<string | null> {
+  return safeInvoke<string>("respond_to_calendar_invite", {
+    eventId,
+    response,
+  });
+}
+
 export async function getAttachmentContent(
   fileId: string,
 ): Promise<string | null> {
