@@ -32,7 +32,7 @@ import {
   upsertMessage,
   upsertContact,
 } from "../stores/data";
-import type { PileMessage } from "../stores/data";
+import { getMessage, type PileMessage } from "../stores/data";
 import { usePaginatedMessages } from "../utils/paginated-messages";
 import type { Contact, Message, MessageBucket } from "../types";
 import { startDrag, endDrag, type DragTarget } from "../utils/drag";
@@ -116,6 +116,24 @@ export function Imbox() {
     PAGE_SIZE,
   );
   const [activeTab, setActiveTab] = createSignal<ImboxTabId>("new");
+
+  // Bucket-changing actions (trash, archive, spam, …) call
+  // bumpRefreshTick() in MessagePanel. The high-frequency sync ticks
+  // are handled by softRefreshTick + prependByIds; the rare "user
+  // moved a message to a different bucket" case needs a real refetch
+  // so both tabs agree on which rows they own. Skip the initial mount
+  // tick to avoid double-fetching right after the resource resolves.
+  let _refreshSkipMount = true;
+  createEffect(() => {
+    // Touch the tick so this effect re-runs when it changes.
+    refreshTick();
+    if (_refreshSkipMount) {
+      _refreshSkipMount = false;
+      return;
+    }
+    void newPaged.refresh();
+    void seenPaged.refresh();
+  });
 
   /** The paginated resource for the currently-active tab. Most derived
    *  memos and handlers read through this so a tab switch re-derives
@@ -261,7 +279,12 @@ export function Imbox() {
         icon: "ph-clock",
         title: "Pending",
         messages: all.filter((m) => m.replyLater),
-        openBoardView: "focusReply",
+        // The "Pending" pile drills into the reply-later board, which
+        // is the focused-reply view. (Was "focusReply" — that name is
+        // also a ViewName for the read-together flow, but Main only
+        // mounts the pile boards under "replyLater" / "setAside" /
+        // "bubbleUp", so we have to match the wire.)
+        openBoardView: "replyLater",
         hasFocusAction: true,
       },
       {
@@ -408,7 +431,19 @@ export function Imbox() {
     try {
       await upsertMessage({ ...m, replyLater: true });
       await refetchPiles();
-      showToast({ message: "已 Reply Later", kind: "success" });
+      showToast({
+        message: "已 Reply Later",
+        kind: "success",
+        action: {
+          label: "撤销",
+          run: async () => {
+            const full = (await getMessage(m.id)) ?? m;
+            await upsertMessage({ ...full, replyLater: false });
+            await refreshAll();
+            showToast({ message: "已撤销", kind: "success" });
+          },
+        },
+      });
     } catch (err) {
       await refreshAll();
       showToast({ message: `Reply Later 失败：${String(err)}`, kind: "error" });
@@ -420,7 +455,19 @@ export function Imbox() {
     try {
       await upsertMessage({ ...m, setAside: true });
       await refetchPiles();
-      showToast({ message: "已 Set Aside", kind: "success" });
+      showToast({
+        message: "已 Set Aside",
+        kind: "success",
+        action: {
+          label: "撤销",
+          run: async () => {
+            const full = (await getMessage(m.id)) ?? m;
+            await upsertMessage({ ...full, setAside: false });
+            await refreshAll();
+            showToast({ message: "已撤销", kind: "success" });
+          },
+        },
+      });
     } catch (err) {
       await refreshAll();
       showToast({ message: `Set Aside 失败：${String(err)}`, kind: "error" });
@@ -540,7 +587,11 @@ export function Imbox() {
       newPaged.removeByIds([m.id]);
       try {
         await seenPaged.prependByIds([m.id]);
-        await upsertMessage({ ...m, unread: false });
+        // `m` here is the lightweight list row (no body / bodyHtml —
+        // see rowToMessageLight). Re-fetch the full row so we don't
+        // overwrite the body fields with empty strings in the DB.
+        const full = (await getMessage(m.id)) ?? m;
+        await upsertMessage({ ...full, unread: false });
       } catch {
         // Restore on failure — re-prepend to newPaged and refetch
         // seenPaged so we don't keep a phantom.
@@ -785,10 +836,14 @@ export function Imbox() {
       </Show>
 
       <Show
-        when={hasAny}
+        when={hasAny()}
         fallback={
+          // No data anywhere: show the empty-state copy unless we
+          // are mid-loadMore. (Loading-more on a previously-empty
+          // list shouldn't happen, but be defensive — show the
+          // skeleton instead of an empty state with a spinning dot.)
           <Show
-            when={paged().loadingMore() || items().length === 0}
+            when={paged().loadingMore()}
             fallback={<EmptyState />}
           >
             <SkeletonBlock />
@@ -846,7 +901,11 @@ export function Imbox() {
         </div>
 
         <Show when={piles().length > 0}>
-          <div class="imbox-piles" data-imbox-piles>
+          <div
+            class="imbox-piles"
+            data-imbox-piles
+            data-testid="piles"
+          >
             <For each={piles()}>
               {(p) => (
                 <PileCard
@@ -1276,6 +1335,7 @@ function MessageCard(props: MessageCardProps) {
         <button
           class="feed-card-action-btn"
           title="Pending (l)"
+          aria-label="Reply later"
           onClick={(ev) => {
             ev.stopPropagation();
             props.onReplyLater(props.m);
@@ -1286,6 +1346,7 @@ function MessageCard(props: MessageCardProps) {
         <button
           class="feed-card-action-btn"
           title="Saved (s)"
+          aria-label="Set aside"
           onClick={(ev) => {
             ev.stopPropagation();
             props.onSetAside(props.m);
@@ -1296,6 +1357,7 @@ function MessageCard(props: MessageCardProps) {
         <button
           class="feed-card-action-btn"
           title="Archive (e)"
+          aria-label="Archive"
           onClick={(ev) => {
             ev.stopPropagation();
             props.onArchive(props.m);
@@ -1306,6 +1368,7 @@ function MessageCard(props: MessageCardProps) {
         <button
           class="feed-card-action-btn"
           title="Trash (#)"
+          aria-label="Trash"
           onClick={(ev) => {
             ev.stopPropagation();
             props.onTrash(props.m);
@@ -1316,6 +1379,7 @@ function MessageCard(props: MessageCardProps) {
         <button
           class="feed-card-action-btn"
           title={props.m.unread ? "Mark as Read" : "Mark as Unread"}
+          aria-label={props.m.unread ? "Mark as Read" : "Mark as Unread"}
           onClick={(ev) => {
             ev.stopPropagation();
             props.onToggleUnread(props.m);
@@ -1411,6 +1475,8 @@ function BundleCard(props: BundleCardProps) {
             <div
               class="bundle-drawer-row"
               data-bundle-row={m.id}
+              data-message-id={m.id}
+              data-feed-card="message"
               draggable
               onDragStart={(ev) => props.onDragStart(m, ev)}
               onDragEnd={(ev) => props.onDragEnd(ev)}
@@ -1454,6 +1520,8 @@ function PileCard(props: {
     <div
       class={"imbox-pile" + (expanded() ? " expanded" : "")}
       data-pile={props.pile.id}
+      data-pile-id={props.pile.id}
+      data-testid={`pile-${props.pile.openBoardView}`}
       data-expanded={expanded() ? "true" : "false"}
       onClick={toggle}
     >
@@ -1487,6 +1555,7 @@ function PileCard(props: {
                 <div
                   class="pile-drawer-row"
                   data-pile-drawer-row={m.id}
+                  data-pile-item={m.id}
                   onClick={(ev) => {
                     ev.stopPropagation();
                     props.onOpen(m.id);
