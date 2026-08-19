@@ -81,8 +81,20 @@ export function useAgent() {
       refetchTasks(),
       refetchDrafts(),
       refetchAudit(),
+      refetchContacts(),
     ]);
   };
+
+  /** First non-undefined error across all Agent resources, or
+   *  undefined if every fetch has succeeded. Surfaced as a single
+   *  signal so AgentPanel / Agent view can show one ErrorState
+   *  instead of checking five resources. */
+  const error = () =>
+    sessions.error ??
+    tasks.error ??
+    drafts.error ??
+    audit.error ??
+    contacts.error;
 
   const appendAudit = async (
     kind: string,
@@ -189,5 +201,6 @@ export function useAgent() {
     appendAudit,
     switchSession,
     refetchAll,
+    error,
   };
 }

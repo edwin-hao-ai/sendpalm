@@ -13,7 +13,7 @@ import {
 import { useAgent } from "../agent/useAgent";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
-import { Empty } from "../components/Empty";
+import { Empty, ErrorState } from "../components/Empty";
 import { setView } from "../stores/ui";
 import { relativeTime } from "../utils/date";
 import { sessionIcon, statusColor } from "../utils/agent";
@@ -72,6 +72,13 @@ export function Agent() {
         animation: "view-enter 0.3s var(--ease-out) both",
       }}
     >
+      <Show when={agent.error()}>
+        <ErrorState
+          title="Agent 加载失败"
+          message={String(agent.error() ?? "")}
+          retry={() => void agent.refetchAll()}
+        />
+      </Show>
       {/* Header */}
       <div
         style={{
