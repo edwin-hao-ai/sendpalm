@@ -5,6 +5,7 @@
 //! task and IMAP session. The account list is reloaded every minute so
 //! accounts added in Settings start syncing without an app restart.
 
+use crate::commands::upsert_calendar_event;
 use crate::services::imap::{ImapClient, IDLE_TIMEOUT};
 use crate::services::mailbox_resolver::resolve_all;
 use crate::services::providers;
@@ -1097,37 +1098,97 @@ async fn maybe_send_vacation_reply(
     Ok(())
 }
 
-async fn insert_event_from_invite(
+/// Process an incoming iCal event from a freshly-synced message and
+/// reconcile it against the local `events` table.
+///
+/// METHOD handling (RFC 5546):
+///   - REQUEST (or implicit) — upsert by ical_uid. New invite creates a
+///     row; organizer resending with the same UID updates the existing
+///     row; the row's local id is preserved so the MeetingPanel keeps
+///     pointing at it.
+///   - CANCEL — delete the row(s) matching ical_uid. No-op if the
+///     invite was never auto-imported.
+///   - REPLY — do NOT create a new event. Instead, find the event the
+///     organizer's local copy is keyed by and merge the responder's
+///     PARTSTAT into the per-attendee map (`attendee_responses_json`).
+///
+/// `contact_id` is the local contact id of the message sender — used
+/// as the event's `pids_json` so the event shows up in that contact's
+/// timeline + the Calendar view's "meetings" filter (which is keyed
+/// off attendees).
+pub async fn insert_event_from_invite(
     pool: &SqlitePool,
     invite: &crate::services::ical::IcalEvent,
     contact_id: &str,
 ) -> Result<(), String> {
-    let id = format!("evt_{}", uuid::Uuid::new_v4().simple());
-    let dt = invite
-        .dtstart
-        .clone()
-        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
-    let (date_str, time_str) = crate::services::ical::split_iso_datetime(&dt);
-    let dur = crate::services::ical::compute_duration_minutes(
-        invite.dtstart.as_deref(),
-        invite.dtend.as_deref(),
-    );
+    let method = invite.method.as_deref().unwrap_or("REQUEST");
 
-    sqlx::query(
-        "INSERT OR IGNORE INTO events (id, title, dt, tm, dur, location, agenda_json, pids_json, brief, color) \
-         VALUES ($1, $2, $3, $4, $5, $6, '[]', $7, $8, '#0A8F63')",
-    )
-    .bind(&id)
-    .bind(&invite.summary)
-    .bind(&date_str)
-    .bind(&time_str)
-    .bind(dur)
-    .bind(invite.location.as_deref().unwrap_or(""))
-    .bind(format!("[\"{contact_id}\"]"))
-    .bind(invite.description.as_deref().unwrap_or(""))
-    .execute(pool)
-    .await
-    .map_err(|e| format!("insert event from invite: {e}"))?;
+    // REPLY: the organizer (us, in this case) already has the canonical
+    // event row keyed by ical_uid. We merge the responder's PARTSTAT
+    // into the per-attendee map. If the invite was never imported
+    // (UID doesn't match any row), the reply is silently ignored — the
+    // organizer's copy of the event lives in the message thread.
+    if method == "REPLY" {
+        return record_incoming_reply(pool, invite).await;
+    }
+
+    // REQUEST / CANCEL / unknown: delegate to the shared upsert helper
+    // so the user-initiated "Add to calendar" path and the auto-import
+    // path share the exact same dedup / sequence / CANCEL semantics.
+    let _id = upsert_calendar_event(pool, invite, Some(contact_id)).await?;
+    Ok(())
+}
+
+/// Apply an incoming REPLY's ATTENDEE + PARTSTAT to the matching event.
+/// No-op when the UID doesn't match any local event (the reply is for
+/// an event the user is not organizing).
+async fn record_incoming_reply(
+    pool: &SqlitePool,
+    invite: &crate::services::ical::IcalEvent,
+) -> Result<(), String> {
+    let Some(uid) = invite.uid.as_deref() else {
+        return Ok(());
+    };
+    let responders: Vec<_> = invite
+        .attendee_responses
+        .iter()
+        .filter(|ar| !ar.email.is_empty() && !ar.partstat.is_empty())
+        .collect();
+    if responders.is_empty() {
+        return Ok(());
+    }
+
+    // Load the existing map (default to empty) so we don't clobber
+    // responses we already have for other attendees.
+    let existing_json: Option<String> =
+        sqlx::query_scalar("SELECT attendee_responses_json FROM events WHERE ical_uid = $1")
+            .bind(uid)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| format!("lookup event by uid: {e}"))?;
+    let Some(existing_json) = existing_json else {
+        // No matching event — silently drop the reply.
+        return Ok(());
+    };
+    let mut map: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(&existing_json).unwrap_or_default();
+    let now = chrono::Utc::now().to_rfc3339();
+    for ar in responders {
+        map.insert(
+            ar.email.to_lowercase(),
+            serde_json::json!({
+                "partstat": ar.partstat,
+                "at": now,
+            }),
+        );
+    }
+    let merged = serde_json::to_string(&map).map_err(|e| format!("encode rsvp map: {e}"))?;
+    sqlx::query("UPDATE events SET attendee_responses_json = $2 WHERE ical_uid = $1")
+        .bind(uid)
+        .bind(&merged)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("update attendee_responses_json: {e}"))?;
     Ok(())
 }
 
