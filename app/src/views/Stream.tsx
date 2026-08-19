@@ -28,6 +28,7 @@ import {
 import { usePaginatedMessages } from "../utils/paginated-messages";
 import { Avatar } from "../components/Avatar";
 import { Empty } from "../components/Empty";
+import { ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { htmlEmailSrcdoc } from "../utils/html";
 import { showToast } from "../stores/ui";
@@ -127,7 +128,17 @@ export function Stream() {
         "flex-direction": "column",
       }}
     >
-      <SectionHeader
+      <Show
+        when={!paged.resource.error}
+        fallback={
+          <ErrorState
+            title="Stream 加载失败"
+            message={String(paged.resource.error ?? "")}
+            retry={() => void paged.refresh()}
+          />
+        }
+      >
+        <SectionHeader
         title="The Stream"
         subtitle={`订阅邮件、长文慢慢看。点击展开全文，多篇可同时展开。无 DetailPanel，光滑滚动。${
           paged.hasMore() ? ` · 已加载 ${items().length}/${paged.total()}` : ""
@@ -181,6 +192,7 @@ export function Stream() {
             </VList>
           </div>
         </Show>
+      </Show>
       </Show>
     </div>
   );
