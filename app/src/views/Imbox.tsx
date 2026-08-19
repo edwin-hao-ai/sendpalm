@@ -31,7 +31,6 @@ import {
   moveMessageToBucket,
   upsertMessage,
   upsertContact,
-  getMessage,
 } from "../stores/data";
 import type { PileMessage } from "../stores/data";
 import { usePaginatedMessages } from "../utils/paginated-messages";
@@ -1765,6 +1764,3 @@ function useSoftRefreshEffect(callback: () => void) {
     callback();
   });
 }
-
-const _placeholder = getMessage; // keep import used
-void _placeholder;
