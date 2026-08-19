@@ -1065,6 +1065,80 @@ export async function listFollowUpsForMessage(
   return rows.map(rowToFollowUp);
 }
 
+/** Bulk fetch messages by id, lightweight projection (no body / body_html).
+ *  Used by the FollowUps / Insights catalog views which only need
+ *  the subject and timestamp columns, not the full message body. */
+export async function listMessagesByIdsLight(ids: ID[]): Promise<Message[]> {
+  if (ids.length === 0) return [];
+  const db = await getDb();
+  const conditions = ids.map((_, i) => `id = $${i + 1}`).join(" OR ");
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT id, pid, subj, prev, tm, st, ac, bucket, direction, unread,
+            labels_json, attachments_json, trackers_json, thread_id,
+            reply_later, set_aside, bubble_up_at, remind_at, to_addr,
+            cc_json, bcc_json, deleted_at, calendar_json
+       FROM messages WHERE ${conditions}`,
+    ids,
+  );
+  return rows.map(rowToMessageLight);
+}
+
+/** Insights-card-only projection of the messages table.
+ *
+ *  The Insights dashboard computes 3 stats from messages: weekly
+ *  volume (last 7 days, bucket=imbox), top people (group by pid,
+ *  bucket=imbox), and average reply time (last 30 days, direction=in,
+ *  bucket=imbox). All three need only {id, pid, st, thread_id, bucket,
+ *  direction} — no body, no body_html, no labels, no attachments, no
+ *  trackers, no calendar invite. The previous full-table load pulled
+ *  ~80 KB/row of HTML for nothing.
+ *
+ *  Pass an `iso` boundary if you want only recent messages (the
+ *  Insights page does: now() - 30 days). Without it, returns every
+ *  message in the table. */
+export interface InsightsMessageSlice {
+  id: ID;
+  pid: ID;
+  st: string;
+  threadId?: ID;
+  bucket: MessageBucket;
+  direction: "in" | "out";
+}
+
+export async function listMessagesForInsights(
+  options: { since?: string } = {},
+): Promise<InsightsMessageSlice[]> {
+  const db = await getDb();
+  if (options.since) {
+    const rows = await db.select<Record<string, unknown>[]>(
+      `SELECT id, pid, st, thread_id, bucket, direction
+         FROM messages
+        WHERE st >= $1
+        ORDER BY st DESC`,
+      [options.since],
+    );
+    return rows.map((r) => ({
+      id: r.id as string,
+      pid: r.pid as string,
+      st: r.st as string,
+      threadId: (r.thread_id as string | undefined) ?? undefined,
+      bucket: r.bucket as MessageBucket,
+      direction: ((r.direction as string) ?? "in") as "in" | "out",
+    }));
+  }
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT id, pid, st, thread_id, bucket, direction FROM messages`,
+  );
+  return rows.map((r) => ({
+    id: r.id as string,
+    pid: r.pid as string,
+    st: r.st as string,
+    threadId: (r.thread_id as string | undefined) ?? undefined,
+    bucket: r.bucket as MessageBucket,
+    direction: ((r.direction as string) ?? "in") as "in" | "out",
+  }));
+}
+
 export async function listFilesByIds(ids: ID[]): Promise<FileItem[]> {
   if (ids.length === 0) return [];
   const db = await getDb();

@@ -3,7 +3,18 @@
  *  without any Tauri / DB / IPC dependency.
  */
 
-import type { Message } from "../types";
+/** Minimal message shape that `pairReply` and the stats need.
+ *  `Message` from `../types` satisfies this, and so does the
+ *  lightweight `InsightsMessageSlice` projection — both have the
+ *  same five fields we read. */
+export interface ReplyTimeMessage {
+  id: string;
+  pid: string;
+  st: string;
+  threadId?: string;
+  bucket: string;
+  direction?: "in" | "out";
+}
 
 /** Pair an incoming message with its first outgoing reply and report the
  *  hours between them. Returns `null` if the incoming message has no
@@ -18,9 +29,9 @@ import type { Message } from "../types";
  *  replies to that contact count) but on a 30-day window it's still a
  *  usable proxy. */
 function pairReply(
-  incoming: Message,
-  candidates: Message[],
-): Message | null {
+  incoming: ReplyTimeMessage,
+  candidates: ReplyTimeMessage[],
+): ReplyTimeMessage | null {
   const t = new Date(incoming.st).getTime();
   const sameThread = candidates.filter(
     (m) =>
@@ -62,7 +73,7 @@ export interface ReplyTimeStats {
  *    *incoming* message window. Defaults to "last 30 days from now".
  *  @param options.now  injected clock for tests. */
 export function computeReplyTimeStats(
-  messages: readonly Message[],
+  messages: readonly ReplyTimeMessage[],
   options: {
     since?: string;
     until?: string;

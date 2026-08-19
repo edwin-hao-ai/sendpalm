@@ -29,6 +29,8 @@ import {
   listFollowUpsForMessage,
   listFilesByIds,
   listContactsByIds,
+  listMessagesByIdsLight,
+  listMessagesForInsights,
   upsertSticky,
 } from "./data";
 import { resetMockDb } from "../services/mock-db";
@@ -479,5 +481,83 @@ describe("scoped MessagePanel queries", () => {
     await upsertContact(makeContact("c3"));
     const c = await listContactsByIds(["c1", "c3"]);
     expect(c.map((x) => x.id).sort()).toEqual(["c1", "c3"]);
+  });
+});
+
+describe("scoped catalog queries (FollowUps / Insights / Companies)", () => {
+  beforeEach(() => {
+    resetMockDb();
+  });
+
+  it("listMessagesByIdsLight returns lightweight rows for the given ids", async () => {
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(
+      makeMessage("m1", "c1", {
+        body: "x".repeat(5_000),
+        bodyHtml: "<p>" + "y".repeat(5_000) + "</p>",
+        st: "2026-08-15T10:00:00Z",
+        subj: "Hi",
+      }),
+    );
+    await upsertMessage(
+      makeMessage("m2", "c1", {
+        body: "z".repeat(5_000),
+        st: "2026-08-16T10:00:00Z",
+        subj: "Hello",
+      }),
+    );
+    const out = await listMessagesByIdsLight(["m1", "m2"]);
+    expect(out).toHaveLength(2);
+    // The lightweight projection must NOT carry body / body_html.
+    for (const m of out) {
+      expect(m.body).toBe("");
+      expect(m.bodyHtml).toBeNull();
+    }
+    // Subject / pid / st are preserved.
+    const m1 = out.find((m) => m.id === "m1");
+    expect(m1?.subj).toBe("Hi");
+    expect(m1?.pid).toBe("c1");
+    expect(m1?.st).toBe("2026-08-15T10:00:00Z");
+  });
+
+  it("listMessagesByIdsLight returns [] for empty id list", async () => {
+    const out = await listMessagesByIdsLight([]);
+    expect(out).toEqual([]);
+  });
+
+  it("listMessagesForInsights returns the narrow projection (no body / html / labels)", async () => {
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(
+      makeMessage("m1", "c1", {
+        body: "x".repeat(5_000),
+        bodyHtml: "<p>" + "y".repeat(5_000) + "</p>",
+        st: "2026-08-15T10:00:00Z",
+        bucket: "imbox",
+        direction: "in",
+      }),
+    );
+    const slice = await listMessagesForInsights({});
+    expect(slice).toHaveLength(1);
+    const row = slice[0]!;
+    expect(row.id).toBe("m1");
+    expect(row.pid).toBe("c1");
+    expect(row.bucket).toBe("imbox");
+    expect(row.direction).toBe("in");
+    // Structural check: the projection has exactly the 6 expected keys.
+    expect(Object.keys(row).sort()).toEqual(
+      ["bucket", "direction", "id", "pid", "st", "threadId"].sort(),
+    );
+  });
+
+  it("listMessagesForInsights respects the since boundary", async () => {
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(
+      makeMessage("m-old", "c1", { st: "2026-07-01T10:00:00Z" }),
+    );
+    await upsertMessage(
+      makeMessage("m-new", "c1", { st: "2026-08-15T10:00:00Z" }),
+    );
+    const slice = await listMessagesForInsights({ since: "2026-08-01T00:00:00Z" });
+    expect(slice.map((m) => m.id)).toEqual(["m-new"]);
   });
 });
