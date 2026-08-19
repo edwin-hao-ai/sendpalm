@@ -1625,7 +1625,7 @@ function ImboxTabButton(props: {
         display: "flex",
         "align-items": "center",
         "justify-content": "center",
-        gap: "8px",
+        gap: "var(--space-2)",
         color: props.active ? "var(--text-primary)" : "var(--text-muted)",
         "font-weight": props.active ? "700" : "600",
         "font-size": "var(--text-body-sm)",
@@ -1712,9 +1712,32 @@ function DateGroupedList(props: {
           <header
             class="imbox-date-header"
             data-imbox-date-header
+            style={{
+              display: "flex",
+              "align-items": "center",
+              gap: "var(--space-2)",
+            }}
           >
             <span class="imbox-date-header-label">{group.label}</span>
-            <span class="imbox-date-header-count">{group.items.length}</span>
+            <span
+              class="imbox-date-header-count"
+              style={{
+                display: "inline-flex",
+                "align-items": "center",
+                "justify-content": "center",
+                "min-width": "20px",
+                height: "20px",
+                padding: "0 6px",
+                "border-radius": "var(--radius-pill)",
+                background: "var(--paper-mid)",
+                color: "var(--text-secondary)",
+                "font-size": "var(--text-micro)",
+                "font-weight": "700",
+                "line-height": "1",
+              }}
+            >
+              {group.items.length}
+            </span>
           </header>
           <For each={group.items}>
             {(item) => props.children(item, item._flatIdx)}
