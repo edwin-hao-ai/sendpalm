@@ -13,6 +13,7 @@ const ALL: FileItem[] = [
     mime: "application/pdf",
     size: 2_000_000, // ~2 MB
     st: "2026-08-15T10:00:00Z",
+    sourceMessageIds: [],
   },
   {
     id: "f_img",
@@ -22,6 +23,7 @@ const ALL: FileItem[] = [
     mime: "image/png",
     size: 50_000, // 50 KB
     st: "2026-08-18T10:00:00Z",
+    sourceMessageIds: [],
   },
   {
     id: "f_doc",
@@ -31,6 +33,7 @@ const ALL: FileItem[] = [
     mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     size: 80_000,
     st: "2026-07-01T10:00:00Z",
+    sourceMessageIds: [],
   },
   {
     id: "f_xls",
@@ -40,6 +43,7 @@ const ALL: FileItem[] = [
     mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     size: 150_000,
     st: "2026-08-10T10:00:00Z",
+    sourceMessageIds: [],
   },
 ];
 

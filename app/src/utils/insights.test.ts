@@ -8,22 +8,23 @@ const NOW = new Date("2026-08-19T12:00:00.000Z");
 
 /** Build a message stub with sensible defaults. */
 function mkMsg(over: Partial<Message> & { st: string; bucket: string }): Message {
+  const { st, bucket, ...rest } = over;
   return {
-    id: over.id ?? `m_${over.st}`,
+    id: over.id ?? `m_${st}`,
     pid: over.pid ?? "c_alice",
     subj: over.subj ?? "",
     prev: "",
     body: "",
     bodyHtml: null,
-    tm: over.st,
-    st: over.st,
+    tm: st,
+    st,
     ac: "acct_1",
-    bucket: over.bucket as Message["bucket"],
+    bucket: bucket as Message["bucket"],
     direction: over.direction ?? "in",
     unread: false,
     labels: [],
     attachments: [],
-    ...over,
+    ...rest,
   } as Message;
 }
 
@@ -60,7 +61,7 @@ describe("computeReplyTimeStats", () => {
       mkMsg({
         id: "out1",
         st: "2026-08-18T13:00:00Z",
-        bucket: "sent",
+        bucket: "paperTrail",
         direction: "out",
         threadId: "t_1",
       }),
@@ -83,7 +84,7 @@ describe("computeReplyTimeStats", () => {
         id: "out1",
         pid: "c_alice",
         st: "2026-08-18T12:00:00Z",
-        bucket: "sent",
+        bucket: "paperTrail",
         direction: "out",
       }),
     ];
@@ -99,14 +100,14 @@ describe("computeReplyTimeStats", () => {
       mkMsg({
         id: "out_late",
         st: "2026-08-19T08:00:00Z",
-        bucket: "sent",
+        bucket: "paperTrail",
         direction: "out",
       }),
       // Early reply — should be used.
       mkMsg({
         id: "out_early",
         st: "2026-08-18T11:00:00Z",
-        bucket: "sent",
+        bucket: "paperTrail",
         direction: "out",
       }),
     ];
@@ -119,9 +120,9 @@ describe("computeReplyTimeStats", () => {
       mkMsg({ id: "i1", st: "2026-08-18T08:00:00Z", bucket: "imbox" }),
       mkMsg({ id: "i2", st: "2026-08-18T09:00:00Z", bucket: "imbox" }),
       mkMsg({ id: "i3", st: "2026-08-18T10:00:00Z", bucket: "imbox" }),
-      mkMsg({ id: "o1", st: "2026-08-18T09:00:00Z", bucket: "sent", direction: "out" }),
-      mkMsg({ id: "o2", st: "2026-08-18T10:00:00Z", bucket: "sent", direction: "out" }),
-      mkMsg({ id: "o3", st: "2026-08-18T13:00:00Z", bucket: "sent", direction: "out" }),
+      mkMsg({ id: "o1", st: "2026-08-18T09:00:00Z", bucket: "paperTrail", direction: "out" }),
+      mkMsg({ id: "o2", st: "2026-08-18T10:00:00Z", bucket: "paperTrail", direction: "out" }),
+      mkMsg({ id: "o3", st: "2026-08-18T13:00:00Z", bucket: "paperTrail", direction: "out" }),
     ];
     // deltas: 1, 1, 3 → median 1
     const s = computeReplyTimeStats(msgs, { now: NOW });
@@ -132,8 +133,8 @@ describe("computeReplyTimeStats", () => {
     const msgs: Message[] = [
       mkMsg({ id: "i1", st: "2026-08-18T08:00:00Z", bucket: "imbox" }),
       mkMsg({ id: "i2", st: "2026-08-18T10:00:00Z", bucket: "imbox" }),
-      mkMsg({ id: "o1", st: "2026-08-18T09:00:00Z", bucket: "sent", direction: "out" }),
-      mkMsg({ id: "o2", st: "2026-08-18T14:00:00Z", bucket: "sent", direction: "out" }),
+      mkMsg({ id: "o1", st: "2026-08-18T09:00:00Z", bucket: "paperTrail", direction: "out" }),
+      mkMsg({ id: "o2", st: "2026-08-18T14:00:00Z", bucket: "paperTrail", direction: "out" }),
     ];
     // deltas: 1, 4 → median 2.5
     const s = computeReplyTimeStats(msgs, { now: NOW });
@@ -147,7 +148,7 @@ describe("computeReplyTimeStats", () => {
       mkMsg({
         id: "oldReply",
         st: "2026-06-19T13:00:00Z",
-        bucket: "sent",
+        bucket: "paperTrail",
         direction: "out",
       }),
       // 5 days ago — inside window
@@ -155,7 +156,7 @@ describe("computeReplyTimeStats", () => {
       mkMsg({
         id: "newReply",
         st: "2026-08-14T16:00:00Z",
-        bucket: "sent",
+        bucket: "paperTrail",
         direction: "out",
       }),
     ];
@@ -171,7 +172,7 @@ describe("computeReplyTimeStats", () => {
       mkMsg({
         id: "spamReply",
         st: "2026-08-18T13:00:00Z",
-        bucket: "sent",
+        bucket: "paperTrail",
         direction: "out",
       }),
     ];
@@ -186,7 +187,7 @@ describe("computeReplyTimeStats", () => {
       mkMsg({
         id: "o1",
         st: "2026-07-01T11:00:00Z",
-        bucket: "sent",
+        bucket: "paperTrail",
         direction: "out",
       }),
     ];
