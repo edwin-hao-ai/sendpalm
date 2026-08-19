@@ -251,16 +251,6 @@ function RecordRow(props: {
           </div>
         </Show>
       </div>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          showToast({ message: "导出为 CSV（M7 实装）", kind: "info" });
-        }}
-        title="Quick action"
-        style={{ color: "var(--text-muted)", "align-self": "center" }}
-      >
-        <Icon name="ph-download-simple" size={16} />
-      </button>
     </div>
   );
 
