@@ -1294,7 +1294,7 @@ function AgentTab() {
           color: "var(--text-muted)",
         }}
       >
-        详细 memory 编辑器在 M6 实装。
+        详细 memory 编辑器已在 Agent 面板的记忆 tab 中实装，可直接编辑。
       </p>
     </div>
   );
