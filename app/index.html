@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#0A8F63" />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="dark" />
     <meta name="description" content="SendPalm — 一个安静的、HEY 风格的邮件 + 日历 + IM + Agent 工作区。100% 本地、端到端。" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -57,9 +57,6 @@
         animation: splash-pulse 1.4s ease-in-out 0.5s infinite;
       }
       @keyframes splash-pulse { 0%, 100% { opacity: 0.4 } 50% { opacity: 1 } }
-
-      /* Hide the splash once SolidJS has finished bootstrapping. */
-      body.app-ready #splash { opacity: 0; pointer-events: none; }
     </style>
 
     <script>
@@ -89,7 +86,7 @@
     <noscript>You need to enable JavaScript to run SendPalm.</noscript>
 
     <div id="splash" aria-hidden="true">
-      <img class="logo" src="/src/assets/logo.svg" alt="" />
+      <img class="logo" src="/src/assets/logo.svg" alt="" onerror="this.style.display='none'" />
       <div class="word">Send<span class="accent">Palm</span></div>
       <div class="dot"></div>
     </div>

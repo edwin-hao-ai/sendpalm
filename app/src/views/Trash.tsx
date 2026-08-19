@@ -10,7 +10,7 @@ import {
 } from "../stores/data";
 import { usePaginatedMessages } from "../utils/paginated-messages";
 import { Avatar } from "../components/Avatar";
-import { Empty } from "../components/Empty";
+import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { setDetailOpen, setSelectedMessageId, showToast } from "../stores/ui";
 import { addDays, daysUntil } from "../utils/date";
@@ -76,6 +76,16 @@ export function Trash() {
         "flex-direction": "column",
       }}
     >
+      <Show
+        when={!paged.resource.error}
+        fallback={
+          <ErrorState
+            title="Trash 加载失败"
+            message={String(paged.resource.error ?? "")}
+            retry={() => void paged.refresh()}
+          />
+        }
+      >
       <header
         style={{ "text-align": "center", "margin-bottom": "var(--space-5)" }}
       >
@@ -212,6 +222,7 @@ export function Trash() {
             }}
           </VList>
         </div>
+      </Show>
       </Show>
     </div>
   );

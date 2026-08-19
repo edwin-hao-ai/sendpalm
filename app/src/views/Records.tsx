@@ -9,7 +9,7 @@ import {
 } from "../stores/data";
 import { usePaginatedMessages } from "../utils/paginated-messages";
 import { Avatar } from "../components/Avatar";
-import { Empty } from "../components/Empty";
+import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import {
   setDetailOpen,
@@ -75,6 +75,16 @@ export function Records() {
         "flex-direction": "column",
       }}
     >
+      <Show
+        when={!paged.resource.error}
+        fallback={
+          <ErrorState
+            title="Records 加载失败"
+            message={String(paged.resource.error ?? "")}
+            retry={() => void paged.refresh()}
+          />
+        }
+      >
       <header
         style={{
           padding: "var(--space-6) var(--space-5) var(--space-3)",
@@ -149,6 +159,7 @@ export function Records() {
             </VList>
           </div>
         </Show>
+      </Show>
       </Show>
     </div>
   );
@@ -251,16 +262,6 @@ function RecordRow(props: {
           </div>
         </Show>
       </div>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          showToast({ message: "导出为 CSV（M7 实装）", kind: "info" });
-        }}
-        title="Quick action"
-        style={{ color: "var(--text-muted)", "align-self": "center" }}
-      >
-        <Icon name="ph-download-simple" size={16} />
-      </button>
     </div>
   );
 

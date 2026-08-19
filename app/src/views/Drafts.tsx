@@ -16,7 +16,7 @@ import {
   showToast,
 } from "../stores/ui";
 import { Icon } from "../components/Icon";
-import { Empty } from "../components/Empty";
+import { Empty, ErrorState } from "../components/Empty";
 import type { Draft } from "../types";
 import { relativeTime } from "../utils/date";
 import { useRefreshEffect } from "../utils/gestures";
@@ -148,6 +148,22 @@ export function Drafts() {
             取消
           </button>
         </div>
+      </Show>
+
+      <Show
+        when={!drafts.error && !scheduled.error}
+        fallback={
+          <ErrorState
+            title="草稿加载失败"
+            message={String(drafts.error ?? scheduled.error ?? "")}
+            retry={() => {
+              void refetchDrafts();
+              void refetchScheduled();
+            }}
+          />
+        }
+      >
+        <></>
       </Show>
 
       <Show

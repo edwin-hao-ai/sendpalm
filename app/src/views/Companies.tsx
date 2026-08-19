@@ -10,7 +10,7 @@ import {
   listFiles,
 } from "../stores/data";
 import { Avatar } from "../components/Avatar";
-import { Empty } from "../components/Empty";
+import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import {
   setDetailOpen,
@@ -88,6 +88,25 @@ export function Companies() {
         </p>
       </header>
 
+      <Show
+        when={!contacts.error && !messages.error && !events.error && !files.error}
+        fallback={
+          <ErrorState
+            title="公司数据加载失败"
+            message={String(
+              contacts.error ?? messages.error ?? events.error ?? files.error ?? "",
+            )}
+            retry={() => {
+              void refetchContacts();
+              void refetchMessages();
+              void refetchEvents();
+              void refetchFiles();
+            }}
+          />
+        }
+      >
+        <></>
+      </Show>
       <Show
         when={grouped().length > 0}
         fallback={<Empty icon="ph-buildings" title="没有公司" />}

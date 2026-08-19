@@ -4,7 +4,7 @@
 
 import { For, Show, createMemo, createResource, createSignal } from "solid-js";
 import { listFiles, listContacts, listMessages } from "../stores/data";
-import { Empty } from "../components/Empty";
+import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { setDetailOpen, setSelectedFileId } from "../stores/ui";
 import { relativeTime } from "../utils/date";
@@ -124,6 +124,18 @@ export function Files() {
         </For>
       </div>
 
+      <Show
+        when={!files.error}
+        fallback={
+          <ErrorState
+            title="文件加载失败"
+            message={String(files.error ?? "")}
+            retry={() => void refetchFiles()}
+          />
+        }
+      >
+        <></>
+      </Show>
       <Show
         when={items().length > 0}
         fallback={<Empty icon="ph-paperclip" title="没有文件" />}
