@@ -19,6 +19,7 @@ import {
 } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
+import { ErrorState } from "../components/Empty";
 import { sendEmailViaBackend } from "../services/backend";
 import { generateAiDraft } from "../utils/draft";
 import { getFocusReplyCandidates } from "../utils/triage";
@@ -68,6 +69,16 @@ export function FocusReply() {
         "flex-direction": "column",
       }}
     >
+      <Show
+        when={!messages.error}
+        fallback={
+          <ErrorState
+            title="Focus Reply 加载失败"
+            message={String(messages.error ?? "")}
+            retry={() => void refetchMessages()}
+          />
+        }
+      >
       <div
         style={{
           display: "flex",
@@ -164,6 +175,7 @@ export function FocusReply() {
             </For>
           </div>
         </div>
+      </Show>
       </Show>
     </div>
   );

@@ -10,7 +10,7 @@ import {
   deleteClip,
 } from "../stores/data";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { Empty } from "../components/Empty";
+import { Empty, ErrorState } from "../components/Empty";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { showToast } from "../stores/ui";
@@ -68,6 +68,16 @@ export function Clips() {
         animation: "view-enter 0.3s var(--ease-out) both",
       }}
     >
+      <Show
+        when={!clips.error}
+        fallback={
+          <ErrorState
+            title="Clips 加载失败"
+            message={String(clips.error ?? "")}
+            retry={() => void refetchClips()}
+          />
+        }
+      >
       <header
         style={{
           padding: "var(--space-5)",
@@ -158,6 +168,7 @@ export function Clips() {
             </Group>
           </Show>
         </div>
+      </Show>
       </Show>
     </div>
   );

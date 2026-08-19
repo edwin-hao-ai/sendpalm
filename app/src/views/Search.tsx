@@ -22,7 +22,7 @@ import {
   searchIndex,
 } from "../stores/data";
 import { Avatar } from "../components/Avatar";
-import { Empty } from "../components/Empty";
+import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import {
   setDetailOpen,
@@ -305,6 +305,18 @@ export function Search() {
         </div>
       </div>
 
+      <Show
+        when={!ftsResults.error}
+        fallback={
+          <ErrorState
+            title="搜索失败"
+            message={String(ftsResults.error ?? "")}
+            retry={() => void refetchFts()}
+          />
+        }
+      >
+        <></>
+      </Show>
       <Show
         when={filtered().length > 0}
         fallback={

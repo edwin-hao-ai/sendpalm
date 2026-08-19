@@ -24,7 +24,7 @@ import {
 } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
-import { Empty } from "../components/Empty";
+import { Empty, ErrorState } from "../components/Empty";
 import { getReadTogetherCandidates } from "../utils/triage";
 import type { Contact, Message } from "../types";
 
@@ -139,6 +139,19 @@ export function ReadTogether() {
         "flex-direction": "column",
       }}
     >
+      <Show
+        when={!messages.error}
+        fallback={
+          <ErrorState
+            title="加载失败"
+            message={String(messages.error ?? "")}
+            retry={() => void refetchMessages()}
+          />
+        }
+      >
+        <></>
+      </Show>
+
       <Show
         when={current()}
         fallback={

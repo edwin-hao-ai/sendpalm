@@ -5,7 +5,7 @@
 import { For, Show, createMemo, createResource, createSignal } from "solid-js";
 import { listContacts, upsertContact, deleteContact } from "../stores/data";
 import { Avatar } from "../components/Avatar";
-import { Empty } from "../components/Empty";
+import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { SkeletonList } from "../components/Skeleton";
 import { ContactEditModal } from "../components/ContactEditModal";
@@ -235,6 +235,18 @@ export function Contacts() {
         </button>
       </div>
 
+      <Show
+        when={!contacts.error}
+        fallback={
+          <ErrorState
+            title="联系人加载失败"
+            message={String(contacts.error ?? "")}
+            retry={() => void refetch()}
+          />
+        }
+      >
+        <></>
+      </Show>
       <Show
         when={contacts.state !== "pending"}
         fallback={
