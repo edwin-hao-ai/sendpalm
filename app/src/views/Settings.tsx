@@ -42,6 +42,7 @@ import {
 import { Modal } from "../components/Modal";
 import { Icon } from "../components/Icon";
 import { Avatar } from "../components/Avatar";
+import { Empty } from "../components/Empty";
 import { uid } from "../utils/id";
 import type {
   Account,
@@ -447,6 +448,14 @@ function AccountsTab() {
           <Icon name="ph-plus" size={12} /> Add account
         </button>
       </div>
+      <Show when={(accounts() ?? []).length === 0}>
+        <Empty
+          icon="ph-plug-charging"
+          title="还没有连接邮箱"
+          description="添加 IMAP/SMTP 账号后，会自动出现在这里。"
+          action={{ label: "添加账号", onClick: () => setAdding(true) }}
+        />
+      </Show>
       <For each={accounts() ?? []}>
         {(a) => (
           <div
@@ -1776,6 +1785,13 @@ function ShortcutsTab() {
           Restore defaults
         </button>
       </div>
+      <Show when={(shortcuts() ?? []).length === 0}>
+        <Empty
+          icon="ph-keyboard"
+          title="还没有自定义快捷键"
+          description="添加快捷键后，会显示在这里。"
+        />
+      </Show>
       <For each={shortcuts() ?? []}>
         {(s) => (
           <div
