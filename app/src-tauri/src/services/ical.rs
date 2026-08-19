@@ -32,6 +32,17 @@ pub struct IcalEvent {
     pub all_day: bool,
     pub location: Option<String>,
     pub description: Option<String>,
+    /// iCalendar METHOD: REQUEST, CANCEL, REPLY, etc. (RFC 5546 / iTip).
+    /// Only set when the wrapping VCALENDAR declared a METHOD property.
+    /// None means "implicit REQUEST" — the iCal body is a new invite.
+    pub method: Option<String>,
+    /// Organizer's email (MAILTO from the ORGANIZER property), when present.
+    pub organizer: Option<String>,
+    /// Attendees as their MAILTO values. For a REPLY message this is
+    /// typically a single entry: the responder.
+    pub attendees: Vec<String>,
+    /// SEQUENCE number from the VEVENT. Used to detect updates.
+    pub sequence: Option<u32>,
 }
 
 /// Parse an iCalendar text body. Returns the first VEVENT found, or `None`.
@@ -39,7 +50,35 @@ pub fn parse_vevent(ics: &str) -> Option<IcalEvent> {
     // Unfold continuation lines (RFC 5545 §3.1).
     let unfolded = unfold(ics);
 
-    // Collect the content between the first BEGIN:VEVENT and matching END:VEVENT.
+    // First pass: look for a METHOD property at the VCALENDAR level
+    // (RFC 5546 §3.2). It always precedes the VEVENT block in valid iCal.
+    let mut method: Option<String> = None;
+    let mut in_vcal = false;
+    for raw in unfolded.lines() {
+        let line = raw.trim_end_matches('\r');
+        let upper_full = line.to_uppercase();
+        let upper_name = line.split(':').next().unwrap_or("").to_uppercase();
+        if upper_name == "BEGIN" && upper_full.contains("VCALENDAR") {
+            in_vcal = true;
+            continue;
+        }
+        if upper_name == "END" && upper_full.contains("VCALENDAR") {
+            in_vcal = false;
+            continue;
+        }
+        // Only read METHOD while we're between BEGIN:VCALENDAR and
+        // BEGIN:VEVENT (otherwise we'd match a method-shaped value
+        // inside a VEVENT, which is a real concern for inline invites
+        // where the body is itself text/calendar without a wrapper).
+        if in_vcal && upper_name == "METHOD" {
+            if let Some((_, v)) = split_property(line) {
+                method = Some(unescape_text(&v).to_uppercase());
+            }
+        }
+    }
+
+    // Second pass: collect the content between the first BEGIN:VEVENT
+    // and matching END:VEVENT.
     let mut in_event = false;
     let mut depth = 0u32;
     let mut lines: Vec<&str> = Vec::new();
@@ -78,6 +117,9 @@ pub fn parse_vevent(ics: &str) -> Option<IcalEvent> {
     let mut dtend_tzid = None;
     let mut location = None;
     let mut description = None;
+    let mut organizer: Option<String> = None;
+    let mut attendees: Vec<String> = Vec::new();
+    let mut sequence: Option<u32> = None;
 
     for line in lines {
         let (name_and_params, value) = match split_property(line) {
@@ -106,6 +148,22 @@ pub fn parse_vevent(ics: &str) -> Option<IcalEvent> {
             }
             "LOCATION" => location = Some(value),
             "DESCRIPTION" => description = Some(value),
+            "ORGANIZER" => {
+                // ORGANIZER;CN=Alice:mailto:alice@example.com
+                organizer = Some(extract_mailto(&value));
+            }
+            "ATTENDEE" => {
+                // ATTENDEE;CN=Bob;RSVP=TRUE:mailto:bob@example.com
+                let addr = extract_mailto(&value);
+                if !addr.is_empty() {
+                    attendees.push(addr);
+                }
+            }
+            "SEQUENCE" => {
+                if let Ok(n) = value.trim().parse::<u32>() {
+                    sequence = Some(n);
+                }
+            }
             _ => {}
         }
     }
@@ -127,7 +185,25 @@ pub fn parse_vevent(ics: &str) -> Option<IcalEvent> {
         all_day,
         location,
         description,
+        method,
+        organizer,
+        attendees,
+        sequence,
     })
+}
+
+/// Strip a leading `mailto:` (or `MAILTO:`) from an iCal value. If the
+/// value is just an address with no scheme, return it as-is.
+fn extract_mailto(value: &str) -> String {
+    let v = value.trim();
+    if let Some(rest) = v
+        .strip_prefix("mailto:")
+        .or_else(|| v.strip_prefix("MAILTO:"))
+    {
+        rest.trim().to_string()
+    } else {
+        v.to_string()
+    }
 }
 
 /// RFC 5545 §3.1 line unfolding: a CRLF (or LF) followed by a single
@@ -238,6 +314,138 @@ pub fn compute_duration_minutes(start: Option<&str>, end: Option<&str>) -> i64 {
     (end_dt - start_dt).num_minutes()
 }
 
+/// iTip RSVP partstat values (RFC 5545 §3.2.12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RsvpStatus {
+    Accepted,
+    Declined,
+    Tentative,
+}
+
+impl RsvpStatus {
+    /// String value used in the iTip PARTSTAT property (case-sensitive per spec).
+    pub fn as_partstat(self) -> &'static str {
+        match self {
+            RsvpStatus::Accepted => "ACCEPTED",
+            RsvpStatus::Declined => "DECLINED",
+            RsvpStatus::Tentative => "TENTATIVE",
+        }
+    }
+}
+
+/// Build an iTip REPLY (RFC 5546 §3.2.5) for the given original event,
+/// addressed from `responder_email` to the organizer. The reply contains
+/// exactly one VEVENT whose ATTENDEE carries the chosen PARTSTAT.
+///
+/// Returns `None` if the original event lacks a UID or organizer — the
+/// caller should treat that as "can't reply, missing required fields."
+pub fn build_itip_reply(
+    original: &IcalEvent,
+    responder_email: &str,
+    response: RsvpStatus,
+) -> Option<String> {
+    let uid = original.uid.as_deref()?;
+    let organizer = original.organizer.as_deref()?;
+    if responder_email.trim().is_empty() {
+        return None;
+    }
+    let now = Utc::now();
+    let stamp = format_ical_utc(now);
+    let sequence = original.sequence.unwrap_or(0);
+
+    let dtstart_line = original
+        .dtstart
+        .as_deref()
+        .map(|d| {
+            let raw = ical_to_compact(d);
+            if let Some(tz) = &original.dtstart_tzid {
+                format!("DTSTART;TZID={tz}:{raw}\r\n")
+            } else {
+                format!("DTSTART:{raw}\r\n")
+            }
+        })
+        .unwrap_or_default();
+    let dtend_line = original
+        .dtend
+        .as_deref()
+        .map(|d| {
+            let raw = ical_to_compact(d);
+            if let Some(tz) = &original.dtend_tzid {
+                format!("DTEND;TZID={tz}:{raw}\r\n")
+            } else {
+                format!("DTEND:{raw}\r\n")
+            }
+        })
+        .unwrap_or_default();
+    let summary_line = original
+        .summary
+        .is_empty()
+        .then(String::new)
+        .unwrap_or_else(|| format!("SUMMARY:{}\r\n", escape_text(&original.summary)));
+    let location_line = original
+        .location
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| format!("LOCATION:{}\r\n", escape_text(s)))
+        .unwrap_or_default();
+
+    Some(format!(
+        "BEGIN:VCALENDAR\r\n\
+METHOD:REPLY\r\n\
+PRODID:-//SendPalm//EN\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:{uid}\r\n\
+SEQUENCE:{sequence}\r\n\
+DTSTAMP:{stamp}\r\n\
+{summary_line}\
+{dtstart_line}\
+{dtend_line}\
+{location_line}\
+ORGANIZER:mailto:{organizer}\r\n\
+ATTENDEE;CN={responder_email};PARTSTAT={partstat};RSVP=TRUE:mailto:{responder_email}\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n",
+        partstat = response.as_partstat()
+    ))
+}
+
+/// Format a chrono::DateTime<Utc> as iCal UTC stamp `YYYYMMDDTHHMMSSZ`.
+fn format_ical_utc(dt: chrono::DateTime<Utc>) -> String {
+    dt.format("%Y%m%dT%H%M%SZ").to_string()
+}
+
+/// Convert a stored RFC3339 / ISO8601 datetime back to compact iCal form
+/// (drop the dashes + colons). Best-effort: if the input doesn't match
+/// either form, the original is returned.
+fn ical_to_compact(iso: &str) -> String {
+    let v = iso.trim();
+    // Already compact (YYYYMMDDTHHMMSSZ) — pass through.
+    if v.contains('T') && !v.contains('-') {
+        return v.to_string();
+    }
+    // RFC3339 → compact: drop dashes, drop the seconds suffix, append Z if missing.
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(v) {
+        return format_ical_utc(dt.with_timezone(&Utc));
+    }
+    v.to_string()
+}
+
+/// Escape commas, semicolons, backslashes, and newlines per RFC 5545 §3.3.11.
+fn escape_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            ',' => out.push_str("\\,"),
+            ';' => out.push_str("\\;"),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 /// Normalize a DTSTART/DTEND value into an RFC3339 timestamp when possible.
 fn normalize_datetime(value: &str) -> String {
     let v = value.trim();
@@ -319,5 +527,151 @@ mod tests {
     fn returns_none_without_vevent() {
         let ics = "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n";
         assert!(parse_vevent(ics).is_none());
+    }
+
+    #[test]
+    fn parses_method_request() {
+        let ics = "BEGIN:VCALENDAR\r\n\
+METHOD:REQUEST\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:inv-1\r\n\
+SUMMARY:Project sync\r\n\
+DTSTART:20260101T100000Z\r\n\
+DTEND:20260101T110000Z\r\n\
+ORGANIZER;CN=Alice:mailto:alice@example.com\r\n\
+ATTENDEE;CN=Bob;RSVP=TRUE:mailto:bob@example.com\r\n\
+ATTENDEE:mailto:carol@example.com\r\n\
+SEQUENCE:0\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let ev = parse_vevent(ics).unwrap();
+        assert_eq!(ev.method.as_deref(), Some("REQUEST"));
+        assert_eq!(ev.organizer.as_deref(), Some("alice@example.com"));
+        assert_eq!(ev.attendees, vec!["bob@example.com", "carol@example.com"]);
+        assert_eq!(ev.sequence, Some(0));
+    }
+
+    #[test]
+    fn parses_method_cancel() {
+        let ics = "BEGIN:VCALENDAR\r\n\
+METHOD:CANCEL\r\n\
+BEGIN:VEVENT\r\n\
+UID:inv-2\r\n\
+SUMMARY:Cancelled meeting\r\n\
+DTSTART:20260101T100000Z\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let ev = parse_vevent(ics).unwrap();
+        assert_eq!(ev.method.as_deref(), Some("CANCEL"));
+        assert_eq!(ev.uid.as_deref(), Some("inv-2"));
+    }
+
+    #[test]
+    fn no_method_implies_implicit_request() {
+        // METHOD is optional; an invite without one is a default REQUEST.
+        let ics = "BEGIN:VCALENDAR\r\n\
+BEGIN:VEVENT\r\n\
+UID:inv-3\r\n\
+SUMMARY:No method\r\n\
+DTSTART:20260101T100000Z\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let ev = parse_vevent(ics).unwrap();
+        assert!(ev.method.is_none());
+    }
+
+    #[test]
+    fn sequence_higher_number_wins() {
+        let s0 = "BEGIN:VEVENT\r\nUID:inv-4\r\nSUMMARY:r0\r\nDTSTART:20260101T100000Z\r\nSEQUENCE:0\r\nEND:VEVENT\r\n";
+        let s2 = "BEGIN:VEVENT\r\nUID:inv-4\r\nSUMMARY:r2 (rescheduled)\r\nDTSTART:20260102T100000Z\r\nSEQUENCE:2\r\nEND:VEVENT\r\n";
+        let a = parse_vevent(s0).unwrap();
+        let b = parse_vevent(s2).unwrap();
+        assert!(b.sequence.unwrap() > a.sequence.unwrap());
+    }
+
+    #[test]
+    fn rsvp_status_partstat_values() {
+        assert_eq!(RsvpStatus::Accepted.as_partstat(), "ACCEPTED");
+        assert_eq!(RsvpStatus::Declined.as_partstat(), "DECLINED");
+        assert_eq!(RsvpStatus::Tentative.as_partstat(), "TENTATIVE");
+    }
+
+    #[test]
+    fn build_itip_reply_roundtrip() {
+        // Step 1: parse a real REQUEST.
+        let ics = "BEGIN:VCALENDAR\r\n\
+METHOD:REQUEST\r\n\
+VERSION:2.0\r\n\
+BEGIN:VEVENT\r\n\
+UID:roundtrip-1\r\n\
+SEQUENCE:0\r\n\
+SUMMARY:Quarterly review\r\n\
+DTSTART:20260101T100000Z\r\n\
+DTEND:20260101T110000Z\r\n\
+LOCATION:Room 42\r\n\
+ORGANIZER;CN=Alice:mailto:alice@example.com\r\n\
+ATTENDEE;CN=Bob;RSVP=TRUE:mailto:bob@example.com\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let original = parse_vevent(ics).unwrap();
+        assert_eq!(original.uid.as_deref(), Some("roundtrip-1"));
+        assert_eq!(original.organizer.as_deref(), Some("alice@example.com"));
+
+        // Step 2: Bob accepts → build the REPLY body.
+        let reply = build_itip_reply(&original, "bob@example.com", RsvpStatus::Accepted).unwrap();
+        assert!(reply.contains("METHOD:REPLY\r\n"));
+        assert!(reply.contains("UID:roundtrip-1\r\n"));
+        assert!(reply.contains("ORGANIZER:mailto:alice@example.com\r\n"));
+        assert!(reply.contains(
+            "ATTENDEE;CN=bob@example.com;PARTSTAT=ACCEPTED;RSVP=TRUE:mailto:bob@example.com\r\n"
+        ));
+        assert!(reply.contains("BEGIN:VEVENT\r\n"));
+        assert!(reply.contains("END:VEVENT\r\n"));
+        assert!(reply.contains("END:VCALENDAR\r\n"));
+
+        // Step 3: the REPLY itself is a valid iCal body that we can re-parse.
+        let parsed_reply = parse_vevent(&reply).unwrap();
+        assert_eq!(parsed_reply.method.as_deref(), Some("REPLY"));
+        assert_eq!(parsed_reply.uid.as_deref(), Some("roundtrip-1"));
+        assert_eq!(parsed_reply.organizer.as_deref(), Some("alice@example.com"));
+        assert_eq!(parsed_reply.attendees, vec!["bob@example.com"]);
+    }
+
+    #[test]
+    fn build_itip_reply_decline_preserves_original_dt() {
+        let ics = "BEGIN:VCALENDAR\r\n\
+METHOD:REQUEST\r\n\
+BEGIN:VEVENT\r\n\
+UID:decline-1\r\n\
+SEQUENCE:3\r\n\
+SUMMARY:Skip\r\n\
+DTSTART:20260215T090000Z\r\n\
+DTEND:20260215T100000Z\r\n\
+ORGANIZER:mailto:boss@example.com\r\n\
+END:VEVENT\r\n\
+END:VCALENDAR\r\n";
+        let original = parse_vevent(ics).unwrap();
+        let reply =
+            build_itip_reply(&original, "me@example.com", RsvpStatus::Declined).unwrap();
+        assert!(reply.contains("DTSTART:20260215T090000Z\r\n"));
+        assert!(reply.contains("DTEND:20260215T100000Z\r\n"));
+        assert!(reply.contains("SEQUENCE:3\r\n"));
+        assert!(reply.contains("PARTSTAT=DECLINED"));
+    }
+
+    #[test]
+    fn build_itip_reply_requires_uid_and_organizer() {
+        let ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20260101T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let original = parse_vevent(ics).unwrap();
+        assert!(build_itip_reply(&original, "me@example.com", RsvpStatus::Accepted).is_none());
+    }
+
+    #[test]
+    fn build_itip_reply_escapes_special_chars() {
+        let ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:esc-1\r\nSUMMARY:Q1, Q2; review\r\nDTSTART:20260101T100000Z\r\nORGANIZER:mailto:boss@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let original = parse_vevent(ics).unwrap();
+        let reply = build_itip_reply(&original, "me@example.com", RsvpStatus::Accepted).unwrap();
+        assert!(reply.contains("SUMMARY:Q1\\, Q2\\; review\r\n"));
     }
 }
