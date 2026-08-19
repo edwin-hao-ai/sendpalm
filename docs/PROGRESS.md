@@ -97,6 +97,46 @@ sidebar counts concurrently). Tweak up if load grows.
 - `5117bdb` `fix(rust): increase SQLite pool to 8 connections + 5s busy_timeout`
 - `89f37df` `fix(imbox): separate date-group count into a pill badge`
 
+## 2026-08-19 (still later) — v2 Phase 1.6: defer htmlEmailSrcdoc + perf audit
+
+After the pool fix, reads no longer block on sync — but `htmlEmailSrcdoc`
+still calls DOMPurify synchronously on the main thread, blocking
+200-600ms per message view on a real 80KB body_html. Switched the
+main message iframe (MessagePanel) and the read-together card
+(ReadTogether) to a deferred signal pattern (per-message or
+per-card `iframeSrc` + `createEffect` that schedules the sanitize
+on the next tick; stale-closure guard discards a sanitize from a
+message the user already moved past).
+
+Also wrote a full performance + interaction audit
+(`docs/PERF-AUDIT-2026-08-19.md`) that identifies the remaining
+structural issues:
+- `MessagePanel` mounts 5 full-table queries on every message view
+  (`listMessages()` alone pulls ~300MB body_html across IPC). Fix
+  shape: scoped queries (`listThreadMessages`, `listStickiesForMessage`,
+  etc.). Phase 2 work.
+- Topbar 10s poll storm — replace with `services/sync-events.ts`
+  push. Phase 2 work.
+- Reminder 60s poll — same shape, push events. Phase 2.
+- UX: tabs duplicate section headers, error states not consistent
+  across all 23 views, no "unsynced changes" indicator, read-together
+  silent exit, some touch targets < 44px.
+- Speculative: Web Worker for DOMPurify, FTS5 search index (the
+  next "I typed in search and froze" issue).
+
+### Verification matrix
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | ✅ |
+| `pnpm test` | ✅ 207/207 |
+| `pnpm lint` (changed files) | ✅ |
+| Live profile run | ⏭️ Tauri dev delayed (mddock iOS sim held shared `~/.cargo/shared-target` lock) |
+
+### Commits
+
+- `5d25c10` `perf(panel): defer htmlEmailSrcdoc to next tick`
+
 ## 2026-08-19 — v2 Phase 1: ship-it fixes (Imbox H1, drag wiring, Read Together)
 
 Closed the three user-reported bugs from the prototype-v11.38 session and
