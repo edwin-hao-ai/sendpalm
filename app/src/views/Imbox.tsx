@@ -798,84 +798,92 @@ function ImboxHeader(props: {
   return (
     <header
       style={{
-        display: "flex",
-        "align-items": "center",
-        gap: "var(--space-2)",
-        padding: "var(--space-4) var(--space-5) var(--space-2)",
+        padding: "var(--space-5) var(--space-5) var(--space-3)",
       }}
     >
       <h1
         style={{
           "font-family": "var(--font-display)",
-          "font-size": "var(--text-h3)",
+          "font-size": "var(--text-h1)",
           "font-weight": "800",
+          "letter-spacing": "-0.02em",
+          "line-height": "1.1",
           margin: 0,
         }}
       >
         Imbox
       </h1>
-      <span
+      <div
         style={{
-          "font-size": "var(--text-caption)",
-          color: "var(--text-muted)",
-        }}
-      >
-        {props.newCount} 待读 · {props.previouslySeenCount} 已读 · {props.total} 总数
-      </span>
-      <span
-        style={{
-          "font-size": "var(--text-micro)",
-          color: "var(--text-muted)",
-          padding: "2px 8px",
-          background: "var(--paper-mid)",
-          "border-radius": "var(--radius-pill)",
-          "font-weight": "700",
-        }}
-        data-active-sort
-      >
-        {SORT_LABELS[props.activeSort]}
-      </span>
-      <div style={{ flex: 1 }} />
-      <button
-        onClick={() => props.onOpenFilters()}
-        data-open-filters
-        title="More filters"
-        aria-label="More filters"
-        style={{
-          display: "inline-flex",
+          display: "flex",
           "align-items": "center",
-          gap: "4px",
-          padding: "4px 10px",
-          background: "transparent",
-          color: "var(--text-secondary)",
-          "border-radius": "var(--radius-pill)",
-          "font-size": "var(--text-micro)",
-          "font-weight": "700",
-          border: "0.5px solid var(--border)",
-          cursor: "pointer",
+          gap: "var(--space-2)",
+          "margin-top": "var(--space-2)",
         }}
       >
-        <Icon name="ph-sliders-horizontal" size={12} /> 筛选
-      </button>
-      <button
-        onClick={() => void props.onSync()}
-        data-sync-now
-        style={{
-          display: "inline-flex",
-          "align-items": "center",
-          gap: "4px",
-          padding: "4px 10px",
-          background: "var(--palm-soft)",
-          color: "var(--palm)",
-          "border-radius": "var(--radius-pill)",
-          "font-size": "var(--text-micro)",
-          "font-weight": "700",
-          border: "0",
-          cursor: "pointer",
-        }}
-      >
-        <Icon name="arrows-clockwise" size={12} /> 同步
-      </button>
+        <span
+          style={{
+            "font-size": "var(--text-caption)",
+            color: "var(--text-muted)",
+          }}
+        >
+          {props.newCount} 待读 · {props.previouslySeenCount} 已读 · {props.total} 总数
+        </span>
+        <span
+          style={{
+            "font-size": "var(--text-micro)",
+            color: "var(--text-muted)",
+            padding: "2px 8px",
+            background: "var(--paper-mid)",
+            "border-radius": "var(--radius-pill)",
+            "font-weight": "700",
+          }}
+          data-active-sort
+        >
+          {SORT_LABELS[props.activeSort]}
+        </span>
+        <div style={{ flex: 1 }} />
+        <button
+          onClick={() => props.onOpenFilters()}
+          data-open-filters
+          title="More filters"
+          aria-label="More filters"
+          style={{
+            display: "inline-flex",
+            "align-items": "center",
+            gap: "4px",
+            padding: "4px 10px",
+            background: "transparent",
+            color: "var(--text-secondary)",
+            "border-radius": "var(--radius-pill)",
+            "font-size": "var(--text-micro)",
+            "font-weight": "700",
+            border: "0.5px solid var(--border)",
+            cursor: "pointer",
+          }}
+        >
+          <Icon name="ph-sliders-horizontal" size={12} /> 筛选
+        </button>
+        <button
+          onClick={() => void props.onSync()}
+          data-sync-now
+          style={{
+            display: "inline-flex",
+            "align-items": "center",
+            gap: "4px",
+            padding: "4px 10px",
+            background: "var(--palm-soft)",
+            color: "var(--palm)",
+            "border-radius": "var(--radius-pill)",
+            "font-size": "var(--text-micro)",
+            "font-weight": "700",
+            border: "0",
+            cursor: "pointer",
+          }}
+        >
+          <Icon name="arrows-clockwise" size={12} /> 同步
+        </button>
+      </div>
     </header>
   );
 }
