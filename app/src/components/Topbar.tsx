@@ -1,9 +1,9 @@
 /** Topbar — search, view title, notification bell, avatar. */
 
-import { Show, For } from "solid-js";
+import { Show, For, onMount } from "solid-js";
 import { Icon } from "./Icon";
 import { BrandMark } from "./BrandMark";
-import { useViewport } from "../utils/gestures";
+import { useViewport, useSoftRefreshEffect } from "../utils/gestures";
 import {
   commandPaletteOpen,
   setCommandPaletteOpen,
@@ -18,7 +18,7 @@ import {
 import { NAV_SECTIONS } from "../utils/labels";
 import { Avatar } from "./Avatar";
 import { getSyncState, syncNow } from "../services/backend";
-import { createSignal, onCleanup, createResource } from "solid-js";
+import { createSignal, createResource } from "solid-js";
 import { listAccounts, countUnreadNotifications } from "../stores/data";
 
 export function Topbar() {
@@ -148,15 +148,28 @@ const iconButtonStyle = {
   transition: "background var(--duration-fast) var(--ease-out)",
 };
 /**
- * Bell icon with unread count badge, auto-refreshed every 10 s and
- * refetched when the panel is opened/closed.
+ * Bell icon with unread count badge. Event-driven, not polled:
+ *  - re-fetches when the sync bridge fires a soft refresh tick
+ *    (i.e. a new message arrived and the count might have changed)
+ *  - re-fetches when the panel is opened (so the user sees a fresh
+ *    count if the bridge fired while the panel was closed)
+ *  - re-fetches once on mount for the initial render
+ *
+ * The previous setInterval(10s) was the source of the 78-second
+ * sync freeze pre-Phase-1.5: every 10s a Topbar-mounted resource
+ * pulled through the now-1-connection SQLite pool. With the pool
+ * fixed (max_connections=8) the freeze is gone, but the polling
+ * was still 100% wasteful — the data has a push channel.
  */
 function NotificationBell(props: { onClick: () => void }) {
   const [count, { refetch }] = createResource(countUnreadNotifications);
 
-  // Keep badge fresh while the app is running.
-  const interval = window.setInterval(() => refetch(), 10_000);
-  onCleanup(() => clearInterval(interval));
+  onMount(() => {
+    void refetch();
+  });
+  useSoftRefreshEffect(() => {
+    void refetch();
+  });
 
   const n = () => count() ?? 0;
 
@@ -164,7 +177,7 @@ function NotificationBell(props: { onClick: () => void }) {
     <button
       onClick={() => {
         props.onClick();
-        refetch();
+        void refetch();
       }}
       title="Notifications"
       aria-label="Notifications"
@@ -211,6 +224,10 @@ function SyncBadge() {
 
   const refreshAll = async () => {
     const list = emailAccounts();
+    if (list.length === 0) {
+      setStates({});
+      return;
+    }
     const next: Record<
       string,
       { last_uid: number; last_synced_at: string; busy: boolean }
@@ -232,16 +249,17 @@ function SyncBadge() {
     setStates(next);
   };
 
-  createResource(
-    () => emailAccounts().length,
-    () => {
-      refreshAll();
-      return null;
-    },
-  );
-  refreshAll();
-  const interval = window.setInterval(refreshAll, 10_000);
-  onCleanup(() => clearInterval(interval));
+  // Event-driven refresh: re-pull sync state when the sync bridge
+  // fires a soft tick (new message arrived → busy flag may have
+  // flipped) and once on mount for the initial render. Previously
+  // this polled every 10s, which was the bulk of the IPC traffic
+  // when an account was mid-sync.
+  onMount(() => {
+    void refreshAll();
+  });
+  useSoftRefreshEffect(() => {
+    void refreshAll();
+  });
 
   const aggregateBusy = () => {
     const s = states();
