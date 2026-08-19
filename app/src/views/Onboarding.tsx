@@ -42,7 +42,7 @@ const STEPS: Step[] = [
     icon: "ph-arrows-clockwise",
     color: "var(--purple)",
     cta: "继续",
-    highlight: { label: "拉取协议", value: "IMAP IDLE" },
+    highlight: { label: "拉取协议", value: "60s IMAP 轮询" },
   },
   {
     title: "真发真收",
