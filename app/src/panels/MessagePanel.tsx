@@ -15,19 +15,20 @@ import {
 import {
   getContact,
   getMessage,
-  listContacts,
-  listMessages,
-  listStickies,
   upsertSticky,
   deleteSticky,
-  listFollowUps,
   upsertFollowUp,
   upsertClip,
   upsertMessage,
   upsertContact,
   upsertDraft,
-  listFiles,
   moveMessageToBucket,
+  listThreadMessages,
+  listMessageNeighbours,
+  listStickiesForMessage,
+  listFollowUpsForMessage,
+  listFilesByIds,
+  listContactsByIds,
 } from "../stores/data";
 import {
   setDetailOpen,
@@ -79,12 +80,71 @@ export function MessagePanel(props: { messageId: string }) {
     () => message()?.pid ?? "",
     (pid) => getContact(pid),
   );
-  const [allContacts, { refetch: refetchContacts }] =
-    createResource(listContacts);
-  const [allMessages, { refetch: refetchAll }] = createResource(listMessages);
-  const [stickies, { refetch: refetchStickies }] = createResource(listStickies);
-  const [followUps, { refetch: refetchFU }] = createResource(listFollowUps);
-  const [files, { refetch: refetchFiles }] = createResource(listFiles);
+  // Scoped thread query: same threadId, or no-threadId + same pid.
+  // Lightweight (no body) because the thread list is just navigation.
+  const [threadMessages, { refetch: refetchThread }] = createResource(
+    () => {
+      const m = message();
+      if (!m) return null;
+      return { messageId: m.id, threadId: m.threadId, pid: m.pid };
+    },
+    async (key) => {
+      if (!key) return [];
+      const list = await listThreadMessages({ ...key, lightweight: true });
+      // For the no-threadId case the SQL can't filter by
+      // baseSubject() (no normalised-subject column yet). Filter in
+      // TS against a much smaller set — only the same sender, not
+      // the whole table.
+      const cur = message();
+      if (cur && !cur.threadId) {
+        const target = baseSubject(cur.subj);
+        return list.filter((m) => baseSubject(m.subj) === target);
+      }
+      return list;
+    },
+  );
+  // Thread + current-message contacts. Batched in one IPC round-trip
+  // so j/k through thread siblings doesn't trigger N separate
+  // getContact() calls.
+  const [threadContacts, { refetch: refetchThreadContacts }] = createResource(
+    () => {
+      const cur = message();
+      const t = threadMessages() ?? [];
+      const pids = new Set<string>();
+      if (cur) pids.add(cur.pid);
+      for (const m of t) pids.add(m.pid);
+      return Array.from(pids);
+    },
+    async (pids) => (pids.length > 0 ? await listContactsByIds(pids) : []),
+  );
+  // Stickies + follow-ups scoped to the current message id.
+  const [stickies, { refetch: refetchStickies }] = createResource(
+    () => props.messageId,
+    listStickiesForMessage,
+  );
+  const [followUps, { refetch: refetchFU }] = createResource(
+    () => props.messageId,
+    listFollowUpsForMessage,
+  );
+  // Attachments: only the file rows the current message references.
+  // Sibling messages may have their own attachments, but the panel
+  // only renders attachments for the current message — the sibling
+  // thread view just shows a count.
+  const [attachments, { refetch: refetchAttachments }] = createResource(
+    () => {
+      const m = message();
+      if (!m) return null;
+      return [...(m.attachments ?? [])];
+    },
+    async (ids) => (ids && ids.length > 0 ? await listFilesByIds(ids) : []),
+  );
+  // Neighbours for j/k navigation: prev/next in the full table by
+  // timestamp. Returns lightweight rows — the body isn't needed, just
+  // the id to navigate to.
+  const [neighbours] = createResource(
+    () => props.messageId,
+    listMessageNeighbours,
+  );
 
   const [viewMode, setViewMode] = createSignal<ViewMode>("rendered");
   const [expandedIds, setExpandedIds] = createSignal<Set<string>>(new Set());
@@ -102,11 +162,11 @@ export function MessagePanel(props: { messageId: string }) {
   useRefreshEffect(() => {
     void refetchMessage();
     void refetchContact();
-    void refetchContacts();
-    void refetchAll();
+    void refetchThread();
+    void refetchThreadContacts();
     void refetchStickies();
     void refetchFU();
-    void refetchFiles();
+    void refetchAttachments();
   });
 
   createEffect(() => {
@@ -124,29 +184,23 @@ export function MessagePanel(props: { messageId: string }) {
 
   const contactsById = createMemo<Record<string, Contact>>(() => {
     const map: Record<string, Contact> = {};
-    for (const c of allContacts() ?? []) map[c.id] = c;
+    for (const c of threadContacts() ?? []) map[c.id] = c;
     return map;
   });
 
   const currentMessage = createMemo<Message | null>(() => message() ?? null);
 
   // All messages in the same conversation, sorted oldest-first so the thread
-  // reads top-down. The current message is included.
+  // reads top-down. The current message is included. The threadMessages
+  // resource already excludes the current and (for the no-threadId case)
+  // baseSubject-filters, so we just append the current and sort.
   const thread = createMemo<Message[]>(() => {
     const cur = currentMessage();
     if (!cur) return [];
-    const tid = cur.threadId;
-    const sameSubject = (m: Message) =>
-      baseSubject(m.subj) === baseSubject(cur.subj);
-    const list = (allMessages() ?? []).filter(
-      (m) =>
-        m.id !== cur.id &&
-        ((tid && m.threadId === tid) ||
-          (!tid && !m.threadId && m.pid === cur.pid && sameSubject(m))),
-    );
-    list.push(cur);
-    list.sort((a, b) => (a.st ?? "").localeCompare(b.st ?? ""));
-    return list;
+    const sibs = threadMessages() ?? [];
+    sibs.push(cur);
+    sibs.sort((a, b) => (a.st ?? "").localeCompare(b.st ?? ""));
+    return sibs;
   });
 
   const threadParticipants = createMemo(() => {
@@ -207,8 +261,13 @@ export function MessagePanel(props: { messageId: string }) {
   }
 
   const attachmentsFor = (m: Message) => {
+    // Only the current message has its file rows loaded (see the
+    // `attachments` resource). For thread siblings we just return
+    // empty — the thread row doesn't render attachment previews
+    // anyway, only a count via m.attachments.length.
+    if (m.id !== currentMessage()?.id) return [];
     const ids = new Set(m.attachments ?? []);
-    return (files() ?? []).filter((f) => ids.has(f.id));
+    return (attachments() ?? []).filter((f) => ids.has(f.id));
   };
 
   const openCompose = (mode: "reply" | "replyAll" | "forward") => {
@@ -227,7 +286,7 @@ export function MessagePanel(props: { messageId: string }) {
     if (!m) return;
     await upsertMessage({ ...m, unread: true });
     await refetchMessage();
-    await refetchAll();
+    // (no local list to refresh — global bumpRefreshTick below covers other views)
     bumpRefreshTick();
     showToast({ message: "已标为未读", kind: "success" });
   };
@@ -236,7 +295,7 @@ export function MessagePanel(props: { messageId: string }) {
     const m = message();
     if (!m) return;
     await moveMessageToBucket(m.id, "paperTrail");
-    await refetchAll();
+    // (no local list to refresh — global bumpRefreshTick below covers other views)
     bumpRefreshTick();
     showToast({ message: "已归档到 Records", kind: "success" });
   };
@@ -246,7 +305,7 @@ export function MessagePanel(props: { messageId: string }) {
     if (!m) return;
     const previousBucket = m.bucket;
     await moveMessageToBucket(m.id, "trash");
-    await refetchAll();
+    // (no local list to refresh — global bumpRefreshTick below covers other views)
     bumpRefreshTick();
     setDetailOpen(false);
     setSelectedMessageId(null);
@@ -259,7 +318,7 @@ export function MessagePanel(props: { messageId: string }) {
           const current = await getMessage(m.id);
           if (!current) return;
           await upsertMessage({ ...current, bucket: previousBucket });
-          await refetchAll();
+          // (no local list to refresh — global bumpRefreshTick below covers other views)
           bumpRefreshTick();
           showToast({ message: "已恢复到原位置", kind: "success" });
         },
@@ -271,7 +330,7 @@ export function MessagePanel(props: { messageId: string }) {
     const m = message();
     if (!m) return;
     await moveMessageToBucket(m.id, "spam");
-    await refetchAll();
+    // (no local list to refresh — global bumpRefreshTick below covers other views)
     bumpRefreshTick();
     setDetailOpen(false);
     setSelectedMessageId(null);
@@ -287,7 +346,7 @@ export function MessagePanel(props: { messageId: string }) {
       screened: true,
       firstSeen: false,
     });
-    await refetchAll();
+    // (no local list to refresh — global bumpRefreshTick below covers other views)
     bumpRefreshTick();
     setDetailOpen(false);
     setSelectedMessageId(null);
@@ -326,7 +385,7 @@ export function MessagePanel(props: { messageId: string }) {
     const m = message();
     if (!m) return;
     await moveMessageToBucket(m.id, bucket);
-    await refetchAll();
+    // (no local list to refresh — global bumpRefreshTick below covers other views)
     bumpRefreshTick();
     setDetailOpen(false);
     setSelectedMessageId(null);
@@ -418,7 +477,7 @@ export function MessagePanel(props: { messageId: string }) {
     if (!m) return;
     await upsertMessage({ ...m, replyLater: !m.replyLater });
     await refetchMessage();
-    await refetchAll();
+    // (no local list to refresh — global bumpRefreshTick below covers other views)
     bumpRefreshTick();
     showToast({
       message: m.replyLater ? "已取消 Reply Later" : "已 Reply Later",
@@ -431,7 +490,7 @@ export function MessagePanel(props: { messageId: string }) {
     if (!m) return;
     await upsertMessage({ ...m, setAside: !m.setAside });
     await refetchMessage();
-    await refetchAll();
+    // (no local list to refresh — global bumpRefreshTick below covers other views)
     bumpRefreshTick();
     showToast({
       message: m.setAside ? "已取消 Set Aside" : "已 Set Aside",
@@ -476,19 +535,12 @@ export function MessagePanel(props: { messageId: string }) {
 
   let heroEl: HTMLDivElement | undefined;
 
-  // Sorted message list used to determine next/previous neighbours.
-  const sortedMessages = createMemo(() => {
-    const list = allMessages() ?? [];
-    return [...list].sort((a, b) => (b.st ?? "").localeCompare(a.st ?? ""));
-  });
-
-  const currentIndex = createMemo(() => {
-    const id = props.messageId;
-    return sortedMessages().findIndex((m) => m.id === id);
-  });
-
-  const nextMessage = () => sortedMessages()[currentIndex() + 1] ?? null;
-  const prevMessage = () => sortedMessages()[currentIndex() - 1] ?? null;
+  // Neighbours for j/k navigation: prev/next in the full table by
+  // timestamp. Returned by the neighbours resource as lightweight
+  // rows (id + st + subj + pid + bucket). The pull-gesture fallback
+  // also reads the subj from these.
+  const nextMessage = () => neighbours()?.next ?? null;
+  const prevMessage = () => neighbours()?.prev ?? null;
 
   function goNext() {
     const m = nextMessage();
@@ -1763,7 +1815,7 @@ export function MessagePanel(props: { messageId: string }) {
               messageIds={[m().id]}
               onChange={async () => {
                 await refetchMessage();
-                await refetchAll();
+                // (no local list to refresh — global bumpRefreshTick below covers other views)
               }}
             />
             <MovePicker
@@ -1772,7 +1824,7 @@ export function MessagePanel(props: { messageId: string }) {
               messageIds={[m().id]}
               onChange={async () => {
                 await refetchMessage();
-                await refetchAll();
+                // (no local list to refresh — global bumpRefreshTick below covers other views)
                 setDetailOpen(false);
                 setSelectedMessageId(null);
               }}
