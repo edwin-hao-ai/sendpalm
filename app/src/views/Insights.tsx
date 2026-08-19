@@ -6,7 +6,6 @@ import { For, Show, createMemo, createResource } from "solid-js";
 import {
   listMessages,
   listContacts,
-  listTasks,
   listFollowUps,
   listAgentTasks,
   listEvents,
@@ -16,11 +15,14 @@ import { Empty } from "../components/Empty";
 import { relativeTime } from "../utils/date";
 import { Avatar } from "../components/Avatar";
 import { useRefreshEffect } from "../utils/gestures";
+import {
+  computeReplyTimeStats,
+  formatDuration,
+} from "../utils/insights";
 
 export function Insights() {
   const [messages, { refetch: refetchMessages }] = createResource(listMessages);
   const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
-  const [tasks, { refetch: refetchTasks }] = createResource(listTasks);
   const [followUps, { refetch: refetchFollowUps }] =
     createResource(listFollowUps);
   const [agentTasks, { refetch: refetchAgentTasks }] = createResource(() =>
@@ -31,7 +33,6 @@ export function Insights() {
   useRefreshEffect(() => {
     void refetchMessages();
     void refetchContacts();
-    void refetchTasks();
     void refetchFollowUps();
     void refetchAgentTasks();
     void refetchEvents();
@@ -68,11 +69,9 @@ export function Insights() {
       .filter((x) => x.contact);
   });
 
-  const replyTime = createMemo(() => {
-    const list = messages() ?? [];
-    const incoming = list.filter((m) => m.bucket === "imbox" && !m.unread);
-    return incoming.length;
-  });
+  const replyTime = createMemo(() =>
+    computeReplyTimeStats(messages() ?? []),
+  );
 
   const channelShare = createMemo(() => {
     const map = new Map<string, number>();
@@ -254,7 +253,7 @@ export function Insights() {
         </Card>
 
         {/* Reply time */}
-        <Card title="Replied (last 30 days)" icon="ph-clock">
+        <Card title="平均回复时间" icon="ph-clock">
           <p
             style={{
               "font-size": "32px",
@@ -264,7 +263,9 @@ export function Insights() {
               color: "var(--cobalt)",
             }}
           >
-            {replyTime()}
+            {replyTime().medianHours === null
+              ? "—"
+              : formatDuration(replyTime().medianHours!)}
           </p>
           <p
             style={{
@@ -273,11 +274,9 @@ export function Insights() {
               margin: "var(--space-1) 0",
             }}
           >
-            已读消息总数
+            近 30 天 · 中位数
           </p>
-          <Show
-            when={(tasks() ?? []).filter((t) => t.status === "done").length > 0}
-          >
+          <Show when={replyTime().total > 0}>
             <p
               style={{
                 "margin-top": "var(--space-3)",
@@ -285,8 +284,9 @@ export function Insights() {
                 color: "var(--text-secondary)",
               }}
             >
-              <Icon name="ph-check-square" size={11} /> 完成{" "}
-              {(tasks() ?? []).filter((t) => t.status === "done").length} 项任务
+              <Icon name="ph-arrow-u-up-left" size={11} /> 已回复{" "}
+              {replyTime().replied} · 未回复 {replyTime().noReply} · 共{" "}
+              {replyTime().total} 封
             </p>
           </Show>
         </Card>
