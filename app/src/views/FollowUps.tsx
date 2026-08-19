@@ -11,7 +11,7 @@ import {
   deleteFollowUp,
 } from "../stores/data";
 import { setSelectedMessageId, setDetailOpen, showToast } from "../stores/ui";
-import { Empty } from "../components/Empty";
+import { Empty, ErrorState } from "../components/Empty";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { addDays, isToday, relativeTime } from "../utils/date";
@@ -109,6 +109,19 @@ export function FollowUps() {
           {total()} 项待处理 · 在消息面板里点 "Follow-up" 添加
         </p>
       </header>
+
+      <Show
+        when={!followUps.error}
+        fallback={
+          <ErrorState
+            title="跟进加载失败"
+            message={String(followUps.error ?? "")}
+            retry={() => void refetchFollowUps()}
+          />
+        }
+      >
+        <></>
+      </Show>
 
       <Show
         when={total() > 0}
