@@ -1895,3 +1895,88 @@ refactoring. Will be addressed in a separate pass:
 - `fix(views): add error fallbacks to 8 createResource views`
 - `fix(records): error fallback for paginated message resource`
 - `docs(progress): record Brand + view-health fixes`
+
+## 2026-08-18 — Imbox tabs + scale handling + remaining view errors
+
+Three real UX gaps closed:
+
+### Imbox tabs redesign
+
+The 2026-08-18 view-health audit fixed 13 views' missing error
+states but left two P1 gaps on the Imbox itself:
+
+1. **'Click a message, can't find it again.'** The Imbox used one
+   paginated query and split the loaded rows client-side into
+   'New for you' / 'Previously seen'. With 1000+ messages that meant
+   any read message older than the first 100 newest was invisible.
+   Now each section has its own paginated resource (unreadOnly=true /
+   readOnly=true) so 'Previously seen' loads its own page slice and
+   the user can scroll back through thousands of read messages.
+
+2. **'Hundreds of unread with no way to navigate.'** The list is now
+   grouped by date bucket (今天 / 昨天 / 本周早些 / 本月早些 / 1月)
+   with anchor headers, so users can scan to a date and jump rather
+   than scrolling 100s of rows.
+
+Stack:
+- `listMessagesPaged` gains `readOnly` filter (mutually exclusive
+  with `unreadOnly`; `unreadOnly` wins if both set).
+- New `ImboxTabs` component above the list with two pill buttons:
+  'New for you' with green badge showing unread count, 'Previously
+  seen' showing total read count. Active tab has palm underline +
+  bold text.
+- New `DateGroupedList` wraps the ItemList with bucket headers
+  between groups. Bucket keys are stable so SolidJS For reuses DOM
+  nodes when items within a bucket re-shuffle.
+- mark-as-read moves a message from newPaged to seenPaged via
+  `removeByIds` + `prependByIds` (which fetches the full row once
+  so the seen tab has body/bodyHtml). mark-as-unread does the
+  reverse. toggleUnread removes from the source tab and prepends
+  to the destination so both totals stay correct.
+- Per-message actions (replyLater, setAside, archive, trash, spam)
+  call `removeByIds` on BOTH resources — `removeByIds` is a no-op
+  when the id isn't present, so this is safe and avoids needing
+  to know which tab the user was on.
+- ImboxHeader H1 centred per user request.
+
+### Remaining view error fallbacks
+
+The 2026-08-18 audit deferred 7 views because their render graphs
+were too complex to wrap in a single inline Show. All 7 are now
+covered:
+
+  - Gate          → `queueItems.error`
+  - ScreenerHistory → `contacts.error`
+  - Insights      → aggregate over messages/contacts/tasks/
+                    followUps/agentTasks/events
+  - Agent         → `useAgent().error()` aggregate; useAgent now
+                    exposes a single error() accessor that returns
+                    the first non-undefined error across its 5
+                    resources
+  - Calendar      → `events.error`
+  - PileBoard     → `paged.resource.error`
+
+Each falls back to ErrorState with 重试 wired to the appropriate
+refetch. The bespoke empty/skeleton sub-components stay in place.
+
+### Tests
+
+13 new tests for dateBucket / bucketLabel (today / yesterday /
+this-week / this-month / cross-month / cross-year keys + Chinese
+label formatting including the year-suppressed same-year case).
+
+All previous tests still pass.
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | ✅ |
+| `pnpm test` | ✅ 207 passed (was 194, +13 for dateBucket) |
+| `cargo test` | ✅ 80 passed |
+
+### Commits (this branch)
+
+- `feat(date): dateBucket + bucketLabel helpers for Imbox date grouping`
+- `feat(imbox): New / Previously seen tabs + date grouping`
+- `fix(gate): error fallbacks for Gate + ScreenerHistory`
+- `fix(agent): error fallback for the Agent workspace`
+- `fix(calendar,pileboard): error fallbacks for events / pile loader`

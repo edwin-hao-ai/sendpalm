@@ -30,7 +30,7 @@ import {
 } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
-import { Empty } from "../components/Empty";
+import { Empty, ErrorState } from "../components/Empty";
 import { SkeletonList } from "../components/Skeleton";
 
 export type PileId = "replyLater" | "setAside" | "bubbleUp";
@@ -209,6 +209,18 @@ export function PileBoard(props: { pileId: PileId }) {
         </div>
       </header>
 
+      <Show
+        when={!paged.resource.error}
+        fallback={
+          <ErrorState
+            title="PileBoard 加载失败"
+            message={String(paged.resource.error ?? "")}
+            retry={() => void paged.refresh()}
+          />
+        }
+      >
+        <></>
+      </Show>
       <Show
         when={items().length > 0}
         fallback={

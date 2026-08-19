@@ -15,7 +15,7 @@ import { emailBodyPreview } from "../utils/html";
 
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
-import { Empty } from "../components/Empty";
+import { Empty, ErrorState } from "../components/Empty";
 import type { Contact, Message, MessageBucket } from "../types";
 import { showToast, setView } from "../stores/ui";
 import { useRefreshEffect, useSoftRefreshEffect, useViewport } from "../utils/gestures";
@@ -110,6 +110,16 @@ export function Gate() {
         animation: "view-enter 0.3s var(--ease-out) both",
       }}
     >
+      <Show
+        when={!queueItems.error}
+        fallback={
+          <ErrorState
+            title="Gate 加载失败"
+            message={String(queueItems.error ?? "")}
+            retry={() => void refetchQueue()}
+          />
+        }
+      >
       <header
         style={{ "margin-bottom": "var(--space-5)", "text-align": "center" }}
       >
@@ -342,6 +352,7 @@ export function Gate() {
           );
         }}
       </Show>
+      </Show>
     </div>
   );
 }
@@ -398,14 +409,24 @@ export function ScreenerHistory() {
         animation: "view-enter 0.3s var(--ease-out) both",
       }}
     >
-      <header
-        style={{
-          display: "flex",
-          "align-items": "center",
-          gap: "var(--space-3)",
-          "margin-bottom": "var(--space-5)",
-        }}
+      <Show
+        when={!contacts.error}
+        fallback={
+          <ErrorState
+            title="ScreenerHistory 加载失败"
+            message={String(contacts.error ?? "")}
+            retry={() => void refetch()}
+          />
+        }
       >
+        <header
+          style={{
+            display: "flex",
+            "align-items": "center",
+            gap: "var(--space-3)",
+            "margin-bottom": "var(--space-5)",
+          }}
+        >
         <button
           onClick={() => setView("screener")}
           style={{
@@ -456,6 +477,7 @@ export function ScreenerHistory() {
           onAction={(c) => toggle(c, false)}
         />
       </div>
+      </Show>
     </div>
   );
 }

@@ -17,7 +17,7 @@ import {
   listContacts,
 } from "../stores/data";
 import { Modal } from "../components/Modal";
-import { Empty } from "../components/Empty";
+import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { Avatar } from "../components/Avatar";
 import {
@@ -296,6 +296,18 @@ export function Calendar() {
 
       <PeriodHeader date={cursor()} view={view()} />
 
+      <Show
+        when={!events.error}
+        fallback={
+          <ErrorState
+            title="日历加载失败"
+            message={String(events.error ?? "")}
+            retry={() => void refetch()}
+          />
+        }
+      >
+        <></>
+      </Show>
       <Show
         when={visibleHasEvents()}
         fallback={

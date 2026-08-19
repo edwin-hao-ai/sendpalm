@@ -23,6 +23,7 @@ import {
   createEffect,
   onCleanup,
   onMount,
+  type JSX,
 } from "solid-js";
 import {
   listContacts,
@@ -54,6 +55,7 @@ import { Icon } from "../components/Icon";
 import { SkeletonList } from "../components/Skeleton";
 import { priorityScore } from "../utils/priority";
 import { SORT_LABELS, type SortMode } from "../utils/sort-imbox";
+import { bucketLabel, dateBucket, type DateBucketKey } from "../utils/date";
 import { registerPrepend } from "../services/sync-events";
 import { FilterPanel } from "../components/FilterPanel";
 
@@ -85,20 +87,41 @@ const BUNDLE_THRESHOLD = 3;
 const PREVIEW_CHARS = 220;
 const PAGE_SIZE = 100;
 
+type ImboxTabId = "new" | "seen";
+
 export function Imbox() {
-  // Hot list: first PAGE_SIZE rows of imbox+incoming. Scroll triggers
-  // loadMore via the IntersectionObserver in the sentinel at the bottom.
-  const paged = usePaginatedMessages(
+  // Two separate paginated resources so "New for you" and "Previously
+  // seen" each have their own scroll position and bundle window.
+  // Previously this view used one paged query and split the loaded
+  // rows client-side; with 1000+ imbox messages that meant read
+  // messages older than the first 100 never showed up in the
+  // "Previously seen" section, so users couldn't find what they'd
+  // already read (the original bug report).
+  const newPaged = usePaginatedMessages(
     {
       bucket: "imbox",
       direction: "in",
+      unreadOnly: true,
       lightweight: true,
     },
     PAGE_SIZE,
   );
-  const items = paged.items;
-  const refresh = paged.refresh;
-  const total = paged.total;
+  const seenPaged = usePaginatedMessages(
+    {
+      bucket: "imbox",
+      direction: "in",
+      readOnly: true,
+      lightweight: true,
+    },
+    PAGE_SIZE,
+  );
+  const [activeTab, setActiveTab] = createSignal<ImboxTabId>("new");
+
+  /** The paginated resource for the currently-active tab. Most derived
+   *  memos and handlers read through this so a tab switch re-derives
+   *  against the right slice. */
+  const paged = () => (activeTab() === "new" ? newPaged : seenPaged);
+  const items = () => paged().items();
 
   // Pile slices: only the rows shown in the Pending / Saved / Remind piles.
   // We deliberately do NOT load the full messages table here — real mailboxes
@@ -107,10 +130,12 @@ export function Imbox() {
   const [pileMessages, { refetch: refetchPiles }] = createResource(listPileMessages);
   const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
 
-  // Live-prepend on sync:new-messages (O(new_ids) IPC round-trips).
+  // Live-prepend on sync:new-messages — the event reports all UIDs, but
+  // they always arrive unread so they only belong in newPaged. Filtering
+  // on the server side via unreadOnly makes that cheap.
   onCleanup(
     registerPrepend("imbox", (ids) => {
-      void paged.prependByIds(ids);
+      void newPaged.prependByIds(ids);
     }),
   );
 
@@ -124,7 +149,8 @@ export function Imbox() {
       initialHardRefresh = false;
       return;
     }
-    void refresh();
+    void newPaged.refresh();
+    void seenPaged.refresh();
     void refetchPiles();
     void refetchContacts();
   });
@@ -164,14 +190,12 @@ export function Imbox() {
     return priorityScore(m, c);
   };
 
-  // Group unread by sender for bundle detection. Sort honors the user's
+  // Group by sender for bundle detection. Sort honors the user's
   // selected sort mode (default = newest first — see utils/sort-imbox.ts).
   // Priority sort stays available as "most_relevant" for users who want
   // HEY-style ordering.
   const renderList = createMemo<ItemList>(() => {
-    const list = items()
-      .filter((m) => !m.setAside && !m.replyLater)
-      .filter((m) => m.unread);
+    const list = items().filter((m) => !m.setAside && !m.replyLater);
 
     const bySender = new Map<string, Message[]>();
     for (const m of list) {
@@ -221,20 +245,11 @@ export function Imbox() {
     return out;
   });
 
-  const newForYou = createMemo<ItemList>(() => renderList());
-
-  const previouslySeen = createMemo<Message[]>(() => {
-    const mode = getSortMode("imbox");
-    const dir = mode === "oldest" ? 1 : -1;
-    return items()
-      .filter((m) => !m.setAside && !m.replyLater)
-      .filter((m) => !m.unread)
-      .sort(
-        (a, b) =>
-          dir *
-          (new Date(a.st).getTime() - new Date(b.st).getTime()),
-      );
-  });
+  // With tabs, each section is its own paginated slice — both already
+  // carry unread/read filtering server-side. So `newForYou` and
+  // `previouslySeen` are just the current paged view, plus bundle
+  // grouping applied to the active tab.
+  const activeList = createMemo<ItemList>(() => renderList());
 
   /* ── Piles (Pending / Saved / Remind) ─────────────────────────────── */
 
@@ -344,7 +359,7 @@ export function Imbox() {
   /* ── Cursor (j/k navigation) ───────────────────────────────────────── */
 
   const flatIds = createMemo(() =>
-    renderList().map((x) => ("messages" in x ? x.contactId : x.id)),
+    activeList().map((x) => ("messages" in x ? x.contactId : x.id)),
   );
 
   createEffect(() => {
@@ -357,7 +372,7 @@ export function Imbox() {
     const cur = cursorIndex() < 0 ? 0 : cursorIndex();
     const next = (cur + delta + ids.length) % ids.length;
     setCursorIndex(next);
-    const item = renderList()[next];
+    const item = activeList()[next];
     if (item) {
       const id = "messages" in item ? item.messages[0]?.id : item.id;
       if (id) setSelectedMessageId(id);
@@ -373,13 +388,23 @@ export function Imbox() {
 
   /* ── Per-message optimistic actions ───────────────────────────────── */
 
+  /** Both paginated resources get the remove attempt — `removeByIds` is a
+   *  no-op if the message isn't present in the loaded window, so calling
+   *  it on both tabs is safe and we don't have to know which tab the user
+   *  was looking at when the action fired. */
+  const removeFromBoth = (id: string) => {
+    newPaged.removeByIds([id]);
+    seenPaged.removeByIds([id]);
+  };
+
   const refreshAll = async () => {
-    await refresh();
+    await newPaged.refresh();
+    await seenPaged.refresh();
     await refetchPiles();
   };
 
   const replyLater = async (m: Message) => {
-    paged.removeByIds([m.id]);
+    removeFromBoth(m.id);
     try {
       await upsertMessage({ ...m, replyLater: true });
       await refetchPiles();
@@ -391,7 +416,7 @@ export function Imbox() {
   };
 
   const setAside = async (m: Message) => {
-    paged.removeByIds([m.id]);
+    removeFromBoth(m.id);
     try {
       await upsertMessage({ ...m, setAside: true });
       await refetchPiles();
@@ -403,7 +428,7 @@ export function Imbox() {
   };
 
   const archive = async (m: Message) => {
-    paged.removeByIds([m.id]);
+    removeFromBoth(m.id);
     try {
       await moveMessageToBucket(m.id, "paperTrail");
       await refetchPiles();
@@ -415,7 +440,7 @@ export function Imbox() {
   };
 
   const trash = async (m: Message) => {
-    paged.removeByIds([m.id]);
+    removeFromBoth(m.id);
     try {
       await moveMessageToBucket(m.id, "trash");
       await refetchPiles();
@@ -427,7 +452,7 @@ export function Imbox() {
   };
 
   const spam = async (m: Message) => {
-    paged.removeByIds([m.id]);
+    removeFromBoth(m.id);
     try {
       await moveMessageToBucket(m.id, "spam");
       await refetchPiles();
@@ -441,6 +466,16 @@ export function Imbox() {
   const toggleUnread = async (m: Message) => {
     try {
       await upsertMessage({ ...m, unread: !m.unread });
+      // If the message just became unread, push it to the new tab; if it
+      // just became read, push it to the seen tab. The opposite tab also
+      // gets a remove to keep totals consistent.
+      if (m.unread) {
+        seenPaged.removeByIds([m.id]);
+        await newPaged.prependByIds([m.id]);
+      } else {
+        newPaged.removeByIds([m.id]);
+        await seenPaged.prependByIds([m.id]);
+      }
       await refetchPiles();
     } catch (err) {
       await refreshAll();
@@ -498,16 +533,19 @@ export function Imbox() {
   const openAndMarkRead = async (m: Message) => {
     open(m.id);
     if (m.unread) {
-      // Optimistic — move the card to the read section instantly. The DB
-      // write is the source of truth; MessagePanel also patches on mount
-      // so this is idempotent. No refreshTick: patching one row in memory
-      // is all the list needs to re-derive its sections.
-      paged.patchMessage(m.id, { unread: false });
+      // Optimistic — remove from the unread tab and prepend to the
+      // read tab so the user sees the message disappear immediately.
+      // The DB write is the source of truth; MessagePanel also patches
+      // on mount so this is idempotent.
+      newPaged.removeByIds([m.id]);
       try {
+        await seenPaged.prependByIds([m.id]);
         await upsertMessage({ ...m, unread: false });
       } catch {
-        // Restore on failure so the list never lies about read state.
-        paged.patchMessage(m.id, { unread: true });
+        // Restore on failure — re-prepend to newPaged and refetch
+        // seenPaged so we don't keep a phantom.
+        await newPaged.refresh();
+        await seenPaged.refresh();
       }
     }
   };
@@ -596,8 +634,10 @@ export function Imbox() {
     observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
-        if (entry && entry.isIntersecting && paged.hasMore() && !paged.loadingMore()) {
-          void paged.loadMore();
+        if (!entry?.isIntersecting) return;
+        const cur = paged();
+        if (cur.hasMore() && !cur.loadingMore()) {
+          void cur.loadMore();
         }
       },
       { rootMargin: "400px" },
@@ -613,24 +653,31 @@ export function Imbox() {
 
   const hasAny = createMemo(
     () =>
-      newForYou().length > 0 ||
-      previouslySeen().length > 0 ||
-      piles().length > 0 ||
-      total() > 0,
+      newPaged.total() > 0 ||
+      seenPaged.total() > 0 ||
+      piles().length > 0,
   );
 
   return (
     <div class="imbox-view">
       <ImboxHeader
-        total={total()}
-        newCount={newForYou().length}
-        previouslySeenCount={previouslySeen().length}
+        total={newPaged.total() + seenPaged.total()}
+        newCount={newPaged.total()}
+        previouslySeenCount={seenPaged.total()}
         onSync={async () => {
-          await refresh();
+          await newPaged.refresh();
+          await seenPaged.refresh();
           showToast({ message: "已刷新", kind: "info", ttlMs: 1500 });
         }}
         onOpenFilters={() => setFilterOpen(true)}
         activeSort={getSortMode("imbox")}
+      />
+
+      <ImboxTabs
+        active={activeTab()}
+        newCount={newPaged.total()}
+        seenCount={seenPaged.total()}
+        onChange={setActiveTab}
       />
 
       <FilterPanel
@@ -663,7 +710,7 @@ export function Imbox() {
         when={hasAny}
         fallback={
           <Show
-            when={paged.loadingMore() || items().length === 0}
+            when={paged().loadingMore() || items().length === 0}
             fallback={<EmptyState />}
           >
             <SkeletonBlock />
@@ -671,76 +718,52 @@ export function Imbox() {
         }
       >
         <div class="feed-list" data-feed-list>
-          <Show when={newForYou().length > 0}>
+          {/* "New for you" tab gets the unread SectionHeader + 一起读
+              action; "Previously seen" doesn't. Each tab renders its own
+              list below; date group anchors let the user jump by recency
+              even when there are hundreds of unread messages. */}
+          <Show when={activeTab() === "new" && activeList().length > 0}>
             <SectionHeader
               title="New for you"
               variant="new"
               action={{ label: "一起读", onClick: () => setView("readTogether") }}
             />
-            <For each={newForYou()}>
-              {(item, i) => (
-                <ItemRow
-                  item={item}
-                  index={i()}
-                  isCursor={(idx) => cursorIndex() === idx}
-                  selectedIds={selectedIds()}
-                  lastSelectedId={lastSelectedId()}
-                  contactMap={contactMap}
-                  scoreFor={scoreFor}
-                  bundleOpen={(id) => openBundles().has(id)}
-                  onToggleBundle={(id) => toggleBundle(id)}
-                  onOpen={openAndMarkRead}
-                  onToggleSelect={(id) => toggleSelect(id)}
-                  onSelectRange={selectRange}
-                  onReplyLater={(m) => void replyLater(m)}
-                  onSetAside={(m) => void setAside(m)}
-                  onArchive={(m) => void archive(m)}
-                  onTrash={(m) => void trash(m)}
-                  onSpam={(m) => void spam(m)}
-                  onToggleUnread={(m) => void toggleUnread(m)}
-                  onApproveFirstTime={(m, b) => void approveFirstTime(m, b)}
-                  onBlockFirstTime={(m) => void blockFirstTime(m)}
-                  onBundleSelect={(b) => toggleBundleSelection(b)}
-                  onDragStart={onDragStart}
-                  onDragEnd={onDragEnd}
-                  itemKey={itemKey}
-                />
-              )}
-            </For>
           </Show>
 
-          <Show when={previouslySeen().length > 0}>
-            <SectionHeader title="Previously seen" variant="seen" />
-            <For each={previouslySeen()}>
-              {(m, i) => (
-                <MessageCard
-                  m={m}
-                  index={newForYou().length + i()}
-                  isCursor={() => false}
-                  selectedIds={selectedIds()}
-                  lastSelectedId={lastSelectedId()}
-                  contact={contactMap().get(m.pid)}
-                  scoreFor={scoreFor}
-                  onOpen={openAndMarkRead}
-                  onToggleSelect={(id) => toggleSelect(id)}
-                  onSelectRange={selectRange}
-                  onReplyLater={(msg) => void replyLater(msg)}
-                  onSetAside={(msg) => void setAside(msg)}
-                  onArchive={(msg) => void archive(msg)}
-                  onTrash={(msg) => void trash(msg)}
-                  onSpam={(msg) => void spam(msg)}
-                  onToggleUnread={(msg) => void toggleUnread(msg)}
-                  onDragStart={onDragStart}
-                  onDragEnd={onDragEnd}
-                  draggable
-                />
-              )}
-            </For>
-          </Show>
+          <DateGroupedList items={activeList()}>
+            {(item, i) => (
+              <ItemRow
+                item={item}
+                index={i}
+                isCursor={(idx) => cursorIndex() === idx}
+                selectedIds={selectedIds()}
+                lastSelectedId={lastSelectedId()}
+                contactMap={contactMap}
+                scoreFor={scoreFor}
+                bundleOpen={(id) => openBundles().has(id)}
+                onToggleBundle={(id) => toggleBundle(id)}
+                onOpen={openAndMarkRead}
+                onToggleSelect={(id) => toggleSelect(id)}
+                onSelectRange={selectRange}
+                onReplyLater={(m) => void replyLater(m)}
+                onSetAside={(m) => void setAside(m)}
+                onArchive={(m) => void archive(m)}
+                onTrash={(m) => void trash(m)}
+                onSpam={(m) => void spam(m)}
+                onToggleUnread={(m) => void toggleUnread(m)}
+                onApproveFirstTime={(m, b) => void approveFirstTime(m, b)}
+                onBlockFirstTime={(m) => void blockFirstTime(m)}
+                onBundleSelect={(b) => toggleBundleSelection(b)}
+                onDragStart={onDragStart}
+                onDragEnd={onDragEnd}
+                itemKey={itemKey}
+              />
+            )}
+          </DateGroupedList>
 
           <div ref={(el) => (sentinel = el)} data-load-more-sentinel />
-          <Show when={paged.hasMore()}>
-            <ShowMoreButton loading={paged.loadingMore()} />
+          <Show when={paged().hasMore()}>
+            <ShowMoreButton loading={paged().loadingMore()} />
           </Show>
         </div>
 
@@ -1437,6 +1460,181 @@ function PileCard(props: {
         </div>
       </Show>
     </div>
+  );
+}
+
+/* ── ImboxTabs ───────────────────────────────────────────────────── */
+
+function ImboxTabs(props: {
+  active: ImboxTabId;
+  newCount: number;
+  seenCount: number;
+  onChange: (tab: ImboxTabId) => void;
+}) {
+  return (
+    <nav
+      class="imbox-tabs"
+      data-imbox-tabs
+      role="tablist"
+      aria-label="Imbox sections"
+      style={{
+        display: "flex",
+        gap: "0",
+        "border-bottom": "0.5px solid var(--border)",
+        "background-color": "var(--paper)",
+        position: "sticky",
+        top: "0",
+        "z-index": "5",
+      }}
+    >
+      <ImboxTabButton
+        label="New for you"
+        icon="ph-envelope-simple-open"
+        active={props.active === "new"}
+        count={props.newCount}
+        highlight={props.newCount > 0}
+        onClick={() => props.onChange("new")}
+        dataTab="new"
+      />
+      <ImboxTabButton
+        label="Previously seen"
+        icon="ph-envelope-open"
+        active={props.active === "seen"}
+        count={props.seenCount}
+        highlight={false}
+        onClick={() => props.onChange("seen")}
+        dataTab="seen"
+      />
+    </nav>
+  );
+}
+
+function ImboxTabButton(props: {
+  label: string;
+  icon: string;
+  active: boolean;
+  count: number;
+  highlight: boolean;
+  onClick: () => void;
+  dataTab: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={props.active}
+      data-imbox-tab={props.dataTab}
+      onClick={props.onClick}
+      style={{
+        flex: "1",
+        padding: "12px 16px",
+        background: "transparent",
+        border: "0",
+        "border-bottom": props.active
+          ? "2px solid var(--palm)"
+          : "2px solid transparent",
+        "margin-bottom": "-0.5px",
+        cursor: "pointer",
+        display: "flex",
+        "align-items": "center",
+        "justify-content": "center",
+        gap: "8px",
+        color: props.active ? "var(--text-primary)" : "var(--text-muted)",
+        "font-weight": props.active ? "700" : "600",
+        "font-size": "var(--text-body-sm)",
+        transition: "color 0.15s var(--ease-out)",
+      }}
+    >
+      <Icon name={props.icon} size={14} />
+      <span>{props.label}</span>
+      <Show when={props.count > 0}>
+        <span
+          style={{
+            display: "inline-flex",
+            "align-items": "center",
+            "justify-content": "center",
+            "min-width": "20px",
+            height: "20px",
+            padding: "0 6px",
+            "border-radius": "var(--radius-pill)",
+            background: props.highlight && !props.active ? "var(--palm)" : "var(--paper-mid)",
+            color: props.highlight && !props.active ? "white" : "var(--text-secondary)",
+            "font-size": "var(--text-micro)",
+            "font-weight": "700",
+            "line-height": "1",
+          }}
+        >
+          {props.count > 999 ? "999+" : props.count}
+        </span>
+      </Show>
+    </button>
+  );
+}
+
+/* ── DateGroupedList ─────────────────────────────────────────────── */
+
+/** Render an ItemList with date-bucket anchors between groups. Anchors
+ *  keep their DOM nodes when items within a bucket re-shuffle, so the
+ *  browser doesn't lose scroll position. Each bucket header is clickable
+ *  to set the cursor to its first item, so the user can jump to a date
+ *  range without scrolling through 100s of unread. */
+function DateGroupedList(props: {
+  items: Item[];
+  children: (item: Item, i: number) => JSX.Element;
+}) {
+  const groups = createMemo<
+    Array<{ key: string; label: string; items: Array<Item & { _flatIdx: number }> }>
+  >(() => {
+    const all = props.items;
+    const out: Array<{
+      key: string;
+      label: string;
+      items: Array<Item & { _flatIdx: number }>;
+    }> = [];
+    let flatIdx = 0;
+    let currentKey: string | null = null;
+    for (const item of all) {
+      const firstMessage: Message =
+        "messages" in item ? item.messages[0]! : item;
+      const bucket: DateBucketKey = dateBucket(firstMessage.st);
+      const key =
+        typeof bucket === "string"
+          ? bucket
+          : `${bucket.year}-${bucket.month}`;
+      if (key !== currentKey) {
+        out.push({ key, label: bucketLabel(bucket), items: [] });
+        currentKey = key;
+      }
+      out[out.length - 1]!.items.push(
+        Object.assign(item, { _flatIdx: flatIdx }) as Item & {
+          _flatIdx: number;
+        },
+      );
+      flatIdx++;
+    }
+    return out;
+  });
+
+  return (
+    <For each={groups()}>
+      {(group) => (
+        <section
+          class="imbox-date-group"
+          data-imbox-date-group={group.key}
+        >
+          <header
+            class="imbox-date-header"
+            data-imbox-date-header
+          >
+            <span class="imbox-date-header-label">{group.label}</span>
+            <span class="imbox-date-header-count">{group.items.length}</span>
+          </header>
+          <For each={group.items}>
+            {(item) => props.children(item, item._flatIdx)}
+          </For>
+        </section>
+      )}
+    </For>
   );
 }
 
