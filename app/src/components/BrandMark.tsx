@@ -1,8 +1,17 @@
-/** BrandMark — palm-leaf wordmark used in the topbar. */
+/** BrandMark — paper-plane + palm-leaf wordmark used in the topbar.
+ *
+ *  Uses the bespoke logo-mark.svg (same composition as the splash screen,
+ *  full logo, and Tauri bundle icons) instead of a stock Phosphor glyph so
+ *  the topbar reads as the same brand as the launch surface.
+ *
+ *  The asset path is `/src/assets/logo-mark.svg` and Vite bundles it as a
+ *  URL — there is no additional HTTP request at runtime because the asset
+ *  sits in the bundle.
+ */
 
-import { Icon } from "./Icon";
+import { JSX } from "solid-js";
 
-export function BrandMark() {
+export function BrandMark(): JSX.Element {
   return (
     <div
       data-testid="brand-mark"
@@ -13,10 +22,13 @@ export function BrandMark() {
         "user-select": "none",
       }}
     >
-      <Icon
-        name="ph-leaf"
-        size={18}
-        style={{ color: "var(--palm)", "flex-shrink": "0" }}
+      <img
+        src="/src/assets/logo-mark.svg"
+        alt=""
+        width="22"
+        height="22"
+        aria-hidden="true"
+        style={{ "flex-shrink": 0, display: "block" }}
       />
       <span
         style={{
