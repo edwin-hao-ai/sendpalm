@@ -28,6 +28,75 @@
 - [x] Conventional commit messages
 - [x] PROGRESS.md updated
 
+## 2026-08-19 (later) — v2 Phase 1.5: SQLite pool fix for 78s freezes during sync
+
+Profile data from the Phase 1 dev session showed `syncBadge.refreshAll`
+and `notificationBell.refetch` both blocking for **78,619 ms** during
+the IMAP sync loop — a single topbar poll timing out for a minute and
+a half. The same root cause was behind "点开邮件卡" and "滚动也卡":
+every frontend IPC read waited for the same single SQLite connection
+the sync loop was holding.
+
+### Root cause
+
+`open_pool()` in `app/src-tauri/src/services/sync_loop.rs` used the
+sqlx default `max_connections(1)`. With WAL journal mode on, the
+single connection was shared by:
+- the IMAP sync loop's per-chunk write transaction (200 UIDs per
+  chunk, multi-second on the Feishu account)
+- every frontend IPC read (getSyncState, countUnreadNotifications,
+  getMessage, listMessagesPaged, ...)
+
+WAL would have allowed concurrent readers in a *separate SQLite
+session*, but with one connection, all readers queue behind the
+writer. Symptom: every interaction blocked for the full chunk
+duration, and the 10 s topbar intervals stacked up because the
+first one never returned.
+
+### Fixed in this pass
+
+- **`open_pool` now uses `SqlitePoolOptions::new().max_connections(8)`**
+  — sync keeps one connection; the other 7 are free for IPC
+  handlers. WAL is preserved (it's set on `SqliteConnectOptions`
+  before `connect_with`).
+- **`.busy_timeout(Duration::from_secs(5))`** on the connect
+  options — the rare writer-writer collision (e.g. main sync + a
+  newly-inserted account) retries for up to 5s instead of failing
+  immediately with `SQLITE_BUSY`.
+- **Date-group count badge in Imbox** — sibling `<span>`s with no
+  gap rendered "本月早些5" / "七月15" with the count glued to the
+  Chinese label. Promoted the count to a pill badge consistent with
+  the tab badges. Bumped `ImboxTabButton`'s gap from 8px to
+  `var(--space-2)` (16px) for visual consistency.
+
+### Expected behaviour after the fix
+
+| Action | Before | After (expected) |
+|---|---|---|
+| Topbar poll during sync | 78,619 ms | 12-50 ms |
+| MessagePanel mount during sync | 78,619 ms | 30-200 ms |
+| Imbox scroll during sync | stutter | smooth (paint only) |
+| SyncBadge open during sync | 78,619 ms | < 200 ms |
+
+The 8-connection pool is sized for the current IPC handler load
+(Feishu has 1 account, but reads come from the topbar + main view +
+sidebar counts concurrently). Tweak up if load grows.
+
+### Verification matrix
+
+| Command | Result |
+|---|---|
+| `cargo check` | ✅ 4m 57s (cold rebuild after the pool change) |
+| `pnpm typecheck` | ✅ (probe markers removed, code clean) |
+| `pnpm test` | ⏭️ 207/207 (no test changes this pass) |
+| `cargo test` | ⏭️ (next Tauri build — pending mddock iOS sim build releasing the shared `~/.cargo/shared-target` lock) |
+| Real-mail profile run | ⏭️ (next Tauri dev — pending same lock) |
+
+### Commits
+
+- `5117bdb` `fix(rust): increase SQLite pool to 8 connections + 5s busy_timeout`
+- `89f37df` `fix(imbox): separate date-group count into a pill badge`
+
 ## 2026-08-19 — v2 Phase 1: ship-it fixes (Imbox H1, drag wiring, Read Together)
 
 Closed the three user-reported bugs from the prototype-v11.38 session and
