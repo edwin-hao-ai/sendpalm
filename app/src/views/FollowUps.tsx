@@ -1,12 +1,18 @@
 /** Follow-ups view — Overdue / Today / This week / Later groups.
  * Spec: prototype-v11 §3.10 + P4.
+ *
+ * Loads only the messages + contacts referenced by the visible pending
+ * follow-ups, not the whole `messages` / `contacts` tables. With ~50
+ * pending follow-ups the IPC payload drops from "every body_html in
+ * the database + every contact" to "50 lightweight message rows +
+ * the few contacts that sent them".
  */
 
-import { For, Show, createMemo, createResource } from "solid-js";
+import { For, Show, createMemo, createResource, createEffect } from "solid-js";
 import {
   listFollowUps,
-  listMessages,
-  listContacts,
+  listMessagesByIdsLight,
+  listContactsByIds,
   upsertFollowUp,
   deleteFollowUp,
 } from "../stores/data";
@@ -21,13 +27,30 @@ import type { FollowUp } from "../types";
 export function FollowUps() {
   const [followUps, { refetch: refetchFollowUps }] =
     createResource(listFollowUps);
-  const [messages, { refetch: refetchMessages }] = createResource(listMessages);
-  const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
 
   useRefreshEffect(() => {
     void refetchFollowUps();
+  });
+
+  /** IDs of every message referenced by a pending follow-up. */
+  const visibleMsgIds = createMemo<string[]>(() => {
+    const set = new Set<string>();
+    for (const f of followUps() ?? []) {
+      if (f.status === "pending" && f.msgId) set.add(f.msgId);
+    }
+    return [...set];
+  });
+
+  const [messages, { refetch: refetchMessages }] = createResource(
+    visibleMsgIds,
+    listMessagesByIdsLight,
+  );
+
+  /** Re-fetch the related message rows whenever the visible id set
+   *  changes (e.g. a new follow-up appears, or one is removed). */
+  createEffect(() => {
+    void visibleMsgIds();
     void refetchMessages();
-    void refetchContacts();
   });
 
   const grouped = createMemo(() => {
@@ -51,6 +74,19 @@ export function FollowUps() {
   });
 
   const msgById = (id: string) => (messages() ?? []).find((m) => m.id === id);
+  const contactIdsByMessage = createMemo<Set<string>>(() => {
+    const s = new Set<string>();
+    for (const m of messages() ?? []) if (m.pid) s.add(m.pid);
+    return s;
+  });
+  const [contacts, { refetch: refetchContacts }] = createResource(
+    contactIdsByMessage,
+    (ids) => listContactsByIds([...ids]),
+  );
+  createEffect(() => {
+    void contactIdsByMessage();
+    void refetchContacts();
+  });
   const contactById = (id: string) =>
     (contacts() ?? []).find((c) => c.id === id);
 
