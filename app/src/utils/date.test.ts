@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dateBucket, bucketLabel, type DateBucketKey } from "./date";
+import { dateBucket, bucketLabel } from "./date";
 
 // Pick a Tuesday so the boundary between this-week and this-month
 // is well-defined across locale-dependent startOfWeek() implementations.
