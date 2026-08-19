@@ -1,14 +1,22 @@
 /** Insights dashboard — 7 cards.
  * Spec: prototype-v11 §3.7.
+ *
+ * The 3 cards that need messages (weekly volume / top people / reply
+ * time) all use the same narrow projection. We pull that once via
+ * `listMessagesForInsights({ since: now-30d })` which returns just
+ * {id, pid, st, thread_id, bucket, direction} — no body / body_html /
+ * labels / attachments / trackers. On the Feishu account this drops
+ * the IPC payload from ~80 MB (3,900 × 80 KB body_html) to ~600 KB
+ * (3,900 × 150 bytes).
  */
 
 import { For, Show, createMemo, createResource } from "solid-js";
 import {
-  listMessages,
   listContacts,
   listFollowUps,
   listAgentTasks,
   listEvents,
+  listMessagesForInsights,
 } from "../stores/data";
 import { Icon } from "../components/Icon";
 import { Empty } from "../components/Empty";
@@ -21,7 +29,6 @@ import {
 } from "../utils/insights";
 
 export function Insights() {
-  const [messages, { refetch: refetchMessages }] = createResource(listMessages);
   const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
   const [followUps, { refetch: refetchFollowUps }] =
     createResource(listFollowUps);
@@ -30,12 +37,20 @@ export function Insights() {
   );
   const [events, { refetch: refetchEvents }] = createResource(listEvents);
 
+  /** 30-day window: powers weekly volume (7d) AND reply time (30d). */
+  const [messages, { refetch: refetchMessages }] = createResource(
+    () => ({
+      since: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+    }),
+    listMessagesForInsights,
+  );
+
   useRefreshEffect(() => {
-    void refetchMessages();
     void refetchContacts();
     void refetchFollowUps();
     void refetchAgentTasks();
     void refetchEvents();
+    void refetchMessages();
   });
 
   const weeklyVolume = createMemo(() => {

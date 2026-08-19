@@ -8,7 +8,7 @@
  */
 
 import { For, Show, createMemo, createResource, createSignal, type JSX } from "solid-js";
-import { listFiles, listContacts, listMessages } from "../stores/data";
+import { listFiles, listContacts } from "../stores/data";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { setDetailOpen, setSelectedFileId } from "../stores/ui";
@@ -19,12 +19,10 @@ import { applyFileFilters, type FileFilterState } from "../utils/file-filters";
 export function Files() {
   const [files, { refetch: refetchFiles }] = createResource(listFiles);
   const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
-  const [messages, { refetch: refetchMessages }] = createResource(listMessages);
 
   useRefreshEffect(() => {
     void refetchFiles();
     void refetchContacts();
-    void refetchMessages();
   });
 
   const [typeFilter, setTypeFilter] = createSignal<
@@ -74,7 +72,6 @@ export function Files() {
 
   const contactById = (id: string) =>
     (contacts() ?? []).find((c) => c.id === id);
-  const msgById = (id: string) => (messages() ?? []).find((m) => m.id === id);
 
   const FILTERS = [
     { id: "all", label: "全部", icon: "ph-files" },
@@ -320,7 +317,6 @@ export function Files() {
             <For each={items()}>
               {(f) => {
                 const c = contactById(f.pid);
-                void msgById(f.id);
                 return (
                   <button
                     onClick={() => {

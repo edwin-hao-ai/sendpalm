@@ -1,13 +1,17 @@
 /** Companies view — group by company with people + comms + meetings.
  * Spec: prototype-v11 §3.4.
+ *
+ * Pulls a narrow projection of messages (id + pid only) for counting
+ * by company. Avoids the full body_html payload that the previous
+ * `listMessages()` call dragged across IPC.
  */
 
 import { For, Show, createMemo, createResource } from "solid-js";
 import {
   listContacts,
-  listMessages,
   listEvents,
   listFiles,
+  listMessagesForInsights,
 } from "../stores/data";
 import { Avatar } from "../components/Avatar";
 import { Empty, ErrorState } from "../components/Empty";
@@ -21,7 +25,10 @@ import { useRefreshEffect } from "../utils/gestures";
 
 export function Companies() {
   const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
-  const [messages, { refetch: refetchMessages }] = createResource(listMessages);
+  const [messages, { refetch: refetchMessages }] = createResource(
+    () => ({}),
+    listMessagesForInsights,
+  );
   const [events, { refetch: refetchEvents }] = createResource(listEvents);
   const [files, { refetch: refetchFiles }] = createResource(listFiles);
 
@@ -43,17 +50,22 @@ export function Companies() {
     return [...map.entries()]
       .map(([company, people]) => {
         const cids = people.map((p) => p.id);
-        const msgs = (messages() ?? []).filter((m) => cids.includes(m.pid));
-        const evts = (events() ?? []).filter((e) =>
-          e.pids.some((p) => cids.includes(p)),
-        );
-        const fls = (files() ?? []).filter((f) => cids.includes(f.pid));
+        const cidsSet = new Set(cids);
+        const msgCount = (messages() ?? []).filter((m) =>
+          cidsSet.has(m.pid),
+        ).length;
+        const eventCount = (events() ?? []).filter((e) =>
+          e.pids.some((p) => cidsSet.has(p)),
+        ).length;
+        const fileCount = (files() ?? []).filter((f) =>
+          cidsSet.has(f.pid),
+        ).length;
         return {
           company,
           people,
-          msgCount: msgs.length,
-          eventCount: evts.length,
-          fileCount: fls.length,
+          msgCount,
+          eventCount,
+          fileCount,
         };
       })
       .sort((a, b) => b.people.length - a.people.length);
