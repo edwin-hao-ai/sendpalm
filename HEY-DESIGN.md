@@ -90,6 +90,35 @@
 - **Hairlines**: `rgba(35,28,51,0.06)` or `rgba(35,28,51,0.10)` — never `#ddd` or `#e5e5e5`
 - **App is light-mode by default** with optional dark mode
 
+### 2.1 Brand Mark
+
+The SendPalm brand mark is built from **three elements only**, at every size:
+
+1. **Green plate** — `var(--palm)` flat fill (`#0A8F63`) on the 32-viewBox mark, or the diagonal `--palm-bright → --palm` gradient (`#0CB87D → #0A8F63`) on the 256-viewBox full logo. Corner radius = `~22%` of edge length (`rx=7` on 32, `rx=56` on 256).
+2. **White paper plane** — single geometric silhouette (upper wing + folded underside at 70% opacity). No envelope, no palm tree, no decoration.
+3. **Canary dot** — `var(--canary)` (`#FFF5CA`) circle in the top-right corner with a thin white stroke. Anchors the mark the same way `.logo-dot` does in `prototype-v11.js` (topbar-logo-mark).
+
+The mark scales cleanly because the paper plane is one `<path>` and the dot is one `<circle>` — both are SVG primitives that render identically at 16px (favicon) and 512px (splash / app icon).
+
+#### Asset Map
+
+| File | viewBox | Use | Contents |
+|------|---------|-----|----------|
+| `app/src/assets/favicon.svg` | 32×32 | Browser tab (`<link rel="icon">`), 16/32/64px renderings | Plate + paper plane only. No canary dot — at favicon scale the dot is a single pixel and looks like noise. |
+| `app/src/assets/logo-mark.svg` | 32×32 | Topbar `BrandMark` and any inline embed | Plate + paper plane + canary dot. |
+| `app/src/assets/logo.svg` | 256×256 | Launch splash, `apple-touch-icon`, **source for every Tauri bundle icon** | Same three elements scaled up, with the gradient plate. |
+
+#### Bundle icon pipeline
+
+`pnpm tauri icon app/src/assets/logo.svg` regenerates every icon under `app/src-tauri/icons/` (`.icns`, `.ico`, `.png` at all standard sizes, plus iOS `AppIcon-*` and Android `mipmap-*` sets). The script sources from `logo.svg` only — never from the older wordmark or the legacy envelope composition. Re-run after any visual change to `logo.svg`.
+
+#### Don'ts
+
+- **Don't** redraw the paper plane with the folded underside as the same color — the 30% opacity split is what makes the silhouette read as 3D at small sizes.
+- **Don't** add the palm-tree accent to the favicon or the mark. It belongs to the onboarding hero, not the brand mark.
+- **Don't** use the legacy envelope+plane composition. It was retired when the mark collapsed to three elements.
+- **Don't** ship a separate wordmark SVG — `BrandMark` is the single source of truth for any inline "SendPalm" lockup.
+
 ---
 
 ## 3. Typography

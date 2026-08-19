@@ -1,4 +1,4 @@
-/** BrandMark — paper-plane + palm-leaf wordmark used in the topbar.
+/** BrandMark — paper-plane + canary-dot wordmark used in the topbar.
  *
  *  Uses the bespoke logo-mark.svg (same composition as the splash screen,
  *  full logo, and Tauri bundle icons) instead of a stock Phosphor glyph so
@@ -7,6 +7,9 @@
  *  The asset path is `/src/assets/logo-mark.svg` and Vite bundles it as a
  *  URL — there is no additional HTTP request at runtime because the asset
  *  sits in the bundle.
+ *
+ *  Keep this typography in sync with the splash word in app/index.html so
+ *  the two brand surfaces don't drift.
  */
 
 import { JSX } from "solid-js";
