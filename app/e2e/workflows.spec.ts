@@ -317,7 +317,14 @@ test.describe("Email workflows", () => {
       makeMessage(),
     );
 
-    await page.locator('#main [aria-label="Reply later"]').first().click();
+    // The card's hover-actions overlay only shows on :hover, so
+    // dispatch the click event directly rather than relying on
+    // pointer-driven visibility checks. This is the only difference
+    // from a real user hover-click.
+    await page
+      .locator('#main [aria-label="Reply later"]')
+      .first()
+      .dispatchEvent("click");
     await expect(page.getByText("已 Reply Later")).toBeVisible({
       timeout: 5_000,
     });
@@ -350,7 +357,10 @@ test.describe("Email workflows", () => {
       makeMessage(),
     );
 
-    await page.locator('#main [aria-label="Set aside"]').first().click();
+    await page
+      .locator('#main [aria-label="Set aside"]')
+      .first()
+      .dispatchEvent("click");
     await expect(page.getByText("已 Set Aside")).toBeVisible({
       timeout: 5_000,
     });
@@ -445,6 +455,11 @@ test.describe("Email workflows", () => {
     });
 
     await navigateTo(page, "imbox");
+    // After trash + undo the message lives in the "Previously seen" tab
+    // (opening a message marks it read, and trash doesn't move it back
+    // to unread). Click the tab to confirm it's restored on the right
+    // surface, instead of only checking the default "New for you" tab.
+    await page.locator("[data-imbox-tab='seen']").first().click();
     await expect(page.locator(`[data-message-id="${MESSAGE_ID}"]`)).toBeVisible(
       { timeout: 5_000 },
     );

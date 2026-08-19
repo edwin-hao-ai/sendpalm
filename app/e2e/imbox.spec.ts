@@ -216,8 +216,13 @@ test.describe("Imbox — single view focus", () => {
     // + the previously-seen page (50 read messages from this single
     // sender — for a multi-sender dataset this would be less).
     await expect(page.locator("text=/\\d+ 待读 · \\d+ 已读 · \\d+ 总数/")).toBeVisible();
-    await expect(page.locator("[data-feed-section='new']")).toBeVisible();
-    await expect(page.locator("[data-feed-section='seen']")).toBeVisible();
+    // Imbox now uses tabs to separate "New for you" / "Previously seen"
+    // (the v1 single-section structure was replaced in the 8/18 perf
+    // pass to keep unread lists scannable for accounts with thousands
+    // of read messages). The two tabs and one collapsed bundle are
+    // the visible signals the dataset is rendering correctly.
+    await expect(page.locator("[data-imbox-tab='new']")).toBeVisible();
+    await expect(page.locator("[data-imbox-tab='seen']")).toBeVisible();
     await expect(page.locator("[data-feed-card='bundle']")).toHaveCount(1);
     await expect(page.locator("[data-load-more-sentinel]")).toHaveCount(1);
     await shoot(page, "01-first-page");
@@ -230,9 +235,13 @@ test.describe("Imbox — single view focus", () => {
     await seedAndOpen(page, contacts, messages);
 
     // 50 unread from Apple Developer collapse into one bundle, plus 50
-    // previously-seen cards rendered below.
+    // previously-seen cards rendered below. Count the bundle as 1
+    // (collapsed) + its `data-bundle-row` children, plus any visible
+    // feed-card='message' cards on either tab.
     const initialCards = await page
-      .locator("[data-feed-card='message'], [data-feed-card='bundle']")
+      .locator(
+        "[data-feed-card='message'], [data-feed-card='bundle'], [data-bundle-row]",
+      )
       .count();
     expect(initialCards).toBeGreaterThanOrEqual(50);
 
@@ -263,7 +272,9 @@ test.describe("Imbox — single view focus", () => {
     // After scrolling, the sentinel should have triggered loadMore and
     // the visible card count should have grown.
     const visibleCards = await page
-      .locator("[data-feed-card='message'], [data-feed-card='bundle']")
+      .locator(
+        "[data-feed-card='message'], [data-feed-card='bundle'], [data-bundle-row]",
+      )
       .count();
     expect(visibleCards).toBeGreaterThanOrEqual(initialCards);
 
@@ -305,12 +316,23 @@ test.describe("Imbox — single view focus", () => {
     await seedAndOpen(page, contacts, messages);
 
     // 100 unread from the loop + 2 previously-seen overrides the loop.
-    // The previously-seen page should still render after the unread.
+    // The previously-seen page should still render after the unread —
+    // we just click the "Previously seen" tab to switch the active
+    // section and confirm its rows appear.
     await expect(
-      page.locator("[data-feed-section='new']").first(),
+      page.locator("[data-imbox-tab='new']").first(),
     ).toBeVisible();
+    await page.locator("[data-imbox-tab='seen']").first().click();
     await expect(
-      page.locator("[data-feed-section='seen']").first(),
+      page.locator("[data-imbox-tab='seen'][aria-selected='true']"),
+    ).toBeVisible();
+    // The seen tab has 450 rows from a single sender, so bundle
+    // detection collapses them into one bundle card. Assert the
+    // seen tab loaded anything (bundle or message).
+    await expect(
+      page
+        .locator("[data-feed-card='message'], [data-feed-card='bundle']")
+        .first(),
     ).toBeVisible();
 
     await shoot(page, "03-sections");
@@ -418,9 +440,15 @@ test.describe("Imbox — single view focus", () => {
     const { contacts, messages } = makeImboxDataset();
     await seedAndOpen(page, contacts, messages);
 
-    // With bundle detection the first 50 unread collapse into a bundle,
-    // so use the first previously-seen row (Bulletin #60) to test direct
-    // click. m_appledeveloper_0 is inside the bundle drawer.
+    // The dataset is 500 messages from a single sender (APPLE_DEV), so
+    // bundle detection collapses the previously-seen page too. We expand
+    // the bundle and click an individual row inside its drawer to
+    // exercise the "click a previously-seen message" path. The chosen
+    // row (m_appledeveloper_60) is the 11th message in the seen tab.
+    await page.locator("[data-imbox-tab='seen']").first().click();
+    const bundle = page.locator("[data-feed-card='bundle']").first();
+    await expect(bundle).toBeVisible({ timeout: 10_000 });
+    await bundle.click();
     const card = page.locator(
       "[data-feed-card='message'][data-message-id='m_appledeveloper_60']",
     );
