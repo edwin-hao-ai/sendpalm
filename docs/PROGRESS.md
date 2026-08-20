@@ -36,6 +36,21 @@ The codebase was feature-complete but had no first-impression surface for someon
 - `scripts/build-dmg.sh` + `scripts/build-dmg.md` — macOS-only .dmg builder. Universal / arm64 / x86_64. Optional codesign + notarytool + stapler. One-time Apple Developer ID setup documented in build-dmg.md.
 - `app/src-tauri/tests/sync_loop_soak_test.rs` — 15 new unit tests stress-testing the sync state machine against dense, sparse, empty, deleted-range, and tiny mailboxes. Specifically guards against the "stop on first partial chunk" bug that left ~3,500 Feishu messages unbackfilled. Runs in < 100 ms on `cargo test` with no network or fixtures.
 
+### 8 GB boot OOM fix (2026-08-20, post-paperwork)
+
+User reported the unsigned .dmg I built above spiked to **8 GB RAM on first open** and locked up the Mac. Root cause: `bootstrap.ts` and `services/reminder.ts` both pulled full tables across the IPC bridge at boot, including `listMessages()` returning 4,076 rows × 90 KB `body_html` = 360 MB just from the messages table. The results from `bootstrap.ts` were ignored (every view that needs them has its own `createResource`).
+
+Fix:
+- Added two scoped queries: `listMessagesForReminder(nowIso)` (5-column slice, LIMIT 50, pre-filtered in SQL) and `listFollowUpsDue(nowIso)` (3-column slice, LIMIT 100). Payload < 10 KB in normal use vs. the previous ~360 MB.
+- `bootstrap.ts` trimmed to only the small lookups the topbar / sidebar / global keyboard handler need at boot: `listAccounts`, `listLabels`, `listShortcuts`, `listBundleConfigs`. Every other list is lazy via `createResource` on view mount.
+- `services/reminder.ts` updated to use the two new scoped queries. Each due follow-up fetches by id via the existing `getMessage` only when there is a real bucket/unread mismatch to fix.
+
+Tests: 9 new unit tests covering the structural shape of the projections (asserts `body` and `bodyHtml` are NOT in the slice), the SQL `WHERE` filters (bucket, status, dueAt, surfacedAt), and the `LIMIT 50/100` enforcement. Total vitest 263 → 272.
+
+`AGENTS.md` §11.7 captures this as a critical lesson with the rule of thumb: any function called from `*Loop` / `tick()` / `bootstrap.ts` / `App.tsx` mount must keep the IPC payload under 10 KB on a 4,000-row account. Full-table `listX()` calls belong in lazy `createResource` on view mount, not in the boot `Promise.all`.
+
+Rebuilt the .dmg with the fix at `dist/SendPalm-0.1.0-arm64.dmg` (7.9 MB, hash verified). User tested it.
+
 ### Commit map for the v3 reframe
 
 ```
