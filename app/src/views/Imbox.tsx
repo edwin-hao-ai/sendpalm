@@ -55,9 +55,9 @@ import { Icon } from "../components/Icon";
 import { SkeletonList } from "../components/Skeleton";
 import { priorityScore } from "../utils/priority";
 import { SORT_LABELS, type SortMode } from "../utils/sort-imbox";
-import { bucketLabel, dateBucket, type DateBucketKey } from "../utils/date";
 import { registerPrepend } from "../services/sync-events";
 import { FilterPanel } from "../components/FilterPanel";
+import { groupItemsByDate } from "./Imbox-helpers";
 
 interface Bundle {
   contactId: string;
@@ -863,6 +863,16 @@ export function Imbox() {
             />
           </Show>
 
+          <Show
+            when={paged().total() > 0 && (paged().hasMore() || paged().loadingMore())}
+          >
+            <LoadedProgressBar
+              loaded={paged().items().length}
+              total={paged().total()}
+              loading={paged().loadingMore()}
+            />
+          </Show>
+
           <DateGroupedList items={activeList()}>
             {(item, i) => (
               <ItemRow
@@ -1089,6 +1099,80 @@ function ShowMoreButton(props: { loading: boolean }) {
       }}
     >
       {props.loading ? "加载中…" : "继续滚动加载更多"}
+    </div>
+  );
+}
+
+/** A thin strip between the section header and the list that shows
+ *  how many items have been loaded vs. the total in the bucket. Hidden
+ *  when the list is complete. The bar fill animates with `transform:
+ *  scaleX()` so it doesn't trigger reflow on every progress tick.
+ *  Pairs with the IntersectionObserver loadMore to give the user a
+ *  visible sense of progress while the next page IPC round-trip is
+ *  in flight. */
+function LoadedProgressBar(props: {
+  loaded: number;
+  total: number;
+  loading: boolean;
+}) {
+  const pct = () => {
+    if (props.total <= 0) return 0;
+    return Math.min(100, Math.round((props.loaded / props.total) * 100));
+  };
+  return (
+    <div
+      data-loaded-progress
+      style={{
+        display: "flex",
+        "align-items": "center",
+        gap: "var(--space-3)",
+        padding: "var(--space-2) var(--space-4)",
+        "margin-bottom": "var(--space-2)",
+        background: "var(--paper-mid)",
+        "border-radius": "var(--radius-md)",
+        "font-size": "var(--text-caption)",
+        color: "var(--text-secondary)",
+      }}
+    >
+      <div
+        style={{
+          flex: 1,
+          height: "4px",
+          background: "var(--paper-dark)",
+          "border-radius": "var(--radius-pill)",
+          overflow: "hidden",
+          position: "relative",
+        }}
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct()}
+      >
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            "border-radius": "var(--radius-pill)",
+            background: "var(--palm)",
+            "transform-origin": "left center",
+            transform: `scaleX(${pct() / 100})`,
+            transition:
+              "transform 0.32s var(--ease-out), opacity 0.2s var(--ease-out)",
+            opacity: props.loading ? 0.7 : 1,
+          }}
+        />
+      </div>
+      <span
+        style={{
+          "white-space": "nowrap",
+          "font-weight": "600",
+          "font-variant-numeric": "tabular-nums",
+        }}
+        data-loaded-progress-text
+      >
+        已加载 {props.loaded} / {props.total}
+        {props.loading ? " · 加载中…" : ""}
+      </span>
     </div>
   );
 }
@@ -1732,43 +1816,20 @@ function ImboxTabButton(props: {
  *  keep their DOM nodes when items within a bucket re-shuffle, so the
  *  browser doesn't lose scroll position. Each bucket header is clickable
  *  to set the cursor to its first item, so the user can jump to a date
- *  range without scrolling through 100s of unread. */
+ *  range without scrolling through 100s of unread.
+ *
+ *  Grouping is delegated to `groupItemsByDate` (see
+ *  `./Imbox-helpers.ts`) so the bucketing logic is unit-testable in
+ *  isolation. The previous inline version mutated the items via
+ *  `Object.assign(item, { _flatIdx })` to attach a global index; that
+ *  broke SolidJS reactivity downstream. The helper instead carries
+ *  `startIdx` per group and the per-row <For> just adds the local
+ *  offset — no mutation. */
 function DateGroupedList(props: {
   items: Item[];
   children: (item: Item, i: number) => JSX.Element;
 }) {
-  const groups = createMemo<
-    Array<{ key: string; label: string; items: Array<Item & { _flatIdx: number }> }>
-  >(() => {
-    const all = props.items;
-    const out: Array<{
-      key: string;
-      label: string;
-      items: Array<Item & { _flatIdx: number }>;
-    }> = [];
-    let flatIdx = 0;
-    let currentKey: string | null = null;
-    for (const item of all) {
-      const firstMessage: Message =
-        "messages" in item ? item.messages[0]! : item;
-      const bucket: DateBucketKey = dateBucket(firstMessage.st);
-      const key =
-        typeof bucket === "string"
-          ? bucket
-          : `${bucket.year}-${bucket.month}`;
-      if (key !== currentKey) {
-        out.push({ key, label: bucketLabel(bucket), items: [] });
-        currentKey = key;
-      }
-      out[out.length - 1]!.items.push(
-        Object.assign(item, { _flatIdx: flatIdx }) as Item & {
-          _flatIdx: number;
-        },
-      );
-      flatIdx++;
-    }
-    return out;
-  });
+  const groups = createMemo(() => groupItemsByDate(props.items));
 
   return (
     <For each={groups()}>
@@ -1808,7 +1869,7 @@ function DateGroupedList(props: {
             </span>
           </header>
           <For each={group.items}>
-            {(item) => props.children(item, item._flatIdx)}
+            {(item, localIdx) => props.children(item, group.startIdx + localIdx())}
           </For>
         </section>
       )}

@@ -4,8 +4,11 @@
 
 interface SkeletonProps {
   lines?: number;
-  height?: number;
-  width?: string;
+  /** Accepts both `number` (px) and `string` (e.g. `"40px"`, `"60%"`).
+   *  Existing call sites mix both styles — the runtime template-literal
+   *  handles either. */
+  height?: number | string;
+  width?: number | string;
   circle?: boolean;
   style?: JSX.CSSProperties;
 }
@@ -18,7 +21,11 @@ declare namespace JSX {
 }
 
 export function Skeleton(props: SkeletonProps) {
-  const baseStyle = {
+  // The baseStyle object uses an index signature `[key: string]: string |
+  // number | undefined` (via the JSX.CSSProperties extension below) so
+  // mixing `number | string` for width/height still type-checks under
+  // Solid's stricter CSSProperties. We cast at the JSX boundary.
+  const baseStyle: JSX.CSSProperties = {
     background:
       "linear-gradient(90deg, var(--paper-mid) 25%, var(--paper-light) 50%, var(--paper-mid) 75%)",
     "background-size": "200% 100%",

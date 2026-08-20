@@ -2242,4 +2242,75 @@ and Vite's production-build asset pipeline.
 external `<script>` or `<link>` is a future Tauri-CSP regression waiting to
 happen. Anything the app needs at render time should be an npm dependency
 that Vite bundles.
+
+### Code-split + better loading UX (2026-08-20)
+
+User reported the app still felt slow after the icon/asset fixes, especially
+on first open and during scroll. The static analysis turned up two
+structural problems and one rendering hot path:
+
+1. `App.tsx` was gating the entire shell (Sidebar + Topbar + Main + every
+   overlay) on `ready()` from `bootstrap.ts`, which awaits 4 IPC round-trips
+   (`load(STORE_PATH)`, `ensureDefaultShortcuts`, then
+   `Promise.all([listAccounts(), listLabels(), listShortcuts(), listBundleConfigs()])`).
+   The user saw only the splash for the whole bootstrap duration. The shell
+   doesn't need any of that data to render — every component uses its own
+   `createResource`. Removed the gate; the shell now paints on the first
+   frame. The splash fades on `requestAnimationFrame × 2` (the double rAF
+   is required so the browser commits the first layout before the splash
+   starts clearing — a single rAF would produce a one-frame flash of
+   paper-coloured void).
+
+2. `Main.tsx` was eagerly importing all 22 view files at app boot. Calendar
+   (2264 lines), Imbox (1835), Settings (2214) all had to be parsed by the
+   JS engine before the user could click anything. Replaced every static
+   import with `lazy(() => import("../views/X").then(m => ({ default: m.X })))`
+   + `<Suspense fallback={<FeedSkeleton />}>`. The active view's chunk
+   downloads after the shell paints; other chunks load on demand when the
+   user navigates to them. Initial bundle dropped from **633 KB → 399 KB
+   raw / 120 KB gzipped**, and the first paint no longer waits for the
+   V8 engine to compile all 22 view components.
+
+3. The Imbox's `DateGroupedList` was using `Object.assign(item, { _flatIdx })`
+   to attach a per-item global index for j/k cursor navigation. That
+   mutated the SolidJS-tracked message objects on every regroup, breaking
+   reactivity for every `createMemo` that read the items. Extracted
+   `groupItemsByDate` to a new `./Imbox-helpers.ts`, returns `startIdx` per
+   group, and the per-row `<For>` adds the local offset. No mutation, the
+   original item references are preserved across the lifecycle.
+
+### Loading UX (2026-08-20, same day)
+
+- New `LoadedProgressBar` component (between SectionHeader and the list
+  in Imbox) shows `已加载 X / 共 Y` plus a thin `transform: scaleX()`
+  bar. The bar is hidden when the list is complete; visible during the
+  initial fetch and while `loadMore` is in flight. The transform-based
+  fill avoids triggering reflow on every progress tick (vs animating
+  `width`).
+- `FeedSkeleton` in `Main.tsx` grew from 6 placeholder rows to 12 (each
+  with avatar + 2 text lines) and added a 32px H1 placeholder so the
+  page header doesn't cause a layout shift when the real view mounts.
+- `Topbar.SyncBadge` now shows `加载中…` while the accounts resource is
+  in flight (was previously showing `未连接`, which made the app look
+  broken on first paint when accounts were just slow to return).
+- `Skeleton` component props widened from `width: string` to
+  `width: number | string` and the same for `height` — existing call
+  sites were already mixing both shapes, but TypeScript was rejecting
+  the wider shape.
+
+### Tests (this commit)
+
+- 4 cases for `groupItemsByDate`: no-mutation regression guard,
+  contiguous `startIdx` per group, global index = `startIdx + localIdx`
+  is unique, labels match `bucketLabel(dateBucket(...))`.
+- 4 cases for `Main.tsx` lazy loading: no static `import` from
+  `../views/*`, `<Suspense fallback={<FeedSkeleton />}>` wraps the
+  switch, every Match renders a component declared as `const X = lazy()`,
+  FeedSkeleton has ≥ 8 row placeholders.
+- Total: 287 (was 279, +8).
+
+`AGENTS.md` §11.9 captures the "no `ready()` gate" lesson: any function
+that paints the top-level shell should NOT block on boot-time IPC. Every
+component pulls its own data via `createResource`; the shell paints
+first, the data catches up.
 - `fix(calendar,pileboard): error fallbacks for events / pile loader`

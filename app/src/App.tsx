@@ -1,8 +1,18 @@
 /** App shell — matches prototype-v11's HTML mount points.
  * #root contains the sidebar + topbar + main + detail + agent + toasts.
+ *
+ * Render order is important: the SHELL paints on the very first frame
+ * (Sidebar + Topbar + Main skeleton). Previously the whole body was
+ * gated on `ready()` from `bootstrap.ts`, which awaits 4 IPC round-trips
+ * before the user sees anything. Users perceived this as "the app takes
+ * a second to open". Now the shell renders immediately; the bootstrap
+ * keeps running in the background and only affects on-disk state, agent
+ * memory, onboarding gating, and the per-component `createResource`
+ * caches. The splash overlay fades out the first time SolidJS paints the
+ * shell, NOT after `initApp()` resolves.
  */
 
-import { Show, createSignal, onMount, onCleanup, createEffect } from "solid-js";
+import { Show, createSignal, onMount, onCleanup } from "solid-js";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { Main } from "./components/Main";
@@ -32,7 +42,12 @@ import {
 import { useGlobalShortcuts } from "./utils/shortcuts";
 
 export default function App() {
-  const [ready, setReady] = createSignal(false);
+  // Track the init error separately. The shell renders as soon as the
+  // component mounts — there is no `ready` gate anymore. If `initApp()`
+  // rejects we surface the error as a fatal banner that hides the shell
+  // (the user can still see the splash behind it so the app didn't just
+  // freeze). Every component handles its own data via createResource, so
+  // unsetting `loading` no longer has to gate the whole UI.
   const [initError, setInitError] = createSignal<string | null>(null);
 
   useGlobalShortcuts();
@@ -41,29 +56,33 @@ export default function App() {
   onMount(async () => {
     try {
       await initApp();
-      setReady(true);
     } catch (e) {
       setInitError(String(e));
-      setReady(true);
     }
   });
 
-  createEffect(() => {
-    if (ready() || initError()) {
-      document.body.classList.add("app-ready");
-      // Remove the splash overlay from the DOM after the CSS fade finishes
-      // so its semi-transparent gradient cannot tint the app during the
-      // transition or after a hot reload.
-      setTimeout(() => {
-        const splash = document.getElementById("splash");
-        if (splash) splash.style.display = "none";
-      }, 600);
-    }
+  // Hide the splash as soon as SolidJS has painted the shell. We use a
+  // double rAF so the browser commits the first layout before the splash
+  // starts fading. Fading on the same frame as the shell mount would
+  // produce a one-frame flash of paper-coloured void.
+  onMount(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        document.body.classList.add("app-ready");
+        // Remove the splash element from the DOM after the CSS fade so it
+        // can't intercept pointer events or sit in the accessibility tree
+        // after a hot reload.
+        setTimeout(() => {
+          const splash = document.getElementById("splash");
+          if (splash) splash.style.display = "none";
+        }, 600);
+      });
+    });
   });
 
   return (
     <>
-      <Show when={ready() && !initError()}>
+      <Show when={!initError()}>
         <div id="app">
           <Sidebar />
           <Topbar />
@@ -125,8 +144,6 @@ export default function App() {
           </div>
         </div>
       </Show>
-
-      {/* Bootstrap decided we're past onboarding but state still loading. */}
     </>
   );
 }

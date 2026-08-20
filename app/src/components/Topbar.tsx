@@ -317,11 +317,13 @@ function SyncBadge() {
           size={11}
         />
         <span>
-          {emailAccounts().length === 0
-            ? "未连接"
-            : aggregateBusy()
-              ? "同步中…"
-              : `${emailAccounts().length} 账户`}
+          {accounts.loading
+            ? "加载中…"
+            : emailAccounts().length === 0
+              ? "未连接"
+              : aggregateBusy()
+                ? "同步中…"
+                : `${emailAccounts().length} 账户`}
         </span>
         <Show when={emailAccounts().length > 0}>
           <Icon name="ph-caret-down" size={9} />
