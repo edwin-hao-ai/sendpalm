@@ -417,9 +417,6 @@ test.describe("Responsive layout — iPad landscape", () => {
     expect(flexDir).toBe("column");
 
     // iPad landscape uses the desktop 64 px rail per the prototype.
-    const sidebarWidth = await sidebar.evaluate(
-      (el) => el.getBoundingClientRect().width,
-    );
     expect(
       await page
         .locator("#sidebar")

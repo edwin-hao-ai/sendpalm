@@ -28,7 +28,6 @@ import {
   test,
   expect,
   type Page,
-  type BrowserContext,
 } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
