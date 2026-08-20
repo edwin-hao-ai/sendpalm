@@ -30,6 +30,12 @@ The codebase was feature-complete but had no first-impression surface for someon
 - `docs/SOAK-CHECKLIST.md` — 11 sections (A-K) of pre-release manual test cases. Run before declaring "daily driver ready".
 - `docs/PRIVACY-POLICY.md` — formal policy. There is no SendPalm server, we do not collect any data, we do not include any analytics or crash reporting.
 
+### Tier 3 ship-ready build + CI (2026-08-20, same day, after the paperwork)
+
+- `.github/workflows/ci.yml` — 4-job CI: frontend (typecheck + lint + vitest), rust (fmt + clippy + test), e2e (Playwright), imap-real (workflow_dispatch gated by secrets). Concurrency cancellation. Artifact uploads.
+- `scripts/build-dmg.sh` + `scripts/build-dmg.md` — macOS-only .dmg builder. Universal / arm64 / x86_64. Optional codesign + notarytool + stapler. One-time Apple Developer ID setup documented in build-dmg.md.
+- `app/src-tauri/tests/sync_loop_soak_test.rs` — 15 new unit tests stress-testing the sync state machine against dense, sparse, empty, deleted-range, and tiny mailboxes. Specifically guards against the "stop on first partial chunk" bug that left ~3,500 Feishu messages unbackfilled. Runs in < 100 ms on `cargo test` with no network or fixtures.
+
 ### Commit map for the v3 reframe
 
 ```
@@ -40,6 +46,7 @@ f284aba  docs(onboarding): reframe copy around the 'client for any email service
 be044c2  docs(progress): add the v3 reframe section to PROGRESS.md
 bebbf38  feat(marketing): single-page landing site at marketing/index.html
 26cb0e4  docs: add README, CONTRIBUTING, LICENSE, CHANGELOG, soak checklist, privacy policy
+2b3c555  feat(ci,dist,test): CI workflow, .dmg builder, sync-loop soak tests
 ```
 
 ## Milestones
