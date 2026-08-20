@@ -17,6 +17,31 @@ Code/test surface changes in this reframe:
 - `utils/save-attachment.ts` — new shared util for "save attachment to disk". Desktop path uses `tauri-plugin-dialog::save` + `tauri-plugin-fs::writeFile` so the user picks the location; browser fallback preserved for `vite dev` / Playwright. FilePanel + MessagePanel both updated to use it. 5 vitest cases.
 - Onboarding copy reworked to lead with "连接你的邮箱" (was "接入真实邮箱") and surface the 10-service list and the Sent-folder sync as first-class features (both already shipped but never advertised).
 
+### Tier 3 ship-ready paperwork (2026-08-20, same day)
+
+The codebase was feature-complete but had no first-impression surface for someone landing on the repo. Added:
+
+- `marketing/index.html` — single-page static landing site, no build step, matches the app's design system (paper + palm green). 7 sections: asymmetric split hero, 1+2 workflow bento, 6 provider logos, 3 numbered privacy facts, 2-up screenshots bento, download CTA, minimal footer. 0 em-dashes. Real iOS + Mac screenshots (no div-based fake UI). Explicit mobile collapse.
+- `marketing/img/` — 5 real screenshots copied from `docs/ios-screenshots/` + `calendar-week.png`. Plus a hand-drawn SVG favicon of the brand mark.
+- `README.md` — project pitch, stack, build, doc map, status. Aligned with the v3 positioning.
+- `CONTRIBUTING.md` — what is in scope (i18n, provider presets, docs, test coverage) and what is not (OAuth, sync, web, integrations, E2E). Conventional commits required.
+- `LICENSE` — MIT.
+- `CHANGELOG.md` — keep-a-changelog format. Documents the v3 reframe and lists M0-M12.
+- `docs/SOAK-CHECKLIST.md` — 11 sections (A-K) of pre-release manual test cases. Run before declaring "daily driver ready".
+- `docs/PRIVACY-POLICY.md` — formal policy. There is no SendPalm server, we do not collect any data, we do not include any analytics or crash reporting.
+
+### Commit map for the v3 reframe
+
+```
+ee4c06e  docs(positioning): write the v3 client-for-any-email-service story
+f719525  feat(attachments): save-to-disk via OS save dialog (not browser download)
+f284aba  docs(onboarding): reframe copy around the 'client for any email service' pitch
+7af0621  docs(decision): v3 ships IMAP+app-password only, no OAuth
+be044c2  docs(progress): add the v3 reframe section to PROGRESS.md
+bebbf38  feat(marketing): single-page landing site at marketing/index.html
+26cb0e4  docs: add README, CONTRIBUTING, LICENSE, CHANGELOG, soak checklist, privacy policy
+```
+
 ## Milestones
 
 | # | Milestone | Status | Notes |
