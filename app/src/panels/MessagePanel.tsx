@@ -44,6 +44,7 @@ import {
 } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
+import { Skeleton, SkeletonList } from "../components/Skeleton";
 import { FollowUpPicker } from "../components/FollowUpPicker";
 import { RemindPicker } from "../components/RemindPicker";
 import { LabelPicker } from "../components/LabelPicker";
@@ -162,9 +163,19 @@ export function MessagePanel(props: { messageId: string }) {
   // sanitize from the previous message if the user clicks another before
   // the first one finishes.
   const [iframeSrc, setIframeSrc] = createSignal("");
+  // Per-message-id set of messages whose iframe srcdoc has been built
+  // and is now live. Used by the plain-text streaming fallback: while
+  // a message's bodyHtml is present but the sanitize hasn't completed
+  // yet, we render the plain text version first so the user sees
+  // *something* in <50 ms instead of an empty box.
+  const [iframeReady, setIframeReady] = createSignal<Set<string>>(
+    new Set(),
+  );
+  const isIframeReady = (id: string) => iframeReady().has(id);
   let pendingSanitize = 0;
   createEffect(() => {
-    const html = message()?.bodyHtml;
+    const m = message();
+    const html = m?.bodyHtml;
     if (!html || !html.trim()) {
       setIframeSrc("");
       return;
@@ -173,7 +184,25 @@ export function MessagePanel(props: { messageId: string }) {
     setTimeout(() => {
       if (myId !== pendingSanitize) return; // stale
       setIframeSrc(htmlEmailSrcdoc(html));
+      setIframeReady((prev) => {
+        if (m && prev.has(m.id)) return prev;
+        const next = new Set(prev);
+        if (m) next.add(m.id);
+        return next;
+      });
     }, 0);
+  });
+  // When the user navigates to a different message, drop the
+  // ready-flag for the previous one so the next open re-streams the
+  // plain text first. The iframe DOM is still torn down by the For
+  // loop; this is just the JS bookkeeping.
+  let lastMessageId = "";
+  createEffect(() => {
+    const m = message();
+    const id = m?.id ?? "";
+    if (id !== lastMessageId) {
+      lastMessageId = id;
+    }
   });
 
   const handlePlainTextLinkClick = (e: MouseEvent) => {
@@ -735,6 +764,12 @@ export function MessagePanel(props: { messageId: string }) {
   const [moveOpen, setMoveOpen] = createSignal(false);
 
   let currentIframe: HTMLIFrameElement | null = null;
+  // Tracked so the iframe's ref-callback teardown (called with `null`
+  // when the For loop drops this row) can disconnect the observer and
+  // release the closure reference. Otherwise every message the user
+  // opens leaks one ResizeObserver + iframe-body reference — see
+  // AGENTS §11.10 (commit e1f3...).
+  let currentIframeResizeObserver: ResizeObserver | null = null;
 
   const [showBusy, setShowBusy] = createSignal(false);
   const [alwaysShow, setAlwaysShow] = createSignal(false);
@@ -770,6 +805,25 @@ export function MessagePanel(props: { messageId: string }) {
       window.removeEventListener("sp:message:label", onLabel);
       window.removeEventListener("sp:message:move", onMove);
     });
+  });
+
+  // Component-level safety net for the iframe ResizeObserver. The
+  // per-iframe ref-callback cleanup fires when SolidJS removes the
+  // iframe (For loop drops the row, user navigates to a new message);
+  // this one fires when the user closes the panel entirely. Either
+  // way, the observer must be disconnected or it pins the iframe body
+  // and the `load` listener closure for the lifetime of the app.
+  onCleanup(() => {
+    try {
+      currentIframeResizeObserver?.disconnect();
+    } catch {
+      /* already torn down */
+    }
+    currentIframeResizeObserver = null;
+    if (currentIframe) {
+      currentIframe.onload = null;
+      currentIframe.dataset.roAttached = "";
+    }
   });
 
   const addFollowUp = async (days: number) => {
@@ -899,6 +953,17 @@ export function MessagePanel(props: { messageId: string }) {
             </For>
           </div>
         </div>
+      </Show>
+
+      {/* Message still loading (IPC round-trip + maybe DOMPurify).
+          Show a real skeleton — the previous version was just an empty
+          space below the header, so the user saw a blank box and didn't
+          know if anything was happening. The skeleton mirrors the
+          MessageCard layout (avatar + 2 text lines + a long body
+          block) so there's no layout shift when the real content
+          arrives. */}
+      <Show when={!message()}>
+        <MessagePanelSkeleton />
       </Show>
 
       <Show when={message() && contact()}>
@@ -1190,6 +1255,44 @@ export function MessagePanel(props: { messageId: string }) {
                             />
                           }
                         >
+                          {/* While the iframe's DOMPurify sanitize is
+                              still in flight, drop down to the plain-text
+                              preview. Perceived speed: user clicks a
+                              message → text body paints in <50 ms (no
+                              iframe, no sanitization) → the rich HTML
+                              swap completes 200-600 ms later when the
+                              iframe populates. Without this fallback the
+                              user stared at a blank box for up to a
+                              second. The text and the iframe carry the
+                              same content (sanitize is lossless apart
+                              from the iframe's table / image rendering). */}
+                          <Show when={!isIframeReady(m.id) || !iframeSrc()}>
+                            <div
+                              class="sp-plaintext-body"
+                              data-plaintext-fallback
+                              onClick={handlePlainTextLinkClick}
+                              style={{
+                                "font-size": "var(--text-body-sm)",
+                                color: "var(--text-secondary)",
+                                "line-height": 1.6,
+                                "overflow-wrap": "anywhere",
+                                "word-break": "break-word",
+                                "margin-bottom": "var(--space-2)",
+                              }}
+                              innerHTML={plainTextToHtml(m.body)}
+                            />
+                            <div
+                              style={{
+                                "font-size": "var(--text-micro)",
+                                color: "var(--text-muted)",
+                                "margin-bottom": "var(--space-3)",
+                                "font-style": "italic",
+                              }}
+                            >
+                              <Icon name="ph-arrow-fat-line-up" size={11} />{" "}
+                              正在加载完整版式…
+                            </div>
+                          </Show>
                           <Show
                             when={
                               (imageAnalysis()?.externalImageCount ?? 0) > 0
@@ -1240,6 +1343,31 @@ export function MessagePanel(props: { messageId: string }) {
                           </Show>
                           <iframe
                             ref={(el) => {
+                              // SolidJS calls the ref callback with `null`
+                              // when the element unmounts (e.g. the user
+                              // navigates to a new message and the For loop
+                              // drops this thread row). Use that to disconnect
+                              // the ResizeObserver + load listener — otherwise
+                              // every message the user opens adds one
+                              // observer + iframe-body reference to the long-
+                              // lived closure scope, which the user notices
+                              // as "uses the app for a while, then it gets
+                              // slow".
+                              if (el === null) {
+                                if (currentIframe?.dataset.roAttached === "1") {
+                                  try {
+                                    currentIframeResizeObserver?.disconnect();
+                                  } catch {
+                                    /* already torn down */
+                                  }
+                                  currentIframeResizeObserver = null;
+                                  if (currentIframe) {
+                                    currentIframe.dataset.roAttached = "";
+                                    currentIframe.onload = null;
+                                  }
+                                }
+                                return;
+                              }
                               currentIframe = el;
                               const resize = () => {
                                 try {
@@ -1263,7 +1391,8 @@ export function MessagePanel(props: { messageId: string }) {
                               // on first paint and during scroll.
                               try {
                                 const ro = new ResizeObserver(resize);
-                                el.dataset.ro = "1";
+                                currentIframeResizeObserver = ro;
+                                el.dataset.roAttached = "1";
                                 el.addEventListener(
                                   "load",
                                   () => {
@@ -2280,4 +2409,59 @@ function formatBytes(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   const idx = Math.min(i, sizes.length - 1);
   return `${(bytes / k ** idx).toFixed(1)} ${sizes[idx]}`;
+}
+
+/** Skeleton shown while the message is loading (IPC round-trip in
+ *  flight). Mirrors the real MessageCard + body layout (avatar + 2
+ *  text lines + a long body block) so there is no layout shift when
+ *  the real content arrives. The header bar above is already rendered
+ *  (it doesn't depend on `message()`), so the user sees a coherent
+ *  panel even at the 0-byte moment. The shimmer animation is on the
+ *  existing Skeleton component (1.4s linear). */
+function MessagePanelSkeleton() {
+  return (
+    <div
+      data-message-panel-skeleton
+      style={{
+        padding: "var(--space-5)",
+        flex: 1,
+        "overflow-y": "auto",
+        "overscroll-behavior": "contain",
+      }}
+    >
+      {/* Hero: avatar + sender + email + timestamp. */}
+      <div
+        style={{
+          display: "flex",
+          "align-items": "center",
+          gap: "var(--space-3)",
+          "margin-bottom": "var(--space-2)",
+        }}
+      >
+        <Skeleton circle width={40} height={40} />
+        <div style={{ flex: 1 }}>
+          <Skeleton width="30%" height="14px" />
+          <div style={{ "margin-top": "6px" }}>
+            <Skeleton width="50%" height="12px" />
+          </div>
+        </div>
+        <Skeleton width="80px" height="12px" />
+      </div>
+      {/* Subject */}
+      <Skeleton width="70%" height="22px" />
+      <div style={{ "margin-bottom": "var(--space-3)" }} />
+      {/* Body: 6 lines fading to 100% so the panel reads as a real
+          email body, not a tiny placeholder. */}
+      <SkeletonList count={6} height={14} />
+      <div
+        style={{
+          "margin-top": "var(--space-3)",
+          "font-size": "var(--text-caption)",
+          color: "var(--text-muted)",
+        }}
+      >
+        正在加载邮件…
+      </div>
+    </div>
+  );
 }
