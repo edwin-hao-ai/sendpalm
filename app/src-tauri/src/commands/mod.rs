@@ -346,7 +346,9 @@ pub async fn upsert_calendar_event(
             sqlx::query(
                 "UPDATE events SET title = $2, dt = $3, end_dt = $4, all_day = $5, \
                  tm = $6, dur = $7, location = $8, brief = $9, \
-                 ical_method = $10, ical_sequence = $11, organizer_email = $12 \
+                 ical_method = $10, ical_sequence = $11, organizer_email = $12, \
+                 recurrence_rule = $13, recurrence_dates_json = $14, \
+                 excluded_dates_json = $15, original_tzid = $16 \
                  WHERE id = $1",
             )
             .bind(&existing_id)
@@ -361,6 +363,10 @@ pub async fn upsert_calendar_event(
             .bind(method)
             .bind(new_seq)
             .bind(invite.organizer.as_deref().unwrap_or(""))
+            .bind(invite.rrule.as_deref().unwrap_or(""))
+            .bind(serde_json::to_string(&invite.rdates).unwrap_or_else(|_| "[]".into()))
+            .bind(serde_json::to_string(&invite.exdates).unwrap_or_else(|_| "[]".into()))
+            .bind(invite.dtstart_tzid.as_deref().unwrap_or(""))
             .execute(pool)
             .await
             .map_err(|e| format!("update event: {e}"))?;
@@ -370,8 +376,8 @@ pub async fn upsert_calendar_event(
 
     let id = format!("evt_{}", uuid::Uuid::new_v4().simple());
     sqlx::query(
-        "INSERT INTO events (id, title, dt, end_dt, all_day, tm, dur, location, agenda_json, pids_json, brief, color, ical_uid, ical_method, ical_sequence, organizer_email) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '[]', $9, $10, '#0A8F63', $11, $12, $13, $14)",
+        "INSERT INTO events (id, title, dt, end_dt, all_day, tm, dur, location, agenda_json, pids_json, brief, color, ical_uid, ical_method, ical_sequence, organizer_email, recurrence_rule, recurrence_dates_json, excluded_dates_json, original_tzid) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '[]', $9, $10, '#0A8F63', $11, $12, $13, $14, $15, $16, $17, $18)",
     )
     .bind(&id)
     .bind(&invite.summary)
@@ -387,6 +393,10 @@ pub async fn upsert_calendar_event(
     .bind(method)
     .bind(invite.sequence.map(|n| n as i64))
     .bind(invite.organizer.as_deref().unwrap_or(""))
+    .bind(invite.rrule.as_deref().unwrap_or(""))
+    .bind(serde_json::to_string(&invite.rdates).unwrap_or_else(|_| "[]".into()))
+    .bind(serde_json::to_string(&invite.exdates).unwrap_or_else(|_| "[]".into()))
+    .bind(invite.dtstart_tzid.as_deref().unwrap_or(""))
     .execute(pool)
     .await
     .map_err(|e| format!("insert event: {e}"))?;
@@ -464,6 +474,10 @@ pub async fn respond_to_calendar_invite(
         attendees: Vec::new(),
         attendee_responses: Vec::new(),
         sequence: seq.map(|n| n as u32),
+        rrule: None,
+        rdates: Vec::new(),
+        exdates: Vec::new(),
+        vtimezones: Vec::new(),
     };
 
     // Get SMTP creds for the local user. We use the test fallback if
@@ -559,4 +573,20 @@ pub struct SyncStateDto {
     pub last_uid: u32,
     pub last_synced_at: String,
     pub busy: bool,
+}
+
+/// M11 — Run a single OpenAI-compatible chat completion against the
+/// user's configured provider. The frontend reads the API key +
+/// model + base URL from tauri-plugin-store (so they survive
+/// restarts and can be edited in Settings) and passes them in
+/// here on every call; we never persist the key on disk.
+#[tauri::command]
+pub async fn agent_chat(
+    config: crate::services::llm::LlmConfig,
+    messages: Vec<crate::services::llm::ChatMessage>,
+) -> Result<crate::services::llm::ChatResponse, String> {
+    crate::services::llm::chat_complete(
+        &crate::services::llm::ChatRequest { config, messages },
+    )
+    .await
 }
