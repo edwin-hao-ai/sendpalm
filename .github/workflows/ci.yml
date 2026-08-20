@@ -1,0 +1,151 @@
+name: CI
+
+# CI for SendPalm. Runs on every push to main and every PR.
+# Three test surfaces:
+#   - vitest (frontend unit tests, 263 cases)
+#   - cargo test (Rust unit + integration tests, 132 cases)
+#   - Playwright e2e (60 cases, headless Chromium against a Vite dev server)
+# Plus typecheck and lint. The e2e is the slowest leg; everything else
+# is in the same matrix job to fail fast.
+
+on:
+  push:
+    branches: [main, feat/**, fix/**, chore/**, docs/**]
+  pull_request:
+    branches: [main]
+
+# Cancel in-flight runs for the same branch / PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: short
+  # Network-gated Rust tests require SENDPALM_E2E_NETWORK=1 + a populated
+  # .env. Off in CI by default. See app/src-tauri/tests/imap_real.rs and
+  # smtp_roundtrip.rs. If you fork and have credentials, opt in via the
+  # workflow_dispatch input below.
+  SENDPALM_E2E_NETWORK: "0"
+
+jobs:
+  frontend:
+    name: Frontend (typecheck, lint, vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - name: Upload coverage
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: app/coverage
+          retention-days: 7
+          if-no-files-found: ignore
+
+  rust:
+    name: Rust (check + test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: app/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+      - name: cargo fmt check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: cargo test
+        # SENDPALM_E2E_NETWORK=0 (env above) keeps the network-gated
+        # IMAP/SMTP tests off. They are skipped by `if std::env::var(...).is_ok()`
+        # inside the test files.
+        run: cargo test --all-features
+
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run Playwright tests
+        run: pnpm exec playwright test
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: app/playwright-report
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: Upload test-results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: app/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # Optional leg: with real network. Run on demand with a populated
+  # SENDPALM_E2E_NETWORK=1 and a runner that has a populated app/.env
+  # (read from the workflow_dispatch secret). Not in the default push
+  # path. See docs/OAUTH-DECISION.md and AGENTS.md §10.4 for context.
+  imap-real:
+    name: IMAP / SMTP (real Feishu)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SENDPALM_E2E_NETWORK: "1"
+      SENDPALM_TEST_EMAIL: ${{ secrets.SENDPALM_TEST_EMAIL }}
+      SENDPALM_TEST_PASSWORD: ${{ secrets.SENDPALM_TEST_PASSWORD }}
+      SENDPALM_TEST_IMAP_HOST: ${{ secrets.SENDPALM_TEST_IMAP_HOST }}
+      SENDPALM_TEST_IMAP_PORT: ${{ secrets.SENDPALM_TEST_IMAP_PORT }}
+      SENDPALM_TEST_SMTP_HOST: ${{ secrets.SENDPALM_TEST_SMTP_HOST }}
+      SENDPALM_TEST_SMTP_PORT: ${{ secrets.SENDPALM_TEST_SMTP_PORT }}
+    defaults:
+      run:
+        working-directory: app/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+      - name: cargo test (network)
+        run: cargo test --test imap_real --test smtp_roundtrip -- --nocapture
