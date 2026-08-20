@@ -815,6 +815,56 @@ export async function listMessages(): Promise<Message[]> {
   return rows.map(rowToMessage);
 }
 
+/** Lightweight projection for the reminder tick.
+ *
+ * The previous version of `services/reminder.ts` called
+ * `listMessages()` and filtered in JS. On a real mailbox with
+ * 4,000+ messages averaging 90 KB of body_html each, that single
+ * call pushed ~360 MB through the IPC bridge and ballooned the
+ * webview's V8 heap to 8 GB before the first user click. See
+ * `docs/lessons.md` (2026-08-20 entry).
+ *
+ * The reminder tick only needs:
+ *   - the message id (for upsertMessage + audit + notification)
+ *   - subj (for the toast / audit body)
+ *   - bubbleUpAt (the trigger condition; this query pre-filters it)
+ *   - bucket (to restrict to imbox)
+ *   - unread (to skip already-unread messages — no-op)
+ * It does NOT need body, body_html, headers, trackers, attachments.
+ *
+ * The query returns at most a handful of rows in normal use (a
+ * "bubble up" reminder is rare) so the IPC payload is < 10 KB.
+ */
+export interface ReminderMessageSlice {
+  id: ID;
+  subj: string;
+  bucket: Message["bucket"];
+  unread: boolean;
+  bubbleUpAt: string | null;
+}
+
+export async function listMessagesForReminder(nowIso: string): Promise<ReminderMessageSlice[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT id, subj, bucket, unread, bubble_up_at
+       FROM messages
+       WHERE bubble_up_at IS NOT NULL
+         AND bubble_up_at <= $1
+         AND bucket = 'imbox'
+         AND unread = 0
+       ORDER BY bubble_up_at ASC
+       LIMIT 50`,
+    [nowIso],
+  );
+  return rows.map((r) => ({
+    id: r.id as ID,
+    subj: r.subj as string,
+    bucket: r.bucket as Message["bucket"],
+    unread: !!r.unread,
+    bubbleUpAt: (r.bubble_up_at as string | null) ?? null,
+  }));
+}
+
 export async function listContactMessages(contactId: ID): Promise<Message[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
@@ -1922,6 +1972,35 @@ export async function listFollowUps(): Promise<FollowUp[]> {
     "SELECT * FROM follow_ups ORDER BY due_at ASC",
   );
   return rows.map(rowToFollowUp);
+}
+
+/** Due follow-ups for the reminder tick. Returns ONLY the columns the
+ * tick needs, and pre-filters by status + dueAt + surfacedAt so the
+ * payload is < 1 KB in normal use. See
+ * `listMessagesForReminder` for the same rationale. */
+export interface DueFollowUp {
+  id: ID;
+  msgId: ID;
+  dueAt: string;
+}
+
+export async function listFollowUpsDue(nowIso: string): Promise<DueFollowUp[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT id, msg_id, due_at
+       FROM follow_ups
+       WHERE status = 'pending'
+         AND surfaced_at IS NULL
+         AND due_at <= $1
+       ORDER BY due_at ASC
+       LIMIT 100`,
+    [nowIso],
+  );
+  return rows.map((r) => ({
+    id: r.id as ID,
+    msgId: r.msg_id as ID,
+    dueAt: r.due_at as string,
+  }));
 }
 
 export async function listContactFollowUps(contactId: ID): Promise<FollowUp[]> {

@@ -10,26 +10,9 @@ import { IS_BROWSER } from "./services/tauri-shim";
 import { ensureNotificationPermission } from "./services/notifications";
 import {
   listAccounts,
-  listAgentAudit,
-  listAgentDrafts,
-  listAgentSessions,
-  listAgentTasks,
   listBundleConfigs,
-  listClips,
-  listContactNotes,
-  listContacts,
-  listDrafts,
-  listEvents,
-  listFiles,
-  listFollowUps,
   listLabels,
-  listMessages,
-  listNotifications,
-  listScheduledSends,
   listShortcuts,
-  listSnippets,
-  listStickies,
-  listTasks,
   loadAgentMemory,
   loadAppSettings,
   ensureDefaultShortcuts,
@@ -116,25 +99,20 @@ export async function initApp() {
     // Seed default keyboard shortcuts on first boot.
     await ensureDefaultShortcuts();
 
+    // Only the small lookups the topbar + sidebar need at boot:
+    //   - accounts (topbar sync badge)
+    //   - labels (sidebar)
+    //   - shortcuts (global keyboard handler)
+    //   - bundle configs (per-sender Imbox bundling)
+    // Every other list (messages, files, contacts, drafts, events, etc.)
+    // is loaded lazily by the view that needs it via createResource. The
+    // previous version of this Promise.all pulled 20+ full tables across
+    // the IPC bridge in parallel, which pushed ~360 MB of message
+    // body_html through the webview at boot and ballooned the V8 heap
+    // to 8 GB before the user could click anything. See
+    // `docs/lessons.md` (2026-08-20 entry).
     await Promise.all([
       listAccounts(),
-      listContacts(),
-      listMessages(),
-      listFiles(),
-      listEvents(),
-      listTasks(),
-      listDrafts(),
-      listAgentSessions(),
-      listAgentTasks(),
-      listAgentDrafts(),
-      listAgentAudit(),
-      listNotifications(),
-      listSnippets(),
-      listStickies(),
-      listContactNotes(),
-      listClips(),
-      listFollowUps(),
-      listScheduledSends(),
       listLabels(),
       listShortcuts(),
       listBundleConfigs(),

@@ -31,6 +31,8 @@ import {
   listContactsByIds,
   listMessagesByIdsLight,
   listMessagesForInsights,
+  listMessagesForReminder,
+  listFollowUpsDue,
   upsertSticky,
 } from "./data";
 import { resetMockDb } from "../services/mock-db";
@@ -559,5 +561,149 @@ describe("scoped catalog queries (FollowUps / Insights / Companies)", () => {
     );
     const slice = await listMessagesForInsights({ since: "2026-08-01T00:00:00Z" });
     expect(slice.map((m) => m.id)).toEqual(["m-new"]);
+  });
+});
+
+describe("listMessagesForReminder", () => {
+  beforeEach(() => {
+    resetMockDb();
+  });
+
+  it("returns only the columns the reminder tick needs (no body_html)", async () => {
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(
+      makeMessage("m1", "c1", {
+        bubbleUpAt: "2026-01-01T00:00:00Z",
+        bucket: "imbox",
+        unread: false,
+      }),
+    );
+    const slice = await listMessagesForReminder("2026-12-01T00:00:00Z");
+    expect(slice).toHaveLength(1);
+    const row = slice[0]!;
+    expect(row.id).toBe("m1");
+    expect(row.subj).toBe("Subject m1");
+    expect(row.bucket).toBe("imbox");
+    // The whole point of this projection: never expose body / body_html.
+    expect(Object.keys(row).sort()).toEqual(
+      ["bubbleUpAt", "bucket", "id", "subj", "unread"].sort(),
+    );
+    expect("body" in row).toBe(false);
+    expect("bodyHtml" in row).toBe(false);
+  });
+
+  it("filters out messages whose bubbleUpAt is in the future", async () => {
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(
+      makeMessage("future", "c1", {
+        bubbleUpAt: "2027-01-01T00:00:00Z",
+        bucket: "imbox",
+        unread: false,
+      }),
+    );
+    expect(await listMessagesForReminder("2026-12-01T00:00:00Z")).toEqual([]);
+  });
+
+  it("filters out messages that are already unread", async () => {
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(
+      makeMessage("already-unread", "c1", {
+        bubbleUpAt: "2026-01-01T00:00:00Z",
+        bucket: "imbox",
+        unread: true,
+      }),
+    );
+    expect(await listMessagesForReminder("2026-12-01T00:00:00Z")).toEqual([]);
+  });
+
+  it("filters out messages not in the imbox bucket", async () => {
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(
+      makeMessage("in-feed", "c1", {
+        bubbleUpAt: "2026-01-01T00:00:00Z",
+        bucket: "feed",
+        unread: false,
+      }),
+    );
+    expect(await listMessagesForReminder("2026-12-01T00:00:00Z")).toEqual([]);
+  });
+
+  it("respects the 50-row limit", async () => {
+    await upsertContact(makeContact("c1"));
+    for (let i = 0; i < 60; i++) {
+      await upsertMessage(
+        makeMessage(`m${i}`, "c1", {
+          bubbleUpAt: "2026-01-01T00:00:00Z",
+          bucket: "imbox",
+          unread: false,
+        }),
+      );
+    }
+    const slice = await listMessagesForReminder("2026-12-01T00:00:00Z");
+    expect(slice).toHaveLength(50);
+  });
+});
+
+describe("listFollowUpsDue", () => {
+  beforeEach(() => {
+    resetMockDb();
+  });
+
+  it("returns only due follow-ups (status=pending, surfacedAt=null, dueAt<=now)", async () => {
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(makeMessage("m1", "c1"));
+    await upsertFollowUp({
+      id: "f-due",
+      msgId: "m1",
+      dueAt: "2026-01-01T00:00:00Z",
+      status: "pending",
+      surfacedAt: null,
+    });
+    const due = await listFollowUpsDue("2026-12-01T00:00:00Z");
+    expect(due).toHaveLength(1);
+    expect(due[0]).toEqual({
+      id: "f-due",
+      msgId: "m1",
+      dueAt: "2026-01-01T00:00:00Z",
+    });
+  });
+
+  it("excludes already-done follow-ups", async () => {
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(makeMessage("m1", "c1"));
+    await upsertFollowUp({
+      id: "f-done",
+      msgId: "m1",
+      dueAt: "2026-01-01T00:00:00Z",
+      status: "done",
+      surfacedAt: null,
+    });
+    expect(await listFollowUpsDue("2026-12-01T00:00:00Z")).toEqual([]);
+  });
+
+  it("excludes already-surfaced follow-ups", async () => {
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(makeMessage("m1", "c1"));
+    await upsertFollowUp({
+      id: "f-surfaced",
+      msgId: "m1",
+      dueAt: "2026-01-01T00:00:00Z",
+      status: "pending",
+      surfacedAt: "2026-06-01T00:00:00Z",
+    });
+    expect(await listFollowUpsDue("2026-12-01T00:00:00Z")).toEqual([]);
+  });
+
+  it("excludes not-yet-due follow-ups", async () => {
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(makeMessage("m1", "c1"));
+    await upsertFollowUp({
+      id: "f-future",
+      msgId: "m1",
+      dueAt: "2027-01-01T00:00:00Z",
+      status: "pending",
+      surfacedAt: null,
+    });
+    expect(await listFollowUpsDue("2026-12-01T00:00:00Z")).toEqual([]);
   });
 });
