@@ -537,6 +537,34 @@ User reported the app still got slow after a while of use, and that opening a me
 **Tests added (1 new case):**
 - `MessagePanel.test.ts` — patches `globalThis.ResizeObserver` with a `FakeRO` whose `disconnect` is a `vi.fn()`, runs the ref-callback logic, asserts `disconnect` fires when the simulated unmount runs. Regression guard for the leak.
 
+### 11.11 Lessons learned (Session 2026-08-21 — Imbox hover-only toolbar + per-message iframe refactor)
+
+Two perf + correctness wins committed together. Both follow the same theme: *cut DOM, cut listeners, give each instance its own state*.
+
+- **Imbox action toolbar was 500 always-mounted buttons with 500 always-bound listeners.** `MessageCard` had 5 `<button>` elements (Reply later / Set aside / Archive / Trash / Toggle unread), each with its own `onClick`, CSS-hidden by default and revealed on `:hover`. For a 100-row Imbox window that's 500 buttons + 500 listeners pinned in the DOM even when the user isn't hovering. The CSS `display: none → display: flex on :hover` rule also fights Solid's fine-grained reactivity because the elements exist but are invisible. **Fix:** a single `hovered` signal per card gates the toolbar via `<Show>`. The 5 buttons carry a `data-action` attribute and the article element has ONE onClick that reads it and routes to the matching prop callback. Event delegation drops the per-button listener cost to zero, and the buttons only mount on hover (Solid handles the re-mount in <2ms). Removed the `.feed-card-actions { display: none }` and `.feed-card:hover .feed-card-actions { display: flex }` rules — the `<Show>` wrapper is now the visibility gate, the CSS only describes the *position* of the toolbar when it's open. Keyboard accessibility preserved by gating on `hovered() || props.isCursor()` so the toolbar also appears for the keyboard-focused card.
+
+- **MessagePanel `iframeSrc` was panel-scoped, not message-scoped** — when the user opens a thread with 3+ messages, every `<iframe>` in the thread was rendering the **current** message's body (single `iframeSrc` signal at the panel level), and the `sendpalm:open-url` postMessage listener dispatched `openUrl` for whichever message happened to be focused — not the message the user actually clicked a link in. **Fix:** extract `<MessageBodyIframe message={m} senderEmail={...} />` as a per-message component. Each thread message gets its own instance with its own `iframeSrc` / `iframeReady` / `currentIframe` / `showBusy` / `alwaysShow` state, and an `onMount`/`onCleanup`-bound window `message` listener that filters by `e.source === currentIframe.contentWindow` — so only THIS message's iframe can fire `openUrl`. The Show images button + "始终显示此发件人的图片" checkbox now live inside the child (they need the per-message iframe ref AND the per-sender image policy). `handlePlainTextLinkClick` was promoted to module scope so the child can call it without prop drilling.
+
+- **`<Show>`/`<Match>` are not the right tool for "make it feel instant"** — SolidJS unmounts inactive `<Switch>/<Match>` branches, so the iframe child here would have been torn down + re-mounted on every tab change, losing all srcdoc parse work. `<Show when={hovered() || isCursor()}>` for the action toolbar is fine (the buttons are cheap to re-mount), but the iframe itself uses a different pattern: per-message component instance, mounted for the lifetime of the thread row.
+
+- **Always remove the `message` listener on cleanup, not just rely on the ref callback** — `window.addEventListener("message", …)` on a per-instance component needs an explicit `removeEventListener` in `onCleanup`. Otherwise 50 thread opens = 50 stale listeners all filtering by their own (now-stale) `currentIframe` ref, never firing but still being called for every postMessage in the window. Tests assert the add/remove pair is symmetric (`MessagePanel.test.ts` "removes the message listener on cleanup").
+
+- **Module-scope helper for shared behavior** — when multiple Solid components in the same file need the same plain-text link click handler, lift it to module scope instead of prop-drilling or duplicating. The risk is `this` binding — we use a plain `function` (not an arrow or method) so the handler can be passed directly to `onClick={handlePlainTextLinkClick}` without binding or `this` surprises.
+
+**Tests added (5 new cases in `MessagePanel.test.ts`):**
+- Routes `sendpalm:open-url` from THIS iframe's `contentWindow` (positive path).
+- Ignores a `sendpalm:open-url` from a SIBLING iframe's `contentWindow` (the multi-message bug regression guard).
+- Ignores a `sendpalm:open-url` fired before the iframe ref has attached (race window).
+- Ignores non-`sendpalm` message types (`sendpalm:show-images` flows downstream, not the other way).
+- Adds and removes the `window.message` listener symmetrically (no window-level listener leak).
+
+**Verification:**
+- `pnpm typecheck` ✓
+- `pnpm lint` ✓
+- `pnpm exec vitest run` ✓ — 293/293 (was 288)
+- `pnpm exec vitest run src/panels/MessagePanel.test.ts` ✓ — 6/6
+- `pnpm exec vitest run src/views/Imbox.test.ts` ✓ — 4/4
+
 ### 11.5 Lessons learned (Session 2026-08-19 — SQLite pool 1→8, IMAP sync blocking all reads)
 
 Profile data from a real-mail session showed `syncBadge.refreshAll` and `notificationBell.refetch` both timing out at **78,619 ms** during the IMAP sync loop. Three user-reported freezes ("点开邮件卡", "同步时卡", "滚动也卡") had the same root cause.

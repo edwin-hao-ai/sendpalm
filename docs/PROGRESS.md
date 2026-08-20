@@ -51,7 +51,55 @@ Tests: 9 new unit tests covering the structural shape of the projections (assert
 
 Rebuilt the .dmg with the fix at `dist/SendPalm-0.1.0-arm64.dmg` (7.9 MB, hash verified). User tested it.
 
-### Commit map for the v3 reframe
+## 2026-08-21 — Imbox hover-only toolbar + per-message iframe refactor
+
+After the v3 reframe + Tier 3 paperwork + 8 GB OOM fix, the remaining perf work was a per-row DOM bloat in Imbox and a long-standing correctness bug in MessagePanel's iframe state. Both fixed in commit `2c41277`.
+
+### Imbox action toolbar → hover-only mount + event delegation
+
+Every `MessageCard` had 5 always-mounted action buttons (Reply later / Set aside / Archive / Trash / Toggle unread) with their own `onClick` listeners, hidden via `display: none` and revealed on `:hover`. For a 100-row Imbox window that was 500 buttons + 500 listeners always in the DOM, even when the user wasn't interacting with the list.
+
+Now: a single `hovered` signal per card gates the toolbar via `<Show when={hovered() || props.isCursor()}>`. The 5 buttons carry a `data-action` attribute and the article element has ONE onClick that reads it and dispatches to the matching prop callback. Event delegation drops the per-button listener cost to zero. The `<Show>` wrapper is now the visibility gate — the CSS only describes the *position* of the toolbar when it's open, the visibility lifecycle is owned by Solid.
+
+Net: 500 fewer `<button>` elements + 500 fewer `onClick` listeners per Imbox window. Buttons re-mount on hover in <2ms (Solid fine-grained reactivity).
+
+### MessagePanel → per-message `<MessageBodyIframe>`
+
+Two bugs fixed by extracting a per-message component:
+
+1. **Multi-message iframe bug**: the previous design had a single `iframeSrc` signal at the panel level. When a thread had 3+ messages, every iframe in the thread rendered the **current** message's body. Wrong content on every sibling message.
+
+2. **Wrong-link-target bug**: the `sendpalm:open-url` postMessage listener (added by `htmlEmailSrcdoc`'s click interceptor) dispatched `openUrl` for whichever message happened to be focused — not the message the user actually clicked a link in.
+
+Now: each thread message gets its own `<MessageBodyIframe message={m} senderEmail={...} />` instance with its own `iframeSrc` / `iframeReady` / `currentIframe` / `showBusy` / `alwaysShow` state, and an `onMount`/`onCleanup`-bound window `message` listener that filters by `e.source === currentIframe.contentWindow` — so only THIS message's iframe can fire `openUrl`. The Show images button + "始终显示此发件人的图片" checkbox now live inside the child (they need the per-message iframe ref AND the per-sender image policy).
+
+`handlePlainTextLinkClick` was promoted to module scope so the child can call it without prop drilling.
+
+### Tests
+
+5 new Vitest cases in `MessagePanel.test.ts` cover the postMessage source filter:
+
+- Routes `sendpalm:open-url` from this iframe's `contentWindow` ✓
+- Ignores a postMessage from a sibling iframe's `contentWindow` ✓
+- Ignores a postMessage before the iframe ref has fired ✓
+- Ignores non-sendpalm message types ✓
+- Adds and removes the `window.message` listener symmetrically ✓
+
+Total: **293/293 tests passing** (was 288).
+
+`AGENTS.md` §11.11 captures both fixes as lessons (event delegation, per-instance component state, symmetric add/remove listener).
+
+### DMG
+
+Rebuilt at `dist/SendPalm-0.1.0-arm64.dmg` (size + hash to be filled in after the build completes).
+
+### Commit
+
+```
+2c41277  perf(imbox,messagepanel): hover-only card actions + per-message iframe state
+```
+
+## Commit map for the v3 reframe
 
 ```
 ee4c06e  docs(positioning): write the v3 client-for-any-email-service story
