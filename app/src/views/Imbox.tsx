@@ -1296,10 +1296,60 @@ function MessageCard(props: MessageCardProps) {
   const firstTimeClass = () =>
     props.firstTimeSender ? " first-time" : "";
 
+  // Hover state for the action toolbar. The 5 action buttons are
+  // rendered only while the user is hovering over the card (or the
+  // card has keyboard focus via the cursor key). Off-screen cards and
+  // non-hovered cards don't have the buttons in the DOM, which cuts
+  // the row count from ~600 elements (100 rows × 5 buttons + avatar +
+  // body) to ~500, and — more importantly — removes ~500 event
+  // listeners. The 5 actions are wired via event delegation on the
+  // article itself (`onAction`), so the toolbar's 5 buttons are
+  // re-mounted on hover without needing to re-attach listeners.
+  const [hovered, setHovered] = createSignal(false);
+
   const preview = () => {
     const raw = props.m.body || props.m.prev || "";
     if (raw.length <= PREVIEW_CHARS) return raw;
     return raw.slice(0, PREVIEW_CHARS).trimEnd() + "…";
+  };
+
+  // Action dispatcher. The 5 buttons inside the toolbar carry a
+  // `data-action` attribute; this single handler reads it and routes
+  // to the matching prop callback. One listener per card instead of
+  // 5 — and the listener is on the article, which exists for every
+  // card regardless of hover state, so we don't pay any setup cost
+  // when the toolbar mounts.
+  //
+  // Note: we do NOT call ev.stopPropagation() here. The article's
+  // own onClick (the "open message" handler) calls this first,
+  // bails out via `if (handled) return`, then runs the open path.
+  // This way the action button never has its own listener, the
+  // article always has exactly one, and the open handler still gets
+  // to do its defensive `closest("button, a, input")` check.
+  const onAction = (ev: MouseEvent): boolean => {
+    const target = ev.target as HTMLElement;
+    const btn = target.closest<HTMLElement>("[data-action]");
+    if (!btn) return false;
+    ev.preventDefault();
+    const action = btn.dataset.action;
+    switch (action) {
+      case "reply-later":
+        props.onReplyLater(props.m);
+        break;
+      case "set-aside":
+        props.onSetAside(props.m);
+        break;
+      case "archive":
+        props.onArchive(props.m);
+        break;
+      case "trash":
+        props.onTrash(props.m);
+        break;
+      case "toggle-unread":
+        props.onToggleUnread(props.m);
+        break;
+    }
+    return true;
   };
 
   return (
@@ -1317,8 +1367,20 @@ function MessageCard(props: MessageCardProps) {
       draggable={props.draggable}
       onDragStart={(ev) => props.onDragStart?.(props.m, ev)}
       onDragEnd={(ev) => props.onDragEnd?.(ev)}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      onFocusIn={() => setHovered(true)}
+      onFocusOut={() => setHovered(false)}
       onClick={(ev) => {
-        // Don't open when the user is interacting with a checkbox, button, or link.
+        // Action delegation runs first. The toolbar's 5 buttons
+        // bubble up here; if the click was on a [data-action]
+        // button we return without opening the message.
+        if (onAction(ev)) return;
+        // Otherwise: open the message. Don't open when the user is
+        // interacting with a checkbox, link, or first-time
+        // approve/block pill (which have their own handlers and
+        // are also <button>/<a> elements — `closest` catches
+        // them too).
         const target = ev.target as HTMLElement;
         if (target.closest("button, a, input")) return;
         props.onOpen(props.m);
@@ -1415,63 +1477,59 @@ function MessageCard(props: MessageCardProps) {
         </Show>
       </div>
 
-      <div class="feed-card-actions" data-feed-card-actions>
-        <button
-          class="feed-card-action-btn"
-          title="Pending (l)"
-          aria-label="Reply later"
-          onClick={(ev) => {
-            ev.stopPropagation();
-            props.onReplyLater(props.m);
-          }}
-        >
-          <Icon name="ph-clock" size={14} />
-        </button>
-        <button
-          class="feed-card-action-btn"
-          title="Saved (s)"
-          aria-label="Set aside"
-          onClick={(ev) => {
-            ev.stopPropagation();
-            props.onSetAside(props.m);
-          }}
-        >
-          <Icon name="ph-push-pin" size={14} />
-        </button>
-        <button
-          class="feed-card-action-btn"
-          title="Archive (e)"
-          aria-label="Archive"
-          onClick={(ev) => {
-            ev.stopPropagation();
-            props.onArchive(props.m);
-          }}
-        >
-          <Icon name="ph-archive" size={14} />
-        </button>
-        <button
-          class="feed-card-action-btn"
-          title="Trash (#)"
-          aria-label="Trash"
-          onClick={(ev) => {
-            ev.stopPropagation();
-            props.onTrash(props.m);
-          }}
-        >
-          <Icon name="ph-trash" size={14} />
-        </button>
-        <button
-          class="feed-card-action-btn"
-          title={props.m.unread ? "Mark as Read" : "Mark as Unread"}
-          aria-label={props.m.unread ? "Mark as Read" : "Mark as Unread"}
-          onClick={(ev) => {
-            ev.stopPropagation();
-            props.onToggleUnread(props.m);
-          }}
-        >
-          <Icon name={props.m.unread ? "ph-eye" : "ph-eye-slash"} size={14} />
-        </button>
-      </div>
+      {/* Action toolbar — only mounted while the card is hovered or
+          keyboard-focused. The 5 buttons below are re-mounted on every
+          hover; event delegation on the article itself keeps the
+          listener setup cost at zero. */}
+      <Show when={hovered() || props.isCursor()}>
+        <div class="feed-card-actions" data-feed-card-actions>
+          <button
+            class="feed-card-action-btn"
+            data-action="reply-later"
+            title="Pending (l)"
+            aria-label="Reply later"
+            type="button"
+          >
+            <Icon name="ph-clock" size={14} />
+          </button>
+          <button
+            class="feed-card-action-btn"
+            data-action="set-aside"
+            title="Saved (s)"
+            aria-label="Set aside"
+            type="button"
+          >
+            <Icon name="ph-push-pin" size={14} />
+          </button>
+          <button
+            class="feed-card-action-btn"
+            data-action="archive"
+            title="Archive (e)"
+            aria-label="Archive"
+            type="button"
+          >
+            <Icon name="ph-archive" size={14} />
+          </button>
+          <button
+            class="feed-card-action-btn"
+            data-action="trash"
+            title="Trash (#)"
+            aria-label="Trash"
+            type="button"
+          >
+            <Icon name="ph-trash" size={14} />
+          </button>
+          <button
+            class="feed-card-action-btn"
+            data-action="toggle-unread"
+            title={props.m.unread ? "Mark as Read" : "Mark as Unread"}
+            aria-label={props.m.unread ? "Mark as Read" : "Mark as Unread"}
+            type="button"
+          >
+            <Icon name={props.m.unread ? "ph-eye" : "ph-eye-slash"} size={14} />
+          </button>
+        </div>
+      </Show>
     </article>
   );
 }

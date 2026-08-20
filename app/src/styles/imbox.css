@@ -233,11 +233,11 @@
 }
 
 .feed-card-actions {
-  display: none;
   position: absolute;
   right: 12px;
   top: 50%;
   transform: translateY(-50%);
+  display: flex;
   gap: 4px;
   background: var(--paper);
   border: 0.5px solid var(--border);
@@ -246,8 +246,6 @@
   box-shadow: var(--shadow-sm);
   z-index: 5;
 }
-
-.feed-card:hover .feed-card-actions { display: flex; }
 
 .feed-card-action-btn {
   width: 28px;

@@ -53,7 +53,12 @@ import { uid } from "../utils/id";
 import { addDays, isoNow, relativeTime } from "../utils/date";
 import { trackerSummary } from "../utils/trackers";
 import type { Clip, Contact, FollowUp, Message, Sticky } from "../types";
-import { addCalendarEvent, setImageSenderPolicy } from "../services/backend";
+import { useAgent } from "../agent/useAgent";
+import {
+  addCalendarEvent,
+  getImageSenderPolicy,
+  setImageSenderPolicy,
+} from "../services/backend";
 import { saveAttachment } from "../utils/save-attachment";
 import { useRefreshEffect, useViewport } from "../utils/gestures";
 import { notifyMessageUpdated } from "../services/sync-events";
@@ -62,12 +67,28 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   analyzeImages,
+  extractExternalImageUrls,
   htmlEmailSrcdoc,
   plainTextToHtml,
-  extractExternalImageUrls,
   prefetchImages,
 } from "../utils/html";
-import { useAgent } from "../agent/useAgent";
+
+/** Click handler used by both the main panel's plain-text body and
+ *  the per-message <MessageBodyIframe> fallback. Lives at module
+ *  scope so the iframe child component can call it without prop
+ *  drilling. Routed through the OS browser via Tauri's opener
+ *  plugin, not window.open, so it picks up the user's default
+ *  browser + handles the URL parsing correctly. */
+function handlePlainTextLinkClick(e: MouseEvent) {
+  const target = e.target as HTMLElement | null;
+  const a = target?.closest?.("a[href]") as HTMLAnchorElement | null;
+  if (!a) return;
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
+    return;
+  e.preventDefault();
+  e.stopPropagation();
+  openUrl(a.href).catch(() => {});
+}
 
 type ViewMode = "rendered" | "plain" | "source";
 
@@ -155,66 +176,16 @@ export function MessagePanel(props: { messageId: string }) {
   const [viewMode, setViewMode] = createSignal<ViewMode>("rendered");
   const [expandedIds, setExpandedIds] = createSignal<Set<string>>(new Set());
 
-  // Deferred iframe src: htmlEmailSrcdoc runs DOMPurify synchronously, which
-  // blocks the main thread for 200-600ms on a real 80KB body_html. Defer
-  // the sanitize to the next tick so the click path (open message →
-  // paint panel chrome) completes first; the iframe starts empty for one
-  // frame, then populates. The stale-closure guard cancels a slow
-  // sanitize from the previous message if the user clicks another before
-  // the first one finishes.
-  const [iframeSrc, setIframeSrc] = createSignal("");
-  // Per-message-id set of messages whose iframe srcdoc has been built
-  // and is now live. Used by the plain-text streaming fallback: while
-  // a message's bodyHtml is present but the sanitize hasn't completed
-  // yet, we render the plain text version first so the user sees
-  // *something* in <50 ms instead of an empty box.
-  const [iframeReady, setIframeReady] = createSignal<Set<string>>(
-    new Set(),
-  );
-  const isIframeReady = (id: string) => iframeReady().has(id);
-  let pendingSanitize = 0;
-  createEffect(() => {
-    const m = message();
-    const html = m?.bodyHtml;
-    if (!html || !html.trim()) {
-      setIframeSrc("");
-      return;
-    }
-    const myId = ++pendingSanitize;
-    setTimeout(() => {
-      if (myId !== pendingSanitize) return; // stale
-      setIframeSrc(htmlEmailSrcdoc(html));
-      setIframeReady((prev) => {
-        if (m && prev.has(m.id)) return prev;
-        const next = new Set(prev);
-        if (m) next.add(m.id);
-        return next;
-      });
-    }, 0);
-  });
-  // When the user navigates to a different message, drop the
-  // ready-flag for the previous one so the next open re-streams the
-  // plain text first. The iframe DOM is still torn down by the For
-  // loop; this is just the JS bookkeeping.
-  let lastMessageId = "";
-  createEffect(() => {
-    const m = message();
-    const id = m?.id ?? "";
-    if (id !== lastMessageId) {
-      lastMessageId = id;
-    }
-  });
+  // The current-message iframe is rendered by a per-message
+  // <MessageBodyIframe> component defined later in this file. Each
+  // thread message has its own component instance with its own
+  // `iframeSrc` + `iframeReady` state, so opening a sibling message
+  // in the thread shows THAT message's body — not the current
+  // message's. The earlier single-iframeSrc signal (shared across
+  // all iframes in the thread) was a pre-existing bug.
 
-  const handlePlainTextLinkClick = (e: MouseEvent) => {
-    const target = e.target as HTMLElement | null;
-    const a = target?.closest?.("a[href]") as HTMLAnchorElement | null;
-    if (!a) return;
-    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
-      return;
-    e.preventDefault();
-    e.stopPropagation();
-    openUrl(a.href).catch(() => {});
-  };
+  // (handlePlainTextLinkClick moved to module scope below so the
+  // per-message <MessageBodyIframe> can call it too.)
 
   useRefreshEffect(() => {
     void refetchMessage();
@@ -763,33 +734,6 @@ export function MessagePanel(props: { messageId: string }) {
   const [labelOpen, setLabelOpen] = createSignal(false);
   const [moveOpen, setMoveOpen] = createSignal(false);
 
-  let currentIframe: HTMLIFrameElement | null = null;
-  // Tracked so the iframe's ref-callback teardown (called with `null`
-  // when the For loop drops this row) can disconnect the observer and
-  // release the closure reference. Otherwise every message the user
-  // opens leaks one ResizeObserver + iframe-body reference — see
-  // AGENTS §11.10 (commit e1f3...).
-  let currentIframeResizeObserver: ResizeObserver | null = null;
-
-  const [showBusy, setShowBusy] = createSignal(false);
-  const [alwaysShow, setAlwaysShow] = createSignal(false);
-
-  onMount(() => {
-    const handler = (e: MessageEvent) => {
-      if (currentIframe && e.source !== currentIframe.contentWindow) return;
-      const data = e.data as { type?: string; href?: string } | null;
-      if (
-        !data ||
-        data.type !== "sendpalm:open-url" ||
-        typeof data.href !== "string"
-      )
-        return;
-      openUrl(data.href).catch(() => {});
-    };
-    window.addEventListener("message", handler);
-    onCleanup(() => window.removeEventListener("message", handler));
-  });
-
   onMount(() => {
     const onLabel = (ev: Event) => {
       const detail = (ev as CustomEvent).detail as { messageId?: string };
@@ -805,25 +749,6 @@ export function MessagePanel(props: { messageId: string }) {
       window.removeEventListener("sp:message:label", onLabel);
       window.removeEventListener("sp:message:move", onMove);
     });
-  });
-
-  // Component-level safety net for the iframe ResizeObserver. The
-  // per-iframe ref-callback cleanup fires when SolidJS removes the
-  // iframe (For loop drops the row, user navigates to a new message);
-  // this one fires when the user closes the panel entirely. Either
-  // way, the observer must be disconnected or it pins the iframe body
-  // and the `load` listener closure for the lifetime of the app.
-  onCleanup(() => {
-    try {
-      currentIframeResizeObserver?.disconnect();
-    } catch {
-      /* already torn down */
-    }
-    currentIframeResizeObserver = null;
-    if (currentIframe) {
-      currentIframe.onload = null;
-      currentIframe.dataset.roAttached = "";
-    }
   });
 
   const addFollowUp = async (days: number) => {
@@ -1080,34 +1005,6 @@ export function MessagePanel(props: { messageId: string }) {
                 const sender = () => senderFor(m);
                 const current = () => isCurrent(m);
                 const c = () => contactsById()[m.pid];
-                const imageAnalysis = createMemo(() =>
-                  m.bodyHtml ? analyzeImages(m.bodyHtml) : null,
-                );
-                const onShowImages = async () => {
-                  if (!m.bodyHtml) return;
-                  setShowBusy(true);
-                  try {
-                    const urls = extractExternalImageUrls(m.bodyHtml);
-                    const map = await prefetchImages(urls);
-                    if (currentIframe?.contentWindow) {
-                      currentIframe.contentWindow.postMessage(
-                        {
-                          type: "sendpalm:show-images",
-                          srcMap: Object.fromEntries(map),
-                        },
-                        "*",
-                      );
-                    }
-                    if (alwaysShow()) {
-                      const senderEmail = sender().email;
-                      if (senderEmail && sender().isMe === false) {
-                        await setImageSenderPolicy(senderEmail, "always");
-                      }
-                    }
-                  } finally {
-                    setShowBusy(false);
-                  }
-                };
                 return (
                   <div
                     data-thread-message
@@ -1255,165 +1152,11 @@ export function MessagePanel(props: { messageId: string }) {
                             />
                           }
                         >
-                          {/* While the iframe's DOMPurify sanitize is
-                              still in flight, drop down to the plain-text
-                              preview. Perceived speed: user clicks a
-                              message → text body paints in <50 ms (no
-                              iframe, no sanitization) → the rich HTML
-                              swap completes 200-600 ms later when the
-                              iframe populates. Without this fallback the
-                              user stared at a blank box for up to a
-                              second. The text and the iframe carry the
-                              same content (sanitize is lossless apart
-                              from the iframe's table / image rendering). */}
-                          <Show when={!isIframeReady(m.id) || !iframeSrc()}>
-                            <div
-                              class="sp-plaintext-body"
-                              data-plaintext-fallback
-                              onClick={handlePlainTextLinkClick}
-                              style={{
-                                "font-size": "var(--text-body-sm)",
-                                color: "var(--text-secondary)",
-                                "line-height": 1.6,
-                                "overflow-wrap": "anywhere",
-                                "word-break": "break-word",
-                                "margin-bottom": "var(--space-2)",
-                              }}
-                              innerHTML={plainTextToHtml(m.body)}
-                            />
-                            <div
-                              style={{
-                                "font-size": "var(--text-micro)",
-                                color: "var(--text-muted)",
-                                "margin-bottom": "var(--space-3)",
-                                "font-style": "italic",
-                              }}
-                            >
-                              <Icon name="ph-arrow-fat-line-up" size={11} />{" "}
-                              正在加载完整版式…
-                            </div>
-                          </Show>
-                          <Show
-                            when={
-                              (imageAnalysis()?.externalImageCount ?? 0) > 0
+                          <MessageBodyIframe
+                            message={m}
+                            senderEmail={
+                              !sender().isMe ? sender().email : undefined
                             }
-                          >
-                            <div
-                              style={{
-                                display: "flex",
-                                "align-items": "center",
-                                gap: "var(--space-3)",
-                                "margin-bottom": "var(--space-2)",
-                              }}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => void onShowImages()}
-                                disabled={showBusy()}
-                                style={{
-                                  opacity: showBusy() ? 0.6 : 1,
-                                  cursor: showBusy() ? "wait" : "pointer",
-                                }}
-                              >
-                                {showBusy()
-                                  ? "Loading…"
-                                  : `Show images (${imageAnalysis()!.externalImageCount})`}
-                                {imageAnalysis()!.hasTrackingPixel ? " ⚠" : ""}
-                              </button>
-                              <label
-                                style={{
-                                  display: "inline-flex",
-                                  "align-items": "center",
-                                  gap: "6px",
-                                  "font-size": "var(--text-caption)",
-                                  color: "var(--text-secondary)",
-                                  cursor: "pointer",
-                                }}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={alwaysShow()}
-                                  onChange={(e) =>
-                                    setAlwaysShow(e.currentTarget.checked)
-                                  }
-                                />
-                                Always show from this sender
-                              </label>
-                            </div>
-                          </Show>
-                          <iframe
-                            ref={(el) => {
-                              // SolidJS calls the ref callback with `null`
-                              // when the element unmounts (e.g. the user
-                              // navigates to a new message and the For loop
-                              // drops this thread row). Use that to disconnect
-                              // the ResizeObserver + load listener — otherwise
-                              // every message the user opens adds one
-                              // observer + iframe-body reference to the long-
-                              // lived closure scope, which the user notices
-                              // as "uses the app for a while, then it gets
-                              // slow".
-                              if (el === null) {
-                                if (currentIframe?.dataset.roAttached === "1") {
-                                  try {
-                                    currentIframeResizeObserver?.disconnect();
-                                  } catch {
-                                    /* already torn down */
-                                  }
-                                  currentIframeResizeObserver = null;
-                                  if (currentIframe) {
-                                    currentIframe.dataset.roAttached = "";
-                                    currentIframe.onload = null;
-                                  }
-                                }
-                                return;
-                              }
-                              currentIframe = el;
-                              const resize = () => {
-                                try {
-                                  const doc = el.contentDocument;
-                                  if (doc && doc.body) {
-                                    const height = doc.body.scrollHeight + 24;
-                                    el.style.height = `${height}px`;
-                                  }
-                                } catch {
-                                  // sandboxed or cross-origin iframe — keep default height
-                                }
-                              };
-                              el.onload = resize;
-                              // ResizeObserver on the iframe body is enough to
-                              // catch every content change (font load, image
-                              // reveal via Show images, dynamic DOM mutations).
-                              // The previous version also ran a 30-frame RAF
-                              // loop and three setTimeout resizes per iframe,
-                              // which compounded across the 3-5 iframes in a
-                              // typical thread and made the panel feel laggy
-                              // on first paint and during scroll.
-                              try {
-                                const ro = new ResizeObserver(resize);
-                                currentIframeResizeObserver = ro;
-                                el.dataset.roAttached = "1";
-                                el.addEventListener(
-                                  "load",
-                                  () => {
-                                    const body = el.contentDocument?.body;
-                                    if (body) ro.observe(body);
-                                  },
-                                  { once: true },
-                                );
-                              } catch {
-                                /* sandbox denies */
-                              }
-                            }}
-                            srcdoc={iframeSrc()}
-                            sandbox="allow-scripts allow-same-origin"
-                            style={{
-                              width: "100%",
-                              "min-height": "240px",
-                              border: "none",
-                              "background-color": "transparent",
-                            }}
-                            title="Message body"
                           />
                         </Show>
                       </Show>
@@ -2463,5 +2206,313 @@ function MessagePanelSkeleton() {
         正在加载邮件…
       </div>
     </div>
+  );
+}
+
+/** Per-message iframe with plain-text streaming fallback, Show
+ *  images button, and per-sender "always show images" toggle.
+ *  Extracted from MessagePanel so each thread message has its own
+ *  iframe state — the previous single-`iframeSrc()` signal made
+ *  every iframe in the thread show the current message's body, not
+ *  its own. Owns its own `currentIframe` ref so the postMessage
+ *  handlers (sendpalm:open-url, sendpalm:show-images) target only
+ *  this message's iframe and not a sibling's. */
+function MessageBodyIframe(props: {
+  message: Message;
+  senderEmail?: string;
+}) {
+  const m = () => props.message;
+  const [iframeSrc, setIframeSrc] = createSignal("");
+  const [iframeReady, setIframeReady] = createSignal(false);
+  const [showBusy, setShowBusy] = createSignal(false);
+  const [alwaysShow, setAlwaysShow] = createSignal(false);
+  let pendingSanitize = 0;
+  let currentIframe: HTMLIFrameElement | null = null;
+  let currentIframeResizeObserver: ResizeObserver | null = null;
+
+  // Image analysis is cheap (regex over bodyHtml) but we still memo
+  // it so the Show images button only re-evaluates when the message
+  // actually changes. Hidden messages (externalImageCount = 0)
+  // collapse the toolbar via the outer <Show when={...}>.
+  const imageAnalysis = createMemo(() => {
+    const html = m().bodyHtml;
+    if (!html) return null;
+    return analyzeImages(html);
+  });
+
+  // Hydrate alwaysShow from the per-sender image policy on mount
+  // and whenever the sender prop changes. The async load races
+  // with the parent's own update via onToggleAlwaysShow, so a
+  // `cancelled` guard prevents stale writes.
+  createEffect(() => {
+    const sender = props.senderEmail;
+    if (!sender) {
+      setAlwaysShow(false);
+      return;
+    }
+    let cancelled = false;
+    void getImageSenderPolicy(sender).then((p) => {
+      if (!cancelled) setAlwaysShow(p === "always");
+    });
+    onCleanup(() => {
+      cancelled = true;
+    });
+  });
+
+  createEffect(() => {
+    const html = m().bodyHtml;
+    if (!html || !html.trim()) {
+      setIframeSrc("");
+      return;
+    }
+    // Reset the ready flag when the message changes so the
+    // plain-text fallback shows for the new message too.
+    setIframeReady(false);
+    const myId = ++pendingSanitize;
+    setTimeout(() => {
+      if (myId !== pendingSanitize) return; // stale
+      setIframeSrc(htmlEmailSrcdoc(html));
+      setIframeReady(true);
+    }, 0);
+  });
+
+  // Window-level message handler — bound to the component's own
+  // iframe via the `e.source === currentIframe?.contentWindow`
+  // check, so we never accidentally receive a sibling thread
+  // message's link click. The `sendpalm:open-url` postMessage is
+  // emitted by the click interceptor injected in `htmlEmailSrcdoc`.
+  const onIframeMessage = (e: MessageEvent) => {
+    if (!e.data || typeof e.data !== "object") return;
+    const iframeWin = currentIframe?.contentWindow;
+    if (!iframeWin || e.source !== iframeWin) return;
+    if (
+      e.data.type === "sendpalm:open-url" &&
+      typeof e.data.href === "string"
+    ) {
+      e.preventDefault?.();
+      openUrl(e.data.href).catch(() => {});
+    }
+  };
+
+  onMount(() => {
+    window.addEventListener("message", onIframeMessage);
+  });
+
+  // Per-component cleanup for the message listener + the
+  // ResizeObserver (see commit 58b9df0 for the leak this prevents).
+  onCleanup(() => {
+    window.removeEventListener("message", onIframeMessage);
+    try {
+      currentIframeResizeObserver?.disconnect();
+    } catch {
+      /* already torn down */
+    }
+    currentIframeResizeObserver = null;
+    if (currentIframe) {
+      currentIframe.onload = null;
+      currentIframe.dataset.roAttached = "";
+    }
+  });
+
+  const onShowImages = async () => {
+    const html = m().bodyHtml;
+    if (!html) return;
+    setShowBusy(true);
+    try {
+      const urls = extractExternalImageUrls(html);
+      if (urls.length === 0) {
+        showToast({ kind: "info", message: "此邮件没有外部图片" });
+        return;
+      }
+      const map = await prefetchImages(urls);
+      const win = currentIframe?.contentWindow;
+      if (win) {
+        win.postMessage(
+          {
+            type: "sendpalm:show-images",
+            srcMap: Object.fromEntries(map),
+          },
+          "*",
+        );
+      }
+    } catch {
+      showToast({ kind: "error", message: "加载图片失败" });
+    } finally {
+      setShowBusy(false);
+    }
+  };
+
+  const onToggleAlwaysShow = async (val: boolean) => {
+    const sender = props.senderEmail;
+    if (!sender) return;
+    setAlwaysShow(val);
+    try {
+      await setImageSenderPolicy(sender, val ? "always" : "ask");
+    } catch {
+      showToast({ kind: "error", message: "保存图片策略失败" });
+    }
+  };
+
+  return (
+    <>
+      {/* Plain-text fallback while DOMPurify sanitize is in flight. */}
+      <Show when={!iframeReady() || !iframeSrc()}>
+        <div
+          class="sp-plaintext-body"
+          data-plaintext-fallback
+          onClick={handlePlainTextLinkClick}
+          style={{
+            "font-size": "var(--text-body-sm)",
+            color: "var(--text-secondary)",
+            "line-height": 1.6,
+            "overflow-wrap": "anywhere",
+            "word-break": "break-word",
+            "margin-bottom": "var(--space-2)",
+          }}
+          innerHTML={plainTextToHtml(m().body)}
+        />
+        <div
+          style={{
+            "font-size": "var(--text-micro)",
+            color: "var(--text-muted)",
+            "margin-bottom": "var(--space-3)",
+            "font-style": "italic",
+          }}
+        >
+          <Icon name="ph-arrow-fat-line-up" size={11} /> 正在加载完整版式…
+        </div>
+      </Show>
+      <iframe
+        ref={(el) => {
+          // ResizeObserver leak fix — see commit 58b9df0.
+          if (el === null) {
+            if (currentIframe?.dataset.roAttached === "1") {
+              try {
+                currentIframeResizeObserver?.disconnect();
+              } catch {
+                /* already torn down */
+              }
+              currentIframeResizeObserver = null;
+              if (currentIframe) {
+                currentIframe.dataset.roAttached = "";
+                currentIframe.onload = null;
+              }
+            }
+            return;
+          }
+          currentIframe = el;
+          const resize = () => {
+            try {
+              const doc = el.contentDocument;
+              if (doc && doc.body) {
+                const height = doc.body.scrollHeight + 24;
+                el.style.height = `${height}px`;
+              }
+            } catch {
+              /* sandboxed — keep default height */
+            }
+          };
+          el.onload = resize;
+          try {
+            const ro = new ResizeObserver(resize);
+            currentIframeResizeObserver = ro;
+            el.dataset.roAttached = "1";
+            el.addEventListener(
+              "load",
+              () => {
+                const body = el.contentDocument?.body;
+                if (body) ro.observe(body);
+              },
+              { once: true },
+            );
+          } catch {
+            /* sandbox denies */
+          }
+        }}
+        srcdoc={iframeSrc()}
+        sandbox="allow-scripts allow-same-origin"
+        style={{
+          width: "100%",
+          "min-height": "240px",
+          border: "none",
+          "background-color": "transparent",
+        }}
+        title="Message body"
+      />
+      {/* Show images + per-sender "always show" — only mount when the
+          sanitized HTML actually contains external <img> tags. The
+          button is per-message because the prefetch map must target
+          this message's iframe, and the checkbox policy is per-sender
+          so the same sender in another thread inherits it. */}
+      <Show
+        when={
+          imageAnalysis() &&
+          (imageAnalysis()?.externalImageCount ?? 0) > 0
+        }
+      >
+        <div
+          data-show-images-bar
+          style={{
+            display: "flex",
+            "align-items": "center",
+            "flex-wrap": "wrap",
+            gap: "var(--space-3)",
+            "margin-top": "var(--space-2)",
+            "font-size": "var(--text-caption)",
+            color: "var(--text-secondary)",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => void onShowImages()}
+            disabled={showBusy()}
+            data-show-images
+            style={{
+              display: "inline-flex",
+              "align-items": "center",
+              gap: "var(--space-1)",
+              padding: "4px 10px",
+              "border-radius": "var(--radius-pill, 999px)",
+              border: "0.5px solid var(--border)",
+              background: "var(--paper-light)",
+              color: "var(--text-primary)",
+              cursor: showBusy() ? "wait" : "pointer",
+              "font-size": "var(--text-caption)",
+              opacity: showBusy() ? 0.6 : 1,
+            }}
+          >
+            <Show
+              when={showBusy()}
+              fallback={<Icon name="ph-image" size={12} />}
+            >
+              <Icon name="ph-spinner" size={12} />
+            </Show>
+            显示图片（{imageAnalysis()?.externalImageCount}）
+          </button>
+          <Show when={props.senderEmail}>
+            <label
+              style={{
+                display: "inline-flex",
+                "align-items": "center",
+                gap: "var(--space-1)",
+                cursor: "pointer",
+                "user-select": "none",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={alwaysShow()}
+                onChange={(e) =>
+                  void onToggleAlwaysShow(e.currentTarget.checked)
+                }
+                data-always-show-images
+                style={{ margin: 0 }}
+              />
+              <span>始终显示此发件人的图片</span>
+            </label>
+          </Show>
+        </div>
+      </Show>
+    </>
   );
 }
