@@ -43,7 +43,20 @@ import {
   setCalendarFilter as setFilter,
 } from "../stores/ui";
 import { useRefreshEffect } from "../utils/gestures";
+import {
+  expandOccurrences,
+  type Occurrence,
+} from "../utils/calendar-occurrences";
 import type { CalendarEvent } from "../types";
+
+/** M11 — A master event + a concrete start time, materialized
+ *  from a recurrence rule inside the current view window. The
+ *  view code treats this as a flat list (one row per occurrence)
+ *  so the day/week/year grids can render recurring events
+ *  without knowing about RRULE. */
+interface OccurrenceView extends Occurrence {
+  ev: CalendarEvent;
+}
 
 const DAY_MINUTES = 24 * 60;
 const HOUR_LABELS = Array.from({ length: 24 }, (_, i) =>
@@ -106,7 +119,73 @@ export function Calendar() {
     return true;
   };
 
-  const sortedEvents = createMemo(() => {
+  // M11 — Build the list of occurrences (one row per master × date)
+  // for the current view window. Day view shows 1 day, week shows 7,
+  // year shows 365. Recurring events get expanded here; non-recurring
+  // events pass through as a single occurrence. The result is sorted
+  // by start time so the grids can iterate it directly.
+  const occurrenceWindow = createMemo<[string, string]>(() => {
+    if (view() === "day") {
+      const d = cursor().toISOString().slice(0, 10);
+      return [d, d];
+    }
+    if (view() === "week") {
+      const s = startOfWeek(cursor());
+      const e = endOfWeek(cursor());
+      return [s.toISOString().slice(0, 10), e.toISOString().slice(0, 10)];
+    }
+    // year view: the whole calendar year centered on the cursor's year.
+    const y = cursor().getFullYear();
+    return [`${y}-01-01`, `${y}-12-31`];
+  });
+
+  const allOccurrences = createMemo<OccurrenceView[]>(() => {
+    const [wStart, wEnd] = occurrenceWindow();
+    const out: OccurrenceView[] = [];
+    for (const ev of (events() ?? []).filter(matchesCalendarFilter)) {
+      for (const occ of expandOccurrences(ev, wStart, wEnd)) {
+        out.push({ ...occ, ev });
+      }
+    }
+    out.sort((a, b) => {
+      const ta = timeToMinutes(a.ev.tm);
+      const tb = timeToMinutes(b.ev.tm);
+      return a.start.localeCompare(b.start) || ta - tb;
+    });
+    return out;
+  });
+
+  // Convert an OccurrenceView into a flat CalendarEvent so the
+  // existing day / week / year grids can keep consuming the
+  // `CalendarEvent[]` shape they were built around. The synthetic
+  // row carries the concrete start time on the right day as its
+  // `dt` (so day-of-month lookups Just Work) and a stable
+  // occurrence id (so click handlers can route back to the
+  // master via `masterId#date → masterId`).
+  const occurrenceAsEvent = (o: OccurrenceView): CalendarEvent => ({
+    ...o.ev,
+    dt: o.start,
+    id: o.id,
+  });
+
+  // The view grids see one row per master × occurrence-in-window.
+  // Year view also needs the full year, but `allOccurrences`
+  // already covers it via the occurrenceWindow memo.
+  const sortedEvents = createMemo<CalendarEvent[]>(() => {
+    // Day / week / year grids are all driven by occurrences. The
+    // bare-masters list (below) is only used by the edit / delete
+    // flows that need the master row.
+    if (
+      view() === "day" ||
+      view() === "week" ||
+      view() === "year"
+    ) {
+      return allOccurrences().map(occurrenceAsEvent);
+    }
+    // Some other view (sometime / habit / tracking) is handled
+    // by its own filter — fall back to the master list so we
+    // don't accidentally drop non-recurring events that fall
+    // outside the view window.
     const list = (events() ?? []).filter(matchesCalendarFilter);
     return [...list].sort((a, b) => {
       const ta = timeToMinutes(a.tm);
@@ -115,22 +194,16 @@ export function Calendar() {
     });
   });
 
-  const eventsForDate = (date: Date) =>
-    sortedEvents().filter((e) => sameDate(new Date(e.dt), date));
+  const eventsForDate = (_date: Date) => {
+    // Backward-compat: the day view used to receive
+    // master-events filtered by date. The day view's
+    // occurrenceWindow already covers the cursor day, so the
+    // synthetic list returned by sortedEvents() for `view() ==
+    // "day"` is correct.
+    return sortedEvents();
+  };
 
-  const visibleHasEvents = createMemo(() => {
-    if (view() === "day") return eventsForDate(cursor()).length > 0;
-    if (view() === "week") {
-      const s = startOfWeek(cursor());
-      const e = endOfWeek(cursor());
-      return sortedEvents().some((ev) => {
-        const d = new Date(ev.dt);
-        return d >= s && d <= e;
-      });
-    }
-    const y = cursor().getFullYear();
-    return sortedEvents().some((ev) => new Date(ev.dt).getFullYear() === y);
-  });
+  const visibleHasEvents = createMemo(() => sortedEvents().length > 0);
 
   const newEvent = (): CalendarEvent => {
     const dt = new Date(cursor());
@@ -167,7 +240,12 @@ export function Calendar() {
   };
 
   const openEvent = (e: CalendarEvent) => {
-    setSelectedMeetingId(e.id);
+    // Accept either a master event id or an occurrence id
+    // (`masterId#YYYY-MM-DD`, from a recurring event tile).
+    // Either way the meeting panel opens on the master, not a
+    // phantom per-occurrence copy.
+    const id = e.id.includes("#") ? e.id.split("#")[0]! : e.id;
+    setSelectedMeetingId(id);
     setDetailOpen(true);
   };
 
@@ -226,6 +304,7 @@ export function Calendar() {
           <For each={["day", "week", "year"] as const}>
             {(v) => (
               <button
+                data-cal-view-btn={v}
                 onClick={() => setView(v)}
                 style={{
                   padding: "4px 12px",
@@ -1072,6 +1151,7 @@ function WeekGrid(props: {
 
   return (
     <div
+      data-cal-view="week"
       style={{
         display: "flex",
         "flex-direction": "column",
@@ -1358,8 +1438,11 @@ function WeekGrid(props: {
                     {(e) => {
                       const start = timeToMinutes(e.tm);
                       const end = start + (e.dur ?? 30);
+                      const isRecurring = !!e.recurrenceRule;
                       return (
                         <button
+                          data-cal-event-tile={isRecurring ? "recurring" : "single"}
+                          data-cal-event-id={e.id}
                           onClick={(ev) => {
                             ev.stopPropagation();
                             props.onEventClick(e);
@@ -1392,11 +1475,33 @@ function WeekGrid(props: {
                         >
                           <div
                             style={{
+                              display: "flex",
+                              "align-items": "center",
+                              gap: "4px",
                               "font-family": "var(--font-mono)",
                               opacity: 0.85,
                             }}
                           >
-                            {formatMinutes(start)}
+                            <span>{formatMinutes(start)}</span>
+                            {isRecurring && (
+                              <span
+                                aria-label="recurring"
+                                style={{
+                                  display: "inline-flex",
+                                  "align-items": "center",
+                                  "justify-content": "center",
+                                  width: "14px",
+                                  height: "14px",
+                                  "border-radius": "999px",
+                                  background: "rgba(255,255,255,0.25)",
+                                  "font-size": "10px",
+                                  "line-height": 1,
+                                  "font-weight": "800",
+                                }}
+                              >
+                                周
+                              </span>
+                            )}
                           </div>
                           <div
                             style={{

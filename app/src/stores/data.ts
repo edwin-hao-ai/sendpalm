@@ -335,6 +335,10 @@ function rowToEvent(r: Record<string, unknown>): CalendarEvent {
     organizerEmail: (r.organizer_email as string | undefined) ?? undefined,
     attendeeResponse: (r.attendee_response as CalendarEvent["attendeeResponse"]) ?? undefined,
     attendeeResponseAt: (r.attendee_response_at as string | undefined) ?? undefined,
+    recurrenceRule: (r.recurrence_rule as string | undefined) ?? undefined,
+    recurrenceDates: safeParse<string[]>(r.recurrence_dates_json as string, []),
+    excludedDates: safeParse<string[]>(r.excluded_dates_json as string, []),
+    originalTzid: (r.original_tzid as string | undefined) ?? undefined,
     attendeeResponses: safeParse<CalendarEvent["attendeeResponses"]>(
       r.attendee_responses_json as string,
       {},

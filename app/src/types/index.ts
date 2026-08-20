@@ -286,6 +286,22 @@ export interface CalendarEvent {
    *  Keyed by attendee email. Populated by the sync loop when an
    *  incoming REPLY message is processed. */
   attendeeResponses?: Record<string, AttendeeResponseEntry>;
+  /** M11 — RRULE for recurring events (RFC 5545 §3.3.10). When
+   *  present, the Calendar view expands occurrences locally
+   *  inside a 90-day rolling window rather than rendering a
+   *  single row. The raw string is stored verbatim so we can
+   *  re-emit it unchanged in iTip REPLY messages. */
+  recurrenceRule?: string;
+  /** RDATE / EXDATE lists for non-RRULE additions / exceptions
+   *  (parsed from the iCal body and stored as JSON for cheap
+   *  re-parse on the frontend). */
+  recurrenceDates?: string[];
+  excludedDates?: string[];
+  /** The original DTSTART;TZID=… value before we normalised it
+   *  to UTC. The Calendar view uses this together with the
+   *  stored VTIMEZONE blocks to render the event in the
+   *  sender's local zone. */
+  originalTzid?: string;
 }
 
 /* ── Task ──────────────────────────────────────────── */
