@@ -91,7 +91,7 @@ Total: **293/293 tests passing** (was 288).
 
 ### DMG
 
-Rebuilt at `dist/SendPalm-0.1.0-arm64.dmg` (size + hash to be filled in after the build completes).
+Rebuilt at `dist/SendPalm-0.1.0-arm64.dmg` — **9.2 MB** (9,217,021 bytes), SHA-256 `530916597b7a6cf3170685bc41c808c6118f91711c1da17f04b5b9dc52c5fa01`, `hdiutil verify` ✅ VALID.
 
 ### Commit
 
