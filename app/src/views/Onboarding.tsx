@@ -23,30 +23,30 @@ interface Step {
 const STEPS: Step[] = [
   {
     title: "欢迎来到 SendPalm",
-    body: "一个安静的、HEY 风格的邮件 + 日历 + IM + Agent 工作区。本地优先，不依赖云端往返。",
+    body: "一个安静的、HEY 风格的本地优先邮件客户端。接你的 Gmail / Outlook / iCloud / 飞书 / 网易 / QQ 任何邮箱，体验 HEY 那种「分门别类」的工作流。",
     icon: "ph-sparkle",
     color: "var(--palm)",
     cta: "开始",
   },
   {
-    title: "接入真实邮箱",
-    body: "Settings → Accounts → 添加账户。支持 Gmail / Outlook / iCloud / 飞书 / QQ / 网易 163 / 126 / Yahoo / Fastmail / 自定义 IMAP。凭据加密存储在系统 Keychain。",
+    title: "连接你的邮箱",
+    body: "支持 10 种邮件服务（Gmail / Outlook / iCloud / 飞书 / QQ / 网易 163 / 126 / Yahoo / Fastmail / 自定义 IMAP）。下一步去添加你的第一个账户。",
     icon: "ph-plug-connected",
     color: "var(--cobalt)",
-    cta: "去添加",
+    cta: "去连接",
     highlight: { label: "凭据存储", value: "OS Keychain" },
   },
   {
     title: "后台自动同步",
-    body: "接入后，60 秒 IMAP 循环自动拉取新邮件到本地 SQLite。首屏已有几百封历史邮件被回填。无 mock 数据，无云端中转。",
+    body: "60 秒 IMAP 循环把新邮件拉到本地 SQLite；Sent 文件夹也同步，所以你用其他客户端发的邮件也能在这里看到。",
     icon: "ph-arrows-clockwise",
     color: "var(--purple)",
     cta: "继续",
     highlight: { label: "拉取协议", value: "60s IMAP 轮询" },
   },
   {
-    title: "真发真收",
-    body: "Compose 用 SMTP 真发邮件。⌘K 全局搜索、? 看快捷键、j/k 在 Imbox 里穿梭。你准备好了。",
+    title: "HEY 工作流，本地运行",
+    body: "Gate 筛选陌生寄件人；L 延迟、A 暂存、Z 提醒；Sticky 黄色便签贴在邮件上；Follow-up 自动跟踪回信。⌘K 全局搜索，j/k 在 Imbox 里穿梭。",
     icon: "ph-paper-plane-tilt",
     color: "var(--orange)",
     cta: "开始使用",
@@ -128,7 +128,7 @@ export function Onboarding() {
             const step = STEPS[stepIndex]!;
             const stepColor = step.color;
             const onPrimary = () => {
-              if (step.cta === "去添加") goToAccounts();
+              if (step.cta === "去连接") goToAccounts();
               else advance();
             };
             return (

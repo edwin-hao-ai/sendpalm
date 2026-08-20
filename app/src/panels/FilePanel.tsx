@@ -10,6 +10,7 @@ import { Icon } from "../components/Icon";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { getAttachmentContent, getAttachmentPath } from "../services/backend";
+import { saveAttachment } from "../utils/save-attachment";
 import { useRefreshEffect } from "../utils/gestures";
 
 export function FilePanel(props: { fileId: string }) {
@@ -36,16 +37,7 @@ export function FilePanel(props: { fileId: string }) {
   });
 
   const downloadFile = async (f: FileItem) => {
-    const dataUrl = await getAttachmentContent(f.id);
-    if (dataUrl) {
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = f.name;
-      a.click();
-      showToast({ message: "开始下载", kind: "success" });
-    } else {
-      showToast({ message: "无法读取附件（浏览器模式不支持）", kind: "info" });
-    }
+    await saveAttachment(f.id, f.name);
   };
 
   return (

@@ -52,7 +52,8 @@ import { uid } from "../utils/id";
 import { addDays, isoNow, relativeTime } from "../utils/date";
 import { trackerSummary } from "../utils/trackers";
 import type { Clip, Contact, FollowUp, Message, Sticky } from "../types";
-import { addCalendarEvent, getAttachmentContent, setImageSenderPolicy } from "../services/backend";
+import { addCalendarEvent, setImageSenderPolicy } from "../services/backend";
+import { saveAttachment } from "../utils/save-attachment";
 import { useRefreshEffect, useViewport } from "../utils/gestures";
 import { notifyMessageUpdated } from "../services/sync-events";
 import { formatMessageSource, messagePreview } from "./message-source";
@@ -1323,23 +1324,7 @@ export function MessagePanel(props: { messageId: string }) {
                             <For each={attachmentsFor(m)}>
                               {(f) => (
                                 <button
-                                  onClick={async () => {
-                                    const dataUrl = await getAttachmentContent(
-                                      f.id,
-                                    );
-                                    if (dataUrl) {
-                                      const a = document.createElement("a");
-                                      a.href = dataUrl;
-                                      a.download = f.name;
-                                      a.click();
-                                    } else {
-                                      showToast({
-                                        message:
-                                          "无法读取附件（浏览器模式不支持）",
-                                        kind: "info",
-                                      });
-                                    }
-                                  }}
+                                  onClick={() => saveAttachment(f.id, f.name)}
                                   style={{
                                     display: "flex",
                                     "align-items": "center",

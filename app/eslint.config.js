@@ -44,6 +44,13 @@ export default [
     files: ["e2e/**/*.{ts,tsx}"],
     languageOptions: {
       parser: tsParser,
+      parserOptions: {
+        // e2e specs are TS in a browser context (page.evaluate runs in the
+        // page); surface the DOM lib so `ScrollBehavior` and friends type-
+        // check. (The app tsconfig already does this for `src/`, but e2e
+        // is a separate directory not in any tsconfig include.)
+        lib: ["ES2020", "DOM", "DOM.Iterable"],
+      },
       globals: {
         ...globals.browser,
         ...globals.es2024,
@@ -57,6 +64,7 @@ export default [
       ...tsPlugin.configs.recommended.rules,
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-var-requires": "off",
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
       "no-console": "off",
     },
   },

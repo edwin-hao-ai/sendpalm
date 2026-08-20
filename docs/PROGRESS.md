@@ -2,6 +2,21 @@
 
 > Source: prototype-v11.38 (v11.38) — every feature reimplemented as Tauri 2 + SolidJS.
 
+## v3 reframing (2026-08-20)
+
+SendPalm is a **HEY-workflow client for any IMAP email service** — not a HEY replacement. The two-pager `docs/POSITIONING.md` is the source of truth for the white space (HEY workflow × any-service client) and the explicit non-goals (no backend, no cross-device sync, no web app, no B2B SSO).
+
+Two new docs in this reframe:
+
+- `docs/POSITIONING.md` — one-liner, what we are, what we are not, market white space, HEY concept → SendPalm mapping, commercial model, non-goals.
+- `docs/OAUTH-DECISION.md` — v3 ships IMAP + app-password only. No OAuth. ≥ 90% user coverage from the 10-provider registry. Defer OAuth to v4+ when (and if) the user base asks.
+
+Code/test surface changes in this reframe:
+
+- `pnpm lint` is now clean for the first time (4 pre-existing e2e errors fixed: `BrowserContext` unused, `ScrollBehavior` undef, `sidebarWidth` unused, e2e config missing DOM lib).
+- `utils/save-attachment.ts` — new shared util for "save attachment to disk". Desktop path uses `tauri-plugin-dialog::save` + `tauri-plugin-fs::writeFile` so the user picks the location; browser fallback preserved for `vite dev` / Playwright. FilePanel + MessagePanel both updated to use it. 5 vitest cases.
+- Onboarding copy reworked to lead with "连接你的邮箱" (was "接入真实邮箱") and surface the 10-service list and the Sent-folder sync as first-class features (both already shipped but never advertised).
+
 ## Milestones
 
 | # | Milestone | Status | Notes |
