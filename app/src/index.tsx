@@ -13,6 +13,14 @@ if (import.meta.env.DEV) {
   void import("./e2e-test-helpers");
 }
 
+// Phosphor Icons — bundled via npm so the Tauri CSP (script-src 'self') and
+// offline desktop builds both get the webfont. The package ships a CSS file
+// per weight; importing the regular weight covers all current <Icon> usage
+// (no call site sets `weight=`). Vite copies the woff2 into dist/assets/.
+// See AGENTS.md §11 ("Many resources not loaded") for the previous
+// unpkg-CDN regression that this import replaces.
+import "@phosphor-icons/web/regular";
+
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/animations.css";

@@ -180,7 +180,8 @@ export function MessagePanel(props: { messageId: string }) {
     const target = e.target as HTMLElement | null;
     const a = target?.closest?.("a[href]") as HTMLAnchorElement | null;
     if (!a) return;
-    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
+      return;
     e.preventDefault();
     e.stopPropagation();
     openUrl(a.href).catch(() => {});
@@ -349,7 +350,11 @@ export function MessagePanel(props: { messageId: string }) {
           // deleted_at IS NULL.
           const current = await getMessage(m.id);
           if (!current) return;
-          await upsertMessage({ ...current, bucket: previousBucket, deletedAt: null });
+          await upsertMessage({
+            ...current,
+            bucket: previousBucket,
+            deletedAt: null,
+          });
           // (no local list to refresh — global bumpRefreshTick below covers other views)
           bumpRefreshTick();
           showToast({ message: "已恢复到原位置", kind: "success" });
@@ -738,7 +743,12 @@ export function MessagePanel(props: { messageId: string }) {
     const handler = (e: MessageEvent) => {
       if (currentIframe && e.source !== currentIframe.contentWindow) return;
       const data = e.data as { type?: string; href?: string } | null;
-      if (!data || data.type !== "sendpalm:open-url" || typeof data.href !== "string") return;
+      if (
+        !data ||
+        data.type !== "sendpalm:open-url" ||
+        typeof data.href !== "string"
+      )
+        return;
       openUrl(data.href).catch(() => {});
     };
     window.addEventListener("message", handler);
@@ -903,12 +913,18 @@ export function MessagePanel(props: { messageId: string }) {
             flex: 1,
             "overflow-y": "auto",
             "overscroll-behavior": "contain",
-            transform:
-              pullKind() === "down-next"
-                ? `translateY(${pullDist() * 0.55}px)`
-                : pullKind() === "up-prev"
-                  ? `translateY(-${pullDist() * 0.55}px)`
-                  : "translateY(0)",
+            // Only apply a transform during an active pull gesture. Leaving
+            // `transform: translateY(0)` + a 420ms transition on at all
+            // times was making the browser promote the scroll container
+            // onto its own compositor layer and visibly slowed native
+            // scroll on dense message bodies.
+            transform: pullKind()
+              ? `translateY(${
+                  pullKind() === "down-next"
+                    ? pullDist() * 0.55
+                    : -pullDist() * 0.55
+                }px)`
+              : undefined,
             transition:
               pullActivePointer === null
                 ? "transform 0.42s cubic-bezier(0.175, 0.885, 0.32, 1.275)"
@@ -1170,11 +1186,15 @@ export function MessagePanel(props: { messageId: string }) {
                                 "overflow-wrap": "anywhere",
                                 "word-break": "break-word",
                               }}
-                               innerHTML={plainTextToHtml(m.body)}
+                              innerHTML={plainTextToHtml(m.body)}
                             />
                           }
                         >
-                          <Show when={(imageAnalysis()?.externalImageCount ?? 0) > 0}>
+                          <Show
+                            when={
+                              (imageAnalysis()?.externalImageCount ?? 0) > 0
+                            }
+                          >
                             <div
                               style={{
                                 display: "flex",
@@ -1233,25 +1253,16 @@ export function MessagePanel(props: { messageId: string }) {
                                 }
                               };
                               el.onload = resize;
-                              // Re-measure as content (images, fonts) finishes
-                              // loading — the iframe body resizes multiple times
-                              // before settling. ResizeObserver + a few timed
-                              // catches cover the common cases (track images,
-                              // Show images button).
-                              let rafs = 0;
-                              const tick = () => {
-                                resize();
-                                if (rafs++ < 30) requestAnimationFrame(tick);
-                              };
-                              requestAnimationFrame(tick);
-                              setTimeout(resize, 300);
-                              setTimeout(resize, 1200);
-                              setTimeout(resize, 3000);
+                              // ResizeObserver on the iframe body is enough to
+                              // catch every content change (font load, image
+                              // reveal via Show images, dynamic DOM mutations).
+                              // The previous version also ran a 30-frame RAF
+                              // loop and three setTimeout resizes per iframe,
+                              // which compounded across the 3-5 iframes in a
+                              // typical thread and made the panel feel laggy
+                              // on first paint and during scroll.
                               try {
                                 const ro = new ResizeObserver(resize);
-                                if (el.contentDocument?.body) {
-                                  ro.observe(el.contentDocument.body);
-                                }
                                 el.dataset.ro = "1";
                                 el.addEventListener(
                                   "load",

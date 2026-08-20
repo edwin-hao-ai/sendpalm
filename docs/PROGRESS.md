@@ -2207,4 +2207,39 @@ All previous tests still pass.
 - `feat(imbox): New / Previously seen tabs + date grouping`
 - `fix(gate): error fallbacks for Gate + ScreenerHistory`
 - `fix(agent): error fallback for the Agent workspace`
+
+### Resource loading + scroll perf fix (2026-08-20)
+
+User reported that opening a message in the Imbox produced a sidebar full
+of tofu glyphs (`※1`, `※2`, …), a 404'd SendPalm logo in the topbar, a
+message body that rendered as raw `[ Stripe ][https://stripe.com…]`
+reference-link text, and a laggy scroll inside the right-side detail panel.
+All four symptoms had one root cause family: assets and code paths the
+prototype relied on were not surviving the move to Tauri 2's strict CSP
+and Vite's production-build asset pipeline.
+
+**Fixes:**
+
+- `app/index.html` — removed the `<script src="https://unpkg.com/@phosphor-icons/web@2.1.1">` line. The Tauri CSP (`script-src 'self' 'unsafe-inline'`) blocked the CDN script, so the Phosphor webfont never loaded and every `<i class="ph ph-tray">` rendered as a tofu box.
+- `app/package.json` — added `@phosphor-icons/web@^2.1.2` as a real dependency.
+- `app/src/index.tsx` — `import "@phosphor-icons/web/regular"` so Vite bundles the CSS + `Phosphor.woff2` into `dist/assets/`. CSP-allowed via `'self'`. Verified the build emits `Phosphor-*.woff2` (147 KB) and `.ph.ph-tray:before { content: "\eXXX" }` rules in the bundled CSS.
+- `app/src/components/BrandMark.tsx` — replaced literal `src="/src/assets/logo-mark.svg"` with `import logoMarkUrl from "/src/assets/logo-mark.svg?url"`. The literal string was not processed by Vite (only `index.html` assets are scanned), so the production build 404'd the topbar logo. Vite now inlines it as a hashed URL.
+- `app/src/panels/MessagePanel.tsx` (iframe ref) — removed the 30-frame `requestAnimationFrame` resize loop and the three `setTimeout(resize, …)` resizes. A single `ResizeObserver` on the iframe body (registered on `load`) covers every content change (font load, Show images reveal, dynamic DOM mutations). With 3–5 iframes per thread, the old code did ~150 forced reflows per message open.
+- `app/src/panels/MessagePanel.tsx` (scroll container) — only applies `transform` during an active pull gesture. The previous always-on `transform: translateY(0)` + 420 ms `transition: transform …` was promoting the scroll container onto its own compositor layer and visibly slowed native scroll on dense bodies.
+- `app/src/utils/html.ts` — `plainTextToHtml` now also handles `[label][url]` (Stripe / Mailchimp / SendGrid plain-text alternative) and `[label](url)` (hand-written markdown) via a single-pass alternation. Previous version only linkified bare `https?://…` and `mailto:…`, leaving the bracketed text untouched. Single-pass avoids the bug where a sequential pass re-matched the URL it just inserted into `href="…"`.
+- `app/src/utils/html.test.ts` — 7 new vitest cases for `plainTextToHtml` covering reference-style, inline-style, mailto, no-regression (single anchor), `<br>` preservation, and HTML escaping.
+
+**Verification:**
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | ✅ |
+| `pnpm lint` | ✅ (0 warnings) |
+| `pnpm test` | ✅ 279 passed (was 272, +7 for `plainTextToHtml`) |
+| `pnpm build` | ✅ bundles `Phosphor-*.woff2` (147 KB) + 4 KB hashed `logo-*.svg`; CSS contains `.ph.ph-tray:before` rules |
+
+`AGENTS.md` §11 captures the icon-CDN regression as a critical lesson: any
+external `<script>` or `<link>` is a future Tauri-CSP regression waiting to
+happen. Anything the app needs at render time should be an npm dependency
+that Vite bundles.
 - `fix(calendar,pileboard): error fallbacks for events / pile loader`

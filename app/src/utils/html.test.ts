@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeEmailHtml, analyzeImages, emailBodyPreview } from "./html";
+import {
+  sanitizeEmailHtml,
+  analyzeImages,
+  emailBodyPreview,
+  plainTextToHtml,
+} from "./html";
 
 describe("sanitizeEmailHtml", () => {
   it("strips <script> blocks", () => {
@@ -126,5 +131,65 @@ describe("analyzeImages", () => {
 
     const benign = `<img width="600" height="200" src="https://example.com/banner.png">`;
     expect(analyzeImages(benign).hasTrackingPixel).toBe(false);
+  });
+});
+
+describe("plainTextToHtml", () => {
+  it("linkifies bare http/https URLs", () => {
+    const result = plainTextToHtml("Visit https://example.com today");
+    expect(result).toContain('<a href="https://example.com"');
+    expect(result).toContain(">https://example.com</a>");
+  });
+
+  it("linkifies mailto: addresses", () => {
+    // Build the address with concatenation to dodge any markdown-aware
+    // rewriter in the test source — the linkifier itself just needs
+    // `mailto:` + a run of non-whitespace characters.
+    const addr = "alice" + "@" + "example.com";
+    const result = plainTextToHtml(`Write to mailto:${addr}`);
+    expect(result).toContain(`<a href="mailto:${addr}"`);
+    // The visible link text is the full `mailto:…` form, like a normal
+    // email client shows it.
+    expect(result).toContain(`>mailto:${addr}</a>`);
+  });
+
+  it("converts reference-style [label][url] to a clickable link", () => {
+    const input = "[ Stripe ][https://stripe.com?utm_campaign=abc]";
+    const result = plainTextToHtml(input);
+    expect(result).toContain('<a href="https://stripe.com?utm_campaign=abc"');
+    expect(result).toContain(">Stripe</a>");
+    // The trailing URL bracket must not survive as literal text.
+    expect(result).not.toContain("[https://stripe.com");
+  });
+
+  it("converts inline-style [label](url) to a clickable link", () => {
+    const result = plainTextToHtml("[Docs](https://docs.example.com)");
+    expect(result).toContain('<a href="https://docs.example.com"');
+    expect(result).toContain(">Docs</a>");
+  });
+
+  it("does not re-linkify a URL that was just inserted into href", () => {
+    // Regression guard: a previous version of this function used three
+    // sequential .replace() passes. The first pass inserted
+    // `<a href="https://stripe.com">Stripe</a>`, and the third pass then
+    // matched the URL inside the new href attribute and produced nested
+    // anchors. The current single-pass alternation must avoid that.
+    const input = "[ Stripe ][https://stripe.com]";
+    const result = plainTextToHtml(input);
+    const openAnchors = (result.match(/<a /g) ?? []).length;
+    const closeAnchors = (result.match(/<\/a>/g) ?? []).length;
+    expect(openAnchors).toBe(1);
+    expect(closeAnchors).toBe(1);
+  });
+
+  it("preserves newlines as <br>", () => {
+    const result = plainTextToHtml("Line one\nLine two");
+    expect(result).toContain("Line one<br>Line two");
+  });
+
+  it("escapes < and > so user content is safe", () => {
+    const result = plainTextToHtml("<script>alert(1)</script>");
+    expect(result).toContain("&lt;script&gt;");
+    expect(result).not.toContain("<script>");
   });
 });

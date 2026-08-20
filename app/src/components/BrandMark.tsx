@@ -4,15 +4,16 @@
  *  full logo, and Tauri bundle icons) instead of a stock Phosphor glyph so
  *  the topbar reads as the same brand as the launch surface.
  *
- *  The asset path is `/src/assets/logo-mark.svg` and Vite bundles it as a
- *  URL — there is no additional HTTP request at runtime because the asset
- *  sits in the bundle.
+ *  The asset is imported via Vite's `?url` query so the build rewrites the
+ *  path to a hashed file under `dist/assets/`. Literal `/src/assets/...`
+ *  strings in JSX are NOT processed by Vite — they would 404 in production.
  *
  *  Keep this typography in sync with the splash word in app/index.html so
  *  the two brand surfaces don't drift.
  */
 
 import { JSX } from "solid-js";
+import logoMarkUrl from "/src/assets/logo-mark.svg?url";
 
 export function BrandMark(): JSX.Element {
   return (
@@ -26,7 +27,7 @@ export function BrandMark(): JSX.Element {
       }}
     >
       <img
-        src="/src/assets/logo-mark.svg"
+        src={logoMarkUrl}
         alt=""
         width="22"
         height="22"
