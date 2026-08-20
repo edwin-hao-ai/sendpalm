@@ -143,6 +143,12 @@ pub fn run() {
             sql: include_str!("../migrations/0019_attendee_responses.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 20,
+            description: "calendar_recurrence + timezones_json",
+            sql: include_str!("../migrations/0020_calendar_recurrence.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     eprintln!("[sendpalm] starting tauri builder");
@@ -189,6 +195,7 @@ pub fn run() {
             commands::get_attachment_path,
             commands::notification_settings::notify_settings_changed,
             commands::image_proxy::fetch_image,
+            commands::agent_chat,
         ])
         .run(tauri::generate_context!());
     if let Err(e) = result {

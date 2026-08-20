@@ -37,6 +37,7 @@ async fn fresh_pool() -> SqlitePool {
         include_str!("../migrations/0017_follow_up_statuses.sql"),
         include_str!("../migrations/0018_calendar_rsvp.sql"),
         include_str!("../migrations/0019_attendee_responses.sql"),
+        include_str!("../migrations/0020_calendar_recurrence.sql"),
     ];
     for sql in migrations {
         sqlx::raw_sql(sql)
@@ -67,6 +68,10 @@ fn make_invite(method: &str, uid: &str, summary: &str) -> IcalEvent {
         organizer: Some("org@example.com".to_string()),
         attendees: vec!["bob@example.com".to_string()],
         attendee_responses: vec![],
+        rrule: None,
+        rdates: vec![],
+        exdates: vec![],
+        vtimezones: vec![],
         sequence: Some(0),
     }
 }
@@ -195,6 +200,10 @@ async fn reply_merges_partstat_into_attendee_responses() {
             email: "bob@example.com".to_string(),
             partstat: "ACCEPTED".to_string(),
         }],
+        rrule: None,
+        rdates: vec![],
+        exdates: vec![],
+        vtimezones: vec![],
         sequence: Some(0),
     };
     insert_event_from_invite(&pool, &reply, "c_bob")
@@ -256,6 +265,10 @@ async fn multiple_replies_are_merged() {
             email: "bob@example.com".to_string(),
             partstat: "ACCEPTED".to_string(),
         }],
+        rrule: None,
+        rdates: vec![],
+        exdates: vec![],
+        vtimezones: vec![],
         sequence: Some(0),
     };
     insert_event_from_invite(&pool, &reply_bob, "c_bob").await.unwrap();
@@ -324,6 +337,10 @@ async fn reply_email_lowercased_for_dedup() {
             email: "Bob@Example.com".to_string(),
             partstat: "ACCEPTED".to_string(),
         }],
+        rrule: None,
+        rdates: vec![],
+        exdates: vec![],
+        vtimezones: vec![],
         sequence: Some(0),
     };
     insert_event_from_invite(&pool, &reply, "c_bob").await.unwrap();

@@ -17,7 +17,7 @@
 //! - Multiple VEVENTs in one ICS body
 //! - VTIMEZONE blocks (we attach the TZID as opaque metadata)
 
-use chrono::{NaiveDate, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc, Weekday as ChronoWeekday};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -48,7 +48,58 @@ pub struct IcalEvent {
     pub attendee_responses: Vec<AttendeeResponse>,
     /// SEQUENCE number from the VEVENT. Used to detect updates.
     pub sequence: Option<u32>,
+    /// RRULE if the event recurs. None means single-shot. Stored
+    /// verbatim (the FREQ/INTERVAL/... key=value pairs) so we can
+    /// re-emit it unchanged and pass it to a real recurrence
+    /// expander when we need concrete occurrences.
+    pub rrule: Option<String>,
+    /// RDATE list of additional occurrence start times (RFC 5545
+    /// §3.8.5.2). Each value is normalized to the same format as
+    /// dtstart (UTC ISO-8601). Combined with RRULE for the full
+    /// occurrence set.
+    pub rdates: Vec<String>,
+    /// EXDATE list of exception dates to remove from the expanded
+    /// set (RFC 5545 §3.8.5.1). Same format as rdates.
+    pub exdates: Vec<String>,
+    /// VTIMEZONE blocks found anywhere in the surrounding iCal
+    /// body (RFC 5545 §3.6.5). Empty for invites that don't
+    /// reference a TZID. The calendar view uses these to convert
+    /// `DTSTART;TZID=Asia/Shanghai` to a concrete UTC time so the
+    /// "starts at" line is right in the user's local zone.
+    pub vtimezones: Vec<VTimezone>,
 }
+
+/// Recurrence rule (RFC 5545 §3.3.10). We keep this as a parsed
+/// structure separate from the raw `rrule` string so the expander
+/// doesn't have to re-parse on every call, and so calendar UI can
+/// introspect "is this weekly?" without grepping the source.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RecurrenceRule {
+    /// FREQ: DAILY, WEEKLY, MONTHLY, YEARLY (we don't support HOURLY /
+    /// MINUTELY / SECONDLY — none of the providers we sync with
+    /// emit them and they're rare enough to defer).
+    pub freq: RecurrenceFreq,
+    /// INTERVAL — every Nth FREQ. Default 1.
+    pub interval: u32,
+    /// COUNT — number of occurrences. Mutually exclusive with UNTIL.
+    pub count: Option<u32>,
+    /// UNTIL — last occurrence start time (UTC ISO-8601). Mutually
+    /// exclusive with COUNT.
+    pub until: Option<String>,
+    /// BYDAY list (e.g. `["MO", "WE", "FR"]` for a weekly rule on
+    /// those days). We support a flat list of weekday codes; the
+    /// positional `1MO` / `-1FR` forms are not handled and ignored
+    /// if present.
+    pub byday: Vec<Weekday>,
+    /// BYMONTHDAY (1..=31, -1..=-31). Same simple form only.
+    pub bymonthday: Vec<i32>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RecurrenceFreq { Daily, Weekly, Monthly, Yearly }
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Weekday { Mo, Tu, We, Th, Fr, Sa, Su }
 
 /// One (email, partstat) pair parsed from an ATTENDEE line.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -136,6 +187,9 @@ pub fn parse_vevent(ics: &str) -> Option<IcalEvent> {
     let mut attendees: Vec<String> = Vec::new();
     let mut attendee_responses: Vec<AttendeeResponse> = Vec::new();
     let mut sequence: Option<u32> = None;
+    let mut rrule: Option<String> = None;
+    let mut rdates: Vec<String> = Vec::new();
+    let mut exdates: Vec<String> = Vec::new();
 
     for line in lines {
         let (name_and_params, value) = match split_property(line) {
@@ -188,6 +242,30 @@ pub fn parse_vevent(ics: &str) -> Option<IcalEvent> {
                     sequence = Some(n);
                 }
             }
+            "RRULE" => {
+                // Keep the raw text so the calendar UI can re-emit
+                // it unchanged when building iTip responses.
+                rrule = Some(value);
+            }
+            "RDATE" => {
+                // RDATE can be a single value or a comma-separated
+                // list. We accept the flat form here and normalize
+                // each entry the same way DTSTART is.
+                for v in value.split(',') {
+                    let n = normalize_datetime(v.trim());
+                    if !n.is_empty() {
+                        rdates.push(n);
+                    }
+                }
+            }
+            "EXDATE" => {
+                for v in value.split(',') {
+                    let n = normalize_datetime(v.trim());
+                    if !n.is_empty() {
+                        exdates.push(n);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -214,6 +292,10 @@ pub fn parse_vevent(ics: &str) -> Option<IcalEvent> {
         attendees,
         attendee_responses,
         sequence,
+        rrule,
+        rdates,
+        exdates,
+        vtimezones: parse_vtimezones(ics),
     })
 }
 
@@ -471,7 +553,508 @@ fn escape_text(s: &str) -> String {
     out
 }
 
-/// Normalize a DTSTART/DTEND value into an RFC3339 timestamp when possible.
+// ── RRULE parsing + expansion ────────────────────────────────────────
+
+/// Parse a single RRULE value (the part after `RRULE:` on the VEVENT).
+///
+/// Format: `FREQ=X;INTERVAL=N;COUNT=N|UNTIL=...;BYDAY=...;BYMONTHDAY=...`
+/// separated by `;`. Unknown keys are ignored. Returns Err for
+/// missing or unrecognised FREQ. INTERVAL defaults to 1.
+pub fn parse_rrule(value: &str) -> Result<RecurrenceRule, String> {
+    let mut freq: Option<RecurrenceFreq> = None;
+    let mut interval: u32 = 1;
+    let mut count: Option<u32> = None;
+    let mut until: Option<String> = None;
+    let mut byday: Vec<Weekday> = Vec::new();
+    let mut bymonthday: Vec<i32> = Vec::new();
+
+    for part in value.split(';') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let (k, v) = match part.split_once('=') {
+            Some(kv) => kv,
+            None => continue,
+        };
+        let k_upper = k.to_uppercase();
+        match k_upper.as_str() {
+            "FREQ" => {
+                freq = Some(match v.to_uppercase().as_str() {
+                    "DAILY" => RecurrenceFreq::Daily,
+                    "WEEKLY" => RecurrenceFreq::Weekly,
+                    "MONTHLY" => RecurrenceFreq::Monthly,
+                    "YEARLY" => RecurrenceFreq::Yearly,
+                    _ => return Err(format!("unsupported FREQ: {v}")),
+                });
+            }
+            "INTERVAL" => {
+                if let Ok(n) = v.parse::<u32>() {
+                    interval = n.max(1);
+                }
+            }
+            "COUNT" => {
+                if let Ok(n) = v.parse::<u32>() {
+                    count = Some(n);
+                }
+            }
+            "UNTIL" => {
+                let norm = normalize_datetime(v);
+                if !norm.is_empty() {
+                    until = Some(norm);
+                }
+            }
+            "BYDAY" => {
+                for d in v.split(',') {
+                    let d = d.trim();
+                    // Ignore positional prefix like "1MO" or "-1FR" — the
+                    // simple "MO" / "WE" form is the common case.
+                    let code = if d.len() > 2 { &d[d.len() - 2..] } else { d };
+                    if let Some(w) = parse_weekday(code) {
+                        byday.push(w);
+                    }
+                }
+            }
+            "BYMONTHDAY" => {
+                for d in v.split(',') {
+                    if let Ok(n) = d.trim().parse::<i32>() {
+                        bymonthday.push(n);
+                    }
+                }
+            }
+            _ => {
+                // Unknown keys (BYSECOND, BYHOUR, BYMONTH, BYSETPOS, …)
+                // are accepted and ignored. We don't have to support
+                // them to cover the common Outlook / Google / Feishu
+                // patterns; tracking the ignored keys would only
+                // complicate the expander.
+            }
+        }
+    }
+
+    Ok(RecurrenceRule {
+        freq: freq.ok_or_else(|| "RRULE missing FREQ".to_string())?,
+        interval,
+        count,
+        until,
+        byday,
+        bymonthday,
+    })
+}
+
+fn parse_weekday(s: &str) -> Option<Weekday> {
+    match s.to_uppercase().as_str() {
+        "MO" => Some(Weekday::Mo),
+        "TU" => Some(Weekday::Tu),
+        "WE" => Some(Weekday::We),
+        "TH" => Some(Weekday::Th),
+        "FR" => Some(Weekday::Fr),
+        "SA" => Some(Weekday::Sa),
+        "SU" => Some(Weekday::Su),
+        _ => None,
+    }
+}
+
+fn weekday_to_chrono(w: Weekday) -> ChronoWeekday {
+    match w {
+        Weekday::Mo => ChronoWeekday::Mon,
+        Weekday::Tu => ChronoWeekday::Tue,
+        Weekday::We => ChronoWeekday::Wed,
+        Weekday::Th => ChronoWeekday::Thu,
+        Weekday::Fr => ChronoWeekday::Fri,
+        Weekday::Sa => ChronoWeekday::Sat,
+        Weekday::Su => ChronoWeekday::Sun,
+    }
+}
+
+/// Expand a parsed RecurrenceRule starting at `dtstart` into a Vec of
+/// UTC `DateTime` occurrences. The result is bounded by either the
+/// rule's COUNT/UNTIL or the safety cap (`max_occurrences`), whichever
+/// is smaller. The result is always non-empty and starts with
+/// `dtstart`.
+pub fn expand_occurrences(
+    rule: &RecurrenceRule,
+    dtstart: DateTime<Utc>,
+    max_occurrences: usize,
+) -> Vec<DateTime<Utc>> {
+    let cap = max_occurrences.min(500);
+    let count_cap = rule.count.map(|c| c as usize).unwrap_or(usize::MAX);
+    let limit = count_cap.min(cap);
+
+    let mut out: Vec<DateTime<Utc>> = Vec::new();
+    out.push(dtstart);
+
+    match rule.freq {
+        RecurrenceFreq::Daily => {
+            let step = chrono::Duration::days(rule.interval as i64);
+            while out.len() < limit {
+                let next = out.last().copied().unwrap() + step;
+                if let Some(until) = &rule.until {
+                    if let Ok(until_dt) = DateTime::parse_from_rfc3339(until) {
+                        if next > until_dt.with_timezone(&Utc) {
+                            break;
+                        }
+                    }
+                }
+                out.push(next);
+            }
+        }
+        RecurrenceFreq::Weekly => {
+            if rule.byday.is_empty() {
+                // No BYDAY — repeat on the same weekday every `interval` weeks.
+                let step = chrono::Duration::weeks(rule.interval as i64);
+                while out.len() < limit {
+                    let next = out.last().copied().unwrap() + step;
+                    if let Some(until) = &rule.until {
+                        if let Ok(until_dt) = DateTime::parse_from_rfc3339(until) {
+                            if next > until_dt.with_timezone(&Utc) {
+                                break;
+                            }
+                        }
+                    }
+                    out.push(next);
+                }
+            } else {
+                // With BYDAY, walk forward day-by-day and pick days that
+                // match. The rule's INTERVAL (= every Nth week) means
+                // the BYDAY list only emits in weeks N apart from the
+                // start, judged by the start's weekday.
+                let target: Vec<ChronoWeekday> =
+                    rule.byday.iter().copied().map(weekday_to_chrono).collect();
+                let mut cursor = dtstart;
+                while out.len() < limit {
+                    // Walk forward `7 * interval` days, picking any
+                    // matching weekday in that window.
+                    for _ in 0..(7 * rule.interval) {
+                        cursor += chrono::Duration::days(1);
+                        if target.contains(&cursor.weekday()) {
+                            let week_index = (cursor - dtstart).num_days() / 7;
+                            if week_index >= 0 && (week_index as u32) % rule.interval == 0 {
+                                if let Some(until) = &rule.until {
+                                    if let Ok(until_dt) =
+                                        DateTime::parse_from_rfc3339(until)
+                                    {
+                                        if cursor > until_dt.with_timezone(&Utc) {
+                                            return out;
+                                        }
+                                    }
+                                }
+                                out.push(cursor);
+                                if out.len() >= limit {
+                                    return out;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        RecurrenceFreq::Monthly => {
+            // Day-of-month based: BYMONTHDAY if present, else dtstart's day.
+            if !rule.bymonthday.is_empty() {
+                // We support a flat BYMONTHDAY list by emitting one
+                // occurrence per matching day in each month.
+                let days: Vec<u32> = rule
+                    .bymonthday
+                    .iter()
+                    .map(|d| if *d > 0 { *d as u32 } else { 0 })
+                    .collect();
+                let mut month = dtstart;
+                while out.len() < limit {
+                    month = add_months(month, rule.interval as i32);
+                    for &d in &days {
+                        if d == 0 {
+                            continue; // -1 = last day handled below if needed
+                        }
+                        if let Some(next) = set_day_of_month(month, d) {
+                            if next <= *out.last().unwrap() {
+                                continue;
+                            }
+                            if let Some(until) = &rule.until {
+                                if let Ok(until_dt) = DateTime::parse_from_rfc3339(until) {
+                                    if next > until_dt.with_timezone(&Utc) {
+                                        return out;
+                                    }
+                                }
+                            }
+                            out.push(next);
+                            if out.len() >= limit {
+                                return out;
+                            }
+                        }
+                    }
+                }
+            } else {
+                let base_day = dtstart.day();
+                while out.len() < limit {
+                    let next = add_months(*out.last().unwrap(), rule.interval as i32);
+                    let next = set_day_of_month(next, base_day).unwrap_or(next);
+                    if let Some(until) = &rule.until {
+                        if let Ok(until_dt) = DateTime::parse_from_rfc3339(until) {
+                            if next > until_dt.with_timezone(&Utc) {
+                                break;
+                            }
+                        }
+                    }
+                    out.push(next);
+                }
+            }
+        }
+        RecurrenceFreq::Yearly => {
+            while out.len() < limit {
+                let next = out.last().copied().unwrap()
+                    + chrono::Duration::days(365 * rule.interval as i64);
+                if let Some(until) = &rule.until {
+                    if let Ok(until_dt) = DateTime::parse_from_rfc3339(until) {
+                        if next > until_dt.with_timezone(&Utc) {
+                            break;
+                        }
+                    }
+                }
+                out.push(next);
+            }
+        }
+    }
+
+    out
+}
+
+fn add_months(dt: DateTime<Utc>, months: i32) -> DateTime<Utc> {
+    let mut year = dt.year();
+    let mut month = dt.month() as i32 + months;
+    while month > 12 {
+        month -= 12;
+        year += 1;
+    }
+    while month < 1 {
+        month += 12;
+        year -= 1;
+    }
+    let new_naive = dt
+        .with_year(year)
+        .and_then(|d| d.with_month(month as u32))
+        .unwrap_or(dt);
+    new_naive
+}
+
+fn set_day_of_month(dt: DateTime<Utc>, day: u32) -> Option<DateTime<Utc>> {
+    // If the requested day doesn't exist in the month (e.g. Feb 30),
+    // skip the occurrence entirely — RFC 5545 says it's omitted.
+    let next_month_first = add_months(dt, 1)
+        .with_day(1)
+        .and_then(|d| d.with_hour(0))
+        .unwrap_or(dt);
+    let last_day_of_month = (next_month_first - chrono::Duration::days(1)).day();
+    if day == 0 || day > last_day_of_month {
+        return None;
+    }
+    dt.with_day(day)
+}
+
+// ── VTIMEZONE parsing + TZID resolution ─────────────────────────────
+
+/// One VTIMEZONE block (RFC 5545 §3.6.5). We capture just the
+/// offset(s) we need to resolve a `DTSTART;TZID=X` to UTC. DST
+/// transitions inside the rule's own RRULE are not evaluated —
+/// we only use these to convert a *floating* local time to UTC.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VTimezone {
+    pub tzid: String,
+    /// Offset in minutes (east of UTC positive) for the STANDARD
+    /// sub-component, if any.
+    pub standard_offset_minutes: Option<i32>,
+    /// Offset in minutes for the DAYLIGHT sub-component, if any.
+    pub daylight_offset_minutes: Option<i32>,
+}
+
+/// Parse all VTIMEZONE blocks in an iCal body. Each block lives
+/// inside a VCALENDAR (so we walk line-by-line and match BEGIN/
+/// END pairs at the right depth). The returned list may be empty.
+pub fn parse_vtimezones(ics: &str) -> Vec<VTimezone> {
+    let unfolded = unfold(ics);
+    let mut out: Vec<VTimezone> = Vec::new();
+    let mut current: Option<VTimezone> = None;
+    let mut in_standard = false;
+    let mut in_daylight = false;
+    for raw in unfolded.lines() {
+        let line = raw.trim_end_matches('\r');
+        let upper = line.to_uppercase();
+        if upper.starts_with("BEGIN:VTIMEZONE") {
+            current = Some(VTimezone {
+                tzid: String::new(),
+                standard_offset_minutes: None,
+                daylight_offset_minutes: None,
+            });
+            continue;
+        }
+        if upper.starts_with("END:VTIMEZONE") {
+            if let Some(tz) = current.take() {
+                out.push(tz);
+            }
+            continue;
+        }
+        let Some(tz) = current.as_mut() else { continue };
+        if upper.starts_with("BEGIN:STANDARD") {
+            in_standard = true;
+            in_daylight = false;
+            continue;
+        }
+        if upper.starts_with("END:STANDARD") {
+            in_standard = false;
+            continue;
+        }
+        if upper.starts_with("BEGIN:DAYLIGHT") {
+            in_daylight = true;
+            in_standard = false;
+            continue;
+        }
+        if upper.starts_with("END:DAYLIGHT") {
+            in_daylight = false;
+            continue;
+        }
+        if let Some((name_and_params, value)) = split_property(line) {
+            let key = name_and_params
+                .split(';')
+                .next()
+                .unwrap_or("")
+                .to_uppercase();
+            match key.as_str() {
+                "TZID" => tz.tzid = value,
+                "TZOFFSETTO" => {
+                    if let Some(minutes) = parse_offset_minutes(&value) {
+                        if in_standard {
+                            tz.standard_offset_minutes = Some(minutes);
+                        } else if in_daylight {
+                            tz.daylight_offset_minutes = Some(minutes);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    out
+}
+
+fn parse_offset_minutes(value: &str) -> Option<i32> {
+    // RFC 5545 §3.3.14: ±HHMM[SS] (positive = east of UTC). We strip
+    // the seconds component for simplicity — SendPalm only displays
+    // minute precision.
+    let v = value.trim();
+    if v.len() < 4 {
+        return None;
+    }
+    let (sign, rest) = match v.as_bytes()[0] {
+        b'+' => (1i32, &v[1..]),
+        b'-' => (-1i32, &v[1..]),
+        _ => (1i32, v),
+    };
+    let hh: i32 = rest.get(0..2)?.parse().ok()?;
+    let mm: i32 = rest.get(2..4)?.parse().ok()?;
+    Some(sign * (hh * 60 + mm))
+}
+
+/// Resolve a DTSTART-like value (already stripped of the `;TZID=`
+/// parameter) to a UTC `DateTime`. The TZID is matched against
+/// the supplied list; if no match is found or the value already
+/// carries a trailing `Z` (already UTC), we fall back to treating
+/// the time as floating (i.e. UTC as written, no offset).
+pub fn resolve_dtstart_with_tzid(
+    value: &str,
+    tzid: Option<&str>,
+    timezones: &[VTimezone],
+) -> Option<DateTime<Utc>> {
+    let v = value.trim();
+    let is_utc = v.ends_with('Z');
+    // Parse the body (strip trailing Z if present).
+    let body = v.trim_end_matches('Z');
+    // YYYYMMDD or YYYYMMDDTHHMMSS (or HHMMSS with seconds optional).
+    let dt = if body.len() == 8 {
+        // DATE only — treat as midnight UTC.
+        let d = NaiveDate::parse_from_str(body, "%Y%m%d").ok()?;
+        let t = d.and_hms_opt(0, 0, 0)?;
+        Some(Utc.from_utc_datetime(&t))
+    } else {
+        let naive = parse_naive_datetime(body)?;
+        if is_utc {
+            Some(Utc.from_utc_datetime(&naive))
+        } else {
+            // Floating or TZID-referenced: subtract the TZID offset
+            // to get UTC. Without a TZID, we treat the value as UTC
+            // (an approximation that matches Feishu / Google which
+            // always emit Z for cross-zone invites; real bugs would
+            // show up as off-by-N-hours in the calendar view).
+            let offset_minutes = tzid
+                .and_then(|id| timezones.iter().find(|t| t.tzid == id))
+                .and_then(|t| t.standard_offset_minutes);
+            match offset_minutes {
+                Some(off) => {
+                    // The naive value is a *local* time in the TZID's
+                    // standard offset. Use from_local_datetime to treat
+                    // it as local (not UTC) before converting to UTC.
+                    let fixed = chrono::FixedOffset::east_opt(off * 60)?;
+                    fixed
+                        .from_local_datetime(&naive)
+                        .single()
+                        .map(|d| d.with_timezone(&Utc))
+                }
+                None => Some(Utc.from_utc_datetime(&naive)),
+            }
+        }
+    };
+    dt
+}
+
+fn parse_naive_datetime(s: &str) -> Option<NaiveDateTime> {
+    // YYYYMMDDTHHMMSS
+    if s.len() >= 15 && s.as_bytes()[8] == b'T' {
+        NaiveDateTime::parse_from_str(&s[..15], "%Y%m%dT%H%M%S").ok()
+    } else {
+        None
+    }
+}
+
+/// Resolve a parsed IcalEvent's `dtstart` to a UTC `DateTime`, taking
+/// the iCal body's VTIMEZONE blocks into account. The stored
+/// `dtstart` field is the raw value (iCal form); this helper is the
+/// canonical way to get the actual UTC time of the first occurrence
+/// (or of a specific RDATE / EXDATE entry).
+pub fn event_utc_start(ev: &IcalEvent) -> Option<DateTime<Utc>> {
+    let raw = ev.dtstart.as_deref()?;
+    // The `dtstart` field already went through normalize_datetime
+    // (which only fixes YYYYMMDDTHHMMSSZ ↔ YYYYMMDDTHHMMSS shapes),
+    // so for the UTC path we just parse the body again. For the
+    // TZID path we need the original iCal value, which we don't
+    // have here — the caller can pass it through `ev.dtstart_tzid`.
+    // This helper is the common case (UTC invites).
+    let body = raw.trim_end_matches('Z');
+    let naive = parse_naive_datetime(body)?;
+    if raw.ends_with('Z') || ev.dtstart_tzid.is_none() {
+        Some(Utc.from_utc_datetime(&naive))
+    } else {
+        let id = ev.dtstart_tzid.as_deref().unwrap_or("");
+        let off = ev
+            .vtimezones
+            .iter()
+            .find(|t| t.tzid == id)
+            .and_then(|t| t.standard_offset_minutes);
+        match off {
+            Some(o) => chrono::FixedOffset::east_opt(o * 60)
+                .and_then(|f| f.from_local_datetime(&naive).single())
+                .map(|d| d.with_timezone(&Utc)),
+            None => Some(Utc.from_utc_datetime(&naive)),
+        }
+    }
+}
+
+#[cfg(test)]
+fn parse_dt(s: &str) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(s)
+        .expect("parse_dt fixture must be RFC3339")
+        .with_timezone(&Utc)
+}
+
+
 fn normalize_datetime(value: &str) -> String {
     let v = value.trim();
     // DATE-only form: YYYYMMDD
@@ -749,5 +1332,158 @@ END:VCALENDAR\r\n";
         let original = parse_vevent(ics).unwrap();
         let reply = build_itip_reply(&original, "me@example.com", RsvpStatus::Accepted).unwrap();
         assert!(reply.contains("SUMMARY:Q1\\, Q2\\; review\r\n"));
+    }
+
+    // ── RRULE parsing + expansion ──────────────────────────────────
+
+    #[test]
+    fn parse_rrule_daily_with_count() {
+        let rule = parse_rrule("FREQ=DAILY;INTERVAL=2;COUNT=5").unwrap();
+        assert_eq!(rule.freq, RecurrenceFreq::Daily);
+        assert_eq!(rule.interval, 2);
+        assert_eq!(rule.count, Some(5));
+        assert_eq!(rule.until, None);
+        assert!(rule.byday.is_empty());
+    }
+
+    #[test]
+    fn parse_rrule_weekly_with_byday() {
+        let rule = parse_rrule("FREQ=WEEKLY;BYDAY=MO,WE,FR").unwrap();
+        assert_eq!(rule.freq, RecurrenceFreq::Weekly);
+        assert_eq!(rule.interval, 1);
+        assert_eq!(
+            rule.byday,
+            vec![Weekday::Mo, Weekday::We, Weekday::Fr]
+        );
+    }
+
+    #[test]
+    fn parse_rrule_monthly_with_bymonthday() {
+        let rule = parse_rrule("FREQ=MONTHLY;BYMONTHDAY=15,-1").unwrap();
+        assert_eq!(rule.freq, RecurrenceFreq::Monthly);
+        assert_eq!(rule.bymonthday, vec![15, -1]);
+    }
+
+    #[test]
+    fn parse_rrule_yearly_with_until() {
+        let rule = parse_rrule("FREQ=YEARLY;UNTIL=20261231T235959Z").unwrap();
+        assert_eq!(rule.freq, RecurrenceFreq::Yearly);
+        // UNTIL normalizes to RFC3339 (chrono emits +00:00 for UTC, not Z).
+        assert_eq!(rule.until.as_deref(), Some("2026-12-31T23:59:59+00:00"));
+    }
+
+    #[test]
+    fn parse_rrule_rejects_unknown_freq() {
+        assert!(parse_rrule("FREQ=SECONDLY;COUNT=3").is_err());
+    }
+
+    #[test]
+    fn expand_daily_count_5() {
+        let rule = parse_rrule("FREQ=DAILY;COUNT=5").unwrap();
+        let start = parse_dt("2026-01-01T10:00:00Z");
+        let occ = expand_occurrences(&rule, start, 50);
+        assert_eq!(occ.len(), 5);
+        assert_eq!(occ[0], start);
+        assert_eq!(occ[4], start + chrono::Duration::days(4));
+    }
+
+    #[test]
+    fn expand_daily_interval_2_count_3() {
+        let rule = parse_rrule("FREQ=DAILY;INTERVAL=2;COUNT=3").unwrap();
+        let start = parse_dt("2026-01-01T10:00:00Z");
+        let occ = expand_occurrences(&rule, start, 50);
+        assert_eq!(occ.len(), 3);
+        assert_eq!(occ[0], start);
+        assert_eq!(occ[1], start + chrono::Duration::days(2));
+        assert_eq!(occ[2], start + chrono::Duration::days(4));
+    }
+
+    #[test]
+    fn expand_weekly_byday() {
+        let rule = parse_rrule("FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=6").unwrap();
+        let start = parse_dt("2026-01-05T10:00:00Z"); // Monday
+        let occ = expand_occurrences(&rule, start, 50);
+        assert_eq!(occ.len(), 6);
+        // Mon, Wed, Fri, Mon, Wed, Fri — same week pattern repeated
+        assert_eq!(occ[0], start);
+        assert_eq!(occ[1], start + chrono::Duration::days(2)); // Wed
+        assert_eq!(occ[2], start + chrono::Duration::days(4)); // Fri
+        assert_eq!(occ[3], start + chrono::Duration::days(7)); // next Mon
+    }
+
+    #[test]
+    fn expand_daily_until_stops_at_horizon() {
+        let rule = parse_rrule("FREQ=DAILY;UNTIL=2026-01-04T10:00:00Z").unwrap();
+        let start = parse_dt("2026-01-01T10:00:00Z");
+        let occ = expand_occurrences(&rule, start, 50);
+        // Jan 1, 2, 3, 4 — UNTIL is inclusive of the day's 10:00.
+        assert_eq!(occ.len(), 4);
+        assert_eq!(occ.last().unwrap(), &parse_dt("2026-01-04T10:00:00Z"));
+    }
+
+    #[test]
+    fn expand_daily_caps_at_max_occurrences() {
+        let rule = parse_rrule("FREQ=DAILY;COUNT=10000").unwrap();
+        let start = parse_dt("2026-01-01T10:00:00Z");
+        // safety cap of 500 even if COUNT/UNTIL would yield more
+        let occ = expand_occurrences(&rule, start, 500);
+        assert_eq!(occ.len(), 500);
+    }
+
+    // ── VTIMEZONE parsing + TZID resolution ────────────────────────
+
+    #[test]
+    fn parse_vtimezones_extracts_single_standard_offset() {
+        let ics = "BEGIN:VTIMEZONE\r\nTZID:Asia/Shanghai\r\n\
+                   BEGIN:STANDARD\r\nDTSTART:19700101T000000\r\nTZOFFSETFROM:+0800\r\nTZOFFSETTO:+0800\r\n\
+                   END:STANDARD\r\nEND:VTIMEZONE\r\n";
+        let tzs = parse_vtimezones(ics);
+        assert_eq!(tzs.len(), 1);
+        assert_eq!(tzs[0].tzid, "Asia/Shanghai");
+        // The CST offset is +08:00. We store it as 480 minutes.
+        assert_eq!(tzs[0].standard_offset_minutes, Some(480));
+    }
+
+    #[test]
+    fn parse_vtimezones_extracts_daylight_for_us_eastern() {
+        // America/New_York: standard = -5, daylight = -4
+        let ics = "BEGIN:VTIMEZONE\r\nTZID:America/New_York\r\n\
+                   BEGIN:STANDARD\r\nDTSTART:19701101T020000\r\nTZOFFSETFROM:-0400\r\nTZOFFSETTO:-0500\r\n\
+                   END:STANDARD\r\n\
+                   BEGIN:DAYLIGHT\r\nDTSTART:19700308T020000\r\nTZOFFSETFROM:-0500\r\nTZOFFSETTO:-0400\r\n\
+                   END:DAYLIGHT\r\nEND:VTIMEZONE\r\n";
+        let tzs = parse_vtimezones(ics);
+        assert_eq!(tzs.len(), 1);
+        assert_eq!(tzs[0].tzid, "America/New_York");
+        assert_eq!(tzs[0].standard_offset_minutes, Some(-300));
+        assert_eq!(tzs[0].daylight_offset_minutes, Some(-240));
+    }
+
+    #[test]
+    fn resolve_dtstart_with_tzid_shanghai() {
+        let ics = "BEGIN:VTIMEZONE\r\nTZID:Asia/Shanghai\r\n\
+                   BEGIN:STANDARD\r\nDTSTART:19700101T000000\r\nTZOFFSETFROM:+0800\r\nTZOFFSETTO:+0800\r\n\
+                   END:STANDARD\r\nEND:VTIMEZONE\r\n";
+        let tzs = parse_vtimezones(ics);
+        // 10:00 in Shanghai (+08:00) = 02:00 UTC
+        let utc = resolve_dtstart_with_tzid("20260101T100000", Some("Asia/Shanghai"), &tzs)
+            .expect("resolved");
+        assert_eq!(utc.to_rfc3339(), "2026-01-01T02:00:00+00:00");
+    }
+
+    #[test]
+    fn resolve_dtstart_with_unknown_tzid_falls_back() {
+        // No matching VTIMEZONE — treat as floating (naive) time.
+        let utc = resolve_dtstart_with_tzid("20260101T100000", Some("Mars/Olympus"), &[])
+            .expect("floating fallback");
+        assert_eq!(utc.to_rfc3339(), "2026-01-01T10:00:00+00:00");
+    }
+
+    #[test]
+    fn resolve_dtstart_utc_unchanged() {
+        // No TZID — the value is already in UTC ('Z' suffix).
+        let utc = resolve_dtstart_with_tzid("20260101T100000Z", Some("ignored"), &[])
+            .expect("utc");
+        assert_eq!(utc.to_rfc3339(), "2026-01-01T10:00:00+00:00");
     }
 }

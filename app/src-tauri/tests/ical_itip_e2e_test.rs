@@ -75,6 +75,10 @@ fn sample_invite() -> sendpalm_app_lib::services::ical::IcalEvent {
         organizer: Some("noreply@example.com".to_string()),
         attendees: vec![],
         attendee_responses: vec![],
+        rrule: None,
+        rdates: vec![],
+        exdates: vec![],
+        vtimezones: vec![],
         sequence: Some(0),
     }
 }

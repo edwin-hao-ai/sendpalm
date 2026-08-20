@@ -38,6 +38,8 @@ async fn fresh_pool() -> SqlitePool {
         include_str!("../migrations/0016_sent_direction_backfill.sql"),
         include_str!("../migrations/0017_follow_up_statuses.sql"),
         include_str!("../migrations/0018_calendar_rsvp.sql"),
+        include_str!("../migrations/0019_attendee_responses.sql"),
+        include_str!("../migrations/0020_calendar_recurrence.sql"),
     ];
     for sql in migrations {
         sqlx::raw_sql(sql)
@@ -193,6 +195,10 @@ async fn cancel_for_unknown_uid_returns_empty() {
         organizer: None,
         attendees: vec![],
         attendee_responses: vec![],
+        rrule: None,
+        rdates: vec![],
+        exdates: vec![],
+        vtimezones: vec![],
         sequence: Some(0),
     };
     let r = upsert_calendar_event(&pool, &cancel, None).await.unwrap();
