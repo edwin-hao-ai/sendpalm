@@ -1269,6 +1269,7 @@ function PreferencesTab() {
 
 function AgentTab() {
   const s = appSettings;
+  const llm = () => s.agent.llm;
   return (
     <div>
       <SectionTitle>Agent behavior</SectionTitle>
@@ -1296,6 +1297,105 @@ function AgentTab() {
       >
         详细 memory 编辑器已在 Agent 面板的记忆 tab 中实装，可直接编辑。
       </p>
+
+      <SectionTitle>LLM provider (M11 — OpenAI 兼容 API)</SectionTitle>
+      <Field label="Base URL" hint="留空时使用 https://api.openai.com/v1；本地 Ollama 填 http://localhost:11434/v1">
+        <input
+          type="text"
+          placeholder="https://api.openai.com/v1"
+          value={llm().baseUrl}
+          onInput={(e) => setAppSettings("agent", "llm", "baseUrl", e.currentTarget.value)}
+          style={inputStyle}
+        />
+      </Field>
+      <Field
+        label="API key"
+        hint="Bearer token。本地模型可留空。"
+      >
+        <input
+          type="password"
+          placeholder="sk-…"
+          value={llm().apiKey}
+          onInput={(e) => setAppSettings("agent", "llm", "apiKey", e.currentTarget.value)}
+          style={inputStyle}
+        />
+      </Field>
+      <Field
+        label="Model"
+        hint="例如 gpt-4o-mini / claude-3-5-sonnet / llama3.1:8b"
+      >
+        <input
+          type="text"
+          placeholder="gpt-4o-mini"
+          value={llm().model}
+          onInput={(e) => setAppSettings("agent", "llm", "model", e.currentTarget.value)}
+          style={inputStyle}
+        />
+      </Field>
+      <div
+        style={{
+          display: "grid",
+          "grid-template-columns": "1fr 1fr",
+          gap: "var(--space-3)",
+          "margin-bottom": "var(--space-3)",
+        }}
+      >
+        <Field
+          label="Temperature"
+          hint="0.0 严谨，1.0 创意"
+        >
+          <input
+            type="number"
+            step="0.1"
+            min="0"
+            max="2"
+            value={llm().temperature}
+            onInput={(e) =>
+              setAppSettings(
+                "agent",
+                "llm",
+                "temperature",
+                Number(e.currentTarget.value) || 0,
+              )
+            }
+            style={inputStyle}
+          />
+        </Field>
+        <Field
+          label="Max tokens"
+          hint="单次回复上限"
+        >
+          <input
+            type="number"
+            step="1"
+            min="64"
+            max="8192"
+            value={llm().maxTokens}
+            onInput={(e) =>
+              setAppSettings(
+                "agent",
+                "llm",
+                "maxTokens",
+                Number(e.currentTarget.value) || 1024,
+              )
+            }
+            style={inputStyle}
+          />
+        </Field>
+      </div>
+      <Field
+        label="System prompt"
+        hint="每次 chat 都会带上这段前缀。留空则不发送 system 角色。"
+      >
+        <textarea
+          rows={4}
+          value={llm().systemPrompt}
+          onInput={(e) =>
+            setAppSettings("agent", "llm", "systemPrompt", e.currentTarget.value)
+          }
+          style={{ ...inputStyle, resize: "vertical", "min-height": "80px" }}
+        />
+      </Field>
     </div>
   );
 }
@@ -1903,7 +2003,7 @@ function ShortcutEditModal(props: {
 
 /* ── Shared ── */
 
-function Field(props: { label: string; children: unknown }) {
+function Field(props: { label: string; hint?: string; children: unknown }) {
   return (
     <label style={{ display: "block", "margin-bottom": "var(--space-3)" }}>
       <span
@@ -1918,6 +2018,18 @@ function Field(props: { label: string; children: unknown }) {
         {props.label}
       </span>
       {props.children as never}
+      {props.hint && (
+        <span
+          style={{
+            display: "block",
+            "font-size": "var(--text-micro)",
+            color: "var(--text-muted)",
+            "margin-top": "2px",
+          }}
+        >
+          {props.hint}
+        </span>
+      )}
     </label>
   );
 }

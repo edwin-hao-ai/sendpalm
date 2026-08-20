@@ -18,7 +18,10 @@ import {
   setDetailOpen,
   setSelectedDraftId,
   showToast,
+  appSettings,
 } from "../stores/ui";
+import { agentChat } from "../services/backend";
+import { IS_BROWSER } from "../services/tauri-shim";
 import { uid } from "../utils/id";
 import { isoNow } from "../utils/date";
 import { useRefreshEffect } from "../utils/gestures";
@@ -140,30 +143,100 @@ export function useAgent() {
     if (!input || !currentSession()) return;
     await appendAudit("user_input", input);
     setChatInput("");
-    setTimeout(async () => {
+
+    // Build the messages we send to the LLM. We prepend the
+    // user's configured system prompt (if any) and a single
+    // user turn with the current input. M11 — real OpenAI-
+    // compatible backend, configured in Settings → Agent.
+    const llm = appSettings.agent.llm;
+    const messages: { role: string; content: string }[] = [];
+    if (llm.systemPrompt.trim()) {
+      messages.push({ role: "system", content: llm.systemPrompt.trim() });
+    }
+    messages.push({ role: "user", content: input });
+
+    // Browser-mode fallback: tauri-plugin-store has no
+    // agent_chat command, so the frontend surfaces a clear hint
+    // instead of silently failing. The Tauri shell will replace
+    // this with a real network round-trip.
+    if (IS_BROWSER()) {
       await appendAudit(
         "agent_response",
-        "Agent 正在处理你的请求…（M6 接入真实 LLM）",
+        "（浏览器预览模式）Settings → Agent 里填入 API key + model 后即可走真 LLM。当前返回 mock 响应。",
       );
       const t: AgentTask = {
         id: uid("at"),
         sessionId: currentSession()!.id,
         title: input,
-        description: "Agent 生成的任务",
+        description: "Agent 生成的占位任务",
         status: "doing",
         steps: [
           { id: uid("st"), label: "分析请求", done: true },
           { id: uid("st"), label: "查找上下文", done: false },
           { id: uid("st"), label: "生成结果", done: false },
         ],
-        confidence: 75,
+        confidence: 0,
         trigger: input,
         createdAt: isoNow(),
       };
       await upsertAgentTask(t);
       await refetchTasks();
-      showToast({ message: "Agent 已开始处理", kind: "info" });
-    }, 600);
+      showToast({ message: "Agent 已开始处理（浏览器预览）", kind: "info" });
+      return;
+    }
+
+    setTimeout(async () => {
+      const t: AgentTask = {
+        id: uid("at"),
+        sessionId: currentSession()!.id,
+        title: input,
+        description: "调用真实 LLM 中…",
+        status: "doing",
+        steps: [
+          { id: uid("st"), label: "分析请求", done: true },
+          { id: uid("st"), label: "调用 LLM", done: false },
+          { id: uid("st"), label: "生成结果", done: false },
+        ],
+        confidence: 0,
+        trigger: input,
+        createdAt: isoNow(),
+      };
+      await upsertAgentTask(t);
+      await refetchTasks();
+      showToast({ message: "Agent 正在调用 LLM…", kind: "info" });
+
+      try {
+        const reply = await agentChat(
+          {
+            base_url: llm.baseUrl.trim() || "https://api.openai.com/v1",
+            api_key: llm.apiKey,
+            model: llm.model.trim(),
+            temperature: llm.temperature,
+            max_tokens: llm.maxTokens,
+          },
+          messages,
+        );
+        const text = reply?.content?.trim() || "（模型未返回内容）";
+        await appendAudit("agent_response", text);
+        // Mark the second step done and the third done, then save the
+        // reply into the task description so the user can see it.
+        t.steps[1]!.done = true;
+        t.steps[2]!.done = true;
+        t.status = "done";
+        t.description = text;
+        await upsertAgentTask(t);
+        await refetchTasks();
+        showToast({ message: "LLM 已返回", kind: "success" });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        await appendAudit("agent_error", `LLM 调用失败：${msg}`);
+        t.status = "error";
+        t.description = `失败：${msg}`;
+        await upsertAgentTask(t);
+        await refetchTasks();
+        showToast({ message: `LLM 失败：${msg}`, kind: "error" });
+      }
+    }, 200);
   };
 
   const approveDraft = async (d: AgentDraft) => {

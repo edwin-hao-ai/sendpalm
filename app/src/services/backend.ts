@@ -200,3 +200,32 @@ export async function setImageSenderPolicy(
   await store.set(IMAGE_POLICY_KEY, map);
   await store.save();
 }
+
+// ── M11 — OpenAI-compatible LLM chat (drives the Agent panel) ─────
+
+export interface LlmConfigWire {
+  base_url: string;
+  api_key: string;
+  model: string;
+  temperature: number;
+  max_tokens: number;
+}
+
+export interface ChatMessageWire {
+  role: string;
+  content: string;
+}
+
+export interface ChatResponseWire {
+  content: string;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  finish_reason?: string;
+}
+
+export async function agentChat(
+  config: LlmConfigWire,
+  messages: ChatMessageWire[],
+): Promise<ChatResponseWire | null> {
+  return safeInvoke<ChatResponseWire | null>("agent_chat", { config, messages });
+}

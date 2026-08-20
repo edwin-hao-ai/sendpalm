@@ -540,6 +540,19 @@ export interface AppSettings {
     autoDraft: boolean;
     autoSummarize: boolean;
     memoryEditable: boolean;
+    /** OpenAI-compatible LLM config. Empty strings mean "use
+     *  default provider" — the user can leave apiKey blank for
+     *  local Ollama, or fill in OpenAI / OpenRouter / Anthropic-via-
+     *  gateway. baseUrl defaults to OpenAI's endpoint when blank. */
+    llm: {
+      baseUrl: string;
+      apiKey: string;
+      model: string;
+      temperature: number;
+      maxTokens: number;
+      /** System prompt prepended to every chat call. Empty = no system prompt. */
+      systemPrompt: string;
+    };
   };
   shortcuts: Record<string, string>;
 }

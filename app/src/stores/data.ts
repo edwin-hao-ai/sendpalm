@@ -2162,6 +2162,18 @@ export async function loadAppSettings(
         autoDraft: false,
         autoSummarize: true,
         memoryEditable: true,
+        llm: {
+          baseUrl: "",
+          apiKey: "",
+          model: "",
+          temperature: 0.2,
+          maxTokens: 1024,
+          systemPrompt:
+            "You are SendPalm's email assistant. Reply concisely in " +
+            "the same language the user wrote in. When asked to draft a " +
+            "reply, output a single ready-to-send message body (no " +
+            '"Subject:" line, no "On [date]…" preamble).',
+        },
       },
       shortcuts: {},
     }
