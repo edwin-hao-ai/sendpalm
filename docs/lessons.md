@@ -283,3 +283,33 @@ The per-account loop checks `stop.load(Ordering::Relaxed)` between `idle_wait` c
 5 minutes later), so removed accounts stop within one tick of the next reload. If you need
 sharper teardown, swap `Arc<AtomicBool>` for `tokio_util::sync::CancellationToken` and call
 `stop.cancelled()` inside `idle_wait`'s polling loop.
+---
+
+## Calendar RRULE expansion (Session 2026-08-20 — feat/calendar-rrule-ui)
+
+- **`mondayIso` from `toISOString().slice(0,10)` is UTC, not local** — in any
+  east-of-UTC timezone (China, Japan, India) `setDate(monday); setHours(0,0,0,0)`
+  gives local midnight which is the previous day in UTC. `mondayIso` then
+  encodes the previous day and the e2e inserts the recurring master on the
+  wrong day. Fix: format the ISO date from the local date parts
+  (`monday.getFullYear() / getMonth()+1 / getDate()`), never via
+  `toISOString()`. Lesson: e2e fixtures that bridge local user time and
+  DB-stored UTC must use the local date, not the UTC projection of local
+  midnight.
+- **`__sendpalmE2E.__internals` was never wired** — the recurring-event
+  e2e silently no-oped on `internals?.getDb()` returning `undefined`. The
+  SQL INSERT never ran but the test moved on because `if (!db) return`
+  is silent. Always assert or fail loud when a test fixture's prerequisites
+  didn't materialize. Lesson: when adding a test-only escape hatch to
+  `__sendpalmE2E`, the first time the harness tries to use it from a
+  test it must (a) be exposed in the helpers' type and (b) actually
+  return the underlying DB the JS layer reads from. SolidJS `mock-db.ts`
+  is in-memory, so a raw SQL INSERT in browser mode is visible to the
+  next `listEvents()` call as long as both go through the same `loadMockDb()`
+  singleton — confirm by also calling `__sendpalmE2E.listEvents()`
+  post-insert in the same `page.evaluate`.
+- **Recurring tiles need `data-cal-event-tile="recurring"` (or "single")
+  + the "周" badge for the human label** — the e2e selector
+  `[data-cal-event-tile='recurring']` lets the test count
+  occurrences directly. Without the data attribute, the test has to fall
+  back to text-content matching which is brittle across timezones.
