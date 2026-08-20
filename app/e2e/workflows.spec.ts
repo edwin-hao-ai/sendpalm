@@ -307,6 +307,88 @@ test.describe("Email workflows", () => {
     ).toBeVisible({ timeout: 5_000 });
   });
 
+  test("Recurring event expands to multiple tiles in the Calendar view", async ({
+    page,
+  }) => {
+    // Seed a recurring event directly through the test helper.
+    // We want the master to land on THIS week's Monday so the
+    // default week-view cursor already shows it without having
+    // to jump the cursor via the calendarJumpTo signal path.
+    const today = new Date();
+    // Use local getDay (matches Calendar's startOfWeek which is
+    // Monday-start in local time). Step back to the Monday that
+    // begins today's week, then derive mondayIso in LOCAL date
+    // (not UTC) — `toISOString()` would shift to the previous
+    // day in any east-of-UTC timezone.
+    const dayOfWeek = today.getDay();
+    const daysBackToMonday = (dayOfWeek - 1 + 7) % 7;
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - daysBackToMonday);
+    const mondayIso =
+      `${monday.getFullYear()}-` +
+      `${String(monday.getMonth() + 1).padStart(2, "0")}-` +
+      `${String(monday.getDate()).padStart(2, "0")}`;
+
+    const invite = {
+      uid: "ical-e2e-recurring-001",
+      summary: "Daily Standup",
+      dtstart: `${mondayIso}T01:00:00.000Z`,
+      dtend: `${mondayIso}T01:15:00.000Z`,
+      recurrenceRule: "FREQ=DAILY;COUNT=5",
+    };
+
+    await page.goto("/");
+    await page.locator("body.app-ready").waitFor({ timeout: 10_000 });
+    await page.evaluate(async () => {
+      await window.__sendpalmE2E?.resetData();
+    });
+    await page.evaluate(async (inv) => {
+      const internals = (
+        window as unknown as {
+          __sendpalmE2E: { __internals?: unknown };
+        }
+      ).__sendpalmE2E?.__internals as
+        | {
+            getDb: () => Promise<{
+              execute: (q: string, p?: unknown[]) => Promise<unknown>;
+            }>;
+          }
+        | undefined;
+      const db = await internals?.getDb();
+      if (!db) return;
+      await db.execute(
+        "INSERT INTO events (id, title, dt, end_dt, all_day, tm, dur, location, agenda_json, pids_json, brief, color, ical_uid, ical_method, ical_sequence, organizer_email, recurrence_rule, recurrence_dates_json, excluded_dates_json, original_tzid) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '[]', '[]', $9, '#0A8F63', $10, 'REQUEST', 0, '', $11, '[]', '[]', '')",
+        [
+          "evt-e2e-recurring",
+          inv.summary,
+          inv.dtstart,
+          inv.dtend,
+          0,
+          "09:00",
+          15,
+          "",
+          "Recurring standup",
+          inv.uid,
+          inv.recurrenceRule,
+        ],
+      );
+    }, invite);
+
+    await navigateTo(page, "calendar");
+    await page.locator("[data-cal-view-btn='week']").first().click();
+    await page
+      .locator("[data-cal-view='week']")
+      .first()
+      .waitFor({ timeout: 5_000 });
+    // The week grid should render 5 distinct tiles for the
+    // recurring event (Mon..Fri). Each tile carries a data
+    // attribute we can count.
+    const tiles = page.locator("[data-cal-event-tile='recurring']");
+    await expect(tiles).toHaveCount(5);
+    // Each tile shows the "周" recurrence marker.
+    await expect(tiles.first()).toContainText("周");
+  });
+
   test("Reply Later moves a message to the Reply Later pile and can be undone", async ({
     page,
   }) => {

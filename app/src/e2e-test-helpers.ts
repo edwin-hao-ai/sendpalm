@@ -16,6 +16,7 @@ import {
   listMessages,
   listEvents,
   resetAllData,
+  getDb,
 } from "./stores/data";
 import { bumpRefreshTick } from "./stores/ui";
 
@@ -35,6 +36,18 @@ interface E2EHelpers {
   listContacts: () => Promise<Contact[]>;
   listMessages: () => Promise<Message[]>;
   listEvents: () => Promise<CalendarEvent[]>;
+  /**
+   * Test-only escape hatch: returns the underlying Database
+   * connection so a test can run arbitrary SQL (e.g. write
+   * columns the JS upsertEvent wrapper doesn't cover, like
+   * `recurrence_rule` for the calendar RRULE tests).
+   * Browser mode only — the Tauri build never attaches this.
+   */
+  __internals: {
+    getDb: () => Promise<{
+      execute: (q: string, p?: unknown[]) => Promise<unknown>;
+    }>;
+  };
   /** Resolves once the auto-seed from sessionStorage has been applied. */
   __seedReady: Promise<void>;
 }
@@ -83,6 +96,14 @@ if (IS_BROWSER() && typeof window !== "undefined") {
     listContacts,
     listMessages,
     listEvents,
+    __internals: {
+      getDb: async () => {
+        const db = await getDb();
+        return {
+          execute: (q: string, p?: unknown[]) => db.execute(q, p),
+        };
+      },
+    },
     __seedReady: seedPromise,
   };
 
