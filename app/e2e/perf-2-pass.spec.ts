@@ -590,4 +590,189 @@ test.describe("perf-2-pass: full surface scan", () => {
         `[scroll: calendar year view] ${fmt(report.scrollCalendarYear as never)}`,
     });
   });
+
+  // ── Stress: 3x data (4500 contacts / 12000 messages / 200 events) ──
+  //
+  // User noted "主要出现在数据多的时候" after the v1 fix round. The
+  // primary test above is sized for the production Feishu account
+  // (~1500 / 4000 / 80). This one pushes 3x to confirm the structural
+  // fixes (Set-based Calendar year lookup, single-resource Insights,
+  // SQL-aggregated Companies) actually scale — they should degrade
+  // sub-linearly because each one replaces an N×M or N-cascade with
+  // an O(1) or O(N) data-structure operation. If they scale linearly
+  // with input size, we have a problem; if they hold under 3x, the
+  // fixes are real wins and not just paper refactors.
+  test("stress 3x data: heavy views + scroll", async ({ page }) => {
+    test.setTimeout(400_000);
+
+    await page.goto("/");
+    await page.locator("body.app-ready").waitFor({ timeout: 10_000 });
+    const seed = buildSeed({
+      contacts: 4500,
+      messages: 12000,
+      events: 200,
+    });
+    // 200 events with the first 50 weekly-recurring → ~2600
+    // occurrences in the year view. The v1 Calendar fix held at
+    // 692 occurrences; this is 4× that.
+    await page.evaluate(async (payload) => {
+      const w = window as unknown as {
+        __sendpalmE2E?: {
+          resetData: () => Promise<void>;
+          seedContact: (c: unknown) => Promise<void>;
+          seedMessage: (m: unknown) => Promise<void>;
+          seedEvent?: (e: unknown) => Promise<void>;
+        };
+      };
+      await w.__sendpalmE2E?.resetData();
+      for (const c of payload.contacts) await w.__sendpalmE2E?.seedContact(c);
+      for (const m of payload.messages) await w.__sendpalmE2E?.seedMessage(m);
+      if (w.__sendpalmE2E?.seedEvent) {
+        for (const e of payload.events) await w.__sendpalmE2E.seedEvent(e);
+      }
+    }, seed);
+    await page.waitForTimeout(300);
+
+    await setupObservers(page);
+
+    // Warmup pass.
+    for (const t of TARGET_VIEWS) {
+      await clickView(page, t.view);
+      await page.waitForTimeout(150);
+    }
+    await clickView(page, "imbox");
+    await page.waitForTimeout(200);
+
+    // Just the heavy hitters: Insights + Calendar + scroll. The full
+    // 12-view sweep at 3x is slow and not interesting — the slow
+    // ones are the data-scaling ones; the others are the same.
+    interface HeavyResult {
+      mountMs: number;
+      longTasks: number;
+      longTaskMaxMs: number;
+      frameAvg: number;
+      frameP95: number;
+      frameMax: number;
+    }
+    const heavyResults: Record<string, HeavyResult> = {};
+    for (const view of ["insights", "calendar"] as const) {
+      await page.evaluate(() => {
+        const w = window as unknown as { __perf: { longTasks: unknown[] } };
+        w.__perf.longTasks = [];
+      });
+      const t0 = await page.evaluate(() => performance.now());
+      const frameBudget = sampleFrames(page, 1500, "() => {}");
+      await clickView(page, view);
+      try {
+        await page
+          .locator("main h1, main h2")
+          .first()
+          .waitFor({ timeout: 5_000 });
+      } catch {
+        await page.locator("h1, h2").first().waitFor({ timeout: 5_000 });
+      }
+      const tMount = await page.evaluate(() => performance.now());
+      try {
+        await page
+          .locator("[aria-busy='true']")
+          .first()
+          .waitFor({ state: "detached", timeout: 3_000 });
+      } catch {
+        /* no skeleton */
+      }
+      const lt = await readLongTasks(page);
+      const frames = await frameBudget;
+      heavyResults[view] = {
+        mountMs: tMount - t0,
+        longTasks: lt.length,
+        longTaskMaxMs: lt.reduce((m, t) => Math.max(m, t.duration), 0),
+        frameAvg: frames.avgFrameMs,
+        frameP95: frames.p95FrameMs,
+        frameMax: frames.maxFrameMs,
+      };
+    }
+
+    // Imbox scroll at 3x (12k rows).
+    await clickView(page, "imbox");
+    await page.waitForTimeout(500);
+    await page.evaluate(() => window.scrollTo({ top: 0 }));
+    await page.waitForTimeout(150);
+    const imboxScroll = await sampleFrames(
+      page,
+      2000,
+      `() => {
+        let i = 0;
+        const step = () => {
+          if (i >= 30) return;
+          window.scrollBy({ top: 200, behavior: 'instant' });
+          i++;
+          setTimeout(step, 60);
+        };
+        setTimeout(step, 16);
+      }`,
+    );
+
+    // Calendar year scroll at 3x (~2600 occurrences).
+    await page.evaluate(() => {
+      const w = window as unknown as { __perf: { longTasks: unknown[] } };
+      w.__perf.longTasks = [];
+    });
+    let yearScroll: Awaited<ReturnType<typeof sampleFrames>> | null = null;
+    await clickView(page, "calendar");
+    await page.waitForTimeout(300);
+    const yearBtn = page.locator("[data-cal-view-btn='year']").first();
+    if ((await yearBtn.count()) > 0) {
+      await yearBtn.click();
+      await page.waitForTimeout(800);
+      yearScroll = await sampleFrames(
+        page,
+        2000,
+        `() => {
+          const main = document.querySelector('main');
+          if (!main) return;
+          let i = 0;
+          const step = () => {
+            if (i >= 30) return;
+            main.scrollBy({ top: 200, behavior: 'instant' });
+            i++;
+            setTimeout(step, 60);
+          };
+          setTimeout(step, 16);
+        }`,
+      );
+    }
+
+    const report = {
+      generatedAt: new Date().toISOString(),
+      config:
+        "3x data: 4500 contacts / 12000 messages / 200 events (50 weekly recurring = ~2600 occurrences)",
+      ...heavyResults,
+      scrollImbox3x: imboxScroll,
+      scrollCalendarYear3x: yearScroll,
+    };
+    await writeFile(
+      join(process.cwd(), "qa-tmp/perf-scan-2-stress-3x.json"),
+      JSON.stringify(report, null, 2),
+    );
+
+    const fmt2 = (r: {
+      avgFrameMs: number;
+      p95FrameMs: number;
+      maxFrameMs: number;
+      droppedFrames: number;
+      longTaskMaxMs: number;
+      longTasks: { duration: number }[];
+    }) =>
+      `avgFrame=${r.avgFrameMs.toFixed(1)}ms  p95=${r.p95FrameMs.toFixed(1)}ms  max=${r.maxFrameMs.toFixed(1)}ms  dropped=${r.droppedFrames}  longTasks=${r.longTasks.length}  maxTask=${r.longTaskMaxMs.toFixed(0)}ms`;
+    const heavySummary = Object.entries(heavyResults)
+      .map(
+        ([k, v]) =>
+          `${k.padEnd(12)} mount=${v.mountMs.toFixed(0).padStart(5)}ms  longTasks=${v.longTasks}  maxTask=${v.longTaskMaxMs.toFixed(0).padStart(4)}ms  frameMax=${v.frameMax.toFixed(1).padStart(5)}ms`,
+      )
+      .join("\n");
+    test.info().annotations.push({
+      type: "perf-2-stress-3x",
+      description: `[config] ${report.config}\n\n[heavy views]\n${heavySummary}\n\n[scroll: imbox 12k rows] ${fmt2(imboxScroll)}\n[scroll: calendar year 3x] ${yearScroll ? fmt2(yearScroll) : "(skipped)"}`,
+    });
+  });
 });

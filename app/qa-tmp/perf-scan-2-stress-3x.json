@@ -1,0 +1,38 @@
+{
+  "generatedAt": "2026-08-21T13:20:42.604Z",
+  "config": "3x data: 4500 contacts / 12000 messages / 200 events (50 weekly recurring = ~2600 occurrences)",
+  "insights": {
+    "mountMs": 142.70000000298023,
+    "longTasks": 0,
+    "longTaskMaxMs": 0,
+    "frameAvg": 16.646153846121095,
+    "frameP95": 18.599999994039536,
+    "frameMax": 32.70000000298023
+  },
+  "calendar": {
+    "mountMs": 66.8999999910593,
+    "longTasks": 0,
+    "longTaskMaxMs": 0,
+    "frameAvg": 16.79000000009934,
+    "frameP95": 18.600000008940697,
+    "frameMax": 27.299999997019768
+  },
+  "scrollImbox3x": {
+    "avgFrameMs": 16.655371900801818,
+    "p95FrameMs": 18.5,
+    "maxFrameMs": 18.80000001192093,
+    "droppedFrames": 0,
+    "longTasks": [],
+    "longTaskMaxMs": 0,
+    "samples": 121
+  },
+  "scrollCalendarYear3x": {
+    "avgFrameMs": 16.65123966939686,
+    "p95FrameMs": 18.599999994039536,
+    "maxFrameMs": 18.900000005960464,
+    "droppedFrames": 0,
+    "longTasks": [],
+    "longTaskMaxMs": 0,
+    "samples": 121
+  }
+}
