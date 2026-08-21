@@ -2597,3 +2597,71 @@ component pulls its own data via `createResource`; the shell paints
 first, the data catches up.
 
 - `fix(calendar,pileboard): error fallbacks for events / pile loader`
+
+## "全屏卡顿" perf pass — RO loop + heavy IPC payloads (2026-08-21)
+
+User reported "现在的性能还是很卡顿，而且是全屏的" — full-screen
+lag, every view. The previous v2 fix (8bc925d, rAF-debounce) was
+insufficient on real Tauri; the iframe body's contentDocument still
+fires ResizeObserver entries across many frames (font load, image
+decode, CSS animation), and writing `el.style.height` from inside
+the callback drives the host iframe's layout, which fires another
+RO entry in the same frame. W3C spec suppresses the second
+notification; Tauri webview logs "ResizeObserver loop completed
+with undelivered notifications" and the panel becomes unresponsive.
+
+Plus a parallel audit of heavy IPC payloads — `listMessages()` and
+`listContacts()` pulls that crossed ~360 MB of HTML for tasks that
+needed 3 KB of slice.
+
+### Fixes
+
+| Commit | What |
+|---|---|
+| `97e17d8` | **MessageBodyIframe v3 — host-only RO + 200ms cooldown + skip-equality.** RO observes the iframe element (not the body's contentDocument, which is the cross-realm loop source). Wall-clock 200ms cooldown on the height write: a 50-burst coalesces to exactly 1 write per cooldown window. Skip-equality guard skips the `style.height =` assignment when the value is unchanged. `onShowImages` explicitly re-measures after the postMessage. Cleanup also tears down the cooldown timer. |
+| `9f457ce` | **e2e fix.** The 50× rapid-resize spec now uses a `Proxy` on the iframe's `style` (Chromium's `height` is an own property, not a prototype descriptor — the original `Object.getOwnPropertyDescriptor` approach failed). Both tests pass in real Chromium: 50× rapid → 1 write, 3 cooldown windows → ≤4 writes. |
+| `e7343e0` | **Clips — `listMessagesByIdsLight(referencedMsgIds)`.** Clips only fetches the message rows referenced by visible clips (no full body_html). |
+| `3839d15` | **analyzeImages — skip DOMPurify sanitize by default.** The 1-3ms DOMPurify pass was being run for `externalImageCount` only and the result was thrown away. `ImageAnalysis.safeHtml` is now opt-in via `{ includeSafeHtml: true }`. |
+| `7dfa19c` | **Compose — `listContactsForRecipient`.** Only id/name/emails/avatar for the recipient picker; the full 25-field Contact row was being fetched 7500+ JSON.parse calls. |
+| `21346ea` | **MovePicker / LabelPicker — `listMessageBucketSlicesByIds` + `setMessageLabels`.** Server-side projection of {id, bucket, labels} for picker modals. `setMessageLabels` is a focused UPDATE-only query that won't NULLOUT every other column. |
+
+### Verification
+
+- `pnpm typecheck` — clean
+- `pnpm vitest run` — 317/317 (was 314 in v2; +3 for the cooldown regression tests)
+- `pnpm exec playwright test e2e/message-iframe-resize.spec.ts` — 2/2 pass in real Chromium
+- `pnpm tauri build --target aarch64-apple-darwin --no-sign` — builds cleanly; v3 DMG at `dist/SendPalm-0.1.0-arm64-v3.dmg` (9.2 MB)
+
+### DMG history
+
+| File | Date | Notable |
+|---|---|---|
+| `dist/SendPalm-0.1.0-arm64.dmg` | 2026-08-21 00:24 | pre-RO-fix baseline |
+| `dist/SendPalm-0.1.0-arm64-perf.dmg` | 2026-08-21 21:34 | perf fixes (loading skeletons, bundle 645→47ms, etc.) but RO loop still on |
+| `dist/SendPalm-0.1.0-arm64-v2.dmg` | 2026-08-21 22:17 | rAF-debounce (8bc925d) — **insufficient on real Tauri** |
+| `dist/SendPalm-0.1.0-arm64-v3.dmg` | 2026-08-21 23:44 | 200ms cooldown + host-only RO + lightweight projections |
+
+### What's still open
+
+- **Real-Tauri scroll perf.** Playwright on Vite dev measures 60fps for
+  every view, but the user reports scroll jank on the real binary.
+  Playwright doesn't reproduce Tauri webview's stricter iframe /
+  scrollbar behavior. The v3 DMG is the test surface — open a
+  long thread, scroll, watch the devtools Performance panel.
+- **Calendar year view.** The `allOccurrences` memo expands every
+  RRULE in the visible window (1 year). With many recurring events
+  this can be O(n×365). Already memoized; check if the 1-year
+  precomputation is the right scope.
+- **`createResource` cleanup on view switch.** `KeepAlive` keeps views
+  mounted, so the resource state persists. But the resource's
+  `_refreshSkipMount` guard (added in v2) means a tab return after
+  a long absence skips the first refetch — verify this is still
+  correct after the lightweight-projection refactors.
+- **useAgent's `listContacts` call** still uses the full 25-field
+  projection. The agent only reads name/avatar/id. Lower priority
+  than Compose (agent is opt-in, Compose is every reply).
+
+AGENTS.md §11 lessons: §11.2 (rAF insufficient → host-only RO + 200ms
+cooldown), §11.3 (lightweight projections are a real win when modal
+loaders are full-table pulls), §11.4 (DOMPurify sanitize is a hot
+path — gate it behind an opt-in flag, not unconditional).
