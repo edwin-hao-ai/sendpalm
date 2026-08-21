@@ -320,6 +320,8 @@ test.describe("view-switching performance audit (Session 2026-08-21)", () => {
   test("quantifies mount + frame timing for every suspect view", async ({
     page,
   }) => {
+    // 12 views × 3s frame budget + warmup = ~50s; default 30s is too tight.
+    test.setTimeout(300_000);
     // Boot + seed a realistic corpus.
     await page.goto("/");
     await page.locator("body.app-ready").waitFor({ timeout: 10_000 });
