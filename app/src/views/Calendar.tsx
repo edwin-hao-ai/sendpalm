@@ -1561,6 +1561,26 @@ function YearGrid(props: {
   selected: Date;
   onDayClick: (d: Date) => void;
 }) {
+  // Session 2026-08-21 perf pass: pre-compute a `Set<YYYY-MM-DD>` of
+  // every day in the year that has at least one event. The previous
+  // shape pushed `props.events` (692 expanded occurrences for the
+  // Feishu workload) into each of 12 MonthMiniCalendar instances,
+  // and `MonthMiniCalendar.hasEvent(d)` did a fresh O(events) scan
+  // for every cell — 12 × 42 × 692 = 348,768 comparisons on every
+  // render. With the Set the lookup is O(1) and the cost is paid
+  // once at the YearGrid level (O(events) per year).
+  const yearDaysWithEvents = createMemo<Set<string>>(() => {
+    const out = new Set<string>();
+    const y = props.year;
+    for (const e of props.events) {
+      // Occurrences already have a concrete `dt` after
+      // `occurrenceAsEvent`; slice to the date portion.
+      const ds = e.dt.slice(0, 10);
+      if (ds.startsWith(`${y}-`)) out.add(ds);
+    }
+    return out;
+  });
+
   return (
     <div
       style={{
@@ -1659,6 +1679,7 @@ function YearGrid(props: {
               year={props.year}
               month={m()}
               events={props.events}
+              yearDaysWithEvents={yearDaysWithEvents()}
               selected={props.selected}
               onDayClick={props.onDayClick}
             />
@@ -1673,6 +1694,11 @@ function MonthMiniCalendar(props: {
   year: number;
   month: number;
   events: CalendarEvent[];
+  /** Pre-computed `Set<YYYY-MM-DD>` of every day in `year` that has
+   * an event. Built once at the YearGrid level so the per-cell
+   * `hasEvent` lookup is O(1) instead of an O(events) scan that
+   * would multiply to 12 × 42 × events per render. */
+  yearDaysWithEvents: Set<string>;
   selected: Date;
   onDayClick: (d: Date) => void;
 }) {
@@ -1686,10 +1712,14 @@ function MonthMiniCalendar(props: {
     return out;
   });
 
-  const hasEvent = (d: number) =>
-    props.events.some((e) =>
-      sameDate(new Date(e.dt), new Date(props.year, props.month, d)),
-    );
+  // O(1) lookup using the parent-provided Set. Bypasses the previous
+  // `props.events.some(e => sameDate(new Date(e.dt), ...))` which
+  // allocated a Date for every event for every cell.
+  const hasEvent = (d: number) => {
+    const mm = String(props.month + 1).padStart(2, "0");
+    const dd = String(d).padStart(2, "0");
+    return props.yearDaysWithEvents.has(`${props.year}-${mm}-${dd}`);
+  };
 
   const monthMultiDayEvents = createMemo(() => {
     const monthStart = new Date(props.year, props.month, 1);
