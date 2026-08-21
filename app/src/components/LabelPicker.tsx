@@ -13,8 +13,8 @@ import { Icon } from "./Icon";
 import {
   listLabels,
   upsertLabel,
-  upsertMessage,
-  listMessages,
+  setMessageLabels,
+  listMessageBucketSlicesByIds,
 } from "../stores/data";
 import { showToast } from "../stores/ui";
 import { uid } from "../utils/id";
@@ -37,15 +37,19 @@ export function LabelPicker(props: {
   onChange?: () => void;
 }) {
   const [labels] = createResource(listLabels);
-  const [messages] = createResource(listMessages);
+  // Only fetch id + bucket + labels for the selected messages. The
+  // previous shape called listMessages() (full body_html) just to
+  // filter by id and read m.labels.
+  const [messages] = createResource(
+    () => props.messageIds,
+    listMessageBucketSlicesByIds,
+  );
   const [selected, setSelected] = createSignal<Set<string>>(new Set());
   const [newName, setNewName] = createSignal("");
   const [newColor, setNewColor] = createSignal<string>(PRESET_COLORS[0]!);
   const [showNew, setShowNew] = createSignal(false);
 
-  const targets = createMemo(() =>
-    (messages() ?? []).filter((m) => props.messageIds.includes(m.id)),
-  );
+  const targets = createMemo(() => messages() ?? []);
 
   const count = () => targets().length;
 
@@ -73,8 +77,13 @@ export function LabelPicker(props: {
 
   const save = async () => {
     const finalLabels = Array.from(selected());
+    // Update only the labels column. The full Message row was never
+    // loaded by this modal (we use the bucket-slice projection), so
+    // we can't call `upsertMessage` here — that would NULLOUT
+    // every other column. setMessageLabels is a focused UPDATE that
+    // preserves body / subj / prev / body_html / etc.
     for (const m of targets()) {
-      await upsertMessage({ ...m, labels: finalLabels });
+      await setMessageLabels(m.id, finalLabels);
     }
     props.onChange?.();
     showToast({

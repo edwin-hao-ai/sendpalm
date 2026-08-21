@@ -1301,6 +1301,36 @@ export async function listMessagesByIdsLight(ids: ID[]): Promise<Message[]> {
   return rows.map(rowToMessageLight);
 }
 
+/** Minimal bucket/label projection for picker modals (Move / Label).
+ *  The MovePicker and LabelPicker only need the target message's id
+ *  + bucket + labels. They previously called `listMessages()` (full
+ *  body_html) and filtered client-side, which on a 4000-row mailbox
+ *  is ~360 MB of HTML crossing the IPC bridge just to render a modal.
+ *  This query returns only the 3 columns the pickers actually read. */
+export interface MessageBucketSlice {
+  id: ID;
+  bucket: Message["bucket"];
+  labels: ID[];
+}
+
+export async function listMessageBucketSlicesByIds(
+  ids: ID[],
+): Promise<MessageBucketSlice[]> {
+  if (ids.length === 0) return [];
+  const db = await getDb();
+  const conditions = ids.map((_, i) => `id = $${i + 1}`).join(" OR ");
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT id, bucket, labels_json
+       FROM messages WHERE ${conditions}`,
+    ids,
+  );
+  return rows.map((r) => ({
+    id: r.id as ID,
+    bucket: r.bucket as Message["bucket"],
+    labels: safeParse<ID[]>(r.labels_json as string, []),
+  }));
+}
+
 /** Insights-card-only projection of the messages table.
  *
  *  The Insights dashboard computes 3 stats from messages: weekly
@@ -1439,6 +1469,24 @@ export async function deleteMessage(id: ID): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM messages WHERE id = $1", [id]);
   await removeFromSearchIndex(id);
+}
+
+/** Update just the labels column of one or more messages.
+ *  Used by the LabelPicker modal which only loaded id + bucket +
+ *  labels from the lightweight bucket-slice query. Calling the
+ *  full `upsertMessage` from there would NULLOUT every other
+ *  column (body, subj, prev, body_html, etc.), so we expose a
+ *  focused UPDATE-only query instead. The picker passes the
+ *  already-parsed id/label arrays; we serialize here. */
+export async function setMessageLabels(
+  id: ID,
+  labels: ID[],
+): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `UPDATE messages SET labels_json = $1 WHERE id = $2`,
+    [safeStringify(labels), id],
+  );
 }
 
 /** Move a message to a bucket and manage the trash/spam expiry timestamp.

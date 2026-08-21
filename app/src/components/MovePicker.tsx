@@ -3,7 +3,10 @@
 import { For, createResource, createMemo } from "solid-js";
 import { Modal } from "./Modal";
 import { Icon } from "./Icon";
-import { moveMessageToBucket, listMessages } from "../stores/data";
+import {
+  moveMessageToBucket,
+  listMessageBucketSlicesByIds,
+} from "../stores/data";
 import { showToast } from "../stores/ui";
 import { BUCKET_LABEL, BUCKET_ICON } from "../utils/labels";
 import type { MessageBucket } from "../types";
@@ -22,11 +25,15 @@ export function MovePicker(props: {
   messageIds: string[];
   onChange?: () => void;
 }) {
-  const [messages] = createResource(listMessages);
-
-  const targets = createMemo(() =>
-    (messages() ?? []).filter((m) => props.messageIds.includes(m.id)),
+  // Only fetch id + bucket for the selected messages. The previous
+  // shape called listMessages() (full body_html on every row) just
+  // to filter by id and read m.bucket.
+  const [messages] = createResource(
+    () => props.messageIds,
+    listMessageBucketSlicesByIds,
   );
+
+  const targets = createMemo(() => messages() ?? []);
 
   const count = () => targets().length;
 
