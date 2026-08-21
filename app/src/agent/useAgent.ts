@@ -99,6 +99,17 @@ export function useAgent() {
     audit.error ??
     contacts.error;
 
+  /** `true` while ANY of the 5 Agent resources is still resolving.
+   *  Pairs with `error()` so a ResourceGate can show one Skeleton
+   *  / ErrorState across the whole Agent surface instead of having
+   *  to check each individual resource. */
+  const isLoading = () =>
+    sessions.loading ||
+    tasks.loading ||
+    drafts.loading ||
+    audit.loading ||
+    contacts.loading;
+
   const appendAudit = async (
     kind: string,
     message: string,
@@ -275,5 +286,11 @@ export function useAgent() {
     switchSession,
     refetchAll,
     error,
+    isLoading,
+    /** Raw sessions resource — needed by consumers that want to plug
+     *  the Agent state into a ResourceGate (loading/error/empty). The
+     *  hook still owns the underlying fetch; this is just a re-export
+     *  so views don't have to reach into the hook internals. */
+    sessionsResource: sessions,
   };
 }

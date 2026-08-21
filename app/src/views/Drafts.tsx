@@ -17,6 +17,8 @@ import {
 } from "../stores/ui";
 import { Icon } from "../components/Icon";
 import { Empty, ErrorState } from "../components/Empty";
+import { ResourceGate } from "../components/ResourceGate";
+import { SkeletonList } from "../components/Skeleton";
 import type { Draft } from "../types";
 import { relativeTime } from "../utils/date";
 import { useRefreshEffect } from "../utils/gestures";
@@ -150,25 +152,31 @@ export function Drafts() {
         </div>
       </Show>
 
-      <Show
-        when={!drafts.error && !scheduled.error}
-        fallback={
+      <ResourceGate
+        resource={drafts}
+        isLoading={() => drafts.loading || scheduled.loading}
+        loading={
+          <div
+            style={{
+              "max-width": "760px",
+              margin: "0 auto",
+              padding: "var(--space-4) var(--space-5)",
+            }}
+          >
+            <SkeletonList count={6} />
+          </div>
+        }
+        errorView={(_err, retry) => (
           <ErrorState
             title="草稿加载失败"
             message={String(drafts.error ?? scheduled.error ?? "")}
             retry={() => {
-              void refetchDrafts();
+              retry();
               void refetchScheduled();
             }}
           />
-        }
-      >
-        <></>
-      </Show>
-
-      <Show
-        when={(drafts() ?? []).length > 0 || (scheduled() ?? []).length > 0}
-        fallback={
+        )}
+        empty={
           <Empty
             icon="ph-pencil-line"
             title="还没有草稿"
@@ -176,80 +184,88 @@ export function Drafts() {
             action={{ label: "新邮件", onClick: () => setComposeOpen(true) }}
           />
         }
+        isEmpty={() =>
+          grouped().scheduled.length === 0 &&
+          grouped().pending.length === 0 &&
+          grouped().manual.length === 0 &&
+          grouped().sent.length === 0
+        }
       >
-        <div
-          style={{
-            "max-width": "760px",
-            margin: "0 auto",
-            padding: "var(--space-4) var(--space-5)",
-          }}
-        >
-          <Show when={grouped().scheduled.length > 0}>
-            <Section title="Scheduled" icon="ph-clock-countdown">
-              <For each={grouped().scheduled}>
-                {(s) => {
-                  const d = (drafts() ?? []).find((x) => x.id === s.draftId);
-                  if (!d) return null;
-                  return (
+        {() => (
+          <div
+            style={{
+              "max-width": "760px",
+              margin: "0 auto",
+              padding: "var(--space-4) var(--space-5)",
+            }}
+          >
+            <Show when={grouped().scheduled.length > 0}>
+              <Section title="Scheduled" icon="ph-clock-countdown">
+                <For each={grouped().scheduled}>
+                  {(s) => {
+                    const d = (drafts() ?? []).find((x) => x.id === s.draftId);
+                    if (!d) return null;
+                    return (
+                      <DraftRow
+                        draft={d}
+                        scheduledAt={s.scheduledAt}
+                        onOpen={open}
+                        selected={selected().has(d.id)}
+                        onSelect={() => toggleSelect(d.id)}
+                      />
+                    );
+                  }}
+                </For>
+              </Section>
+            </Show>
+
+            <Show when={grouped().pending.length > 0}>
+              <Section title="Pending approval" icon="ph-hourglass-medium">
+                <For each={grouped().pending}>
+                  {(d) => (
                     <DraftRow
                       draft={d}
-                      scheduledAt={s.scheduledAt}
                       onOpen={open}
                       selected={selected().has(d.id)}
                       onSelect={() => toggleSelect(d.id)}
                     />
-                  );
-                }}
-              </For>
-            </Section>
-          </Show>
+                  )}
+                </For>
+              </Section>
+            </Show>
 
-          <Show when={grouped().pending.length > 0}>
-            <Section title="Pending approval" icon="ph-hourglass-medium">
-              <For each={grouped().pending}>
-                {(d) => (
-                  <DraftRow
-                    draft={d}
-                    onOpen={open}
-                    selected={selected().has(d.id)}
-                    onSelect={() => toggleSelect(d.id)}
-                  />
-                )}
-              </For>
-            </Section>
-          </Show>
+            <Show when={grouped().manual.length > 0}>
+              <Section title="Manual drafts" icon="ph-file-text">
+                <For each={grouped().manual}>
+                  {(d) => (
+                    <DraftRow
+                      draft={d}
+                      onOpen={open}
+                      selected={selected().has(d.id)}
+                      onSelect={() => toggleSelect(d.id)}
+                    />
+                  )}
+                </For>
+              </Section>
+            </Show>
 
-          <Show when={grouped().manual.length > 0}>
-            <Section title="Manual drafts" icon="ph-file-text">
-              <For each={grouped().manual}>
-                {(d) => (
-                  <DraftRow
-                    draft={d}
-                    onOpen={open}
-                    selected={selected().has(d.id)}
-                    onSelect={() => toggleSelect(d.id)}
-                  />
-                )}
-              </For>
-            </Section>
-          </Show>
-
-          <Show when={grouped().sent.length > 0}>
-            <Section title="Sent" icon="ph-paper-plane-tilt">
-              <For each={grouped().sent}>
-                {(d) => (
-                  <DraftRow
-                    draft={d}
-                    onOpen={open}
-                    selected={selected().has(d.id)}
-                    onSelect={() => toggleSelect(d.id)}
-                  />
-                )}
-              </For>
-            </Section>
-          </Show>
-        </div>
-      </Show>
+            <Show when={grouped().sent.length > 0}>
+              <Section title="Sent" icon="ph-paper-plane-tilt">
+                <For each={grouped().sent}>
+                  {(d) => (
+                    <DraftRow
+                      draft={d}
+                      onOpen={open}
+                      selected={selected().has(d.id)}
+                      onSelect={() => toggleSelect(d.id)}
+                    />
+                  )}
+                </For>
+              </Section>
+            </Show>
+          </div>
+        )}
+      </ResourceGate>
     </div>
   );
 }

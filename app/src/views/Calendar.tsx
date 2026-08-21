@@ -20,6 +20,8 @@ import { Modal } from "../components/Modal";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { Avatar } from "../components/Avatar";
+import { ResourceGate } from "../components/ResourceGate";
+import { SkeletonList } from "../components/Skeleton";
 import {
   addDays,
   sameDate,
@@ -175,11 +177,7 @@ export function Calendar() {
     // Day / week / year grids are all driven by occurrences. The
     // bare-masters list (below) is only used by the edit / delete
     // flows that need the master row.
-    if (
-      view() === "day" ||
-      view() === "week" ||
-      view() === "year"
-    ) {
+    if (view() === "day" || view() === "week" || view() === "year") {
       return allOccurrences().map(occurrenceAsEvent);
     }
     // Some other view (sometime / habit / tracking) is handled
@@ -375,68 +373,77 @@ export function Calendar() {
 
       <PeriodHeader date={cursor()} view={view()} />
 
-      <Show
-        when={!events.error}
-        fallback={
+      <ResourceGate
+        resource={events}
+        loading={
+          <div
+            style={{
+              flex: 1,
+              overflow: "auto",
+              padding: "var(--space-5)",
+            }}
+          >
+            <SkeletonList count={6} height={48} />
+          </div>
+        }
+        errorView={() => (
           <ErrorState
             title="日历加载失败"
             message={String(events.error ?? "")}
             retry={() => void refetch()}
           />
-        }
-      >
-        <></>
-      </Show>
-      <Show
-        when={visibleHasEvents()}
-        fallback={
+        )}
+        empty={
           <Empty
             icon="ph-calendar-blank"
             title="这段时间没有会议"
             description="点击 New 创建。"
           />
         }
+        isEmpty={() => !visibleHasEvents()}
       >
-        <div
-          style={{
-            flex: 1,
-            overflow: "auto",
-            padding: "0 var(--space-5) var(--space-5)",
-          }}
-        >
-          <Show when={view() === "day"}>
-            <DayView
-              date={cursor()}
-              events={eventsForDate(cursor())}
-              onEventClick={openEvent}
-              onEventEdit={startEditing}
-            />
-          </Show>
-          <Show when={view() === "week"}>
-            <WeekGrid
-              date={cursor()}
-              events={sortedEvents()}
-              onEventClick={openEvent}
-              onEventEdit={startEditing}
-              onDayClick={(d) => {
-                setCursor(d);
-                setView("day");
-              }}
-            />
-          </Show>
-          <Show when={view() === "year"}>
-            <YearGrid
-              year={cursor().getFullYear()}
-              events={sortedEvents()}
-              selected={cursor()}
-              onDayClick={(d) => {
-                setCursor(d);
-                setView("day");
-              }}
-            />
-          </Show>
-        </div>
-      </Show>
+        {() => (
+          <div
+            style={{
+              flex: 1,
+              overflow: "auto",
+              padding: "0 var(--space-5) var(--space-5)",
+            }}
+          >
+            <Show when={view() === "day"}>
+              <DayView
+                date={cursor()}
+                events={eventsForDate(cursor())}
+                onEventClick={openEvent}
+                onEventEdit={startEditing}
+              />
+            </Show>
+            <Show when={view() === "week"}>
+              <WeekGrid
+                date={cursor()}
+                events={sortedEvents()}
+                onEventClick={openEvent}
+                onEventEdit={startEditing}
+                onDayClick={(d) => {
+                  setCursor(d);
+                  setView("day");
+                }}
+              />
+            </Show>
+            <Show when={view() === "year"}>
+              <YearGrid
+                year={cursor().getFullYear()}
+                events={sortedEvents()}
+                selected={cursor()}
+                onDayClick={(d) => {
+                  setCursor(d);
+                  setView("day");
+                }}
+              />
+            </Show>
+          </div>
+        )}
+      </ResourceGate>
 
       <Show when={creating()}>
         <EventEditModal
@@ -1441,7 +1448,9 @@ function WeekGrid(props: {
                       const isRecurring = !!e.recurrenceRule;
                       return (
                         <button
-                          data-cal-event-tile={isRecurring ? "recurring" : "single"}
+                          data-cal-event-tile={
+                            isRecurring ? "recurring" : "single"
+                          }
                           data-cal-event-id={e.id}
                           onClick={(ev) => {
                             ev.stopPropagation();

@@ -42,7 +42,9 @@ import {
 import { Modal } from "../components/Modal";
 import { Icon } from "../components/Icon";
 import { Avatar } from "../components/Avatar";
-import { Empty } from "../components/Empty";
+import { Empty, ErrorState } from "../components/Empty";
+import { ResourceGate } from "../components/ResourceGate";
+import { SkeletonList } from "../components/Skeleton";
 import { uid } from "../utils/id";
 import type {
   Account,
@@ -448,78 +450,92 @@ function AccountsTab() {
           <Icon name="ph-plus" size={12} /> Add account
         </button>
       </div>
-      <Show when={(accounts() ?? []).length === 0}>
-        <Empty
-          icon="ph-plug-charging"
-          title="还没有连接邮箱"
-          description="添加 IMAP/SMTP 账号后，会自动出现在这里。"
-          action={{ label: "添加账号", onClick: () => setAdding(true) }}
-        />
-      </Show>
-      <For each={accounts() ?? []}>
-        {(a) => (
-          <div
-            style={{
-              display: "flex",
-              gap: "var(--space-3)",
-              padding: "var(--space-3)",
-              background: "var(--paper-light)",
-              "border-radius": "var(--radius-md)",
-              border: "0.5px solid var(--border)",
-              "margin-bottom": "var(--space-2)",
-              "align-items": "center",
-            }}
-          >
-            <Avatar name={a.label} color={a.color} size={36} />
-            <div style={{ flex: 1, "min-width": 0 }}>
-              <strong>{a.label}</strong>
-              <p
+      <ResourceGate
+        resource={accounts}
+        loading={<SkeletonList count={2} height={64} />}
+        errorView={() => (
+          <ErrorState
+            title="账户加载失败"
+            message={String(accounts.error ?? "")}
+            retry={() => void refetch()}
+          />
+        )}
+        empty={
+          <Empty
+            icon="ph-plug-charging"
+            title="还没有连接邮箱"
+            description="添加 IMAP/SMTP 账号后，会自动出现在这里。"
+            action={{ label: "添加账号", onClick: () => setAdding(true) }}
+          />
+        }
+      >
+        {(list) => (
+          <For each={list}>
+            {(a) => (
+              <div
                 style={{
-                  margin: "2px 0 0",
-                  "font-size": "var(--text-caption)",
-                  color: "var(--text-muted)",
+                  display: "flex",
+                  gap: "var(--space-3)",
+                  padding: "var(--space-3)",
+                  background: "var(--paper-light)",
+                  "border-radius": "var(--radius-md)",
+                  border: "0.5px solid var(--border)",
+                  "margin-bottom": "var(--space-2)",
+                  "align-items": "center",
                 }}
               >
-                {a.email ?? `${a.type} · ${a.workspace ?? ""}`} · {a.status}
-                <SyncStatus accountId={a.id} />
-              </p>
-            </div>
-            <button
-              onClick={async () => {
-                const r = await syncNow(a.id, "INBOX");
-                if (r) {
-                  showToast({
-                    message: `已同步 ${a.label} · 新增 ${r.new_messages} 封`,
-                    kind: "success",
-                  });
-                } else {
-                  showToast({
-                    message: `同步请求已发送（${a.label}）`,
-                    kind: "info",
-                  });
-                }
-              }}
-              style={{
-                color: "var(--palm)",
-                "font-size": "var(--text-caption)",
-                "font-weight": "700",
-              }}
-            >
-              立即同步
-            </button>
-            <button
-              onClick={() => setEditing(a)}
-              style={{
-                color: "var(--blurple)",
-                "font-size": "var(--text-caption)",
-                "font-weight": "700",
-              }}
-            >
-              设置
-            </button>
-          </div>
+                <Avatar name={a.label} color={a.color} size={36} />
+                <div style={{ flex: 1, "min-width": 0 }}>
+                  <strong>{a.label}</strong>
+                  <p
+                    style={{
+                      margin: "2px 0 0",
+                      "font-size": "var(--text-caption)",
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    {a.email ?? `${a.type} · ${a.workspace ?? ""}`} · {a.status}
+                    <SyncStatus accountId={a.id} />
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    const r = await syncNow(a.id, "INBOX");
+                    if (r) {
+                      showToast({
+                        message: `已同步 ${a.label} · 新增 ${r.new_messages} 封`,
+                        kind: "success",
+                      });
+                    } else {
+                      showToast({
+                        message: `同步请求已发送（${a.label}）`,
+                        kind: "info",
+                      });
+                    }
+                  }}
+                  style={{
+                    color: "var(--palm)",
+                    "font-size": "var(--text-caption)",
+                    "font-weight": "700",
+                  }}
+                >
+                  立即同步
+                </button>
+                <button
+                  onClick={() => setEditing(a)}
+                  style={{
+                    color: "var(--blurple)",
+                    "font-size": "var(--text-caption)",
+                    "font-weight": "700",
+                  }}
+                >
+                  设置
+                </button>
+              </div>
+            )}
+          </For>
         )}
-      </For>
+      </ResourceGate>
 
       <Show when={editing()}>
         {(a) => (
@@ -1299,24 +1315,28 @@ function AgentTab() {
       </p>
 
       <SectionTitle>LLM provider (M11 — OpenAI 兼容 API)</SectionTitle>
-      <Field label="Base URL" hint="留空时使用 https://api.openai.com/v1；本地 Ollama 填 http://localhost:11434/v1">
+      <Field
+        label="Base URL"
+        hint="留空时使用 https://api.openai.com/v1；本地 Ollama 填 http://localhost:11434/v1"
+      >
         <input
           type="text"
           placeholder="https://api.openai.com/v1"
           value={llm().baseUrl}
-          onInput={(e) => setAppSettings("agent", "llm", "baseUrl", e.currentTarget.value)}
+          onInput={(e) =>
+            setAppSettings("agent", "llm", "baseUrl", e.currentTarget.value)
+          }
           style={inputStyle}
         />
       </Field>
-      <Field
-        label="API key"
-        hint="Bearer token。本地模型可留空。"
-      >
+      <Field label="API key" hint="Bearer token。本地模型可留空。">
         <input
           type="password"
           placeholder="sk-…"
           value={llm().apiKey}
-          onInput={(e) => setAppSettings("agent", "llm", "apiKey", e.currentTarget.value)}
+          onInput={(e) =>
+            setAppSettings("agent", "llm", "apiKey", e.currentTarget.value)
+          }
           style={inputStyle}
         />
       </Field>
@@ -1328,7 +1348,9 @@ function AgentTab() {
           type="text"
           placeholder="gpt-4o-mini"
           value={llm().model}
-          onInput={(e) => setAppSettings("agent", "llm", "model", e.currentTarget.value)}
+          onInput={(e) =>
+            setAppSettings("agent", "llm", "model", e.currentTarget.value)
+          }
           style={inputStyle}
         />
       </Field>
@@ -1340,10 +1362,7 @@ function AgentTab() {
           "margin-bottom": "var(--space-3)",
         }}
       >
-        <Field
-          label="Temperature"
-          hint="0.0 严谨，1.0 创意"
-        >
+        <Field label="Temperature" hint="0.0 严谨，1.0 创意">
           <input
             type="number"
             step="0.1"
@@ -1361,10 +1380,7 @@ function AgentTab() {
             style={inputStyle}
           />
         </Field>
-        <Field
-          label="Max tokens"
-          hint="单次回复上限"
-        >
+        <Field label="Max tokens" hint="单次回复上限">
           <input
             type="number"
             step="1"
@@ -1391,7 +1407,12 @@ function AgentTab() {
           rows={4}
           value={llm().systemPrompt}
           onInput={(e) =>
-            setAppSettings("agent", "llm", "systemPrompt", e.currentTarget.value)
+            setAppSettings(
+              "agent",
+              "llm",
+              "systemPrompt",
+              e.currentTarget.value,
+            )
           }
           style={{ ...inputStyle, resize: "vertical", "min-height": "80px" }}
         />
@@ -1420,9 +1441,17 @@ function LabelsTab() {
   return (
     <div>
       <SectionTitle>Labels</SectionTitle>
-      <For
-        each={labels() ?? []}
-        fallback={
+      <ResourceGate
+        resource={labels}
+        loading={<SkeletonList count={3} height={40} />}
+        errorView={() => (
+          <ErrorState
+            title="标签加载失败"
+            message={String(labels.error ?? "")}
+            retry={() => void refetch()}
+          />
+        )}
+        empty={
           <p
             style={{
               color: "var(--text-muted)",
@@ -1433,48 +1462,52 @@ function LabelsTab() {
           </p>
         }
       >
-        {(l) => (
-          <div
-            style={{
-              display: "flex",
-              "align-items": "center",
-              gap: "var(--space-3)",
-              padding: "var(--space-2) var(--space-3)",
-              background: "var(--paper-light)",
-              "border-radius": "var(--radius-md)",
-              border: "0.5px solid var(--border)",
-              "margin-bottom": "var(--space-2)",
-            }}
-          >
-            <div
-              style={{
-                width: "16px",
-                height: "16px",
-                "border-radius": "50%",
-                background: l.color,
-              }}
-            />
-            <span style={{ flex: 1, "font-weight": "600" }}>{l.name}</span>
-            <button
-              onClick={() => setEditing(l)}
-              style={{
-                color: "var(--blurple)",
-                "font-size": "var(--text-caption)",
-                "font-weight": "700",
-              }}
-            >
-              Edit
-            </button>
-            <button
-              onClick={() => remove(l.id)}
-              style={{ color: "var(--text-muted)" }}
-              aria-label="Delete"
-            >
-              <Icon name="ph-trash" size={14} />
-            </button>
-          </div>
+        {(list) => (
+          <For each={list}>
+            {(l) => (
+              <div
+                style={{
+                  display: "flex",
+                  "align-items": "center",
+                  gap: "var(--space-3)",
+                  padding: "var(--space-2) var(--space-3)",
+                  background: "var(--paper-light)",
+                  "border-radius": "var(--radius-md)",
+                  border: "0.5px solid var(--border)",
+                  "margin-bottom": "var(--space-2)",
+                }}
+              >
+                <div
+                  style={{
+                    width: "16px",
+                    height: "16px",
+                    "border-radius": "50%",
+                    background: l.color,
+                  }}
+                />
+                <span style={{ flex: 1, "font-weight": "600" }}>{l.name}</span>
+                <button
+                  onClick={() => setEditing(l)}
+                  style={{
+                    color: "var(--blurple)",
+                    "font-size": "var(--text-caption)",
+                    "font-weight": "700",
+                  }}
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => remove(l.id)}
+                  style={{ color: "var(--text-muted)" }}
+                  aria-label="Delete"
+                >
+                  <Icon name="ph-trash" size={14} />
+                </button>
+              </div>
+            )}
+          </For>
         )}
-      </For>
+      </ResourceGate>
       <button
         onClick={() => setEditing(newLabel())}
         style={{ ...primaryBtn, "margin-top": "var(--space-3)" }}
@@ -1579,9 +1612,17 @@ function SnippetsTab() {
       >
         在 Compose 中点击 Snippet 按钮插入常用段落。
       </p>
-      <For
-        each={snippets() ?? []}
-        fallback={
+      <ResourceGate
+        resource={snippets}
+        loading={<SkeletonList count={3} height={56} />}
+        errorView={() => (
+          <ErrorState
+            title="Snippet 加载失败"
+            message={String(snippets.error ?? "")}
+            retry={() => void refetch()}
+          />
+        )}
+        empty={
           <p
             style={{
               color: "var(--text-muted)",
@@ -1592,55 +1633,59 @@ function SnippetsTab() {
           </p>
         }
       >
-        {(s) => (
-          <div
-            style={{
-              display: "flex",
-              "align-items": "center",
-              gap: "var(--space-3)",
-              padding: "var(--space-2) var(--space-3)",
-              background: "var(--paper-light)",
-              "border-radius": "var(--radius-md)",
-              border: "0.5px solid var(--border)",
-              "margin-bottom": "var(--space-2)",
-            }}
-          >
-            <Icon name="ph-text-aa" size={18} color="var(--text-muted)" />
-            <div style={{ flex: 1, "min-width": 0 }}>
-              <div style={{ "font-weight": "600" }}>{s.label}</div>
+        {(list) => (
+          <For each={list}>
+            {(s) => (
               <div
                 style={{
-                  "font-size": "var(--text-micro)",
-                  color: "var(--text-muted)",
-                  "white-space": "nowrap",
-                  overflow: "hidden",
-                  "text-overflow": "ellipsis",
+                  display: "flex",
+                  "align-items": "center",
+                  gap: "var(--space-3)",
+                  padding: "var(--space-2) var(--space-3)",
+                  background: "var(--paper-light)",
+                  "border-radius": "var(--radius-md)",
+                  border: "0.5px solid var(--border)",
+                  "margin-bottom": "var(--space-2)",
                 }}
               >
-                {s.shortcut ? `/${s.shortcut} · ` : ""}
-                {s.body}
+                <Icon name="ph-text-aa" size={18} color="var(--text-muted)" />
+                <div style={{ flex: 1, "min-width": 0 }}>
+                  <div style={{ "font-weight": "600" }}>{s.label}</div>
+                  <div
+                    style={{
+                      "font-size": "var(--text-micro)",
+                      color: "var(--text-muted)",
+                      "white-space": "nowrap",
+                      overflow: "hidden",
+                      "text-overflow": "ellipsis",
+                    }}
+                  >
+                    {s.shortcut ? `/${s.shortcut} · ` : ""}
+                    {s.body}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setEditing(s)}
+                  style={{
+                    color: "var(--blurple)",
+                    "font-size": "var(--text-caption)",
+                    "font-weight": "700",
+                  }}
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => remove(s.id)}
+                  style={{ color: "var(--text-muted)" }}
+                  aria-label="Delete"
+                >
+                  <Icon name="ph-trash" size={14} />
+                </button>
               </div>
-            </div>
-            <button
-              onClick={() => setEditing(s)}
-              style={{
-                color: "var(--blurple)",
-                "font-size": "var(--text-caption)",
-                "font-weight": "700",
-              }}
-            >
-              Edit
-            </button>
-            <button
-              onClick={() => remove(s.id)}
-              style={{ color: "var(--text-muted)" }}
-              aria-label="Delete"
-            >
-              <Icon name="ph-trash" size={14} />
-            </button>
-          </div>
+            )}
+          </For>
         )}
-      </For>
+      </ResourceGate>
       <button
         onClick={() => setEditing(newSnippet())}
         style={{ ...primaryBtn, "margin-top": "var(--space-3)" }}
@@ -1885,66 +1930,80 @@ function ShortcutsTab() {
           Restore defaults
         </button>
       </div>
-      <Show when={(shortcuts() ?? []).length === 0}>
-        <Empty
-          icon="ph-keyboard"
-          title="还没有自定义快捷键"
-          description="添加快捷键后，会显示在这里。"
-        />
-      </Show>
-      <For each={shortcuts() ?? []}>
-        {(s) => (
-          <div
-            style={{
-              display: "flex",
-              "align-items": "center",
-              gap: "var(--space-3)",
-              padding: "var(--space-2) var(--space-3)",
-              background: "var(--paper-light)",
-              "border-radius": "var(--radius-md)",
-              border: "0.5px solid var(--border)",
-              "margin-bottom": "var(--space-2)",
-            }}
-          >
-            <kbd
-              style={{
-                padding: "4px 10px",
-                background: "var(--paper-mid)",
-                "border-radius": "var(--radius-sm)",
-                "font-size": "var(--text-caption)",
-                "font-weight": "700",
-                color: "var(--text-primary)",
-                "font-family": "var(--font-mono)",
-              }}
-            >
-              {s.combo}
-            </kbd>
-            <span style={{ flex: 1, "font-size": "var(--text-body-sm)" }}>
-              {s.label}
-            </span>
-            <span
-              style={{
-                "font-size": "var(--text-micro)",
-                color: "var(--text-muted)",
-              }}
-            >
-              {s.action}
-            </span>
-            <Show when={s.editable}>
-              <button
-                onClick={() => setEditing(s)}
+      <ResourceGate
+        resource={shortcuts}
+        loading={<SkeletonList count={4} height={48} />}
+        errorView={() => (
+          <ErrorState
+            title="快捷键加载失败"
+            message={String(shortcuts.error ?? "")}
+            retry={() => void refetch()}
+          />
+        )}
+        empty={
+          <Empty
+            icon="ph-keyboard"
+            title="还没有自定义快捷键"
+            description="添加快捷键后，会显示在这里。"
+          />
+        }
+      >
+        {(list) => (
+          <For each={list}>
+            {(s) => (
+              <div
                 style={{
-                  color: "var(--blurple)",
-                  "font-size": "var(--text-caption)",
-                  "font-weight": "700",
+                  display: "flex",
+                  "align-items": "center",
+                  gap: "var(--space-3)",
+                  padding: "var(--space-2) var(--space-3)",
+                  background: "var(--paper-light)",
+                  "border-radius": "var(--radius-md)",
+                  border: "0.5px solid var(--border)",
+                  "margin-bottom": "var(--space-2)",
                 }}
               >
-                Edit
-              </button>
-            </Show>
-          </div>
+                <kbd
+                  style={{
+                    padding: "4px 10px",
+                    background: "var(--paper-mid)",
+                    "border-radius": "var(--radius-sm)",
+                    "font-size": "var(--text-caption)",
+                    "font-weight": "700",
+                    color: "var(--text-primary)",
+                    "font-family": "var(--font-mono)",
+                  }}
+                >
+                  {s.combo}
+                </kbd>
+                <span style={{ flex: 1, "font-size": "var(--text-body-sm)" }}>
+                  {s.label}
+                </span>
+                <span
+                  style={{
+                    "font-size": "var(--text-micro)",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  {s.action}
+                </span>
+                <Show when={s.editable}>
+                  <button
+                    onClick={() => setEditing(s)}
+                    style={{
+                      color: "var(--blurple)",
+                      "font-size": "var(--text-caption)",
+                      "font-weight": "700",
+                    }}
+                  >
+                    Edit
+                  </button>
+                </Show>
+              </div>
+            )}
+          </For>
         )}
-      </For>
+      </ResourceGate>
 
       <Show when={editing()}>
         <ShortcutEditModal
@@ -2103,7 +2162,9 @@ function download(name: string, content: string, mime: string) {
 function PreferencesNotificationsTab() {
   const prefs = () => appSettings.preferences.notifications;
   return (
-    <div style={{ display: "grid", gap: "var(--space-3)", "max-width": "520px" }}>
+    <div
+      style={{ display: "grid", gap: "var(--space-3)", "max-width": "520px" }}
+    >
       <ToggleRow
         label="桌面通知"
         description="收到新邮件时在 macOS 通知中心弹出。"

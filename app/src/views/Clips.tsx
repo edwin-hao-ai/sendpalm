@@ -13,6 +13,8 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { Empty, ErrorState } from "../components/Empty";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
+import { ResourceGate } from "../components/ResourceGate";
+import { SkeletonList } from "../components/Skeleton";
 import { showToast } from "../stores/ui";
 import { isToday, isYesterday, relativeTime } from "../utils/date";
 import { useRefreshEffect } from "../utils/gestures";
@@ -68,16 +70,6 @@ export function Clips() {
         animation: "view-enter 0.3s var(--ease-out) both",
       }}
     >
-      <Show
-        when={!clips.error}
-        fallback={
-          <ErrorState
-            title="Clips 加载失败"
-            message={String(clips.error ?? "")}
-            retry={() => void refetchClips()}
-          />
-        }
-      >
       <header
         style={{
           padding: "var(--space-5)",
@@ -105,9 +97,28 @@ export function Clips() {
         </p>
       </header>
 
-      <Show
-        when={(clips() ?? []).length > 0}
-        fallback={
+      <ResourceGate
+        resource={clips}
+        isLoading={() => clips.loading || contacts.loading || messages.loading}
+        loading={
+          <div
+            style={{
+              "max-width": "760px",
+              margin: "0 auto",
+              padding: "var(--space-4) var(--space-5)",
+            }}
+          >
+            <SkeletonList count={4} height={120} />
+          </div>
+        }
+        errorView={() => (
+          <ErrorState
+            title="Clips 加载失败"
+            message={String(clips.error ?? "")}
+            retry={() => void refetchClips()}
+          />
+        )}
+        empty={
           <Empty
             icon="ph-bookmarks"
             title="还没有 Clip"
@@ -115,61 +126,62 @@ export function Clips() {
           />
         }
       >
-        <div
-          style={{
-            "max-width": "760px",
-            margin: "0 auto",
-            padding: "var(--space-4) var(--space-5)",
-          }}
-        >
-          <Show when={grouped().today.length > 0}>
-            <Group title="Today">
-              <For each={grouped().today}>
-                {(c) => (
-                  <Row
-                    c={c}
-                    contact={contactById(c.contactId)}
-                    msg={msgById(c.msgId)?.subj}
-                    onCopy={copy}
-                    onRemove={remove}
-                  />
-                )}
-              </For>
-            </Group>
-          </Show>
-          <Show when={grouped().yesterday.length > 0}>
-            <Group title="Yesterday">
-              <For each={grouped().yesterday}>
-                {(c) => (
-                  <Row
-                    c={c}
-                    contact={contactById(c.contactId)}
-                    msg={msgById(c.msgId)?.subj}
-                    onCopy={copy}
-                    onRemove={remove}
-                  />
-                )}
-              </For>
-            </Group>
-          </Show>
-          <Show when={grouped().earlier.length > 0}>
-            <Group title="Earlier">
-              <For each={grouped().earlier}>
-                {(c) => (
-                  <Row
-                    c={c}
-                    contact={contactById(c.contactId)}
-                    msg={msgById(c.msgId)?.subj}
-                    onCopy={copy}
-                    onRemove={remove}
-                  />
-                )}
-              </For>
-            </Group>
-          </Show>
-        </div>
-      </Show>
-      </Show>
+        {() => (
+          <div
+            style={{
+              "max-width": "760px",
+              margin: "0 auto",
+              padding: "var(--space-4) var(--space-5)",
+            }}
+          >
+            <Show when={grouped().today.length > 0}>
+              <Group title="Today">
+                <For each={grouped().today}>
+                  {(c) => (
+                    <Row
+                      c={c}
+                      contact={contactById(c.contactId)}
+                      msg={msgById(c.msgId)?.subj}
+                      onCopy={copy}
+                      onRemove={remove}
+                    />
+                  )}
+                </For>
+              </Group>
+            </Show>
+            <Show when={grouped().yesterday.length > 0}>
+              <Group title="Yesterday">
+                <For each={grouped().yesterday}>
+                  {(c) => (
+                    <Row
+                      c={c}
+                      contact={contactById(c.contactId)}
+                      msg={msgById(c.msgId)?.subj}
+                      onCopy={copy}
+                      onRemove={remove}
+                    />
+                  )}
+                </For>
+              </Group>
+            </Show>
+            <Show when={grouped().earlier.length > 0}>
+              <Group title="Earlier">
+                <For each={grouped().earlier}>
+                  {(c) => (
+                    <Row
+                      c={c}
+                      contact={contactById(c.contactId)}
+                      msg={msgById(c.msgId)?.subj}
+                      onCopy={copy}
+                      onRemove={remove}
+                    />
+                  )}
+                </For>
+              </Group>
+            </Show>
+          </div>
+        )}
+      </ResourceGate>
     </div>
   );
 }

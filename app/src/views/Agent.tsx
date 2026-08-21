@@ -14,6 +14,8 @@ import { useAgent } from "../agent/useAgent";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { Empty, ErrorState } from "../components/Empty";
+import { ResourceGate } from "../components/ResourceGate";
+import { SkeletonList } from "../components/Skeleton";
 import { setView } from "../stores/ui";
 import { relativeTime } from "../utils/date";
 import { sessionIcon, statusColor } from "../utils/agent";
@@ -72,13 +74,8 @@ export function Agent() {
         animation: "view-enter 0.3s var(--ease-out) both",
       }}
     >
-      <Show when={agent.error()}>
-        <ErrorState
-          title="Agent 加载失败"
-          message={String(agent.error() ?? "")}
-          retry={() => void agent.refetchAll()}
-        />
-      </Show>
+      {/* Top-level error state is now handled by the ResourceGate below. */}
+
       {/* Header */}
       <div
         style={{
@@ -155,56 +152,116 @@ export function Agent() {
       </div>
 
       {/* Workspace */}
-      <Show
-        when={!searching()}
-        fallback={
-          <SearchResults
-            sessions={filteredSessions()}
-            tasks={filteredTasks()}
-            drafts={filteredDrafts()}
-            onSession={(id) => {
-              setQuery("");
-              agent.switchSession(id);
+      <ResourceGate
+        // `agent` owns 5 resources (sessions / tasks / drafts / audit /
+        // contacts). The sessions resource is the canonical "is the
+        // agent workspace ready" signal — once sessions are in, the
+        // rest follow. isLoading OR's all 5 for the skeleton phase;
+        // errorView refetches everything.
+        resource={agent.sessionsResource}
+        isLoading={() => agent.isLoading()}
+        errorView={() => (
+          <ErrorState
+            title="Agent 加载失败"
+            message={String(agent.error() ?? "")}
+            retry={() => void agent.refetchAll()}
+          />
+        )}
+        loading={
+          <div
+            style={{
+              flex: 1,
+              display: "grid",
+              "grid-template-columns": "260px 1fr 280px",
+              "grid-template-rows": "1fr",
+              overflow: "hidden",
             }}
-            onDraft={(d) => agent.editDraft(d)}
-            onTask={(t) => {
-              setQuery("");
-              if (t.sessionId) agent.switchSession(t.sessionId);
-            }}
+          >
+            <div
+              style={{
+                padding: "var(--space-3)",
+                "border-right": "0.5px solid var(--border)",
+                background: "var(--paper-light)",
+              }}
+            >
+              <SkeletonList count={4} />
+            </div>
+            <div style={{ padding: "var(--space-5)" }}>
+              <SkeletonList count={3} height={80} />
+            </div>
+            <div
+              style={{
+                padding: "var(--space-3)",
+                "border-left": "0.5px solid var(--border)",
+                background: "var(--paper-light)",
+              }}
+            >
+              <SkeletonList count={3} />
+            </div>
+          </div>
+        }
+        empty={
+          <Empty
+            icon="ph-chat-circle"
+            title="还没有会话"
+            description="点击 'Freeform' 或 'Msg' 按钮新建。"
           />
         }
+        isEmpty={() => (agent.sessions() ?? []).length === 0}
       >
-        <div
-          style={{
-            flex: 1,
-            display: "grid",
-            "grid-template-columns": "260px 1fr 280px",
-            "grid-template-rows": "1fr",
-            overflow: "hidden",
-          }}
-        >
-          <SessionList
-            sessions={agent.sessions() ?? []}
-            current={agent.currentSession()}
-            contacts={agent.contacts() ?? []}
-            onSelect={agent.switchSession}
-            onNew={agent.newSession}
-          />
-          <Conversation
-            session={agent.currentSession()}
-            audit={agent.audit() ?? []}
-            input={agent.chatInput()}
-            onInput={agent.setChatInput}
-            onSend={agent.sendChat}
-          />
-          <RightPanel
-            tasks={agent.sessionTasks()}
-            drafts={agent.sessionDrafts()}
-            onApproveDraft={agent.approveDraft}
-            onEditDraft={agent.editDraft}
-          />
-        </div>
-      </Show>
+        {() => (
+          <Show
+            when={!searching()}
+            fallback={
+              <SearchResults
+                sessions={filteredSessions()}
+                tasks={filteredTasks()}
+                drafts={filteredDrafts()}
+                onSession={(id) => {
+                  setQuery("");
+                  agent.switchSession(id);
+                }}
+                onDraft={(d) => agent.editDraft(d)}
+                onTask={(t) => {
+                  setQuery("");
+                  if (t.sessionId) agent.switchSession(t.sessionId);
+                }}
+              />
+            }
+          >
+            <div
+              style={{
+                flex: 1,
+                display: "grid",
+                "grid-template-columns": "260px 1fr 280px",
+                "grid-template-rows": "1fr",
+                overflow: "hidden",
+              }}
+            >
+              <SessionList
+                sessions={agent.sessions() ?? []}
+                current={agent.currentSession()}
+                contacts={agent.contacts() ?? []}
+                onSelect={agent.switchSession}
+                onNew={agent.newSession}
+              />
+              <Conversation
+                session={agent.currentSession()}
+                audit={agent.audit() ?? []}
+                input={agent.chatInput()}
+                onInput={agent.setChatInput}
+                onSend={agent.sendChat}
+              />
+              <RightPanel
+                tasks={agent.sessionTasks()}
+                drafts={agent.sessionDrafts()}
+                onApproveDraft={agent.approveDraft}
+                onEditDraft={agent.editDraft}
+              />
+            </div>
+          </Show>
+        )}
+      </ResourceGate>
     </div>
   );
 }

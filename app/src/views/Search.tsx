@@ -24,6 +24,8 @@ import {
 import { Avatar } from "../components/Avatar";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
+import { ResourceGate } from "../components/ResourceGate";
+import { SkeletonList } from "../components/Skeleton";
 import {
   setDetailOpen,
   setSelectedContactId,
@@ -305,113 +307,134 @@ export function Search() {
         </div>
       </div>
 
-      <Show
-        when={!ftsResults.error}
-        fallback={
+      <ResourceGate
+        resource={ftsResults}
+        isLoading={() =>
+          ftsResults.loading ||
+          files.loading ||
+          drafts.loading ||
+          events.loading ||
+          snippets.loading ||
+          clips.loading ||
+          stickies.loading
+        }
+        loading={
+          <div
+            style={{
+              "max-width": "720px",
+              margin: "0 auto",
+              padding: "0 var(--space-5) var(--space-5)",
+            }}
+          >
+            <SkeletonList count={6} height={56} />
+          </div>
+        }
+        errorView={() => (
           <ErrorState
             title="搜索失败"
             message={String(ftsResults.error ?? "")}
             retry={() => void refetchFts()}
           />
-        }
-      >
-        <></>
-      </Show>
-      <Show
-        when={filtered().length > 0}
-        fallback={
+        )}
+        empty={
           <Empty
             icon="ph-magnifying-glass"
             title={q() ? "无匹配" : "输入关键词开始搜索"}
             description="搜索联系 / 消息 / 文件 / 会议 / 草稿"
           />
         }
+        isEmpty={() => filtered().length === 0}
       >
-        <div
-          style={{
-            "max-width": "720px",
-            margin: "0 auto",
-            padding: "0 var(--space-5) var(--space-5)",
-          }}
-        >
-          <For each={Object.keys(grouped())}>
-            {(group) => (
-              <section style={{ "margin-bottom": "var(--space-5)" }}>
-                <h3
-                  style={{
-                    "font-family": "var(--font-display)",
-                    "font-size": "var(--text-h4)",
-                    "font-weight": "800",
-                    margin: "0 0 var(--space-3)",
-                  }}
-                >
-                  {groupLabel(group)}
-                </h3>
-                <For each={grouped()[group]}>
-                  {(r) => (
-                    <button
-                      onClick={r.onClick}
-                      style={{
-                        display: "flex",
-                        gap: "var(--space-3)",
-                        width: "100%",
-                        padding: "var(--space-3)",
-                        background: "var(--paper-light)",
-                        "border-radius": "var(--radius-md)",
-                        border: "0.5px solid var(--border)",
-                        "margin-bottom": "var(--space-2)",
-                        "text-align": "left",
-                        cursor: "pointer",
-                        "align-items": "center",
-                      }}
-                      onMouseEnter={(e) =>
-                        (e.currentTarget.style.background = "var(--paper-mid)")
-                      }
-                      onMouseLeave={(e) =>
-                        (e.currentTarget.style.background =
-                          "var(--paper-light)")
-                      }
-                    >
-                      <Show
-                        when={r.avatar}
-                        fallback={<Icon name={iconForType(r.type)} size={20} />}
+        {() => (
+          <div
+            style={{
+              "max-width": "720px",
+              margin: "0 auto",
+              padding: "0 var(--space-5) var(--space-5)",
+            }}
+          >
+            <For each={Object.keys(grouped())}>
+              {(group) => (
+                <section style={{ "margin-bottom": "var(--space-5)" }}>
+                  <h3
+                    style={{
+                      "font-family": "var(--font-display)",
+                      "font-size": "var(--text-h4)",
+                      "font-weight": "800",
+                      margin: "0 0 var(--space-3)",
+                    }}
+                  >
+                    {groupLabel(group)}
+                  </h3>
+                  <For each={grouped()[group]}>
+                    {(r) => (
+                      <button
+                        onClick={r.onClick}
+                        style={{
+                          display: "flex",
+                          gap: "var(--space-3)",
+                          width: "100%",
+                          padding: "var(--space-3)",
+                          background: "var(--paper-light)",
+                          "border-radius": "var(--radius-md)",
+                          border: "0.5px solid var(--border)",
+                          "margin-bottom": "var(--space-2)",
+                          "text-align": "left",
+                          cursor: "pointer",
+                          "align-items": "center",
+                        }}
+                        onMouseEnter={(e) =>
+                          (e.currentTarget.style.background =
+                            "var(--paper-mid)")
+                        }
+                        onMouseLeave={(e) =>
+                          (e.currentTarget.style.background =
+                            "var(--paper-light)")
+                        }
                       >
-                        <Avatar name={r.title} src={r.avatar} size={28} />
-                      </Show>
-                      <div style={{ flex: 1, "min-width": 0 }}>
-                        <div
-                          style={{
-                            "font-weight": "600",
-                            "white-space": "nowrap",
-                            overflow: "hidden",
-                            "text-overflow": "ellipsis",
-                          }}
+                        <Show
+                          when={r.avatar}
+                          fallback={
+                            <Icon name={iconForType(r.type)} size={20} />
+                          }
                         >
-                          {r.title}
-                        </div>
-                        <Show when={r.hint}>
+                          <Avatar name={r.title} src={r.avatar} size={28} />
+                        </Show>
+                        <div style={{ flex: 1, "min-width": 0 }}>
                           <div
                             style={{
-                              "font-size": "var(--text-caption)",
-                              color: "var(--text-secondary)",
+                              "font-weight": "600",
                               "white-space": "nowrap",
                               overflow: "hidden",
                               "text-overflow": "ellipsis",
                             }}
                           >
-                            {r.hint}
+                            {r.title}
                           </div>
-                        </Show>
-                      </div>
-                      <Icon name="ph-arrow-right" size={14} />
-                    </button>
-                  )}
-                </For>
-              </section>
-            )}
-          </For>
-        </div>
-      </Show>
+                          <Show when={r.hint}>
+                            <div
+                              style={{
+                                "font-size": "var(--text-caption)",
+                                color: "var(--text-secondary)",
+                                "white-space": "nowrap",
+                                overflow: "hidden",
+                                "text-overflow": "ellipsis",
+                              }}
+                            >
+                              {r.hint}
+                            </div>
+                          </Show>
+                        </div>
+                        <Icon name="ph-arrow-right" size={14} />
+                      </button>
+                    )}
+                  </For>
+                </section>
+              )}
+            </For>
+          </div>
+        )}
+      </ResourceGate>
     </div>
   );
 }

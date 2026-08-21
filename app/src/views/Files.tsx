@@ -7,10 +7,19 @@
  * default state visually clean.
  */
 
-import { For, Show, createMemo, createResource, createSignal, type JSX } from "solid-js";
+import {
+  For,
+  Show,
+  createMemo,
+  createResource,
+  createSignal,
+  type JSX,
+} from "solid-js";
 import { listFiles, listContacts } from "../stores/data";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
+import { ResourceGate } from "../components/ResourceGate";
+import { SkeletonList } from "../components/Skeleton";
 import { setDetailOpen, setSelectedFileId } from "../stores/ui";
 import { relativeTime } from "../utils/date";
 import { useRefreshEffect } from "../utils/gestures";
@@ -161,12 +170,14 @@ export function Files() {
           style={{
             padding: "4px 12px",
             "border-radius": "var(--radius-pill)",
-            background: showAdvanced() || advancedActive()
-              ? "var(--palm-soft)"
-              : "var(--paper-mid)",
-            color: showAdvanced() || advancedActive()
-              ? "var(--palm)"
-              : "var(--text-secondary)",
+            background:
+              showAdvanced() || advancedActive()
+                ? "var(--palm-soft)"
+                : "var(--paper-mid)",
+            color:
+              showAdvanced() || advancedActive()
+                ? "var(--palm)"
+                : "var(--text-secondary)",
             "font-size": "var(--text-caption)",
             "font-weight": advancedActive() ? "700" : "500",
             display: "flex",
@@ -284,120 +295,132 @@ export function Files() {
         </div>
       </Show>
 
-      <Show
-        when={!files.error}
-        fallback={
+      <ResourceGate
+        resource={files}
+        isLoading={() => files.loading || contacts.loading}
+        loading={
+          <div
+            style={{
+              "max-width": "920px",
+              margin: "0 auto",
+              padding: "0 var(--space-5) var(--space-5)",
+            }}
+          >
+            <SkeletonList count={8} height={140} />
+          </div>
+        }
+        errorView={() => (
           <ErrorState
             title="文件加载失败"
             message={String(files.error ?? "")}
             retry={() => void refetchFiles()}
           />
-        }
+        )}
+        empty={<Empty icon="ph-paperclip" title="没有文件" />}
+        isEmpty={() => items().length === 0}
       >
-        <></>
-      </Show>
-      <Show
-        when={items().length > 0}
-        fallback={<Empty icon="ph-paperclip" title="没有文件" />}
-      >
-        <div
-          style={{
-            "max-width": "920px",
-            margin: "0 auto",
-            padding: "0 var(--space-5) var(--space-5)",
-          }}
-        >
+        {() => (
           <div
             style={{
-              display: "grid",
-              "grid-template-columns": "repeat(auto-fill, minmax(180px, 1fr))",
-              gap: "var(--space-3)",
+              "max-width": "920px",
+              margin: "0 auto",
+              padding: "0 var(--space-5) var(--space-5)",
             }}
           >
-            <For each={items()}>
-              {(f) => {
-                const c = contactById(f.pid);
-                return (
-                  <button
-                    onClick={() => {
-                      setSelectedFileId(f.id);
-                      setDetailOpen(true);
-                    }}
-                    style={{
-                      padding: "var(--space-3)",
-                      background: "var(--paper-light)",
-                      border: "0.5px solid var(--border)",
-                      "border-radius": "var(--radius-md)",
-                      "text-align": "left",
-                      cursor: "pointer",
-                    }}
-                    onMouseEnter={(e) =>
-                      (e.currentTarget.style.background = "var(--paper-mid)")
-                    }
-                    onMouseLeave={(e) =>
-                      (e.currentTarget.style.background = "var(--paper-light)")
-                    }
-                  >
-                    <div
-                      style={{
-                        width: "100%",
-                        "aspect-ratio": "1",
-                        background: "var(--paper-mid)",
-                        "border-radius": "var(--radius-sm)",
-                        display: "flex",
-                        "align-items": "center",
-                        "justify-content": "center",
-                        "margin-bottom": "var(--space-2)",
-                        color: "var(--text-secondary)",
-                      }}
-                    >
-                      <Icon
-                        name={
-                          f.type === "pdf"
-                            ? "ph-file-pdf"
-                            : f.type === "image"
-                              ? "ph-file-image"
-                              : "ph-file-text"
-                        }
-                        size={40}
-                      />
-                    </div>
-                    <strong
-                      style={{
-                        "font-size": "var(--text-body-sm)",
-                        "white-space": "nowrap",
-                        overflow: "hidden",
-                        "text-overflow": "ellipsis",
-                        display: "block",
-                      }}
-                    >
-                      {f.name}
-                    </strong>
-                    <p
-                      style={{
-                        margin: "2px 0 0",
-                        "font-size": "var(--text-micro)",
-                        color: "var(--text-muted)",
-                      }}
-                    >
-                      {(f.size / 1024).toFixed(0)} KB · {c?.name ?? "—"}
-                    </p>
-                    <p
-                      style={{
-                        margin: "2px 0 0",
-                        "font-size": "var(--text-micro)",
-                        color: "var(--text-muted)",
-                      }}
-                    >
-                      {relativeTime(f.st)}
-                    </p>
-                  </button>
-                );
+            <div
+              style={{
+                display: "grid",
+                "grid-template-columns":
+                  "repeat(auto-fill, minmax(180px, 1fr))",
+                gap: "var(--space-3)",
               }}
-            </For>
+            >
+              <For each={items()}>
+                {(f) => {
+                  const c = contactById(f.pid);
+                  return (
+                    <button
+                      onClick={() => {
+                        setSelectedFileId(f.id);
+                        setDetailOpen(true);
+                      }}
+                      style={{
+                        padding: "var(--space-3)",
+                        background: "var(--paper-light)",
+                        border: "0.5px solid var(--border)",
+                        "border-radius": "var(--radius-md)",
+                        "text-align": "left",
+                        cursor: "pointer",
+                      }}
+                      onMouseEnter={(e) =>
+                        (e.currentTarget.style.background = "var(--paper-mid)")
+                      }
+                      onMouseLeave={(e) =>
+                        (e.currentTarget.style.background =
+                          "var(--paper-light)")
+                      }
+                    >
+                      <div
+                        style={{
+                          width: "100%",
+                          "aspect-ratio": "1",
+                          background: "var(--paper-mid)",
+                          "border-radius": "var(--radius-sm)",
+                          display: "flex",
+                          "align-items": "center",
+                          "justify-content": "center",
+                          "margin-bottom": "var(--space-2)",
+                          color: "var(--text-secondary)",
+                        }}
+                      >
+                        <Icon
+                          name={
+                            f.type === "pdf"
+                              ? "ph-file-pdf"
+                              : f.type === "image"
+                                ? "ph-file-image"
+                                : "ph-file-text"
+                          }
+                          size={40}
+                        />
+                      </div>
+                      <strong
+                        style={{
+                          "font-size": "var(--text-body-sm)",
+                          "white-space": "nowrap",
+                          overflow: "hidden",
+                          "text-overflow": "ellipsis",
+                          display: "block",
+                        }}
+                      >
+                        {f.name}
+                      </strong>
+                      <p
+                        style={{
+                          margin: "2px 0 0",
+                          "font-size": "var(--text-micro)",
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        {(f.size / 1024).toFixed(0)} KB · {c?.name ?? "—"}
+                      </p>
+                      <p
+                        style={{
+                          margin: "2px 0 0",
+                          "font-size": "var(--text-micro)",
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        {relativeTime(f.st)}
+                      </p>
+                    </button>
+                  );
+                }}
+              </For>
+            </div>
           </div>
-        </div>
-      </Show>
+        )}
+      </ResourceGate>
     </div>
   );
 }

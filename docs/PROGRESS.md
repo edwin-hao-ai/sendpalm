@@ -2,6 +2,23 @@
 
 > Source: prototype-v11.38 (v11.38) — every feature reimplemented as Tauri 2 + SolidJS.
 
+## Loading states across all views (2026-08-21)
+
+12 views were missing loading feedback — `createResource` was firing but no Skeleton / placeholder was rendered until the IPC round-trip resolved, so the user saw a blank screen on every view switch. The `ResourceGate` component (`src/components/ResourceGate.tsx`) already existed for exactly this; the migration just had not been done. Refactored every affected view to use it, getting the loading/error/empty trifecta for free:
+
+- `ResourceGate` gained a new `isLoading?: () => boolean` override so multi-resource views (Drafts, Files, Insights, Search, Agent, …) can OR all their `createResource.loading` flags and keep the skeleton up until *everything* the view needs is ready. Previously these views would render partial content as the slowest resource resolved.
+- 11 views migrated: Agent, Calendar, Clips, Companies, Drafts, Files, FocusReply, FollowUps, Insights, Search, Settings (Settings has 4 tab-level sub-components each with their own gate).
+- Onboarding verified to not need a gate (no `createResource`).
+- `useAgent` hook gained an `isLoading` accessor + a re-exported `sessionsResource` so the Agent view can plug a single `ResourceGate` over 5 internal resources.
+- New `src/views/loading-states.test.ts` (16 vitest cases) greps each view source for `import { ResourceGate }` and the `<ResourceGate>` JSX usage. Cheap belt-and-suspenders that catches a regression if someone reaches for a raw `<Show when={!resource.error}>` again.
+- `ResourceGate.test.ts` → `.tsx` (renamed because the new tests use JSX via `@solidjs/testing-library`), +4 new render tests covering the loading/skeleton, isLoading override, and error paths.
+
+`pnpm vitest run` → 313 / 313 pass. `pnpm lint` / `pnpm tsc --noEmit` / `pnpm prettier --check` all clean on the 15 changed files.
+
+### Lesson
+
+The `ResourceGate` component existed but the views never migrated to it. Audit-style catchup would be cheaper if the component is **introduced *and* the migration is shipped in the same commit** — half-migrating leaves the technical debt in place and reviewers can't tell whether the new pattern is enforced. Going forward: new `createResource` calls should default to a `ResourceGate` and the loader is the `SkeletonList` skeleton, not a hand-rolled `<Show>`.
+
 ## v3 reframing (2026-08-20)
 
 SendPalm is a **HEY-workflow client for any IMAP email service** — not a HEY replacement. The two-pager `docs/POSITIONING.md` is the source of truth for the white space (HEY workflow × any-service client) and the explicit non-goals (no backend, no cross-device sync, no web app, no B2B SSO).

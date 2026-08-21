@@ -20,6 +20,8 @@ import { setSelectedMessageId, setDetailOpen, showToast } from "../stores/ui";
 import { Empty, ErrorState } from "../components/Empty";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
+import { ResourceGate } from "../components/ResourceGate";
+import { SkeletonList } from "../components/Skeleton";
 import { addDays, isToday, relativeTime } from "../utils/date";
 import { useRefreshEffect } from "../utils/gestures";
 import type { FollowUp } from "../types";
@@ -146,113 +148,124 @@ export function FollowUps() {
         </p>
       </header>
 
-      <Show
-        when={!followUps.error}
-        fallback={
+      <ResourceGate
+        resource={followUps}
+        isLoading={() =>
+          followUps.loading || messages.loading || contacts.loading
+        }
+        loading={
+          <div
+            style={{
+              "max-width": "760px",
+              margin: "0 auto",
+              padding: "var(--space-4) var(--space-5)",
+            }}
+          >
+            <SkeletonList count={5} />
+          </div>
+        }
+        errorView={() => (
           <ErrorState
             title="跟进加载失败"
             message={String(followUps.error ?? "")}
             retry={() => void refetchFollowUps()}
           />
-        }
-      >
-        <></>
-      </Show>
-
-      <Show
-        when={total() > 0}
-        fallback={
+        )}
+        empty={
           <Empty
             icon="ph-bell-ringing"
             title="没有跟进"
             description="还没设置跟进提醒。"
           />
         }
+        isEmpty={() => total() === 0}
       >
-        <div
-          style={{
-            "max-width": "760px",
-            margin: "0 auto",
-            padding: "var(--space-4) var(--space-5)",
-          }}
-        >
-          <Show when={grouped().overdue.length > 0}>
-            <Group title="Overdue" icon="ph-warning-circle" tone="danger">
-              <For each={grouped().overdue}>
-                {(f) => (
-                  <Row
-                    f={f}
-                    msg={msgById(f.msgId)}
-                    contact={
-                      f.msgId ? contactById(msgById(f.msgId)!.pid) : undefined
-                    }
-                    onOpen={open}
-                    onDone={markDone}
-                    onRemove={remove}
-                  />
-                )}
-              </For>
-            </Group>
-          </Show>
+        {() => (
+          <div
+            style={{
+              "max-width": "760px",
+              margin: "0 auto",
+              padding: "var(--space-4) var(--space-5)",
+            }}
+          >
+            <Show when={grouped().overdue.length > 0}>
+              <Group title="Overdue" icon="ph-warning-circle" tone="danger">
+                <For each={grouped().overdue}>
+                  {(f) => (
+                    <Row
+                      f={f}
+                      msg={msgById(f.msgId)}
+                      contact={
+                        f.msgId ? contactById(msgById(f.msgId)!.pid) : undefined
+                      }
+                      onOpen={open}
+                      onDone={markDone}
+                      onRemove={remove}
+                    />
+                  )}
+                </For>
+              </Group>
+            </Show>
 
-          <Show when={grouped().today.length > 0}>
-            <Group title="Today" icon="ph-calendar-blank">
-              <For each={grouped().today}>
-                {(f) => (
-                  <Row
-                    f={f}
-                    msg={msgById(f.msgId)}
-                    contact={
-                      f.msgId ? contactById(msgById(f.msgId)!.pid) : undefined
-                    }
-                    onOpen={open}
-                    onDone={markDone}
-                    onRemove={remove}
-                  />
-                )}
-              </For>
-            </Group>
-          </Show>
+            <Show when={grouped().today.length > 0}>
+              <Group title="Today" icon="ph-calendar-blank">
+                <For each={grouped().today}>
+                  {(f) => (
+                    <Row
+                      f={f}
+                      msg={msgById(f.msgId)}
+                      contact={
+                        f.msgId ? contactById(msgById(f.msgId)!.pid) : undefined
+                      }
+                      onOpen={open}
+                      onDone={markDone}
+                      onRemove={remove}
+                    />
+                  )}
+                </For>
+              </Group>
+            </Show>
 
-          <Show when={grouped().thisWeek.length > 0}>
-            <Group title="This week" icon="ph-calendar">
-              <For each={grouped().thisWeek}>
-                {(f) => (
-                  <Row
-                    f={f}
-                    msg={msgById(f.msgId)}
-                    contact={
-                      f.msgId ? contactById(msgById(f.msgId)!.pid) : undefined
-                    }
-                    onOpen={open}
-                    onDone={markDone}
-                    onRemove={remove}
-                  />
-                )}
-              </For>
-            </Group>
-          </Show>
+            <Show when={grouped().thisWeek.length > 0}>
+              <Group title="This week" icon="ph-calendar">
+                <For each={grouped().thisWeek}>
+                  {(f) => (
+                    <Row
+                      f={f}
+                      msg={msgById(f.msgId)}
+                      contact={
+                        f.msgId ? contactById(msgById(f.msgId)!.pid) : undefined
+                      }
+                      onOpen={open}
+                      onDone={markDone}
+                      onRemove={remove}
+                    />
+                  )}
+                </For>
+              </Group>
+            </Show>
 
-          <Show when={grouped().later.length > 0}>
-            <Group title="Later" icon="ph-clock">
-              <For each={grouped().later}>
-                {(f) => (
-                  <Row
-                    f={f}
-                    msg={msgById(f.msgId)}
-                    contact={
-                      f.msgId ? contactById(msgById(f.msgId)!.pid) : undefined
-                    }
-                    onOpen={open}
-                    onDone={markDone}
-                    onRemove={remove}
-                  />
-                )}
-              </For>
-            </Group>
-          </Show>
-        </div>
-      </Show>
+            <Show when={grouped().later.length > 0}>
+              <Group title="Later" icon="ph-clock">
+                <For each={grouped().later}>
+                  {(f) => (
+                    <Row
+                      f={f}
+                      msg={msgById(f.msgId)}
+                      contact={
+                        f.msgId ? contactById(msgById(f.msgId)!.pid) : undefined
+                      }
+                      onOpen={open}
+                      onDone={markDone}
+                      onRemove={remove}
+                    />
+                  )}
+                </For>
+              </Group>
+            </Show>
+          </div>
+        )}
+      </ResourceGate>
     </div>
   );
 }

@@ -4,7 +4,6 @@
 
 import {
   For,
-  Show,
   createMemo,
   createResource,
   createSignal,
@@ -20,6 +19,8 @@ import {
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { ErrorState } from "../components/Empty";
+import { ResourceGate } from "../components/ResourceGate";
+import { SkeletonList } from "../components/Skeleton";
 import { sendEmailViaBackend } from "../services/backend";
 import { generateAiDraft } from "../utils/draft";
 import { getFocusReplyCandidates } from "../utils/triage";
@@ -69,16 +70,6 @@ export function FocusReply() {
         "flex-direction": "column",
       }}
     >
-      <Show
-        when={!messages.error}
-        fallback={
-          <ErrorState
-            title="Focus Reply 加载失败"
-            message={String(messages.error ?? "")}
-            retry={() => void refetchMessages()}
-          />
-        }
-      >
       <div
         style={{
           display: "flex",
@@ -131,9 +122,38 @@ export function FocusReply() {
         </button>
       </div>
 
-      <Show
-        when={pendingCount() > 0}
-        fallback={
+      <ResourceGate
+        resource={messages}
+        isLoading={() => messages.loading || contacts.loading}
+        loading={
+          <div
+            style={{
+              flex: 1,
+              overflow: "auto",
+              padding: "var(--space-4) var(--space-5)",
+            }}
+          >
+            <div
+              style={{
+                "max-width": "720px",
+                margin: "0 auto",
+                display: "flex",
+                "flex-direction": "column",
+                gap: "var(--space-4)",
+              }}
+            >
+              <SkeletonList count={2} height={180} />
+            </div>
+          </div>
+        }
+        errorView={() => (
+          <ErrorState
+            title="Focus Reply 加载失败"
+            message={String(messages.error ?? "")}
+            retry={() => void refetchMessages()}
+          />
+        )}
+        empty={
           <DoneState
             onBack={() => {
               setCompletedIds(new Set<string>());
@@ -141,42 +161,44 @@ export function FocusReply() {
             }}
           />
         }
+        isEmpty={() => pendingCount() === 0}
       >
-        <div
-          style={{
-            flex: 1,
-            overflow: "auto",
-            padding: "var(--space-4) var(--space-5)",
-          }}
-        >
+        {() => (
           <div
             style={{
-              display: "flex",
-              "flex-direction": "column",
-              gap: "var(--space-4)",
-              "max-width": "720px",
-              margin: "0 auto",
+              flex: 1,
+              overflow: "auto",
+              padding: "var(--space-4) var(--space-5)",
             }}
           >
-            <For each={replyLater()}>
-              {(m, i) => (
-                <FocusReplyItem
-                  m={m}
-                  contact={contactMap().get(m.pid)}
-                  index={i()}
-                  onChange={async () => {
-                    await refetchMessages();
-                  }}
-                  onComplete={(id) => {
-                    setCompletedIds((prev) => new Set([...prev, id]));
-                  }}
-                />
-              )}
-            </For>
+            <div
+              style={{
+                display: "flex",
+                "flex-direction": "column",
+                gap: "var(--space-4)",
+                "max-width": "720px",
+                margin: "0 auto",
+              }}
+            >
+              <For each={replyLater()}>
+                {(m, i) => (
+                  <FocusReplyItem
+                    m={m}
+                    contact={contactMap().get(m.pid)}
+                    index={i()}
+                    onChange={async () => {
+                      await refetchMessages();
+                    }}
+                    onComplete={(id) => {
+                      setCompletedIds((prev) => new Set([...prev, id]));
+                    }}
+                  />
+                )}
+              </For>
+            </div>
           </div>
-        </div>
-      </Show>
-      </Show>
+        )}
+      </ResourceGate>
     </div>
   );
 }

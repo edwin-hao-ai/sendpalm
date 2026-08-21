@@ -19,14 +19,13 @@ import {
   listMessagesForInsights,
 } from "../stores/data";
 import { Icon } from "../components/Icon";
-import { Empty } from "../components/Empty";
+import { Empty, ErrorState } from "../components/Empty";
+import { ResourceGate } from "../components/ResourceGate";
+import { SkeletonList } from "../components/Skeleton";
 import { relativeTime } from "../utils/date";
 import { Avatar } from "../components/Avatar";
 import { useRefreshEffect } from "../utils/gestures";
-import {
-  computeReplyTimeStats,
-  formatDuration,
-} from "../utils/insights";
+import { computeReplyTimeStats, formatDuration } from "../utils/insights";
 
 export function Insights() {
   const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
@@ -84,9 +83,7 @@ export function Insights() {
       .filter((x) => x.contact);
   });
 
-  const replyTime = createMemo(() =>
-    computeReplyTimeStats(messages() ?? []),
-  );
+  const replyTime = createMemo(() => computeReplyTimeStats(messages() ?? []));
 
   const channelShare = createMemo(() => {
     const map = new Map<string, number>();
@@ -146,432 +143,497 @@ export function Insights() {
         Insights
       </h2>
 
-      <div
-        style={{
-          display: "grid",
-          "grid-template-columns": "repeat(auto-fit, minmax(280px, 1fr))",
-          gap: "var(--space-4)",
-          "max-width": "1100px",
-          margin: "0 auto",
-        }}
-      >
-        {/* Weekly volume */}
-        <Card title="Weekly volume" icon="ph-trend-up">
-          <p
-            style={{
-              "font-size": "32px",
-              "font-weight": "800",
-              "font-family": "var(--font-display)",
-              margin: 0,
-              color: "var(--palm)",
-            }}
-          >
-            {weeklyVolume().total}
-          </p>
-          <p
-            style={{
-              "font-size": "var(--text-caption)",
-              color: "var(--text-muted)",
-              margin: "var(--space-1) 0 var(--space-3)",
-            }}
-          >
-            条消息 / 7 天
-          </p>
+      <ResourceGate
+        resource={messages}
+        isLoading={() =>
+          messages.loading ||
+          contacts.loading ||
+          followUps.loading ||
+          agentTasks.loading ||
+          events.loading
+        }
+        loading={
           <div
             style={{
-              display: "flex",
-              "align-items": "flex-end",
-              gap: "4px",
-              height: "60px",
+              display: "grid",
+              "grid-template-columns": "repeat(auto-fit, minmax(280px, 1fr))",
+              gap: "var(--space-4)",
+              "max-width": "1100px",
+              margin: "0 auto",
             }}
           >
-            <For each={weeklyVolume().week}>
-              {(v, i) => (
-                <div
-                  style={{
-                    flex: 1,
-                    display: "flex",
-                    "flex-direction": "column",
-                    "align-items": "center",
-                    gap: "4px",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: "100%",
-                      height: `${(v / weeklyVolume().max) * 100}%`,
-                      "min-height": "2px",
-                      background:
-                        i() === 6 ? "var(--palm)" : "var(--paper-dark)",
-                      "border-radius": "var(--radius-sm)",
-                    }}
-                  />
-                  <span
-                    style={{ "font-size": "10px", color: "var(--text-muted)" }}
-                  >
-                    {["S", "M", "T", "W", "T", "F", "S"][i()]}
-                  </span>
-                </div>
-              )}
-            </For>
+            <SkeletonList count={5} height={160} />
           </div>
-        </Card>
-
-        {/* Top people */}
-        <Card title="Top People" icon="ph-users">
-          <Show
-            when={topPeople().length > 0}
-            fallback={<Empty icon="ph-users" title="暂无" />}
-          >
-            <For each={topPeople()}>
-              {(p) => (
-                <div
-                  style={{
-                    display: "flex",
-                    "align-items": "center",
-                    gap: "var(--space-2)",
-                    padding: "var(--space-2) 0",
-                  }}
-                >
-                  <Avatar
-                    name={p.contact!.name}
-                    src={p.contact!.avatar}
-                    size={28}
-                  />
-                  <div style={{ flex: 1, "min-width": 0 }}>
-                    <strong style={{ "font-size": "var(--text-body-sm)" }}>
-                      {p.contact!.name}
-                    </strong>
-                    <p
-                      style={{
-                        margin: 0,
-                        "font-size": "10px",
-                        color: "var(--text-muted)",
-                      }}
-                    >
-                      {p.contact!.company}
-                    </p>
-                  </div>
-                  <span
-                    style={{
-                      "font-size": "var(--text-caption)",
-                      color: "var(--text-secondary)",
-                      "font-weight": "700",
-                    }}
-                  >
-                    {p.count}
-                  </span>
-                </div>
-              )}
-            </For>
-          </Show>
-        </Card>
-
-        {/* Reply time */}
-        <Card title="平均回复时间" icon="ph-clock">
-          <p
+        }
+        errorView={() => (
+          <ErrorState
+            title="Insights 加载失败"
+            message={String(
+              messages.error ??
+                contacts.error ??
+                followUps.error ??
+                agentTasks.error ??
+                events.error ??
+                "",
+            )}
+            retry={() => {
+              void refetchMessages();
+              void refetchContacts();
+              void refetchFollowUps();
+              void refetchAgentTasks();
+              void refetchEvents();
+            }}
+          />
+        )}
+        empty={<Empty icon="ph-chart-line-up" title="暂无数据" />}
+        isEmpty={() => weeklyVolume().total === 0 && topPeople().length === 0}
+      >
+        {() => (
+          <div
             style={{
-              "font-size": "32px",
-              "font-weight": "800",
-              "font-family": "var(--font-display)",
-              margin: 0,
-              color: "var(--cobalt)",
+              display: "grid",
+              "grid-template-columns": "repeat(auto-fit, minmax(280px, 1fr))",
+              gap: "var(--space-4)",
+              "max-width": "1100px",
+              margin: "0 auto",
             }}
           >
-            {replyTime().medianHours === null
-              ? "—"
-              : formatDuration(replyTime().medianHours!)}
-          </p>
-          <p
-            style={{
-              "font-size": "var(--text-caption)",
-              color: "var(--text-muted)",
-              margin: "var(--space-1) 0",
-            }}
-          >
-            近 30 天 · 中位数
-          </p>
-          <Show when={replyTime().total > 0}>
-            <p
-              style={{
-                "margin-top": "var(--space-3)",
-                "font-size": "var(--text-caption)",
-                color: "var(--text-secondary)",
-              }}
-            >
-              <Icon name="ph-arrow-u-up-left" size={11} /> 已回复{" "}
-              {replyTime().replied} · 未回复 {replyTime().noReply} · 共{" "}
-              {replyTime().total} 封
-            </p>
-          </Show>
-        </Card>
-
-        {/* Channel share */}
-        <Card title="Channel share" icon="ph-share-network">
-          <Show
-            when={channelShare().length > 0}
-            fallback={
+            {/* Weekly volume */}
+            <Card title="Weekly volume" icon="ph-trend-up">
               <p
                 style={{
-                  color: "var(--text-muted)",
-                  "font-size": "var(--text-caption)",
-                }}
-              >
-                暂无
-              </p>
-            }
-          >
-            <For each={channelShare()}>
-              {([ch, n]) => (
-                <div
-                  style={{
-                    display: "flex",
-                    "align-items": "center",
-                    gap: "var(--space-2)",
-                    padding: "var(--space-1) 0",
-                  }}
-                >
-                  <span style={{ "font-size": "var(--text-body-sm)", flex: 1 }}>
-                    {ch}
-                  </span>
-                  <span
-                    style={{
-                      "font-size": "var(--text-caption)",
-                      "font-weight": "700",
-                      color: "var(--text-secondary)",
-                    }}
-                  >
-                    {n}
-                  </span>
-                </div>
-              )}
-            </For>
-          </Show>
-        </Card>
-
-        {/* Pending follow-ups */}
-        <Card title="Pending follow-ups" icon="ph-bell-ringing">
-          <p
-            style={{
-              "font-size": "32px",
-              "font-weight": "800",
-              "font-family": "var(--font-display)",
-              margin: 0,
-              color: pendingFU() > 0 ? "var(--orange)" : "var(--text-muted)",
-            }}
-          >
-            {pendingFU()}
-          </p>
-          <p
-            style={{
-              "font-size": "var(--text-caption)",
-              color: "var(--text-muted)",
-              margin: "var(--space-1) 0",
-            }}
-          >
-            待处理跟进
-          </p>
-        </Card>
-
-        {/* Agent actions */}
-        <Card title="Agent actions" icon="ph-sparkle">
-          <div style={{ display: "flex", gap: "var(--space-4)" }}>
-            <div>
-              <p
-                style={{
-                  "font-size": "24px",
-                  "font-weight": "800",
-                  "font-family": "var(--font-display)",
-                  margin: 0,
-                  color: "var(--agent)",
-                }}
-              >
-                {agentActions().total}
-              </p>
-              <p style={{ "font-size": "10px", color: "var(--text-muted)" }}>
-                Total
-              </p>
-            </div>
-            <div>
-              <p
-                style={{
-                  "font-size": "24px",
+                  "font-size": "32px",
                   "font-weight": "800",
                   "font-family": "var(--font-display)",
                   margin: 0,
                   color: "var(--palm)",
                 }}
               >
-                {agentActions().done}
+                {weeklyVolume().total}
               </p>
-              <p style={{ "font-size": "10px", color: "var(--text-muted)" }}>
-                Done
-              </p>
-            </div>
-            <div>
               <p
                 style={{
-                  "font-size": "24px",
+                  "font-size": "var(--text-caption)",
+                  color: "var(--text-muted)",
+                  margin: "var(--space-1) 0 var(--space-3)",
+                }}
+              >
+                条消息 / 7 天
+              </p>
+              <div
+                style={{
+                  display: "flex",
+                  "align-items": "flex-end",
+                  gap: "4px",
+                  height: "60px",
+                }}
+              >
+                <For each={weeklyVolume().week}>
+                  {(v, i) => (
+                    <div
+                      style={{
+                        flex: 1,
+                        display: "flex",
+                        "flex-direction": "column",
+                        "align-items": "center",
+                        gap: "4px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: "100%",
+                          height: `${(v / weeklyVolume().max) * 100}%`,
+                          "min-height": "2px",
+                          background:
+                            i() === 6 ? "var(--palm)" : "var(--paper-dark)",
+                          "border-radius": "var(--radius-sm)",
+                        }}
+                      />
+                      <span
+                        style={{
+                          "font-size": "10px",
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        {["S", "M", "T", "W", "T", "F", "S"][i()]}
+                      </span>
+                    </div>
+                  )}
+                </For>
+              </div>
+            </Card>
+
+            {/* Top people */}
+            <Card title="Top People" icon="ph-users">
+              <Show
+                when={topPeople().length > 0}
+                fallback={<Empty icon="ph-users" title="暂无" />}
+              >
+                <For each={topPeople()}>
+                  {(p) => (
+                    <div
+                      style={{
+                        display: "flex",
+                        "align-items": "center",
+                        gap: "var(--space-2)",
+                        padding: "var(--space-2) 0",
+                      }}
+                    >
+                      <Avatar
+                        name={p.contact!.name}
+                        src={p.contact!.avatar}
+                        size={28}
+                      />
+                      <div style={{ flex: 1, "min-width": 0 }}>
+                        <strong style={{ "font-size": "var(--text-body-sm)" }}>
+                          {p.contact!.name}
+                        </strong>
+                        <p
+                          style={{
+                            margin: 0,
+                            "font-size": "10px",
+                            color: "var(--text-muted)",
+                          }}
+                        >
+                          {p.contact!.company}
+                        </p>
+                      </div>
+                      <span
+                        style={{
+                          "font-size": "var(--text-caption)",
+                          color: "var(--text-secondary)",
+                          "font-weight": "700",
+                        }}
+                      >
+                        {p.count}
+                      </span>
+                    </div>
+                  )}
+                </For>
+              </Show>
+            </Card>
+
+            {/* Reply time */}
+            <Card title="平均回复时间" icon="ph-clock">
+              <p
+                style={{
+                  "font-size": "32px",
                   "font-weight": "800",
                   "font-family": "var(--font-display)",
                   margin: 0,
-                  color: "var(--yellow)",
+                  color: "var(--cobalt)",
                 }}
               >
-                {agentActions().doing}
+                {replyTime().medianHours === null
+                  ? "—"
+                  : formatDuration(replyTime().medianHours!)}
               </p>
-              <p style={{ "font-size": "10px", color: "var(--text-muted)" }}>
-                Doing
-              </p>
-            </div>
-          </div>
-        </Card>
-
-        {/* Health distribution */}
-        <Card title="Health distribution" icon="ph-heartbeat">
-          <Show
-            when={Object.values(healthDist()).some((v) => v > 0)}
-            fallback={
               <p
                 style={{
-                  color: "var(--text-muted)",
                   "font-size": "var(--text-caption)",
+                  color: "var(--text-muted)",
+                  margin: "var(--space-1) 0",
                 }}
               >
-                暂无联系人
+                近 30 天 · 中位数
               </p>
-            }
-          >
-            <For
-              each={[
-                {
-                  label: "活跃",
-                  count: healthDist().active,
-                  color: "var(--status-active)",
-                },
-                {
-                  label: "需跟进",
-                  count: healthDist().risk,
-                  color: "var(--status-warning)",
-                },
-                {
-                  label: "冷淡",
-                  count: healthDist().cold,
-                  color: "var(--status-danger)",
-                },
-                {
-                  label: "其他",
-                  count: healthDist().other,
-                  color: "var(--text-muted)",
-                },
-              ]}
-            >
-              {(b) => {
-                const total =
-                  healthDist().active +
-                  healthDist().risk +
-                  healthDist().cold +
-                  healthDist().other;
-                return (
-                  <div
-                    style={{
-                      display: "flex",
-                      "align-items": "center",
-                      gap: "var(--space-2)",
-                      padding: "var(--space-1) 0",
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: "8px",
-                        height: "8px",
-                        "border-radius": "50%",
-                        background: b.color,
-                      }}
-                    />
-                    <span
-                      style={{ "font-size": "var(--text-body-sm)", flex: 1 }}
-                    >
-                      {b.label}
-                    </span>
-                    <span
-                      style={{
-                        "font-size": "var(--text-caption)",
-                        "font-weight": "700",
-                        color: "var(--text-secondary)",
-                      }}
-                    >
-                      {b.count}
-                    </span>
-                    <span
-                      style={{
-                        "font-size": "10px",
-                        color: "var(--text-muted)",
-                        "min-width": "32px",
-                        "text-align": "right",
-                      }}
-                    >
-                      {total > 0
-                        ? `${Math.round((b.count / total) * 100)}%`
-                        : "0%"}
-                    </span>
-                  </div>
-                );
-              }}
-            </For>
-          </Show>
-        </Card>
-
-        {/* Upcoming events */}
-        <Card title="Upcoming meetings" icon="ph-calendar-blank">
-          <Show
-            when={upcomingEvents().length > 0}
-            fallback={
-              <p
-                style={{
-                  color: "var(--text-muted)",
-                  "font-size": "var(--text-caption)",
-                }}
-              >
-                暂无
-              </p>
-            }
-          >
-            <For each={upcomingEvents()}>
-              {(e) => (
-                <div
+              <Show when={replyTime().total > 0}>
+                <p
                   style={{
-                    display: "flex",
-                    "align-items": "center",
-                    gap: "var(--space-2)",
-                    padding: "var(--space-1) 0",
+                    "margin-top": "var(--space-3)",
+                    "font-size": "var(--text-caption)",
+                    color: "var(--text-secondary)",
                   }}
                 >
-                  <div
+                  <Icon name="ph-arrow-u-up-left" size={11} /> 已回复{" "}
+                  {replyTime().replied} · 未回复 {replyTime().noReply} · 共{" "}
+                  {replyTime().total} 封
+                </p>
+              </Show>
+            </Card>
+
+            {/* Channel share */}
+            <Card title="Channel share" icon="ph-share-network">
+              <Show
+                when={channelShare().length > 0}
+                fallback={
+                  <p
                     style={{
-                      width: "8px",
-                      height: "8px",
-                      "border-radius": "50%",
-                      background: e.color,
-                    }}
-                  />
-                  <span style={{ "font-size": "var(--text-body-sm)", flex: 1 }}>
-                    {e.title}
-                  </span>
-                  <span
-                    style={{
-                      "font-size": "var(--text-micro)",
                       color: "var(--text-muted)",
+                      "font-size": "var(--text-caption)",
                     }}
                   >
-                    {relativeTime(e.dt)}
-                  </span>
+                    暂无
+                  </p>
+                }
+              >
+                <For each={channelShare()}>
+                  {([ch, n]) => (
+                    <div
+                      style={{
+                        display: "flex",
+                        "align-items": "center",
+                        gap: "var(--space-2)",
+                        padding: "var(--space-1) 0",
+                      }}
+                    >
+                      <span
+                        style={{ "font-size": "var(--text-body-sm)", flex: 1 }}
+                      >
+                        {ch}
+                      </span>
+                      <span
+                        style={{
+                          "font-size": "var(--text-caption)",
+                          "font-weight": "700",
+                          color: "var(--text-secondary)",
+                        }}
+                      >
+                        {n}
+                      </span>
+                    </div>
+                  )}
+                </For>
+              </Show>
+            </Card>
+
+            {/* Pending follow-ups */}
+            <Card title="Pending follow-ups" icon="ph-bell-ringing">
+              <p
+                style={{
+                  "font-size": "32px",
+                  "font-weight": "800",
+                  "font-family": "var(--font-display)",
+                  margin: 0,
+                  color:
+                    pendingFU() > 0 ? "var(--orange)" : "var(--text-muted)",
+                }}
+              >
+                {pendingFU()}
+              </p>
+              <p
+                style={{
+                  "font-size": "var(--text-caption)",
+                  color: "var(--text-muted)",
+                  margin: "var(--space-1) 0",
+                }}
+              >
+                待处理跟进
+              </p>
+            </Card>
+
+            {/* Agent actions */}
+            <Card title="Agent actions" icon="ph-sparkle">
+              <div style={{ display: "flex", gap: "var(--space-4)" }}>
+                <div>
+                  <p
+                    style={{
+                      "font-size": "24px",
+                      "font-weight": "800",
+                      "font-family": "var(--font-display)",
+                      margin: 0,
+                      color: "var(--agent)",
+                    }}
+                  >
+                    {agentActions().total}
+                  </p>
+                  <p
+                    style={{ "font-size": "10px", color: "var(--text-muted)" }}
+                  >
+                    Total
+                  </p>
                 </div>
-              )}
-            </For>
-          </Show>
-        </Card>
-      </div>
+                <div>
+                  <p
+                    style={{
+                      "font-size": "24px",
+                      "font-weight": "800",
+                      "font-family": "var(--font-display)",
+                      margin: 0,
+                      color: "var(--palm)",
+                    }}
+                  >
+                    {agentActions().done}
+                  </p>
+                  <p
+                    style={{ "font-size": "10px", color: "var(--text-muted)" }}
+                  >
+                    Done
+                  </p>
+                </div>
+                <div>
+                  <p
+                    style={{
+                      "font-size": "24px",
+                      "font-weight": "800",
+                      "font-family": "var(--font-display)",
+                      margin: 0,
+                      color: "var(--yellow)",
+                    }}
+                  >
+                    {agentActions().doing}
+                  </p>
+                  <p
+                    style={{ "font-size": "10px", color: "var(--text-muted)" }}
+                  >
+                    Doing
+                  </p>
+                </div>
+              </div>
+            </Card>
+
+            {/* Health distribution */}
+            <Card title="Health distribution" icon="ph-heartbeat">
+              <Show
+                when={Object.values(healthDist()).some((v) => v > 0)}
+                fallback={
+                  <p
+                    style={{
+                      color: "var(--text-muted)",
+                      "font-size": "var(--text-caption)",
+                    }}
+                  >
+                    暂无联系人
+                  </p>
+                }
+              >
+                <For
+                  each={[
+                    {
+                      label: "活跃",
+                      count: healthDist().active,
+                      color: "var(--status-active)",
+                    },
+                    {
+                      label: "需跟进",
+                      count: healthDist().risk,
+                      color: "var(--status-warning)",
+                    },
+                    {
+                      label: "冷淡",
+                      count: healthDist().cold,
+                      color: "var(--status-danger)",
+                    },
+                    {
+                      label: "其他",
+                      count: healthDist().other,
+                      color: "var(--text-muted)",
+                    },
+                  ]}
+                >
+                  {(b) => {
+                    const total =
+                      healthDist().active +
+                      healthDist().risk +
+                      healthDist().cold +
+                      healthDist().other;
+                    return (
+                      <div
+                        style={{
+                          display: "flex",
+                          "align-items": "center",
+                          gap: "var(--space-2)",
+                          padding: "var(--space-1) 0",
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: "8px",
+                            height: "8px",
+                            "border-radius": "50%",
+                            background: b.color,
+                          }}
+                        />
+                        <span
+                          style={{
+                            "font-size": "var(--text-body-sm)",
+                            flex: 1,
+                          }}
+                        >
+                          {b.label}
+                        </span>
+                        <span
+                          style={{
+                            "font-size": "var(--text-caption)",
+                            "font-weight": "700",
+                            color: "var(--text-secondary)",
+                          }}
+                        >
+                          {b.count}
+                        </span>
+                        <span
+                          style={{
+                            "font-size": "10px",
+                            color: "var(--text-muted)",
+                            "min-width": "32px",
+                            "text-align": "right",
+                          }}
+                        >
+                          {total > 0
+                            ? `${Math.round((b.count / total) * 100)}%`
+                            : "0%"}
+                        </span>
+                      </div>
+                    );
+                  }}
+                </For>
+              </Show>
+            </Card>
+
+            {/* Upcoming events */}
+            <Card title="Upcoming meetings" icon="ph-calendar-blank">
+              <Show
+                when={upcomingEvents().length > 0}
+                fallback={
+                  <p
+                    style={{
+                      color: "var(--text-muted)",
+                      "font-size": "var(--text-caption)",
+                    }}
+                  >
+                    暂无
+                  </p>
+                }
+              >
+                <For each={upcomingEvents()}>
+                  {(e) => (
+                    <div
+                      style={{
+                        display: "flex",
+                        "align-items": "center",
+                        gap: "var(--space-2)",
+                        padding: "var(--space-1) 0",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: "8px",
+                          height: "8px",
+                          "border-radius": "50%",
+                          background: e.color,
+                        }}
+                      />
+                      <span
+                        style={{ "font-size": "var(--text-body-sm)", flex: 1 }}
+                      >
+                        {e.title}
+                      </span>
+                      <span
+                        style={{
+                          "font-size": "var(--text-micro)",
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        {relativeTime(e.dt)}
+                      </span>
+                    </div>
+                  )}
+                </For>
+              </Show>
+            </Card>
+          </div>
+        )}
+      </ResourceGate>
     </div>
   );
 }

@@ -11,6 +11,15 @@
  *  shape every list view in the app has). Callers resolving to a single
  *  object should pass `isEmpty={d => false}` or the equivalent — the
  *  single-record case is never 'empty' from the user's perspective.
+ *
+ *  Multi-resource views (Drafts / Files / Insights / Agent / Search) wrap
+ *  the data area in a single gate whose `resource` is the "main" array,
+ *  and pass `isLoading` to combine secondary resources into the skeleton
+ *  phase. Without `isLoading`, the gate renders children as soon as the
+ *  main resource resolves, and secondary data (lookups, scheduled
+ *  follow-ups, …) renders progressively on its own — usually fine, but
+ *  for views where a section would visibly flicker in, the override
+ *  keeps the skeleton up until everything is ready.
  */
 
 import { Show, type JSX, type Resource } from "solid-js";
@@ -24,6 +33,13 @@ export interface ResourceGateProps<T> {
    * SkeletonList; pass an explicit element to override.
    */
   loading?: JSX.Element;
+  /**
+   * Override the loading check for multi-resource views. Return `true`
+   * while any related resource is still resolving; the skeleton stays
+   * up until *everything* the view needs is ready. Defaults to
+   * `resource.loading`.
+   */
+  isLoading?: () => boolean;
   /**
    * Render when the resource has errored. Receives the raw error and a
    * retry callback wired to `resource.refetch()`. Defaults to the app-wide
@@ -61,6 +77,9 @@ export function isResourceEmpty<T>(
 
 export function ResourceGate<T>(props: ResourceGateProps<T>): JSX.Element {
   const data = (): T | undefined => props.resource();
+  const loading = (): boolean =>
+    (props.isLoading ? props.isLoading() : props.resource.loading) ||
+    data() == null;
 
   const errorView = (): JSX.Element => {
     const err = props.resource.error;
@@ -90,7 +109,7 @@ export function ResourceGate<T>(props: ResourceGateProps<T>): JSX.Element {
   return (
     <Show when={!props.resource.error} fallback={errorView()}>
       <Show
-        when={!props.resource.loading && data() != null}
+        when={!loading() && data() != null}
         fallback={props.loading ?? <SkeletonList count={6} />}
       >
         <Show
