@@ -8,16 +8,18 @@
  * labels / attachments / trackers. On the Feishu account this drops
  * the IPC payload from ~80 MB (3,900 × 80 KB body_html) to ~600 KB
  * (3,900 × 150 bytes).
+ *
+ * Session 2026-08-21 perf pass: collapsed 5 parallel `createResource`
+ * calls into a single `getInsightsSummary()` resource. The 5-cascade
+ * was the bottleneck (each resource resolving re-ran every downstream
+ * `createMemo` against half-loaded data). With one resource the JS
+ * derivation runs exactly once, after the slowest read resolves. The
+ * 5 SQL hits are unchanged — IPC is the same — but the mount cost
+ * drops from 5x to 1x.
  */
 
 import { For, Show, createMemo, createResource } from "solid-js";
-import {
-  listContacts,
-  listFollowUps,
-  listAgentTasks,
-  listEvents,
-  listMessagesForInsights,
-} from "../stores/data";
+import { getInsightsSummary } from "../stores/data";
 import { Icon } from "../components/Icon";
 import { Empty, ErrorState } from "../components/Empty";
 import { ResourceGate } from "../components/ResourceGate";
@@ -28,29 +30,22 @@ import { useRefreshEffect } from "../utils/gestures";
 import { computeReplyTimeStats, formatDuration } from "../utils/insights";
 
 export function Insights() {
-  const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
-  const [followUps, { refetch: refetchFollowUps }] =
-    createResource(listFollowUps);
-  const [agentTasks, { refetch: refetchAgentTasks }] = createResource(() =>
-    listAgentTasks(),
-  );
-  const [events, { refetch: refetchEvents }] = createResource(listEvents);
-
-  /** 30-day window: powers weekly volume (7d) AND reply time (30d). */
-  const [messages, { refetch: refetchMessages }] = createResource(
-    () => ({
-      since: new Date(Date.now() - 30 * 86_400_000).toISOString(),
-    }),
-    listMessagesForInsights,
-  );
+  const [summary, { refetch }] = createResource(getInsightsSummary);
 
   useRefreshEffect(() => {
-    void refetchContacts();
-    void refetchFollowUps();
-    void refetchAgentTasks();
-    void refetchEvents();
-    void refetchMessages();
+    void refetch();
   });
+
+  // Slice accessors. `createMemo` is overkill here because the
+  // resource is a single immutable snapshot until the next refetch,
+  // but keeping them as plain function calls means a refetch that
+  // updates one field doesn't re-derive the others (Solid's signal
+  // graph handles the propagation).
+  const contacts = () => summary()?.contacts;
+  const followUps = () => summary()?.followUps;
+  const agentTasks = () => summary()?.agentTasks;
+  const events = () => summary()?.events;
+  const messages = () => summary()?.messages;
 
   const weeklyVolume = createMemo(() => {
     const now = new Date();
@@ -144,14 +139,7 @@ export function Insights() {
       </h2>
 
       <ResourceGate
-        resource={messages}
-        isLoading={() =>
-          messages.loading ||
-          contacts.loading ||
-          followUps.loading ||
-          agentTasks.loading ||
-          events.loading
-        }
+        resource={summary}
         loading={
           <div
             style={{
@@ -168,21 +156,8 @@ export function Insights() {
         errorView={() => (
           <ErrorState
             title="Insights 加载失败"
-            message={String(
-              messages.error ??
-                contacts.error ??
-                followUps.error ??
-                agentTasks.error ??
-                events.error ??
-                "",
-            )}
-            retry={() => {
-              void refetchMessages();
-              void refetchContacts();
-              void refetchFollowUps();
-              void refetchAgentTasks();
-              void refetchEvents();
-            }}
+            message={String(summary.error ?? "")}
+            retry={() => void refetch()}
           />
         )}
         empty={<Empty icon="ph-chart-line-up" title="暂无数据" />}

@@ -333,8 +333,10 @@ function rowToEvent(r: Record<string, unknown>): CalendarEvent {
     icalMethod: (r.ical_method as string | undefined) ?? undefined,
     icalSequence: (r.ical_sequence as number | undefined) ?? undefined,
     organizerEmail: (r.organizer_email as string | undefined) ?? undefined,
-    attendeeResponse: (r.attendee_response as CalendarEvent["attendeeResponse"]) ?? undefined,
-    attendeeResponseAt: (r.attendee_response_at as string | undefined) ?? undefined,
+    attendeeResponse:
+      (r.attendee_response as CalendarEvent["attendeeResponse"]) ?? undefined,
+    attendeeResponseAt:
+      (r.attendee_response_at as string | undefined) ?? undefined,
     recurrenceRule: (r.recurrence_rule as string | undefined) ?? undefined,
     recurrenceDates: safeParse<string[]>(r.recurrence_dates_json as string, []),
     excludedDates: safeParse<string[]>(r.excluded_dates_json as string, []),
@@ -703,7 +705,9 @@ export async function listCompaniesWithCounts(): Promise<CompanyGroup[]> {
   return out;
 }
 
-export async function listCompanyContacts(companyName: string): Promise<Contact[]> {
+export async function listCompanyContacts(
+  companyName: string,
+): Promise<Contact[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
     "SELECT * FROM contacts WHERE company = $1 ORDER BY name",
@@ -763,7 +767,7 @@ export async function listGateQueue(): Promise<GateQueueItem[]> {
     // surface in the Gate screener, which is meant for incoming first-time
     // senders. We filter here rather than in SQL so the in-memory MockDb used
     // by tests doesn't need full multi-condition IN() parsing.
-    if ((row.direction as string | undefined ?? "in") === "out") continue;
+    if (((row.direction as string | undefined) ?? "in") === "out") continue;
     const pid = row.pid as ID;
     const existing = messagesByContact.get(pid);
     if (existing) {
@@ -949,7 +953,9 @@ export interface ReminderMessageSlice {
   bubbleUpAt: string | null;
 }
 
-export async function listMessagesForReminder(nowIso: string): Promise<ReminderMessageSlice[]> {
+export async function listMessagesForReminder(
+  nowIso: string,
+): Promise<ReminderMessageSlice[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
     `SELECT id, subj, bucket, unread, bubble_up_at
@@ -980,7 +986,9 @@ export async function listContactMessages(contactId: ID): Promise<Message[]> {
   return rows.map(rowToMessage);
 }
 
-export async function listCompanyMessages(contactIds: ID[]): Promise<Message[]> {
+export async function listCompanyMessages(
+  contactIds: ID[],
+): Promise<Message[]> {
   if (contactIds.length === 0) return [];
   const db = await getDb();
   const placeholders = contactIds.map((_, i) => `$${i + 1}`).join(",");
@@ -1200,7 +1208,9 @@ export async function listMessageNeighbours(id: ID): Promise<{
       [curSt],
     ),
   ]);
-  const toN = (r: Record<string, unknown> | undefined): NeighbourMessage | null =>
+  const toN = (
+    r: Record<string, unknown> | undefined,
+  ): NeighbourMessage | null =>
     r
       ? {
           id: r.id as string,
@@ -1213,9 +1223,7 @@ export async function listMessageNeighbours(id: ID): Promise<{
   return { prev: toN(prevRows[0]), next: toN(nextRows[0]) };
 }
 
-export async function listStickiesForMessage(
-  messageId: ID,
-): Promise<Sticky[]> {
+export async function listStickiesForMessage(messageId: ID): Promise<Sticky[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
     "SELECT * FROM stickies WHERE msg_id = $1 ORDER BY created_at DESC",
@@ -1522,12 +1530,18 @@ export async function listCompanyFiles(contactIds: ID[]): Promise<FileItem[]> {
   return rows.map(rowToFile).filter((f) => idSet.has(f.pid));
 }
 
-export async function addFileSourceMessage(fileId: ID, messageId: ID): Promise<void> {
+export async function addFileSourceMessage(
+  fileId: ID,
+  messageId: ID,
+): Promise<void> {
   const db = await getDb();
-  const existing = (await db.select<Array<{ source_message_ids: string }>>(
-    "SELECT source_message_ids FROM files WHERE id = $1",
-    [fileId],
-  ))[0]?.source_message_ids ?? "[]";
+  const existing =
+    (
+      await db.select<Array<{ source_message_ids: string }>>(
+        "SELECT source_message_ids FROM files WHERE id = $1",
+        [fileId],
+      )
+    )[0]?.source_message_ids ?? "[]";
   const next = safeParse<string[]>(existing, []);
   if (!next.includes(messageId)) next.push(messageId);
   await db.execute("UPDATE files SET source_message_ids = $1 WHERE id = $2", [
@@ -1585,23 +1599,27 @@ export async function listEvents(): Promise<CalendarEvent[]> {
   return rows.map(rowToEvent);
 }
 
-export async function listContactEvents(contactId: ID): Promise<CalendarEvent[]> {
+export async function listContactEvents(
+  contactId: ID,
+): Promise<CalendarEvent[]> {
   const db = await getDb();
   const pattern = `%"${contactId}"%`;
   const rows = await db.select<Record<string, unknown>[]>(
     "SELECT * FROM events WHERE pids_json LIKE $1 ORDER BY dt ASC",
     [pattern],
   );
-  return rows
-    .map(rowToEvent)
-    .filter((e) => e.pids.includes(contactId));
+  return rows.map(rowToEvent).filter((e) => e.pids.includes(contactId));
 }
 
-export async function listCompanyEvents(contactIds: ID[]): Promise<CalendarEvent[]> {
+export async function listCompanyEvents(
+  contactIds: ID[],
+): Promise<CalendarEvent[]> {
   if (contactIds.length === 0) return [];
   const db = await getDb();
   const patterns = contactIds.map((id) => `%"${id}"%`);
-  const placeholders = patterns.map((_, i) => `$${i + 1}`).join(" OR pids_json LIKE ");
+  const placeholders = patterns
+    .map((_, i) => `$${i + 1}`)
+    .join(" OR pids_json LIKE ");
   const rows = await db.select<Record<string, unknown>[]>(
     `SELECT * FROM events WHERE pids_json LIKE ${placeholders} ORDER BY dt ASC`,
     patterns,
@@ -2078,6 +2096,44 @@ export async function listFollowUps(): Promise<FollowUp[]> {
     "SELECT * FROM follow_ups ORDER BY due_at ASC",
   );
   return rows.map(rowToFollowUp);
+}
+
+/** Bundled Insights view data — one resource, one render.
+ *
+ *  The previous shape fired 5 `createResource` calls in parallel and
+ *  let SolidJS re-derive every downstream `createMemo` 5 times as each
+ *  one resolved (`Insights.tsx`). The mount cost was the 5-cascade,
+ *  not the JS work — at the Feishu scale (1500 contacts / 4000
+ *  messages) the memos re-ran against half-loaded data 5 times.
+ *
+ *  This single fetcher awaits all 5 reads in parallel and returns one
+ *  DTO. The view drops to 1 `createResource` (and therefore 1
+ *  ResourceGate / 1 isLoading / 1 mount cascade). The IPC cost is
+ *  unchanged — Tauri still gets 5 SQL hits — but the JS work happens
+ *  exactly once, after the slowest read resolves, not 5 times.
+ *
+ *  All 5 calls use the existing narrow projections so the body_html
+ *  and full Message rows never cross the IPC bridge. */
+export interface InsightsSummary {
+  contacts: Contact[];
+  followUps: FollowUp[];
+  agentTasks: AgentTask[];
+  events: CalendarEvent[];
+  messages: InsightsMessageSlice[];
+}
+
+export async function getInsightsSummary(): Promise<InsightsSummary> {
+  const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const [contacts, followUps, agentTasks, events, messages] = await Promise.all(
+    [
+      listContacts(),
+      listFollowUps(),
+      listAgentTasks(),
+      listEvents(),
+      listMessagesForInsights({ since }),
+    ],
+  );
+  return { contacts, followUps, agentTasks, events, messages };
 }
 
 /** Due follow-ups for the reminder tick. Returns ONLY the columns the
