@@ -189,6 +189,26 @@ The first cold Rust build from scratch took 6 m 27 s — this is the all-deps-fr
 
 The previous DMG from `2c41277` (the Imbox hover-only toolbar refactor) is preserved in `dist/SendPalm-0.1.0-arm64.dmg` for comparison. The `-perf` suffix marks the new build so the user can pick the right one.
 
+## v2 DMG build — ResizeObserver loop fix (2026-08-21)
+
+User reported the `-perf` DMG showed `ResizeObserver loop completed with undelivered notifications` in the Tauri devtools console and the MessagePanel became unresponsive on long emails. Root cause was the iframe body's ResizeObserver callback setting `el.style.height` synchronously inside the callback — when the body is still laying out (inline images / web fonts / CSS animations), the height change can fire another RO event in the same frame, which the browser suppresses and logs.
+
+Fix (commit 8bc925d, `src/panels/MessagePanel.tsx`): wrap the height write in `requestAnimationFrame` so the browser delivers all RO entries first, then the rAF callback runs the height write on the next frame. Also coalesces bursts via `cancelAnimationFrame` so 10+ RO events from a long email with many inline images collapse to a single height write. New regression test in `panels/MessagePanel.test.ts` covers the rAF coalescing.
+
+This is a textbook fix for the RO loop warning per https://www.w3.org/TR/resize-observer/#deliver-resize-errors. The earlier fix 58b9df0 plugged the **cleanup** leak (observers accumulating on unmount) — this is a different bug: the loop, not the leak.
+
+| Field            | Value                                                              |
+| ---------------- | ------------------------------------------------------------------ |
+| Commit           | 8bc925d                                                            |
+| Rust compile     | 21 m 11 s (deps were wiped mid-build; full rebuild from scratch)   |
+| DMG path         | `dist/SendPalm-0.1.0-arm64-v2.dmg`                                 |
+| DMG size         | 8.8 MB (9 215 004 bytes)                                           |
+| DMG sha256       | `21ab791bcb35e369bc0a101509680609708ed79dc7fe7d8865b5d6d6b13bbb34` |
+| App binary mtime | Aug 21 22:16                                                       |
+| vitest           | 314/314 pass (was 313, +1 rAF coalescing test)                     |
+
+The `-v2` suffix marks this build vs the earlier `-perf` (which had the leak but not the loop fix). To install, the user replaces the .app in `/Applications` — both builds have the same `CFBundleIdentifier` so macOS will offer to replace in place.
+
 ## v3 reframing (2026-08-20)
 
 SendPalm is a **HEY-workflow client for any IMAP email service** — not a HEY replacement. The two-pager `docs/POSITIONING.md` is the source of truth for the white space (HEY workflow × any-service client) and the explicit non-goals (no backend, no cross-device sync, no web app, no B2B SSO).
