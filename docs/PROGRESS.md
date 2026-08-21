@@ -19,6 +19,40 @@
 
 The `ResourceGate` component existed but the views never migrated to it. Audit-style catchup would be cheaper if the component is **introduced *and* the migration is shipped in the same commit** — half-migrating leaves the technical debt in place and reviewers can't tell whether the new pattern is enforced. Going forward: new `createResource` calls should default to a `ResourceGate` and the loader is the `SkeletonList` skeleton, not a hand-rolled `<Show>`.
 
+## View-switching perf audit (2026-08-21)
+
+The "loading fixed" pass also needed to answer "how bad is the lag, actually?" before any perf optimization. Built `e2e/perf-views.spec.ts` — Playwright boots Vite, seeds ~1500 contacts + 4000 messages via `window.__sendpalmE2E`, then for every sidebar-navigable view clicks the nav button, records `mountMs` (click → h1/h2 visible), `longTasks` via `PerformanceObserver`, frame avg/p95/max over a 3 s rAF sampler, and `loadingVisible` (whether the new Skeleton was actually observed in the DOM). Output to `qa-tmp/perf-views-report.json`. Search / Agent / FocusReply are not in the sidebar — they open via ⌘K and need a separate test pass.
+
+Results (warmup pass + measurement pass, Vite dev mode, 4000-row MockDb):
+
+| View      | mountMs | longTasks | maxTask | frameAvg | frameP95 | frameMax |
+| --------- | ------- | --------- | ------- | -------- | -------- | -------- |
+| Imbox     | 131     | 0         | 0       | 16.5     | 17.5     | 19.6     |
+| Drafts    |  88     | 0         | 0       | 16.5     | 17.5     | 21.1     |
+| Files     | 177     | 0         | 0       | 16.5     | 17.4     | 27.3     |
+| Clips     | 220     | 0         | 0       | 16.7     | 17.4     | 55.5     |
+| FollowUps | 148     | 0         | 0       | 16.5     | 17.5     | 17.8     |
+| **Companies** | **645** | **3**  | **217** | 19.2     | 18.2     | **298.7** |
+| Insights  | 202     | 0         | 0       | 16.6     | 17.7     | 34.1     |
+| Calendar  | 200     | 0         | 0       | 16.6     | 17.6     | 25.2     |
+| Settings  | 324     | 0         | 0       | 16.7     | 17.6     | 23.2     |
+| Records   | 167     | 0         | 0       | 16.7     | 18.9     | 36.3     |
+| Spam      | 216     | 0         | 0       | 16.5     | 17.7     | 25.9     |
+| Trash     | 249     | 0         | 0       | 16.5     | 17.5     | 17.7     |
+
+**Companies is the only real perf hotspot** — 645 ms mount, 3 long tasks, 217 ms max long task, 298 ms max frame. Other views are 100–330 ms and stay at 60 fps after the first paint.
+
+Root cause for Companies (read straight from `Companies.tsx:42-72`):
+- 5 concurrent IPC round-trips (contacts + messages + events + files)
+- client-side `grouped()` memo runs `O(people × (messages + events + files))` set lookups in a single synchronous `createMemo` on the main thread — 1500 contacts × 4 lookups per contact = 6000 Set ops blocking the JS thread
+- when the 5 resources all resolve near-simultaneously, SolidJS re-runs the memo on each one → render storm on the main thread
+
+`loadingVisible: false` everywhere in this measurement is **expected** — MockDb resolves in the microtask queue, faster than the Playwright locator can observe `aria-busy="true"`. The visual confirmation of the new Skeleton has to happen against a real Tauri IPC round-trip (where the data path is 50–500 ms).
+
+### Lesson
+
+The audit-script-in-source approach (loading-states.test.ts) catches structural mistakes but the perf audit lives better in `e2e/`. Keep `e2e/perf-views.spec.ts` as the regression gate for the Companies hot path specifically — once that 645 ms drops below 200 ms and 0 long tasks, raise the bar to the next slowest view.
+
 ## v3 reframing (2026-08-20)
 
 SendPalm is a **HEY-workflow client for any IMAP email service** — not a HEY replacement. The two-pager `docs/POSITIONING.md` is the source of truth for the white space (HEY workflow × any-service client) and the explicit non-goals (no backend, no cross-device sync, no web app, no B2B SSO).
