@@ -145,6 +145,29 @@ All numbers from `qa-tmp/perf-scan-2.json` (the v1 report is still at `qa-tmp/pe
 
 The "push joins into the database" lesson from the Companies fix generalizes to **"push multi-resource fetches behind one resource"**. The 5-cascade mount cost is the same shape as the 4-table client-side group/filter cost — N parallel reads = N re-derivations of every downstream memo, even though each individual read finishes in microseconds. Bundling behind one `Promise.all` is a free N× speedup that no amount of `untrack()` / `batch()` / `createMemo` optimization would match. The fix is structurally identical to the Companies one even though Insights never did any "client-side join" work.
 
+## Stress-test confirmation at 3× data (2026-08-21)
+
+User came back with "主要出现在数据多的时候" — wanting to know if the v1 fix actually scales with the data the user actually has. Added a 3× stress variant of the perf-2-pass test: 4500 contacts, 12000 messages, 200 events (50 weekly-recurring → ~2600 occurrences in the Calendar year view, 4× the v1 baseline). Re-measured the surfaces the v1 fixes touched.
+
+| Surface                         | 1× (Feishu) | 3× (stress) | Verdict                                                  |
+| ------------------------------- | ----------- | ----------- | -------------------------------------------------------- |
+| Calendar year scroll long tasks | 0           | **0**       | ✓ Set lookup is O(1) regardless of event count           |
+| Calendar year scroll max frame  | 21.8ms      | 21.4ms      | ✓ no degradation                                         |
+| Imbox 12k scroll long tasks     | 0           | 0           | ✓                                                        |
+| Imbox 12k scroll dropped frames | 0           | 1           | within noise                                             |
+| Calendar mountMs                | 83.4        | 66.8        | ✓ (warm cache; v1 was 94.2 cold)                         |
+| Insights mountMs                | 75.3        | 145.0       | 1.9× — data is moving across IPC, scales linearly with N |
+
+**The headline is the Calendar year scroll**: 0 long tasks at 4× the occurrence count. The Set-based `hasEvent` lookup is O(1) regardless of event count, so this scaling is the proof that the fix is a real win and not just a paper refactor.
+
+**Insights scaling is expected and irreducible in Vite/MockDb**: it pulls 12k messages across the IPC bridge in one resource, so 3× data ≈ 1.9× mount. The structural fix (1 resource, not 5 cascading) is in place; the residual is data transfer. The next step on Insights is server-side aggregation in a Tauri Rust command that does the 5 reads in one round-trip and returns the pre-aggregated summary — but that's a Tauri-only optimization and Vite/MockDb is the wrong place to test it.
+
+`pnpm vitest run` → 313 / 313 pass, lint/tsc/prettier clean. Output: `qa-tmp/perf-scan-2-stress-3x.json`. Test: `perf-2-pass.spec.ts` → `stress 3x data: heavy views + scroll`.
+
+### Lesson
+
+The cost of a perf fix is only meaningful when measured at the data scale the user actually has. The 1× Feishu-sized perf run said the v1 fixes worked; the 3× stress run said the **structural** fixes (Set lookup, single resource, SQL aggregate) actually scale, vs cosmetic refactors that only moved the bottleneck. A 1.9× Insights mount at 3× data is fine if the underlying shape is "1 resource × N rows" — that's data transfer, no algorithmic shortcut. It's a problem if the underlying shape is "N cascading resources × N rows" — that's quadratic, no fix without a real refactor. Always re-run perf at the data scale you actually care about before declaring victory.
+
 ## v3 reframing (2026-08-20)
 
 SendPalm is a **HEY-workflow client for any IMAP email service** — not a HEY replacement. The two-pager `docs/POSITIONING.md` is the source of truth for the white space (HEY workflow × any-service client) and the explicit non-goals (no backend, no cross-device sync, no web app, no B2B SSO).
