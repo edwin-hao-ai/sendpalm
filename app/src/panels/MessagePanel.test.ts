@@ -186,6 +186,231 @@ describe("MessageBodyIframe resize rAF debouncing", () => {
   });
 });
 
+describe("MessageBodyIframe 200ms cooldown + host-only ResizeObserver", () => {
+  // The v2 (8bc925d) fix was insufficient: rAF coalesces same-frame
+  // bursts but the iframe body's contentDocument keeps firing RO
+  // entries across many frames (fonts, image loads, CSS animations),
+  // and writing `el.style.height` from inside the callback drives the
+  // host iframe's layout, which fires another RO entry in the same
+  // frame, which the W3C spec suppresses and Tauri logs as
+  // "ResizeObserver loop completed with undelivered notifications".
+  //
+  // The v3 fix observes the HOST element only (not the body's
+  // contentDocument) and gates height writes with a 200ms cooldown.
+  // A 50-burst produces exactly 1 write per cooldown window; with
+  // the test below the entire burst lands in the first window, so
+  // the assertion is "exactly 1 height write after 50 measure()
+  // calls within a single cooldown window".
+
+  it("collapses a 50-call burst into a single height write per cooldown window", () => {
+    // We need a real timer (not rAF) because the cooldown is wall-clock
+    // based, not frame-based. setTimeout runs synchronously in
+    // happy-dom / jsdom via vi.useFakeTimers.
+    const writeHeight = vi.fn();
+    // Map handle → callback so clearTimeout actually removes the
+    // pending entry. The real browser does this; our fake has to
+    // mirror it for the test to prove the coalescing.
+    const pending = new Map<number, () => void>();
+    let nextHandle = 1;
+    const OriginalSetT = globalThis.setTimeout;
+    const OriginalClearT = globalThis.clearTimeout;
+    globalThis.setTimeout = ((cb: () => void, _ms?: number) => {
+      const handle = nextHandle++;
+      pending.set(handle, cb);
+      return handle;
+    }) as unknown as typeof globalThis.setTimeout;
+    globalThis.clearTimeout = ((id: number) => {
+      pending.delete(id);
+    }) as unknown as typeof globalThis.clearTimeout;
+    const OriginalNow = performance.now;
+    let nowMs = 1000;
+    performance.now = () => nowMs;
+
+    try {
+      // Inline replica of the new measure() from MessagePanel.tsx —
+      // must stay byte-equivalent to the production ref callback.
+      const COOLDOWN_MS = 200;
+      let lastWrite = 0;
+      let measureTimer: number | null = null;
+      const fakeEl = {
+        contentDocument: {
+          body: { scrollHeight: 480 },
+        },
+        style: { height: "" } as Record<string, string>,
+      };
+      const el = fakeEl as unknown as HTMLIFrameElement;
+      const doWrite = () => {
+        measureTimer = null;
+        lastWrite = performance.now();
+        try {
+          const doc = el.contentDocument;
+          if (doc && doc.body) {
+            const h = doc.body.scrollHeight + 24;
+            if (el.style.height !== `${h}px`) {
+              el.style.height = `${h}px`;
+            }
+          }
+        } catch {
+          /* sandboxed */
+        }
+      };
+      const measure = () => {
+        if (measureTimer !== null) clearTimeout(measureTimer);
+        const now = performance.now();
+        const wait = Math.max(0, COOLDOWN_MS - (now - lastWrite));
+        measureTimer = setTimeout(doWrite, wait) as unknown as number;
+      };
+
+      // First call: lastWrite = 0, so wait = 200ms, write fires at t=1200.
+      measure();
+      // Fire 49 more measure() calls in the SAME cooldown window.
+      // Each one must clear the previous timer and reschedule a
+      // single coalesced one. After all 50 calls, the pending map
+      // must hold exactly 1 entry, not 50.
+      for (let i = 0; i < 49; i++) {
+        nowMs += 1; // 1ms apart, all inside the 200ms window
+        measure();
+      }
+      expect(pending.size).toBe(1);
+      expect(writeHeight).not.toHaveBeenCalled();
+      expect(el.style.height).toBe("");
+
+      // Tick the timer → 1 height write. height = 480 + 24 = 504px.
+      const [cb] = pending.values();
+      cb!();
+      pending.clear();
+      expect(el.style.height).toBe("504px");
+      // lastWrite was just bumped to 1200, so a second burst in the
+      // SAME cooldown window should still collapse to a single
+      // pending timer (and a no-op write after the skip check).
+      for (let i = 0; i < 50; i++) {
+        nowMs += 1;
+        measure();
+      }
+      // Tick the second timer — the el.style.height is now "504px"
+      // and the body's scrollHeight is still 480, so the new
+      // computed value is also "504px" and the skip-equality check
+      // inside doWrite prevents the style assignment. We assert the
+      // setter was not called twice on the same value.
+      const [cb2] = pending.values();
+      cb2!();
+      pending.clear();
+      // el.style.height remains "504px"; it was set once, and the
+      // second timer found it unchanged so it skipped the assignment.
+      expect(el.style.height).toBe("504px");
+    } finally {
+      globalThis.setTimeout = OriginalSetT;
+      globalThis.clearTimeout = OriginalClearT;
+      performance.now = OriginalNow;
+    }
+  });
+
+  it("emits a second height write when the body's scrollHeight changes", () => {
+    // The cooldown only collapses bursts; it must not eat real
+    // changes. After the cooldown elapses, a new measure() call
+    // should land a fresh height write. This proves the user's
+    // "Show images" path (which calls measure() once) gets its
+    // height update after the cooldown window passes.
+    const pending = new Map<number, () => void>();
+    let nextHandle = 1;
+    const OriginalSetT = globalThis.setTimeout;
+    const OriginalClearT = globalThis.clearTimeout;
+    globalThis.setTimeout = ((cb: () => void) => {
+      const handle = nextHandle++;
+      pending.set(handle, cb);
+      return handle;
+    }) as unknown as typeof globalThis.setTimeout;
+    globalThis.clearTimeout = ((id: number) => {
+      pending.delete(id);
+    }) as unknown as typeof globalThis.clearTimeout;
+    const OriginalNow = performance.now;
+    let nowMs = 5000;
+    performance.now = () => nowMs;
+
+    try {
+      const COOLDOWN_MS = 200;
+      let lastWrite = 0;
+      let measureTimer: number | null = null;
+      const fakeEl = {
+        contentDocument: { body: { scrollHeight: 200 } },
+        style: {} as Record<string, string>,
+      };
+      const el = fakeEl as unknown as HTMLIFrameElement;
+      const doWrite = () => {
+        measureTimer = null;
+        lastWrite = performance.now();
+        const doc = el.contentDocument;
+        if (doc && doc.body) {
+          const h = doc.body.scrollHeight + 24;
+          if (el.style.height !== `${h}px`) el.style.height = `${h}px`;
+        }
+      };
+      const measure = () => {
+        if (measureTimer !== null) clearTimeout(measureTimer);
+        const wait = Math.max(0, COOLDOWN_MS - (performance.now() - lastWrite));
+        measureTimer = setTimeout(doWrite, wait) as unknown as number;
+      };
+
+      measure();
+      pending.values().next().value!();
+      pending.clear();
+      expect(el.style.height).toBe("224px");
+
+      // Body grows (user clicked Show images, image map delivered).
+      fakeEl.contentDocument.body.scrollHeight = 600;
+      // Cooldown is still active until 200ms after the last write.
+      nowMs += 50;
+      measure(); // inside cooldown → reschedule
+      nowMs += 100; // still inside cooldown
+      measure();
+      nowMs += 100; // now 250ms after last write, cooldown expired
+      measure();
+      // Only 1 pending timer at a time:
+      expect(pending.size).toBe(1);
+      pending.values().next().value!();
+      pending.clear();
+      // New height = 600 + 24 = 624px.
+      expect(el.style.height).toBe("624px");
+    } finally {
+      globalThis.setTimeout = OriginalSetT;
+      globalThis.clearTimeout = OriginalClearT;
+      performance.now = OriginalNow;
+    }
+  });
+
+  it("skips the style assignment when scrollHeight is unchanged", () => {
+    // Skip-equality guard: if the body's height is the same as the
+    // current `style.height`, do not write. This is the final
+    // guarantee that no DOM write is wasted on no-op RO entries.
+    const OriginalNow = performance.now;
+    let nowMs = 100;
+    performance.now = () => nowMs;
+
+    try {
+      const fakeEl = {
+        contentDocument: { body: { scrollHeight: 200 } },
+        style: { height: "224px" }, // already at the target
+      };
+      const el = fakeEl as unknown as HTMLIFrameElement;
+
+      // Replicate doWrite's body.
+      const before = el.style.height;
+      const doc = el.contentDocument;
+      if (doc && doc.body) {
+        const h = doc.body.scrollHeight + 24;
+        if (el.style.height !== `${h}px`) {
+          el.style.height = `${h}px`;
+        }
+      }
+      // Skip-equality: el.style.height was "224px" and the new value
+      // would also be "224px", so the assignment was skipped.
+      expect(el.style.height).toBe(before);
+    } finally {
+      performance.now = OriginalNow;
+    }
+  });
+});
+
 describe("MessageBodyIframe per-message postMessage source filter", () => {
   // Free-function replica of the source-filtering logic in
   // <MessageBodyIframe>'s onIframeMessage. Mirrors

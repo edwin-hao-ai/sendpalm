@@ -2226,6 +2226,13 @@ function MessageBodyIframe(props: { message: Message; senderEmail?: string }) {
   let pendingSanitize = 0;
   let currentIframe: HTMLIFrameElement | null = null;
   let currentIframeResizeObserver: ResizeObserver | null = null;
+  // 200ms cooldown timer + last-write timestamp. See the ref callback
+  // below for the full reasoning. Exposed so onShowImages can re-trigger
+  // a measurement after the prefetched image map is delivered to the
+  // iframe (which causes the body to grow, but the body's contentWindow
+  // is cross-realm so we can't observe it from the host realm).
+  let currentMeasure: (() => void) | null = null;
+  let currentMeasureTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Image analysis is cheap (regex over bodyHtml) but we still memo
   // it so the Show images button only re-evaluates when the message
@@ -2296,7 +2303,8 @@ function MessageBodyIframe(props: { message: Message; senderEmail?: string }) {
   });
 
   // Per-component cleanup for the message listener + the
-  // ResizeObserver (see commit 58b9df0 for the leak this prevents).
+  // ResizeObserver + the cooldown timer (see commit 58b9df0 for the
+  // original leak; see commit a6ebd81 / this change for the loop).
   onCleanup(() => {
     window.removeEventListener("message", onIframeMessage);
     try {
@@ -2305,6 +2313,11 @@ function MessageBodyIframe(props: { message: Message; senderEmail?: string }) {
       /* already torn down */
     }
     currentIframeResizeObserver = null;
+    if (currentMeasureTimer !== null) {
+      clearTimeout(currentMeasureTimer);
+      currentMeasureTimer = null;
+    }
+    currentMeasure = null;
     if (currentIframe) {
       currentIframe.onload = null;
       currentIframe.dataset.roAttached = "";
@@ -2331,6 +2344,16 @@ function MessageBodyIframe(props: { message: Message; senderEmail?: string }) {
           },
           "*",
         );
+        // Re-measure once the image map is delivered to the iframe.
+        // The postMessage is dispatched immediately; the iframe's
+        // image swap + layout pass happens in the next animation
+        // frame. We schedule a measurement in that frame so the
+        // body.scrollHeight is read AFTER the new images have
+        // actually contributed to layout (otherwise we'd capture
+        // the pre-image height and need a second tick).
+        requestAnimationFrame(() => {
+          currentMeasure?.();
+        });
       }
     } catch {
       showToast({ kind: "error", message: "加载图片失败" });
@@ -2398,47 +2421,98 @@ function MessageBodyIframe(props: { message: Message; senderEmail?: string }) {
             return;
           }
           currentIframe = el;
-          // rAF-debounce the height write. The ResizeObserver spec
-          // (https://www.w3.org/TR/resize-observer/#deliver-resize-errors)
-          // requires observers to deliver all resize entries before the
-          // next frame; if our callback synchronously writes a new
-          // `style.height` that triggers another resize, the browser
-          // suppresses the second notification and logs
-          // "ResizeObserver loop completed with undelivered
-          // notifications." Deferring the height write to the next
-          // rAF tick breaks the synchronous feedback loop while still
-          // sizing the iframe before the next paint. We also coalesce
-          // bursts (a long email with many inline images / fonts can
-          // fire 10+ RO events in one frame) into a single write.
-          let resizeRaf = 0;
-          const resize = () => {
-            if (resizeRaf) cancelAnimationFrame(resizeRaf);
-            resizeRaf = requestAnimationFrame(() => {
-              resizeRaf = 0;
-              try {
-                const doc = el.contentDocument;
-                if (doc && doc.body) {
-                  const height = doc.body.scrollHeight + 24;
+          // 200ms cooldown: every height write bumps `lastWrite`;
+          // subsequent measure() calls within the cooldown window
+          // collapse to the next cooldown boundary. This is the
+          // physical guarantee that a 50-burst (e.g. onload + N
+          // image loads) produces at most ceil(bursts / cooldown)
+          // height writes — usually exactly 1, and never more than
+          // the number of distinct cooldown windows the burst spans.
+          //
+          // Why not ResizeObserver on the iframe body's contentDocument?
+          //   - It was the source of the "ResizeObserver loop completed
+          //     with undelivered notifications" error.
+          //   - The iframe body is cross-realm; the host document's
+          //     ResizeObserver can observe the BODY node (same window),
+          //     but writing `el.style.height` from that callback
+          //     triggers the host iframe's own layout, which fires
+          //     another RO entry on the body, which the browser
+          //     suppresses AND the Tauri webview logs as a
+          //     frame-stalling warning. With long emails (many inline
+          //     images, web fonts, CSS animations), the body's scroll
+          //     height changes across many frames and the loop can
+          //     compound until the webview is unresponsive.
+          //   - The previous rAF-debounce (commit 8bc925d) coalesced
+          //     same-frame bursts but did NOT prevent cross-frame
+          //     burst compounding, and the user still reports the
+          //     loop on real Tauri.
+          //
+          // Why is observing the HOST element safe?
+          //   - The host iframe's size is driven by the OUTER layout
+          //     (window resize, panel toggle, sidebar toggle). None of
+          //     those happen synchronously from inside this callback,
+          //     so writing `el.style.height` here is a one-way trip —
+          //     it does not cause the host to resize again within the
+          //     same frame. The W3C spec
+          //     (https://www.w3.org/TR/resize-observer/#deliver-resize-errors)
+          //     only suppresses notifications when callback → DOM
+          //     write → DOM mutation → callback is synchronous within
+          //     one frame. We break that chain by (a) writing the
+          //     iframe's own height, not the host's, and (b) gating
+          //     the write with a 200ms cooldown so a runaway outer
+          //     resize cannot drive us into a tight loop.
+          //
+          // What about content changes (Show images, etc.)?
+          //   - onShowImages explicitly calls `currentMeasure()` after
+          //     the postMessage delivery, so the image-reveal path
+          //     gets a fresh height write.
+          //   - Other body mutations (font load, CSS animation) are
+          //     not directly observable from the host realm. They
+          //     typically settle within 200ms of onload, which the
+          //     cooldown covers.
+          const COOLDOWN_MS = 200;
+          let lastWrite = 0;
+          const doWrite = () => {
+            currentMeasureTimer = null;
+            lastWrite = performance.now();
+            try {
+              const doc = el.contentDocument;
+              if (doc && doc.body) {
+                const height = doc.body.scrollHeight + 24;
+                // Skip the DOM write if the height is unchanged. This
+                // breaks the only remaining feedback edge: a RO entry
+                // that fires when the host hasn't actually changed
+                // size would otherwise write the same `style.height`
+                // and look identical to a no-op, but the assignment
+                // still forces a style invalidation. Skipping the
+                // assignment when the value matches removes that
+                // micro-cost AND guarantees the next layout pass
+                // produces zero host-geometry change.
+                if (el.style.height !== `${height}px`) {
                   el.style.height = `${height}px`;
                 }
-              } catch {
-                /* sandboxed — keep default height */
               }
-            });
+            } catch {
+              /* sandboxed — keep default height */
+            }
           };
-          el.onload = resize;
+          const measure = () => {
+            if (currentMeasureTimer !== null) {
+              clearTimeout(currentMeasureTimer);
+            }
+            const now = performance.now();
+            const wait = Math.max(0, COOLDOWN_MS - (now - lastWrite));
+            currentMeasureTimer = setTimeout(doWrite, wait);
+          };
+          currentMeasure = measure;
+          el.onload = measure;
           try {
-            const ro = new ResizeObserver(resize);
+            // Observe the HOST (the iframe element itself), not the
+            // body's contentDocument. See the long comment above.
+            const ro = new ResizeObserver(measure);
             currentIframeResizeObserver = ro;
             el.dataset.roAttached = "1";
-            el.addEventListener(
-              "load",
-              () => {
-                const body = el.contentDocument?.body;
-                if (body) ro.observe(body);
-              },
-              { once: true },
-            );
+            ro.observe(el);
           } catch {
             /* sandbox denies */
           }
