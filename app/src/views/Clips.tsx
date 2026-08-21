@@ -2,11 +2,11 @@
  * Spec: prototype-v11 §3.13 + P4.
  */
 
-import { For, Show, createMemo, createResource } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource } from "solid-js";
 import {
   listClips,
   listContacts,
-  listMessages,
+  listMessagesByIdsLight,
   deleteClip,
 } from "../stores/data";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -22,7 +22,34 @@ import { useRefreshEffect } from "../utils/gestures";
 export function Clips() {
   const [clips, { refetch: refetchClips }] = createResource(listClips);
   const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
-  const [messages, { refetch: refetchMessages }] = createResource(listMessages);
+
+  // Only fetch the message rows referenced by visible clips. The
+  // previous full-table `listMessages()` pulled every row with
+  // body_html, which on a real 4000-row mailbox is ~360 MB of HTML
+  // just to render the few clip previews that reference a message.
+  // `listMessagesByIdsLight` is the same lightweight projection used
+  // by FollowUps / Insights and skips body / body_html.
+  const referencedMsgIds = createMemo<string[]>(() => {
+    const set = new Set<string>();
+    for (const c of clips() ?? []) if (c.msgId) set.add(c.msgId);
+    return [...set];
+  });
+  const [messages, { refetch: refetchMessages }] = createResource(
+    referencedMsgIds,
+    listMessagesByIdsLight,
+  );
+  // The createResource fetcher re-runs only when the source signal
+  // reference changes. The createResource(source, fetcher) signature
+  // is reactive on the source — SolidJS compares the previous and
+    // new source values for referential equality. Because the memo
+    // returns a fresh array each time, the resource refetches on
+    // every clips() change. We still want that behavior; the
+    // createEffect below is a defensive guard in case the Solid
+    // runtime ever changes how it compares memo results.
+  createEffect(() => {
+    void referencedMsgIds();
+    void refetchMessages();
+  });
 
   useRefreshEffect(() => {
     void refetchClips();
