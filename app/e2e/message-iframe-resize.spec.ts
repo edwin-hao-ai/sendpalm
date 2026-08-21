@@ -140,10 +140,20 @@ async function seedAndOpenMessage(
   await page.locator("body.app-ready").waitFor({ timeout: 10_000 });
   await page.evaluate(() => window.__sendpalmE2E?.__seedReady);
   await page.locator('[data-nav-view="imbox"]').first().click();
-  // Open the first row by pressing j then Enter. j selects the first
-  // row in the Imbox; Enter opens it. The MessagePanel then mounts the
-  // MessageBodyIframe for that message.
-  await page.locator("[data-imbox-row]").first().waitFor({ timeout: 5_000 });
+  // Open the first row by clicking it. The Imbox rows use
+  // `data-feed-card="message"` (single sender) or
+  // `data-feed-card="bundle"` (≥3 from same sender). For the 1-sender
+  // seed we have here, the first row is a single-message card.
+  await page
+    .locator('[data-feed-card="message"], [data-feed-card="bundle"]')
+    .first()
+    .waitFor({ timeout: 5_000 });
+  await page
+    .locator('[data-feed-card="message"], [data-feed-card="bundle"]')
+    .first()
+    .click();
+  // Detail panel uses ⌘O or Enter to open. Click the row already
+  // selects it; pressing Enter opens the message in the DetailPanel.
   await page.keyboard.press("Enter");
   // Wait for the iframe to render. The plain-text fallback appears
   // first, then the sanitized srcdoc iframe. The iframe is the
@@ -186,42 +196,59 @@ test.describe("MessageBodyIframe — 50× rapid resize → 1 height write per co
         'iframe[title="Message body"]',
       );
       if (!iframe) throw new Error("iframe not found");
-      const win = iframe.contentWindow as unknown as {
-        __sendpalmHeightWrites?: string[];
-        __sendpalmHeightSpyInstalled?: boolean;
-      };
-      // The iframe's contentWindow has its own document; install the
-      // spy on the IFRAME ELEMENT's style (host realm). Our
-      // measure() writes `el.style.height = ...` on the iframe itself.
-      const style = iframe.style as CSSStyleDeclaration & {
-        __sendpalmHeightWrites?: string[];
-      };
+      // We replace the entire `style` object with a Proxy that
+      // intercepts `height` assignments. This is the only reliable
+      // way to spy on CSSStyleDeclaration's `height` setter in
+      // Chromium (the underlying setter is implemented in C++ and
+      // shadows any JS-level override on the prototype).
+      const realStyle = iframe.style;
+      const realHeight = realStyle.height;
       const writes: string[] = [];
-      // Save the original descriptor; we'll restore it at the end of
-      // the test by re-assigning the style.height (no teardown
-      // needed because the iframe is removed when the message is
-      // closed).
-      const desc = Object.getOwnPropertyDescriptor(
-        CSSStyleDeclaration.prototype,
-        "height",
-      );
-      if (!desc) throw new Error("no height descriptor");
-      const originalSet = desc.set!;
-      Object.defineProperty(iframe.style, "height", {
-        configurable: true,
-        enumerable: desc.enumerable,
-        get() {
-          return desc.get?.call(this) ?? "";
+      const fakeStyle = new Proxy(realStyle, {
+        get(target, prop) {
+          if (prop === "height") return realHeight;
+          const v = (target as unknown as Record<string | symbol, unknown>)[
+            prop
+          ];
+          return typeof v === "function" ? v.bind(target) : v;
         },
-        set(v: string) {
-          writes.push(String(v));
-          originalSet.call(this, v);
+        set(target, prop, value) {
+          if (prop === "height") {
+            writes.push(String(value));
+            (realHeight as unknown as string) = String(value);
+            // Mirror the write to a data attribute so the host
+            // realm's CSS box-sizing (and the iframe's own height
+            // computation) still observes the new value.
+            target.setProperty("height", String(value));
+            return true;
+          }
+          (target as unknown as Record<string | symbol, unknown>)[prop] =
+            value;
+          return true;
         },
       });
-      style.__sendpalmHeightWrites = writes;
-      // Expose the writes array so the test harness can read it back.
-      win.__sendpalmHeightWrites = writes;
-      win.__sendpalmHeightSpyInstalled = true;
+      // Use a non-enumerable property so the proxy doesn't show
+      // up in Object.keys(iframe).
+      Object.defineProperty(iframe, "style", {
+        configurable: true,
+        enumerable: true,
+        get() {
+          return fakeStyle;
+        },
+      });
+      // Expose the writes array so the test harness can read it
+      // back from the page.
+      (
+        iframe.contentWindow as unknown as {
+          __sendpalmHeightWrites?: string[];
+          __sendpalmHeightSpyInstalled?: boolean;
+        }
+      ).__sendpalmHeightWrites = writes;
+      (
+        iframe.contentWindow as unknown as {
+          __sendpalmHeightSpyInstalled?: boolean;
+        }
+      ).__sendpalmHeightSpyInstalled = true;
     });
 
     // 2. Force 50 rapid mutations of the iframe body. Each mutation
@@ -314,28 +341,41 @@ test.describe("MessageBodyIframe — 50× rapid resize → 1 height write per co
         'iframe[title="Message body"]',
       );
       if (!iframe) throw new Error("iframe not found");
-      const win = iframe.contentWindow as unknown as {
-        __sendpalmHeightWrites?: string[];
-      };
+      const realStyle = iframe.style;
+      const realHeight = realStyle.height;
       const writes: string[] = [];
-      const desc = Object.getOwnPropertyDescriptor(
-        CSSStyleDeclaration.prototype,
-        "height",
-      );
-      if (!desc) throw new Error("no height descriptor");
-      const originalSet = desc.set!;
-      Object.defineProperty(iframe.style, "height", {
-        configurable: true,
-        enumerable: desc.enumerable,
-        get() {
-          return desc.get?.call(this) ?? "";
+      const fakeStyle = new Proxy(realStyle, {
+        get(target, prop) {
+          if (prop === "height") return realHeight;
+          const v = (target as unknown as Record<string | symbol, unknown>)[
+            prop
+          ];
+          return typeof v === "function" ? v.bind(target) : v;
         },
-        set(v: string) {
-          writes.push(String(v));
-          originalSet.call(this, v);
+        set(target, prop, value) {
+          if (prop === "height") {
+            writes.push(String(value));
+            (realHeight as unknown as string) = String(value);
+            target.setProperty("height", String(value));
+            return true;
+          }
+          (target as unknown as Record<string | symbol, unknown>)[prop] =
+            value;
+          return true;
         },
       });
-      win.__sendpalmHeightWrites = writes;
+      Object.defineProperty(iframe, "style", {
+        configurable: true,
+        enumerable: true,
+        get() {
+          return fakeStyle;
+        },
+      });
+      (
+        iframe.contentWindow as unknown as {
+          __sendpalmHeightWrites?: string[];
+        }
+      ).__sendpalmHeightWrites = writes;
     });
 
     // Spread 50 mutations across 3 cooldown windows.
