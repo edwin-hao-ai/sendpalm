@@ -1,18 +1,18 @@
 /** Companies view — group by company with people + comms + meetings.
  * Spec: prototype-v11 §3.4.
  *
- * Pulls a narrow projection of messages (id + pid only) for counting
- * by company. Avoids the full body_html payload that the previous
- * `listMessages()` call dragged across IPC.
+ * Performance: aggregates people + message / event / file counts on the
+ * SQL side via `listCompaniesWithCounts` (single IPC, single SQL pass).
+ * The previous shape — 4 separate resources + a client-side
+ * `grouped()` memo doing O(people × 4) Set lookups on the main thread
+ * — measured 645 ms mount + 217 ms long task on a 1500-contact /
+ * 4000-message corpus (e2e/perf-views.spec.ts Companies row). After
+ * the server-side aggregation, the JS step is a single linear pass
+ * to group the rows by company.
  */
 
-import { For, Show, createMemo, createResource } from "solid-js";
-import {
-  listContacts,
-  listEvents,
-  listFiles,
-  listMessagesForInsights,
-} from "../stores/data";
+import { For, Show, createResource } from "solid-js";
+import { listCompaniesWithCounts, type CompanyGroup } from "../stores/data";
 import { Avatar } from "../components/Avatar";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
@@ -26,51 +26,10 @@ import {
 import { useRefreshEffect } from "../utils/gestures";
 
 export function Companies() {
-  const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
-  const [messages, { refetch: refetchMessages }] = createResource(
-    () => ({}),
-    listMessagesForInsights,
-  );
-  const [events, { refetch: refetchEvents }] = createResource(listEvents);
-  const [files, { refetch: refetchFiles }] = createResource(listFiles);
+  const [groups, { refetch }] = createResource(listCompaniesWithCounts);
 
   useRefreshEffect(() => {
-    void refetchContacts();
-    void refetchMessages();
-    void refetchEvents();
-    void refetchFiles();
-  });
-
-  const grouped = createMemo(() => {
-    const list = contacts() ?? [];
-    const map = new Map<string, typeof list>();
-    for (const c of list) {
-      const key = c.company || "(未分类)";
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(c);
-    }
-    return [...map.entries()]
-      .map(([company, people]) => {
-        const cids = people.map((p) => p.id);
-        const cidsSet = new Set(cids);
-        const msgCount = (messages() ?? []).filter((m) =>
-          cidsSet.has(m.pid),
-        ).length;
-        const eventCount = (events() ?? []).filter((e) =>
-          e.pids.some((p) => cidsSet.has(p)),
-        ).length;
-        const fileCount = (files() ?? []).filter((f) =>
-          cidsSet.has(f.pid),
-        ).length;
-        return {
-          company,
-          people,
-          msgCount,
-          eventCount,
-          fileCount,
-        };
-      })
-      .sort((a, b) => b.people.length - a.people.length);
+    void refetch();
   });
 
   const open = (id: string) => {
@@ -103,13 +62,7 @@ export function Companies() {
       </header>
 
       <ResourceGate
-        resource={contacts}
-        isLoading={() =>
-          contacts.loading ||
-          messages.loading ||
-          events.loading ||
-          files.loading
-        }
+        resource={groups}
         loading={
           <div
             style={{
@@ -124,25 +77,13 @@ export function Companies() {
         errorView={() => (
           <ErrorState
             title="公司数据加载失败"
-            message={String(
-              contacts.error ??
-                messages.error ??
-                events.error ??
-                files.error ??
-                "",
-            )}
-            retry={() => {
-              void refetchContacts();
-              void refetchMessages();
-              void refetchEvents();
-              void refetchFiles();
-            }}
+            message={String(groups.error ?? "")}
+            retry={() => void refetch()}
           />
         )}
         empty={<Empty icon="ph-buildings" title="没有公司" />}
-        isEmpty={() => grouped().length === 0}
       >
-        {() => (
+        {(list: CompanyGroup[]) => (
           <div
             style={{
               "max-width": "920px",
@@ -150,7 +91,7 @@ export function Companies() {
               padding: "0 var(--space-5) var(--space-5)",
             }}
           >
-            <For each={grouped()}>
+            <For each={list}>
               {(g) => (
                 <section
                   style={{
@@ -194,18 +135,17 @@ export function Companies() {
                       }}
                     >
                       <span>
-                        <Icon name="ph-users" size={11} /> {g.people.length} 人
+                        <Icon name="ph-users" size={11} /> {g.peopleCount} 人
                       </span>
                       <span>
                         <Icon name="ph-envelope" size={11} /> {g.msgCount} 消息
                       </span>
                       <span>
-                        <Icon name="ph-calendar-blank" size={11} />{" "}
-                        {g.eventCount} 会议
+                        <Icon name="ph-calendar-blank" size={11} /> {g.eventCount}{" "}
+                        会议
                       </span>
                       <span>
-                        <Icon name="ph-paperclip" size={11} /> {g.fileCount}{" "}
-                        文件
+                        <Icon name="ph-paperclip" size={11} /> {g.fileCount} 文件
                       </span>
                     </div>
                   </div>
@@ -231,12 +171,10 @@ export function Companies() {
                             border: "none",
                           }}
                           onMouseEnter={(e) =>
-                            (e.currentTarget.style.background =
-                              "var(--paper-dark)")
+                            (e.currentTarget.style.background = "var(--paper-dark)")
                           }
                           onMouseLeave={(e) =>
-                            (e.currentTarget.style.background =
-                              "var(--paper-mid)")
+                            (e.currentTarget.style.background = "var(--paper-mid)")
                           }
                         >
                           <Avatar name={c.name} src={c.avatar} size={20} />

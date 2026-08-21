@@ -597,6 +597,112 @@ export async function listContacts(): Promise<Contact[]> {
   return rows.map(rowToContact);
 }
 
+/** Aggregated Companies view data — one row per company.
+ *
+ *  Pre-computes the per-company counts (people, messages, events, files)
+ *  on the SQL side so the Companies view doesn't have to fetch 4 separate
+ *  tables + run an O(people × 4) cross-filter on the main thread. The
+ *  old shape — `listContacts` + `listMessagesForInsights` + `listEvents`
+ *  + `listFiles` + a client-side `grouped()` memo — showed 645 ms mount
+ *  + 217 ms long task on a 1500-contact / 4000-message corpus
+ *  (`e2e/perf-views.spec.ts` Companies row). One IPC + one SQL pass
+ *  drops that to a single-digit ms JS step.
+ *
+ *  Returned rows are sorted by `peopleCount DESC` so the JS side can
+ *  render top-to-bottom without an extra sort pass.
+ *
+ *  Events store attendees as a JSON array on `events.pids`; we expand
+ *  it with `json_each` and join against the per-company contact set.
+ *  Messages and files store a single `pid` TEXT column so the join is
+ *  a straight equality match.
+ *
+ *  Empty / null company strings fold into the literal bucket
+ *  `"(未分类)"` to match the original `c.company || "(未分类)"` UX. */
+export interface CompanyGroup {
+  company: string;
+  peopleCount: number;
+  msgCount: number;
+  eventCount: number;
+  fileCount: number;
+  people: Contact[];
+}
+
+export async function listCompaniesWithCounts(): Promise<CompanyGroup[]> {
+  const db = await getDb();
+  // The SQL returns one row per (company, contact). The first row of
+  // each company carries the counts in the same columns, so the JS
+  // side groups by company and reads the counts off the first row.
+  // We avoid CTEs because the in-browser MockDb used by e2e tests
+  // only matches `SELECT ...` at the start of the string (see
+  // `src/services/mock-db.ts` MockDb.select) — CTEs in the real Tauri
+  // build are fine, but the test path would silently return [].
+  // The flattened correlated-subquery form below has the same plan
+  // in SQLite and keeps MockDb compatible.
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT
+        COALESCE(NULLIF(c.company, ''), '(未分类)') AS company,
+        (SELECT COUNT(DISTINCT c2.id)
+           FROM contacts c2
+          WHERE COALESCE(NULLIF(c2.company, ''), '(未分类)') =
+                COALESCE(NULLIF(c.company, ''), '(未分类)')) AS people_count,
+        (SELECT COUNT(*)
+           FROM messages m
+          WHERE m.pid IN (
+            SELECT id FROM contacts
+             WHERE COALESCE(NULLIF(company, ''), '(未分类)') =
+                   COALESCE(NULLIF(c.company, ''), '(未分类)')
+          )) AS msg_count,
+        (SELECT COUNT(*)
+           FROM events e
+          WHERE EXISTS (
+            SELECT 1 FROM json_each(e.pids) je
+             WHERE je.value IN (
+               SELECT id FROM contacts
+                WHERE COALESCE(NULLIF(company, ''), '(未分类)') =
+                      COALESCE(NULLIF(c.company, ''), '(未分类)')
+             )
+          )) AS event_count,
+        (SELECT COUNT(*)
+           FROM files f
+          WHERE f.pid IN (
+            SELECT id FROM contacts
+             WHERE COALESCE(NULLIF(company, ''), '(未分类)') =
+                   COALESCE(NULLIF(c.company, ''), '(未分类)')
+          )) AS file_count,
+        c.id, c.first_name, c.last_name, c.nickname, c.name, c.title,
+        c.emails_json, c.phones_json, c.stage, c.labels_json, c.topics_json,
+        c.notes, c.avatar, c.photo, c.health, c.sc, c.sc_c, c.sc_l, c.lc,
+        c.grp, c.trd, c.pattern, c.accounts_json, c.stage_history_json,
+        c.first_contact, c.milestones_json, c.merged, c.blocked, c.notify,
+        c.first_seen, c.screened, c.default_bucket, c.auto_label_json,
+        c.recycling, c.ch_json
+       FROM contacts c
+      ORDER BY people_count DESC, company, c.name`,
+  );
+
+  // Group by company. The first row of each group carries the counts;
+  // we just collect contacts and assign once.
+  const out: CompanyGroup[] = [];
+  let current: CompanyGroup | null = null;
+  for (const r of rows) {
+    const c = rowToContact(r);
+    if (current && current.company === r.company) {
+      current.people.push(c);
+    } else {
+      current = {
+        company: r.company as string,
+        peopleCount: r.people_count as number,
+        msgCount: r.msg_count as number,
+        eventCount: r.event_count as number,
+        fileCount: r.file_count as number,
+        people: [c],
+      };
+      out.push(current);
+    }
+  }
+  return out;
+}
+
 export async function listCompanyContacts(companyName: string): Promise<Contact[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(

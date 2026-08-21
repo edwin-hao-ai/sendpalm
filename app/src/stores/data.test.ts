@@ -707,3 +707,12 @@ describe("listFollowUpsDue", () => {
     expect(await listFollowUpsDue("2026-12-01T00:00:00Z")).toEqual([]);
   });
 });
+
+// `listCompaniesWithCounts` runs a multi-subselect aggregate query
+// (correlated subqueries + json_each). The in-browser MockDb in
+// `src/services/mock-db.ts` is a deliberately small SQL subset that
+// does not parse this shape, so a unit test would either need to
+// pre-shape the result or maintain a parallel implementation. The
+// function is exercised end-to-end by `e2e/perf-views.spec.ts` which
+// runs against the real Tauri SQL plugin in CI; that test would catch
+// any regression in the SQL itself.

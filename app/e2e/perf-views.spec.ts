@@ -367,7 +367,7 @@ test.describe("view-switching performance audit (Session 2026-08-21)", () => {
       description: results
         .map(
           (r) =>
-            `${r.label.padEnd(10)} mount=${r.mountMs.toFixed(0).padStart(5)}ms  frameAvg=${r.frameAvgMs.toFixed(1).padStart(5)}ms  frameP95=${r.frameP95Ms.toFixed(1).padStart(5)}ms  longTasks=${r.longTasks}  max=${r.longTaskMaxMs.toFixed(0).padStart(4)}ms  heap=${r.heapMB.toFixed(0).padStart(4)}MB  loading=${r.loadingVisible ? "✓" : "·"}`,
+            `${r.view.padEnd(12)} mount=${r.mountMs.toFixed(0).padStart(5)}ms  frameAvg=${r.frameAvgMs.toFixed(1).padStart(5)}ms  frameP95=${r.frameP95Ms.toFixed(1).padStart(5)}ms  longTasks=${r.longTasks}  max=${r.longTaskMaxMs.toFixed(0).padStart(4)}ms  heap=${r.heapMB.toFixed(0).padStart(4)}MB  loading=${r.loadingVisible ? "✓" : "·"}`,
         )
         .join("\n"),
     });

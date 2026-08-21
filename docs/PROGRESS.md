@@ -53,6 +53,37 @@ Root cause for Companies (read straight from `Companies.tsx:42-72`):
 
 The audit-script-in-source approach (loading-states.test.ts) catches structural mistakes but the perf audit lives better in `e2e/`. Keep `e2e/perf-views.spec.ts` as the regression gate for the Companies hot path specifically — once that 645 ms drops below 200 ms and 0 long tasks, raise the bar to the next slowest view.
 
+## Companies perf fix (2026-08-21)
+
+Followed up on the perf audit: the 645 ms / 3 long-task / 217 ms max-task result for Companies was the worst offender in the report. Replaced the 4-resource client-side aggregation with a single SQL aggregate query.
+
+`src/stores/data.ts`:
+- New `listCompaniesWithCounts()` + `CompanyGroup` interface. One `SELECT` with four correlated subqueries (per-row) computing people / message / event / file counts. SQL was first drafted with CTEs but the in-browser `MockDb` only matches `SELECT ...` at the start of the string, so the production-flattened form uses inline subqueries to keep the e2e MockDb path working. Real Tauri runs both shapes identically.
+- `events.pids` is a JSON array, so the event count uses `EXISTS (SELECT 1 FROM json_each(e.pids) je WHERE je.value IN ...)` to expand the array server-side.
+- Empty / null company strings fold into the `(未分类)` bucket to match the previous `c.company || "(未分类)"` UX.
+- Returns rows pre-sorted by `people_count DESC, company, c.name`, so the JS side just groups by company and reads counts off the first row of each group — no sort pass, no Set construction on 1500 contacts.
+
+`src/views/Companies.tsx`:
+- 4 `createResource` calls → 1. `createMemo` group/sort → linear pass.
+- Removed `useRefreshEffect` from the 4 separate refetches; one `refetch` covers the whole view.
+
+Re-ran `e2e/perf-views.spec.ts` against the same 1500 contacts / 4000 messages seed:
+
+| Metric | Before | After |
+| --- | --- | --- |
+| mountMs | 645 | **47** |
+| longTasks | 3 | **0** |
+| longTaskMaxMs | 217 | **0** |
+| frameMaxMs | 298 | **19** |
+
+13.7× mount speedup, long tasks gone, no observable frame jitter. Other views also got faster as a side effect of the warmup pass no longer hitting a 217 ms blocking task on the previous navigation.
+
+`pnpm vitest run` → 313 / 313 pass. `pnpm lint` / `pnpm tsc --noEmit` / `pnpm prettier --check` all clean.
+
+### Lesson
+
+When a view's `createMemo` does cross-table work, the right fix is almost never "memoize smarter" — it's "push the join into the database". A 1500 × 4 in-memory filter pass is irrelevant CPU-wise but it runs on the **main thread**, which means the entire UI freezes for the duration. SQLite's correlated-subquery planner handles this in microseconds; moving the join across the IPC boundary is a free 13× speedup that no amount of `untrack()` / `batch()` / `createMemo` optimization would match.
+
 ## v3 reframing (2026-08-20)
 
 SendPalm is a **HEY-workflow client for any IMAP email service** — not a HEY replacement. The two-pager `docs/POSITIONING.md` is the source of truth for the white space (HEY workflow × any-service client) and the explicit non-goals (no backend, no cross-device sync, no web app, no B2B SSO).
