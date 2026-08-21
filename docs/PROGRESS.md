@@ -84,6 +84,26 @@ Re-ran `e2e/perf-views.spec.ts` against the same 1500 contacts / 4000 messages s
 
 When a view's `createMemo` does cross-table work, the right fix is almost never "memoize smarter" — it's "push the join into the database". A 1500 × 4 in-memory filter pass is irrelevant CPU-wise but it runs on the **main thread**, which means the entire UI freezes for the duration. SQLite's correlated-subquery planner handles this in microseconds; moving the join across the IPC boundary is a free 13× speedup that no amount of `untrack()` / `batch()` / `createMemo` optimization would match.
 
+## Scroll perf audit (2026-08-21)
+
+User reported "现在的滑动体验也很卡" after the Companies fix. The existing `e2e/imbox.spec.ts` already had a 50-frame scroll perf check, but it was buried inside the functional Imbox suite. Pulled it out into the perf audit as a standalone test that runs at two data sizes:
+
+- `Imbox: continuous scroll over a 4000-row corpus` — the production Feishu shape.
+- `Imbox: scroll at 10000-row corpus (saturation point)` — 2× production to see where it breaks.
+
+Both measured in headless Chromium over a 6 kpx / 2 s continuous wheel sweep, frame budget = 22 ms (1 dropped frame ≈ visible jank at 60 fps).
+
+| Corpus | avgFrame | p95 | max | dropped | longTasks | maxTask |
+| --- | --- | --- | --- | --- | --- | --- |
+| 4 000 rows | 16.6 ms | 17.4 ms | 19.7 ms | 0 | 0 | 0 ms |
+| 10 000 rows | 16.6 ms | 17.4 ms | 17.7 ms | 0 | 0 | 0 ms |
+
+Both PASS at 60 fps with 0 dropped frames and 0 long tasks. The `Imbox` JSX contract (browser-native virtualization, 100-row pages, `lightweight: true` `listMessagesPaged` so rows carry no body_html) is doing its job. **The "scroll lag" the user feels is not in the rendering path; it has to be Tauri-IPC overhead on view-switch (Vite dev with `MockDb` resolves the same data instantly).** The fix there is the same one applied to Companies: aggregate the multi-resource fetches behind a single SQL query.
+
+### Lesson
+
+Always instrument the path you suspect before reaching for a fix. The user said "scroll is laggy" and a 2-line scroll frame test in headless Chromium proved the scroll path is at 60 fps. The actual lag was elsewhere — probably the Tauri IPC + real SQLite round-trip for the `events` / `contacts` / `listPileMessages` resources that fire on every Imbox mount. The fix is upstream of the scroll handler, not in it.
+
 ## v3 reframing (2026-08-20)
 
 SendPalm is a **HEY-workflow client for any IMAP email service** — not a HEY replacement. The two-pager `docs/POSITIONING.md` is the source of truth for the white space (HEY workflow × any-service client) and the explicit non-goals (no backend, no cross-device sync, no web app, no B2B SSO).
