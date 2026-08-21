@@ -212,8 +212,17 @@ export function Imbox() {
   // selected sort mode (default = newest first — see utils/sort-imbox.ts).
   // Priority sort stays available as "most_relevant" for users who want
   // HEY-style ordering.
+  //
+  // Perf: pre-compute per-item sort keys (priority score, timestamp) ONCE
+  // and decorate the array. The previous comparator called
+  // `new Date(m.st).getTime()` and `priorityScore(m, contactMap().get(...))`
+  // on every comparison — for 100 items that's 700+ Date allocations and
+  // 700+ Map lookups per sort, every time `items()` or `contactMap()`
+  // changes. WKWebView (real Tauri) is 2-3x more sensitive to this than
+  // Chrome and the dominant cost during the "tab switch → scroll" window.
   const renderList = createMemo<ItemList>(() => {
     const list = items().filter((m) => !m.setAside && !m.replyLater);
+    const map = contactMap();
 
     const bySender = new Map<string, Message[]>();
     for (const m of list) {
@@ -222,52 +231,81 @@ export function Imbox() {
       bySender.set(m.pid, arr);
     }
 
-    const out: Item[] = [];
+    // Decorate each output row with pre-computed sort keys. Item is
+    // { kind: "msg", m, _ts, _score } or { kind: "bundle", bundle,
+    // contact, _ts, _score }. The comparator only reads the pre-computed
+    // fields — no per-call Date/Map work.
+    type Decorated =
+      | { kind: "msg"; item: Item; m: Message; _ts: number; _score: number }
+      | {
+          kind: "bundle";
+          item: Item;
+          bundle: { contactId: string; contact: Contact; messages: Message[] };
+          _ts: number;
+          _score: number;
+        };
+    const decorated: Decorated[] = [];
     for (const [pid, msgs] of bySender) {
       if (msgs.length >= BUNDLE_THRESHOLD) {
-        const c = contactMap().get(pid);
+        const c = map.get(pid);
         if (c) {
-          out.push({ contactId: pid, contact: c, messages: msgs });
+          const bundle = { contactId: pid, contact: c, messages: msgs };
+          const item: Item = bundle;
+          let maxTs = 0;
+          let maxScore = -Infinity;
+          for (const m of msgs) {
+            const ts = Date.parse(m.st) || 0;
+            const sc = priorityScore(m, c);
+            if (ts > maxTs) maxTs = ts;
+            if (sc > maxScore) maxScore = sc;
+          }
+          decorated.push({
+            kind: "bundle",
+            item,
+            bundle,
+            _ts: maxTs,
+            _score: maxScore,
+          });
           continue;
         }
       }
-      for (const m of msgs) out.push(m);
+      for (const m of msgs) {
+        const item: Item = m;
+        decorated.push({
+          kind: "msg",
+          item,
+          m,
+          _ts: Date.parse(m.st) || 0,
+          _score: priorityScore(m, map.get(m.pid)),
+        });
+      }
     }
 
     const mode = getSortMode("imbox");
     if (mode === "most_relevant") {
-      out.sort((a, b) => {
-        const sa = "messages" in a
-          ? Math.max(...a.messages.map(scoreFor))
-          : scoreFor(a);
-        const sb = "messages" in b
-          ? Math.max(...b.messages.map(scoreFor))
-          : scoreFor(b);
-        if (sb !== sa) return sb - sa;
-        const da = "messages" in a
-          ? Math.max(...a.messages.map((m) => new Date(m.st).getTime()))
-          : new Date(a.st).getTime();
-        const db = "messages" in b
-          ? Math.max(...b.messages.map((m) => new Date(m.st).getTime()))
-          : new Date(b.st).getTime();
-        return db - da;
+      decorated.sort((a, b) => {
+        if (b._score !== a._score) return b._score - a._score;
+        return b._ts - a._ts;
       });
     } else {
-      const timeOf = (it: Item) =>
-        "messages" in it
-          ? Math.max(...it.messages.map((m) => new Date(m.st).getTime()))
-          : new Date(it.st).getTime();
       const dir = mode === "oldest" ? 1 : -1;
-      out.sort((a, b) => dir * (timeOf(a) - timeOf(b)));
+      decorated.sort((a, b) => dir * (a._ts - b._ts));
     }
-    return out;
+    return decorated.map((d) => d.item);
   });
 
   // With tabs, each section is its own paginated slice — both already
   // carry unread/read filtering server-side. So `newForYou` and
   // `previouslySeen` are just the current paged view, plus bundle
   // grouping applied to the active tab.
-  const activeList = createMemo<ItemList>(() => renderList());
+  //
+  // No-op memo removed (was `createMemo(() => renderList())`). It
+  // added a reactive layer that downstream `flatIds`, the
+  // `<DateGroupedList items={activeList()}>` prop, and the bundle
+  // drawer state all subscribed to, doubling the reactive update
+  // fan-out on every `items()` change. Direct pass-through is
+  // identical from a consumer's perspective.
+  const activeList = renderList;
 
   /* ── Piles (Pending / Saved / Remind) ─────────────────────────────── */
 
@@ -1286,7 +1324,9 @@ interface MessageCardProps {
 }
 
 function MessageCard(props: MessageCardProps) {
-  const score = () => props.scoreFor(props.m);
+  // Memoize so the comparator-shaped reactive read doesn't recompute on
+  // every signal tick. The card's class is the only consumer.
+  const score = createMemo(() => props.scoreFor(props.m));
   const isSelected = () => props.selectedIds.has(props.m.id);
   const priorityClass = () =>
     score() >= 80 ? " priority-high" : "";
@@ -1307,11 +1347,11 @@ function MessageCard(props: MessageCardProps) {
   // re-mounted on hover without needing to re-attach listeners.
   const [hovered, setHovered] = createSignal(false);
 
-  const preview = () => {
+  const preview = createMemo(() => {
     const raw = props.m.body || props.m.prev || "";
     if (raw.length <= PREVIEW_CHARS) return raw;
     return raw.slice(0, PREVIEW_CHARS).trimEnd() + "…";
-  };
+  });
 
   // Action dispatcher. The 5 buttons inside the toolbar carry a
   // `data-action` attribute; this single handler reads it and routes

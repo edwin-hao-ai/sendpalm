@@ -1,6 +1,6 @@
 /** Avatar — initials-based fallback with picsum/photo support. */
 
-import { Show } from "solid-js";
+import { Show, createMemo } from "solid-js";
 
 interface AvatarProps {
   name: string;
@@ -24,14 +24,20 @@ function hashHue(s: string): number {
 
 export function Avatar(props: AvatarProps) {
   const size = () => props.size ?? 32;
+  // hashHue was previously called twice (background + color) per render.
+  // With 100 cards in viewport that's 200 charCodeAt passes per scroll
+  // frame. Memoise it so the hue is computed once when name changes —
+  // the Solid style prop is reactive, so the hue is only re-derived
+  // when the actual name prop changes, not on every other signal tick.
+  const hue = createMemo(() => hashHue(props.name));
   return (
     <div
       style={{
         width: `${size()}px`,
         height: `${size()}px`,
         "border-radius": "50%",
-        background: props.color ?? `hsl(${hashHue(props.name)}, 60%, 85%)`,
-        color: props.color ? "white" : `hsl(${hashHue(props.name)}, 60%, 30%)`,
+        background: props.color ?? `hsl(${hue()}, 60%, 85%)`,
+        color: props.color ? "white" : `hsl(${hue()}, 60%, 30%)`,
         display: "flex",
         "align-items": "center",
         "justify-content": "center",
