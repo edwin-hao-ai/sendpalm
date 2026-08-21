@@ -133,7 +133,15 @@ export function sanitizeEmailHtml(html: string): string {
 }
 
 export interface ImageAnalysis {
-  safeHtml: string;
+  /** Sanitized HTML, ready to be embedded as iframe srcdoc or preview.
+   *  Only populated when the caller passes `includeSafeHtml: true`. The
+   *  default omits it because the DOMPurify sanitize pass is the
+   *  single most expensive step in opening a message, and most
+   *  callers (the Show-images toolbar, the Gate card count, etc.)
+   *  only need the image count + tracking-pixel flag. Callers that
+   *  actually embed the HTML call `sanitizeEmailHtml` (or
+   *  `htmlEmailSrcdoc`, which wraps it) explicitly. */
+  safeHtml?: string;
   externalImageCount: number;
   hasTrackingPixel: boolean;
 }
@@ -141,15 +149,30 @@ export interface ImageAnalysis {
 const TRACKING_DIMENSIONS =
   /width\s*[:=]\s*["']?0|height\s*[:=]\s*["']?0|display\s*:\s*none|visibility\s*:\s*hidden/i;
 
-export function analyzeImages(html: string): ImageAnalysis {
-  const safeHtml = sanitizeEmailHtml(html);
+export function analyzeImages(
+  html: string,
+  options: { includeSafeHtml?: boolean } = {},
+): ImageAnalysis {
+  // DOMPurify sanitize is a 1-3 ms pass on a typical email body
+  // (longer on messages with many inline images / nested tables).
+  // It was previously always-on inside analyzeImages, but every
+  // production caller of analyzeImages only reads
+  // `externalImageCount` (for the Show-images toolbar visibility
+  // and the Gate card count) — `safeHtml` was being computed and
+  // thrown away. Callers that DO need sanitized HTML go through
+  // `htmlEmailSrcdoc` (iframe) or `emailBodyPreview` (short
+  // previews), which sanitize at the point of use.
   const externalMatches =
     html.match(/<img\b[^>]*\bsrc\s*=\s*["']?https?:\/\/[^"'>\s]+/gi) || [];
   const externalImageCount = externalMatches.length;
   const hasTrackingPixel = externalMatches.some((m) =>
     TRACKING_DIMENSIONS.test(m),
   );
-  return { safeHtml, externalImageCount, hasTrackingPixel };
+  const out: ImageAnalysis = { externalImageCount, hasTrackingPixel };
+  if (options.includeSafeHtml) {
+    out.safeHtml = sanitizeEmailHtml(html);
+  }
+  return out;
 }
 
 export function extractExternalImageUrls(html: string): string[] {
