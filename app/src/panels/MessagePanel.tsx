@@ -2217,10 +2217,7 @@ function MessagePanelSkeleton() {
  *  its own. Owns its own `currentIframe` ref so the postMessage
  *  handlers (sendpalm:open-url, sendpalm:show-images) target only
  *  this message's iframe and not a sibling's. */
-function MessageBodyIframe(props: {
-  message: Message;
-  senderEmail?: string;
-}) {
+function MessageBodyIframe(props: { message: Message; senderEmail?: string }) {
   const m = () => props.message;
   const [iframeSrc, setIframeSrc] = createSignal("");
   const [iframeReady, setIframeReady] = createSignal(false);
@@ -2401,16 +2398,33 @@ function MessageBodyIframe(props: {
             return;
           }
           currentIframe = el;
+          // rAF-debounce the height write. The ResizeObserver spec
+          // (https://www.w3.org/TR/resize-observer/#deliver-resize-errors)
+          // requires observers to deliver all resize entries before the
+          // next frame; if our callback synchronously writes a new
+          // `style.height` that triggers another resize, the browser
+          // suppresses the second notification and logs
+          // "ResizeObserver loop completed with undelivered
+          // notifications." Deferring the height write to the next
+          // rAF tick breaks the synchronous feedback loop while still
+          // sizing the iframe before the next paint. We also coalesce
+          // bursts (a long email with many inline images / fonts can
+          // fire 10+ RO events in one frame) into a single write.
+          let resizeRaf = 0;
           const resize = () => {
-            try {
-              const doc = el.contentDocument;
-              if (doc && doc.body) {
-                const height = doc.body.scrollHeight + 24;
-                el.style.height = `${height}px`;
+            if (resizeRaf) cancelAnimationFrame(resizeRaf);
+            resizeRaf = requestAnimationFrame(() => {
+              resizeRaf = 0;
+              try {
+                const doc = el.contentDocument;
+                if (doc && doc.body) {
+                  const height = doc.body.scrollHeight + 24;
+                  el.style.height = `${height}px`;
+                }
+              } catch {
+                /* sandboxed — keep default height */
               }
-            } catch {
-              /* sandboxed — keep default height */
-            }
+            });
           };
           el.onload = resize;
           try {
@@ -2445,10 +2459,7 @@ function MessageBodyIframe(props: {
           this message's iframe, and the checkbox policy is per-sender
           so the same sender in another thread inherits it. */}
       <Show
-        when={
-          imageAnalysis() &&
-          (imageAnalysis()?.externalImageCount ?? 0) > 0
-        }
+        when={imageAnalysis() && (imageAnalysis()?.externalImageCount ?? 0) > 0}
       >
         <div
           data-show-images-bar

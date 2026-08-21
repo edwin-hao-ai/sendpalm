@@ -104,6 +104,88 @@ describe("MessagePanel iframe ref cleanup", () => {
   });
 });
 
+describe("MessageBodyIframe resize rAF debouncing", () => {
+  it("coalesces multiple ResizeObserver callbacks into a single height write per frame", () => {
+    // Regression for "ResizeObserver loop completed with undelivered
+    // notifications" (the Tauri webview logs this and the panel
+    // becomes unresponsive on long emails with many inline images).
+    // The fix wraps the height write in requestAnimationFrame so the
+    // browser can deliver all RO entries before we mutate layout,
+    // and coalesces bursts (10+ fires in one frame) into one write.
+    const writeHeight = vi.fn();
+    // Map handle → callback so cancelAnimationFrame actually removes
+    // the pending entry. The real browser does this; our fake has
+    // to mirror it for the test to prove the coalescing.
+    const pending = new Map<number, FrameRequestCallback>();
+    let nextHandle = 1;
+    const OriginalRAF = globalThis.requestAnimationFrame;
+    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      const handle = nextHandle++;
+      pending.set(handle, cb);
+      return handle;
+    }) as typeof globalThis.requestAnimationFrame;
+    const OriginalCAF = globalThis.cancelAnimationFrame;
+    globalThis.cancelAnimationFrame = ((id: number) => {
+      pending.delete(id);
+    }) as typeof globalThis.cancelAnimationFrame;
+    // We need contentDocument / contentWindow to expose scrollHeight.
+    const fakeDoc = { body: { scrollHeight: 200 } };
+    const fakeEl = {
+      contentDocument: fakeDoc,
+      style: {} as CSSStyleDeclaration,
+    };
+
+    try {
+      // Inline replica of the new resize() from MessagePanel.tsx.
+      let resizeRaf = 0;
+      const resize = () => {
+        if (resizeRaf) cancelAnimationFrame(resizeRaf);
+        resizeRaf = requestAnimationFrame(() => {
+          resizeRaf = 0;
+          try {
+            const doc = fakeEl.contentDocument;
+            if (doc && doc.body) {
+              const height = doc.body.scrollHeight + 24;
+              writeHeight(height);
+            }
+          } catch {
+            /* sandboxed */
+          }
+        });
+      };
+
+      // Fire 10 RO callbacks back-to-back — long email with many
+      // inline images can do this during initial paint.
+      for (let i = 0; i < 10; i++) resize();
+      // All 10 should have coalesced into a single rAF callback
+      // (cancelAnimationFrame removed the previous 9).
+      expect(pending.size).toBe(1);
+      // No height write yet — the rAF hasn't ticked.
+      expect(writeHeight).not.toHaveBeenCalled();
+
+      // Now tick the rAF. Exactly one height write should land,
+      // not 10.
+      const [cb] = pending.values();
+      cb!(performance.now());
+      pending.clear();
+      expect(writeHeight).toHaveBeenCalledTimes(1);
+      expect(writeHeight).toHaveBeenCalledWith(224);
+
+      // A second burst of 5 more RO callbacks + a tick should
+      // produce a second, single write.
+      for (let i = 0; i < 5; i++) resize();
+      expect(pending.size).toBe(1);
+      const [cb2] = pending.values();
+      cb2!(performance.now());
+      pending.clear();
+      expect(writeHeight).toHaveBeenCalledTimes(2);
+    } finally {
+      globalThis.requestAnimationFrame = OriginalRAF;
+      globalThis.cancelAnimationFrame = OriginalCAF;
+    }
+  });
+});
+
 describe("MessageBodyIframe per-message postMessage source filter", () => {
   // Free-function replica of the source-filtering logic in
   // <MessageBodyIframe>'s onIframeMessage. Mirrors
@@ -206,16 +288,14 @@ describe("MessageBodyIframe per-message postMessage source filter", () => {
     window.addEventListener("message", handler);
     expect(
       addSpy.mock.calls.some(
-        (c: [string, unknown]) =>
-          c[0] === "message" && c[1] === handler,
+        (c: [string, unknown]) => c[0] === "message" && c[1] === handler,
       ),
     ).toBe(true);
 
     window.removeEventListener("message", handler);
     expect(
       removeSpy.mock.calls.some(
-        (c: [string, unknown]) =>
-          c[0] === "message" && c[1] === handler,
+        (c: [string, unknown]) => c[0] === "message" && c[1] === handler,
       ),
     ).toBe(true);
   });
