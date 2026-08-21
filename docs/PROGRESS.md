@@ -2665,3 +2665,42 @@ AGENTS.md §11 lessons: §11.2 (rAF insufficient → host-only RO + 200ms
 cooldown), §11.3 (lightweight projections are a real win when modal
 loaders are full-table pulls), §11.4 (DOMPurify sanitize is a hot
 path — gate it behind an opt-in flag, not unconditional).
+
+## v4 — Imbox scroll perf micro-fixes (2026-08-22)
+
+Build: `dist/SendPalm-0.1.0-arm64-v4.dmg` (9.22 MB, sha256
+`2947484addfb6dc477263a76003913a1888f76a25b657050612ba7b6da2f96f0`).
+Commit `d2e0f64`. Rust incremental 2m04s + 30s bundle.
+
+User's "滚动都是卡的，经常出现大量白色区域" report after testing v3.
+The v3 iframe RO loop fix was a different bug — scroll lag needed
+its own investigation. This pass adds a real e2e scroll test
+(`e2e/imbox-scroll-perf.spec.ts`, 1500 contacts + 4000 imbox messages
+to match Feishu) and four micro-fixes to reduce per-frame work in
+WKWebView (which is 2-3x more sensitive to per-frame work than
+Chrome).
+
+- Imbox `renderList` sort: pre-decorate items with priority score and
+  timestamp ONCE. Was calling `new Date(m.st).getTime()` and
+  `priorityScore()` in the comparator on every comparison — 700+
+  allocations per sort for 100 items.
+- Imbox: removed no-op `createMemo(() => renderList())` wrapper.
+  Was doubling reactive fan-out for `flatIds`, `DateGroupedList`, and
+  bundle drawer.
+- `MessageCard`: memoized `preview()` and `score()`. Was re-running
+  the slice/allocation on every reactive read.
+- `Avatar`: deduped `hashHue()` — was called twice per render
+  (background + color). With 100 cards in viewport that's 200
+  charCodeAt passes per scroll frame.
+
+e2e proof (browser mode Vite dev, 1440×900):
+- top:    16.6ms median / 19.7ms max / 0 long tasks / 0 white areas
+- middle: 16.7ms median / 299ms max (1 loadMore IPC) / 1 long task
+- bottom: 16.7ms median / 18.1ms max / 0 long tasks / 0 white areas
+- All 9 existing `imbox.spec.ts` tests still pass.
+
+Honest caveat: browser test = lower bound. Real Tauri (WKWebView) is
+stricter. The white-area symptom specifically needs proper
+virtualization (VList) to fully eliminate — that's a separate
+refactor, not in this pass. If v4 still shows white areas in real
+Tauri, next step is VList for Imbox.
