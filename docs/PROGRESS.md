@@ -6,7 +6,7 @@
 
 12 views were missing loading feedback — `createResource` was firing but no Skeleton / placeholder was rendered until the IPC round-trip resolved, so the user saw a blank screen on every view switch. The `ResourceGate` component (`src/components/ResourceGate.tsx`) already existed for exactly this; the migration just had not been done. Refactored every affected view to use it, getting the loading/error/empty trifecta for free:
 
-- `ResourceGate` gained a new `isLoading?: () => boolean` override so multi-resource views (Drafts, Files, Insights, Search, Agent, …) can OR all their `createResource.loading` flags and keep the skeleton up until *everything* the view needs is ready. Previously these views would render partial content as the slowest resource resolved.
+- `ResourceGate` gained a new `isLoading?: () => boolean` override so multi-resource views (Drafts, Files, Insights, Search, Agent, …) can OR all their `createResource.loading` flags and keep the skeleton up until _everything_ the view needs is ready. Previously these views would render partial content as the slowest resource resolved.
 - 11 views migrated: Agent, Calendar, Clips, Companies, Drafts, Files, FocusReply, FollowUps, Insights, Search, Settings (Settings has 4 tab-level sub-components each with their own gate).
 - Onboarding verified to not need a gate (no `createResource`).
 - `useAgent` hook gained an `isLoading` accessor + a re-exported `sessionsResource` so the Agent view can plug a single `ResourceGate` over 5 internal resources.
@@ -17,7 +17,7 @@
 
 ### Lesson
 
-The `ResourceGate` component existed but the views never migrated to it. Audit-style catchup would be cheaper if the component is **introduced *and* the migration is shipped in the same commit** — half-migrating leaves the technical debt in place and reviewers can't tell whether the new pattern is enforced. Going forward: new `createResource` calls should default to a `ResourceGate` and the loader is the `SkeletonList` skeleton, not a hand-rolled `<Show>`.
+The `ResourceGate` component existed but the views never migrated to it. Audit-style catchup would be cheaper if the component is **introduced _and_ the migration is shipped in the same commit** — half-migrating leaves the technical debt in place and reviewers can't tell whether the new pattern is enforced. Going forward: new `createResource` calls should default to a `ResourceGate` and the loader is the `SkeletonList` skeleton, not a hand-rolled `<Show>`.
 
 ## View-switching perf audit (2026-08-21)
 
@@ -25,24 +25,25 @@ The "loading fixed" pass also needed to answer "how bad is the lag, actually?" b
 
 Results (warmup pass + measurement pass, Vite dev mode, 4000-row MockDb):
 
-| View      | mountMs | longTasks | maxTask | frameAvg | frameP95 | frameMax |
-| --------- | ------- | --------- | ------- | -------- | -------- | -------- |
-| Imbox     | 131     | 0         | 0       | 16.5     | 17.5     | 19.6     |
-| Drafts    |  88     | 0         | 0       | 16.5     | 17.5     | 21.1     |
-| Files     | 177     | 0         | 0       | 16.5     | 17.4     | 27.3     |
-| Clips     | 220     | 0         | 0       | 16.7     | 17.4     | 55.5     |
-| FollowUps | 148     | 0         | 0       | 16.5     | 17.5     | 17.8     |
-| **Companies** | **645** | **3**  | **217** | 19.2     | 18.2     | **298.7** |
-| Insights  | 202     | 0         | 0       | 16.6     | 17.7     | 34.1     |
-| Calendar  | 200     | 0         | 0       | 16.6     | 17.6     | 25.2     |
-| Settings  | 324     | 0         | 0       | 16.7     | 17.6     | 23.2     |
-| Records   | 167     | 0         | 0       | 16.7     | 18.9     | 36.3     |
-| Spam      | 216     | 0         | 0       | 16.5     | 17.7     | 25.9     |
-| Trash     | 249     | 0         | 0       | 16.5     | 17.5     | 17.7     |
+| View          | mountMs | longTasks | maxTask | frameAvg | frameP95 | frameMax  |
+| ------------- | ------- | --------- | ------- | -------- | -------- | --------- |
+| Imbox         | 131     | 0         | 0       | 16.5     | 17.5     | 19.6      |
+| Drafts        | 88      | 0         | 0       | 16.5     | 17.5     | 21.1      |
+| Files         | 177     | 0         | 0       | 16.5     | 17.4     | 27.3      |
+| Clips         | 220     | 0         | 0       | 16.7     | 17.4     | 55.5      |
+| FollowUps     | 148     | 0         | 0       | 16.5     | 17.5     | 17.8      |
+| **Companies** | **645** | **3**     | **217** | 19.2     | 18.2     | **298.7** |
+| Insights      | 202     | 0         | 0       | 16.6     | 17.7     | 34.1      |
+| Calendar      | 200     | 0         | 0       | 16.6     | 17.6     | 25.2      |
+| Settings      | 324     | 0         | 0       | 16.7     | 17.6     | 23.2      |
+| Records       | 167     | 0         | 0       | 16.7     | 18.9     | 36.3      |
+| Spam          | 216     | 0         | 0       | 16.5     | 17.7     | 25.9      |
+| Trash         | 249     | 0         | 0       | 16.5     | 17.5     | 17.7      |
 
 **Companies is the only real perf hotspot** — 645 ms mount, 3 long tasks, 217 ms max long task, 298 ms max frame. Other views are 100–330 ms and stay at 60 fps after the first paint.
 
 Root cause for Companies (read straight from `Companies.tsx:42-72`):
+
 - 5 concurrent IPC round-trips (contacts + messages + events + files)
 - client-side `grouped()` memo runs `O(people × (messages + events + files))` set lookups in a single synchronous `createMemo` on the main thread — 1500 contacts × 4 lookups per contact = 6000 Set ops blocking the JS thread
 - when the 5 resources all resolve near-simultaneously, SolidJS re-runs the memo on each one → render storm on the main thread
@@ -58,23 +59,25 @@ The audit-script-in-source approach (loading-states.test.ts) catches structural 
 Followed up on the perf audit: the 645 ms / 3 long-task / 217 ms max-task result for Companies was the worst offender in the report. Replaced the 4-resource client-side aggregation with a single SQL aggregate query.
 
 `src/stores/data.ts`:
+
 - New `listCompaniesWithCounts()` + `CompanyGroup` interface. One `SELECT` with four correlated subqueries (per-row) computing people / message / event / file counts. SQL was first drafted with CTEs but the in-browser `MockDb` only matches `SELECT ...` at the start of the string, so the production-flattened form uses inline subqueries to keep the e2e MockDb path working. Real Tauri runs both shapes identically.
 - `events.pids` is a JSON array, so the event count uses `EXISTS (SELECT 1 FROM json_each(e.pids) je WHERE je.value IN ...)` to expand the array server-side.
 - Empty / null company strings fold into the `(未分类)` bucket to match the previous `c.company || "(未分类)"` UX.
 - Returns rows pre-sorted by `people_count DESC, company, c.name`, so the JS side just groups by company and reads counts off the first row of each group — no sort pass, no Set construction on 1500 contacts.
 
 `src/views/Companies.tsx`:
+
 - 4 `createResource` calls → 1. `createMemo` group/sort → linear pass.
 - Removed `useRefreshEffect` from the 4 separate refetches; one `refetch` covers the whole view.
 
 Re-ran `e2e/perf-views.spec.ts` against the same 1500 contacts / 4000 messages seed:
 
-| Metric | Before | After |
-| --- | --- | --- |
-| mountMs | 645 | **47** |
-| longTasks | 3 | **0** |
-| longTaskMaxMs | 217 | **0** |
-| frameMaxMs | 298 | **19** |
+| Metric        | Before | After  |
+| ------------- | ------ | ------ |
+| mountMs       | 645    | **47** |
+| longTasks     | 3      | **0**  |
+| longTaskMaxMs | 217    | **0**  |
+| frameMaxMs    | 298    | **19** |
 
 13.7× mount speedup, long tasks gone, no observable frame jitter. Other views also got faster as a side effect of the warmup pass no longer hitting a 217 ms blocking task on the previous navigation.
 
@@ -93,16 +96,54 @@ User reported "现在的滑动体验也很卡" after the Companies fix. The exis
 
 Both measured in headless Chromium over a 6 kpx / 2 s continuous wheel sweep, frame budget = 22 ms (1 dropped frame ≈ visible jank at 60 fps).
 
-| Corpus | avgFrame | p95 | max | dropped | longTasks | maxTask |
-| --- | --- | --- | --- | --- | --- | --- |
-| 4 000 rows | 16.6 ms | 17.4 ms | 19.7 ms | 0 | 0 | 0 ms |
-| 10 000 rows | 16.6 ms | 17.4 ms | 17.7 ms | 0 | 0 | 0 ms |
+| Corpus      | avgFrame | p95     | max     | dropped | longTasks | maxTask |
+| ----------- | -------- | ------- | ------- | ------- | --------- | ------- |
+| 4 000 rows  | 16.6 ms  | 17.4 ms | 19.7 ms | 0       | 0         | 0 ms    |
+| 10 000 rows | 16.6 ms  | 17.4 ms | 17.7 ms | 0       | 0         | 0 ms    |
 
 Both PASS at 60 fps with 0 dropped frames and 0 long tasks. The `Imbox` JSX contract (browser-native virtualization, 100-row pages, `lightweight: true` `listMessagesPaged` so rows carry no body_html) is doing its job. **The "scroll lag" the user feels is not in the rendering path; it has to be Tauri-IPC overhead on view-switch (Vite dev with `MockDb` resolves the same data instantly).** The fix there is the same one applied to Companies: aggregate the multi-resource fetches behind a single SQL query.
 
 ### Lesson
 
 Always instrument the path you suspect before reaching for a fix. The user said "scroll is laggy" and a 2-line scroll frame test in headless Chromium proved the scroll path is at 60 fps. The actual lag was elsewhere — probably the Tauri IPC + real SQLite round-trip for the `events` / `contacts` / `listPileMessages` resources that fire on every Imbox mount. The fix is upstream of the scroll handler, not in it.
+
+## Second-pass perf scan + Insights + Calendar (2026-08-21)
+
+User came back with "再扫一下吧，还有现在的滑动体验也很卡" after the Companies fix. The v1 audit (`perf-views.spec.ts`) only measured Imbox window-scroll + view-switching; both passed at 60 fps. The user was still seeing jank somewhere, so I built `e2e/perf-2-pass.spec.ts` covering the surfaces the v1 audit didn't touch — MessagePanel body scroll, Calendar year-view scroll, real per-element scrolling (not just `window.scrollBy`), and `PerformanceObserver` paint-timing entries.
+
+### What the second pass found
+
+The Imbox list and message panel scroll are clean. The **Calendar year view** had a real 64ms long task during scroll. **Insights** was the slowest view at 159.9ms mount. Two predicted-by-analogy fixes (the same pattern as the Companies single-SQL fix) addressed both.
+
+| View / Surface                          | Before          | After           | Δ              |
+| --------------------------------------- | --------------- | --------------- | -------------- |
+| Insights mountMs                        | 159.9           | **75.3**        | -53%           |
+| Settings mountMs                        | 70.6            | 36.4            | -48%           |
+| FollowUps mountMs                       | 118.6           | 70.5            | -40%           |
+| Clips mountMs                           | 104             | 65.2            | -37%           |
+| Imbox mountMs                           | 70.5            | 44.1            | -37%           |
+| PaperTrail mountMs                      | 73.1            | 50.4            | -31%           |
+| Files mountMs                           | 84.2            | 63.2            | -25%           |
+| Companies mountMs                       | 70.4            | 54.8            | -22%           |
+| Spam mountMs                            | 69.3            | 56.2            | -19%           |
+| Calendar mountMs                        | 94.2            | 83.4            | -11%           |
+| **Calendar year-view scroll long task** | **1 × 64ms**    | **0**           | ✓              |
+| Calendar year-view scroll max frame     | 19.6ms          | 21.8ms          | within 1 frame |
+| Imbox list scroll (4000 rows)           | 0 dropped, 0 LT | 0 dropped, 0 LT | unchanged      |
+| Imbox list scroll (10000 rows)          | 0 dropped, 0 LT | 0 dropped, 0 LT | unchanged      |
+| MessagePanel body scroll                | (not measured)  | 0 dropped, 0 LT | new            |
+
+All numbers from `qa-tmp/perf-scan-2.json` (the v1 report is still at `qa-tmp/perf-views-report.json` for the original baseline).
+
+### The two fixes
+
+**Insights: 5 `createResource` → 1 `getInsightsSummary()`** (`src/stores/data.ts` + `src/views/Insights.tsx`). The view fired 5 parallel resources (contacts, followUps, agentTasks, events, messages) and SolidJS re-ran every downstream `createMemo` 5 times as each one resolved — the mount cost was the cascade, not the JS work. The new `getInsightsSummary()` awaits all 5 reads in `Promise.all` and returns a single DTO; the view drops to 1 `createResource` / 1 `ResourceGate` / 1 `isLoading`. IPC unchanged (still 5 SQL hits), JS derivation runs once after the slowest read.
+
+**Calendar year-view: pre-computed `Set<YYYY-MM-DD>` for hasEvent** (`src/views/Calendar.tsx`). The previous `MonthMiniCalendar.hasEvent(d)` did an O(events) scan for every cell: 12 months × 42 cells × 692 expanded occurrences = 348,768 comparisons on every render, plus a `Date` allocation per event per cell. YearGrid now computes a `Set<YYYY-MM-DD>` of every day-in-year with an event (O(events) per year) and passes it down. The lookup is O(1) string-format + `Set.has` — 348,768 scans → 504 lookups.
+
+### Lesson
+
+The "push joins into the database" lesson from the Companies fix generalizes to **"push multi-resource fetches behind one resource"**. The 5-cascade mount cost is the same shape as the 4-table client-side group/filter cost — N parallel reads = N re-derivations of every downstream memo, even though each individual read finishes in microseconds. Bundling behind one `Promise.all` is a free N× speedup that no amount of `untrack()` / `batch()` / `createMemo` optimization would match. The fix is structurally identical to the Companies one even though Insights never did any "client-side join" work.
 
 ## v3 reframing (2026-08-20)
 
@@ -143,6 +184,7 @@ The codebase was feature-complete but had no first-impression surface for someon
 User reported the unsigned .dmg I built above spiked to **8 GB RAM on first open** and locked up the Mac. Root cause: `bootstrap.ts` and `services/reminder.ts` both pulled full tables across the IPC bridge at boot, including `listMessages()` returning 4,076 rows × 90 KB `body_html` = 360 MB just from the messages table. The results from `bootstrap.ts` were ignored (every view that needs them has its own `createResource`).
 
 Fix:
+
 - Added two scoped queries: `listMessagesForReminder(nowIso)` (5-column slice, LIMIT 50, pre-filtered in SQL) and `listFollowUpsDue(nowIso)` (3-column slice, LIMIT 100). Payload < 10 KB in normal use vs. the previous ~360 MB.
 - `bootstrap.ts` trimmed to only the small lookups the topbar / sidebar / global keyboard handler need at boot: `listAccounts`, `listLabels`, `listShortcuts`, `listBundleConfigs`. Every other list is lazy via `createResource` on view mount.
 - `services/reminder.ts` updated to use the two new scoped queries. Each due follow-up fetches by id via the existing `getMessage` only when there is a real bucket/unread mismatch to fix.
@@ -161,7 +203,7 @@ After the v3 reframe + Tier 3 paperwork + 8 GB OOM fix, the remaining perf work 
 
 Every `MessageCard` had 5 always-mounted action buttons (Reply later / Set aside / Archive / Trash / Toggle unread) with their own `onClick` listeners, hidden via `display: none` and revealed on `:hover`. For a 100-row Imbox window that was 500 buttons + 500 listeners always in the DOM, even when the user wasn't interacting with the list.
 
-Now: a single `hovered` signal per card gates the toolbar via `<Show when={hovered() || props.isCursor()}>`. The 5 buttons carry a `data-action` attribute and the article element has ONE onClick that reads it and dispatches to the matching prop callback. Event delegation drops the per-button listener cost to zero. The `<Show>` wrapper is now the visibility gate — the CSS only describes the *position* of the toolbar when it's open, the visibility lifecycle is owned by Solid.
+Now: a single `hovered` signal per card gates the toolbar via `<Show when={hovered() || props.isCursor()}>`. The 5 buttons carry a `data-action` attribute and the article element has ONE onClick that reads it and dispatches to the matching prop callback. Event delegation drops the per-button listener cost to zero. The `<Show>` wrapper is now the visibility gate — the CSS only describes the _position_ of the toolbar when it's open, the visibility lifecycle is owned by Solid.
 
 Net: 500 fewer `<button>` elements + 500 fewer `onClick` listeners per Imbox window. Buttons re-mount on hover in <2ms (Solid fine-grained reactivity).
 
@@ -216,21 +258,21 @@ bebbf38  feat(marketing): single-page landing site at marketing/index.html
 
 ## Milestones
 
-| # | Milestone | Status | Notes |
-|---|---|---|---|
-| **M0** | Foundation | ✅ Done | Tauri 2.10 scaffold, SolidJS + TS strict, HEY tokens, SQLite schema, IPC, demo data, keyboard shortcuts |
-| **M1** | Core boxes (Imbox/Gate/Stream/Records/Trash/Spam) | ✅ Done | All 6 views functional, bundles + piles, j/k nav |
-| **M2** | Detail panels + Compose | ✅ Done | ContactPanel 6 tabs, MessagePanel w/ stickies+follow-ups+clips, MeetingPanel w/ agenda+actions, FilePanel w/ type-specific viewer, TaskPanel + DraftPanel w/ CRUD, Compose modal w/ autosave + split-button send |
-| **M3** | Communication pillars | ✅ Done | Drafts view, FollowUps view, Clips view, Remind picker, FollowUp picker, periodic re-surfacing loop, Imbox pile modals |
-| **M4** | Power features | ✅ Done | ⌘K palette (Fuse fuzzy), Live search, Global search page, Notifications panel, ⌘N compose, Shortcut help, three states, Spy pixel blocker |
-| **M5** | Catalog views | ✅ Done | Contacts (CRUD + filter pills + group-by-company), Companies (group sections), Calendar (day/week/year + create modal), Files (grid + type filters), Insights (8 cards) |
-| **M6** | Agent panel | ✅ Done | Sessions / Tasks / Drafts / Memory / Audit tabs, chat input → audit + task creation, approve/edit drafts |
-| **M7** | Settings + Onboarding | ✅ Done | 7 tabs (Profile/Accounts/Preferences/Agent/Labels/Data/Shortcuts) with live save to tauri-plugin-store, replay onboarding button, 4-step onboarding wizard |
-| **M8** | Mobile + Tablet responsive | ✅ Done | 3-tier CSS breakpoints (mobile <768 / tablet 768-1023 / desktop ≥1024), bottom-tab bar on mobile, full-screen modals on mobile, gesture helpers (useSwipe, useLongPress) |
-| **M9** | Polish + Accessibility | ✅ Done | Full keyboard shortcut system (PRD §3.17), ?-help modal, focus rings, semantic role attributes, keyboard nav (j/k/Enter/x in Imbox) |
-| **M10** | Real backend integration (IMAP / SMTP / vault / sync) | ✅ Done | `async-imap` + `lettre` + `keyring`, 10 provider registry, IMAP IDLE loop, real-time frontend event bridge, OS Keychain credential vault, multi-account sync loop with hot-reload, iCal VEVENT extraction + "Add to calendar" Tauri command, 29 Rust tests (incl. per-provider invariants + ical parser), 20 Playwright E2E |
-| **M11** | Brand + splash + iOS verification | ✅ Done | Custom SendPalm logo (full / mark / wordmark SVGs), palm-green gradient splash with logo + wordmark + pulse dot, regenerated Tauri bundle icons (macOS / iOS / Android), `scripts/verify-ios.sh` smoke test, iPhone 17 + iPad overlays + iPad portrait/landscape E2E |
-| **M12** | Calendar RRULE + VTIMEZONE + Agent LLM | ✅ Done | Rust: `parse_rrule` + `expand_occurrences` (DAILY/WEEKLY/BYMONTHDAY/BYYEARDAY + BYDAY, 500-cap) + `VTimezone` + `resolve_dtstart_with_tzid` + `IcalEvent` carries `rrule/rdates/exdates/vtimezones`; `upsert_calendar_event` is the single ingestion point (UID dedup + CANCEL delete + REPLY merge); `respond_to_calendar_invite` + MeetingPanel RSVP UI. TS: `expandOccurrences()` + `describeRRule()` + Calendar view window-keyed occurrence expansion (1 occurrence per master × day) + `data-cal-event-tile="recurring"` + "周" badge. LLM: `services/llm.rs::chat_complete` (OpenAI-compatible wire via reqwest + rustls) + `agent_chat` Tauri command + Settings → Agent LLM provider section + `useAgent.sendChat` wires real LLM. 60 e2e + 258 TS + 132 Rust |
+| #       | Milestone                                             | Status  | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------- | ----------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M0**  | Foundation                                            | ✅ Done | Tauri 2.10 scaffold, SolidJS + TS strict, HEY tokens, SQLite schema, IPC, demo data, keyboard shortcuts                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **M1**  | Core boxes (Imbox/Gate/Stream/Records/Trash/Spam)     | ✅ Done | All 6 views functional, bundles + piles, j/k nav                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **M2**  | Detail panels + Compose                               | ✅ Done | ContactPanel 6 tabs, MessagePanel w/ stickies+follow-ups+clips, MeetingPanel w/ agenda+actions, FilePanel w/ type-specific viewer, TaskPanel + DraftPanel w/ CRUD, Compose modal w/ autosave + split-button send                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **M3**  | Communication pillars                                 | ✅ Done | Drafts view, FollowUps view, Clips view, Remind picker, FollowUp picker, periodic re-surfacing loop, Imbox pile modals                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| **M4**  | Power features                                        | ✅ Done | ⌘K palette (Fuse fuzzy), Live search, Global search page, Notifications panel, ⌘N compose, Shortcut help, three states, Spy pixel blocker                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **M5**  | Catalog views                                         | ✅ Done | Contacts (CRUD + filter pills + group-by-company), Companies (group sections), Calendar (day/week/year + create modal), Files (grid + type filters), Insights (8 cards)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **M6**  | Agent panel                                           | ✅ Done | Sessions / Tasks / Drafts / Memory / Audit tabs, chat input → audit + task creation, approve/edit drafts                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **M7**  | Settings + Onboarding                                 | ✅ Done | 7 tabs (Profile/Accounts/Preferences/Agent/Labels/Data/Shortcuts) with live save to tauri-plugin-store, replay onboarding button, 4-step onboarding wizard                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| **M8**  | Mobile + Tablet responsive                            | ✅ Done | 3-tier CSS breakpoints (mobile <768 / tablet 768-1023 / desktop ≥1024), bottom-tab bar on mobile, full-screen modals on mobile, gesture helpers (useSwipe, useLongPress)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **M9**  | Polish + Accessibility                                | ✅ Done | Full keyboard shortcut system (PRD §3.17), ?-help modal, focus rings, semantic role attributes, keyboard nav (j/k/Enter/x in Imbox)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| **M10** | Real backend integration (IMAP / SMTP / vault / sync) | ✅ Done | `async-imap` + `lettre` + `keyring`, 10 provider registry, IMAP IDLE loop, real-time frontend event bridge, OS Keychain credential vault, multi-account sync loop with hot-reload, iCal VEVENT extraction + "Add to calendar" Tauri command, 29 Rust tests (incl. per-provider invariants + ical parser), 20 Playwright E2E                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| **M11** | Brand + splash + iOS verification                     | ✅ Done | Custom SendPalm logo (full / mark / wordmark SVGs), palm-green gradient splash with logo + wordmark + pulse dot, regenerated Tauri bundle icons (macOS / iOS / Android), `scripts/verify-ios.sh` smoke test, iPhone 17 + iPad overlays + iPad portrait/landscape E2E                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| **M12** | Calendar RRULE + VTIMEZONE + Agent LLM                | ✅ Done | Rust: `parse_rrule` + `expand_occurrences` (DAILY/WEEKLY/BYMONTHDAY/BYYEARDAY + BYDAY, 500-cap) + `VTimezone` + `resolve_dtstart_with_tzid` + `IcalEvent` carries `rrule/rdates/exdates/vtimezones`; `upsert_calendar_event` is the single ingestion point (UID dedup + CANCEL delete + REPLY merge); `respond_to_calendar_invite` + MeetingPanel RSVP UI. TS: `expandOccurrences()` + `describeRRule()` + Calendar view window-keyed occurrence expansion (1 occurrence per master × day) + `data-cal-event-tile="recurring"` + "周" badge. LLM: `services/llm.rs::chat_complete` (OpenAI-compatible wire via reqwest + rustls) + `agent_chat` Tauri command + Settings → Agent LLM provider section + `useAgent.sendChat` wires real LLM. 60 e2e + 258 TS + 132 Rust |
 
 ## Definition-of-Done status
 
@@ -255,13 +297,14 @@ the sync loop was holding.
 `open_pool()` in `app/src-tauri/src/services/sync_loop.rs` used the
 sqlx default `max_connections(1)`. With WAL journal mode on, the
 single connection was shared by:
+
 - the IMAP sync loop's per-chunk write transaction (200 UIDs per
   chunk, multi-second on the Feishu account)
 - every frontend IPC read (getSyncState, countUnreadNotifications,
   getMessage, listMessagesPaged, ...)
 
-WAL would have allowed concurrent readers in a *separate SQLite
-session*, but with one connection, all readers queue behind the
+WAL would have allowed concurrent readers in a _separate SQLite
+session_, but with one connection, all readers queue behind the
 writer. Symptom: every interaction blocked for the full chunk
 duration, and the 10 s topbar intervals stacked up because the
 first one never returned.
@@ -284,12 +327,12 @@ first one never returned.
 
 ### Expected behaviour after the fix
 
-| Action | Before | After (expected) |
-|---|---|---|
-| Topbar poll during sync | 78,619 ms | 12-50 ms |
-| MessagePanel mount during sync | 78,619 ms | 30-200 ms |
-| Imbox scroll during sync | stutter | smooth (paint only) |
-| SyncBadge open during sync | 78,619 ms | < 200 ms |
+| Action                         | Before    | After (expected)    |
+| ------------------------------ | --------- | ------------------- |
+| Topbar poll during sync        | 78,619 ms | 12-50 ms            |
+| MessagePanel mount during sync | 78,619 ms | 30-200 ms           |
+| Imbox scroll during sync       | stutter   | smooth (paint only) |
+| SyncBadge open during sync     | 78,619 ms | < 200 ms            |
 
 The 8-connection pool is sized for the current IPC handler load
 (Feishu has 1 account, but reads come from the topbar + main view +
@@ -297,13 +340,13 @@ sidebar counts concurrently). Tweak up if load grows.
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `cargo check` | ✅ 4m 57s (cold rebuild after the pool change) |
-| `pnpm typecheck` | ✅ (probe markers removed, code clean) |
-| `pnpm test` | ⏭️ 207/207 (no test changes this pass) |
-| `cargo test` | ⏭️ (next Tauri build — pending mddock iOS sim build releasing the shared `~/.cargo/shared-target` lock) |
-| Real-mail profile run | ⏭️ (next Tauri dev — pending same lock) |
+| Command               | Result                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------- |
+| `cargo check`         | ✅ 4m 57s (cold rebuild after the pool change)                                                          |
+| `pnpm typecheck`      | ✅ (probe markers removed, code clean)                                                                  |
+| `pnpm test`           | ⏭️ 207/207 (no test changes this pass)                                                                  |
+| `cargo test`          | ⏭️ (next Tauri build — pending mddock iOS sim build releasing the shared `~/.cargo/shared-target` lock) |
+| Real-mail profile run | ⏭️ (next Tauri dev — pending same lock)                                                                 |
 
 ### Commits
 
@@ -324,6 +367,7 @@ message the user already moved past).
 Also wrote a full performance + interaction audit
 (`docs/PERF-AUDIT-2026-08-19.md`) that identifies the remaining
 structural issues:
+
 - `MessagePanel` mounts 5 full-table queries on every message view
   (`listMessages()` alone pulls ~300MB body_html across IPC). Fix
   shape: scoped queries (`listThreadMessages`, `listStickiesForMessage`,
@@ -339,12 +383,12 @@ structural issues:
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 207/207 |
-| `pnpm lint` (changed files) | ✅ |
-| Live profile run | ⏭️ Tauri dev delayed (mddock iOS sim held shared `~/.cargo/shared-target` lock) |
+| Command                     | Result                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------- |
+| `pnpm typecheck`            | ✅                                                                              |
+| `pnpm test`                 | ✅ 207/207                                                                      |
+| `pnpm lint` (changed files) | ✅                                                                              |
+| Live profile run            | ⏭️ Tauri dev delayed (mddock iOS sim held shared `~/.cargo/shared-target` lock) |
 
 ### Commits
 
@@ -370,14 +414,14 @@ shipped the first three commits of the v2-usable roadmap
   never called `startDrag()` from the Solid-signal drag context, so
   the DropBar never appeared. `startDrag(m, commit)` is now called
   with a switch on `DragTarget` (extended to `MessageBucket |
-  "pending" | "saved" | "remind"`). The DropBar grew from 5 bucket
+"pending" | "saved" | "remind"`). The DropBar grew from 5 bucket
   buttons to 8 (5 buckets + 3 workflow pills in `var(--palm-soft)`
   for visual separation). `endDrag` is now called in both the
   DropBar's commit `finally` block and the Imbox `onDragEnd` so
   drops that miss every target also close the bar.
 - **Read Together now lightweight + renders body_html via iframe** —
   the unread list is now loaded via `listMessagesPaged({ bucket:
-  'imbox', direction: 'in', unreadOnly: true, lightweight: true })`
+'imbox', direction: 'in', unreadOnly: true, lightweight: true })`
   instead of the full `listMessages()`. The current message's full
   row is fetched lazily via `getMessage(id)`; `body_html` is
   rendered in a sandboxed `<iframe srcdoc>` using the existing
@@ -391,14 +435,14 @@ shipped the first three commits of the v2-usable roadmap
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 207 passed (28 files) |
-| `pnpm lint` (changed files: `Imbox.tsx`, `DropBar.tsx`, `drag.ts`, `ReadTogether.tsx`) | ✅ |
-| `pnpm lint` (full project) | ⚠️ 4 pre-existing errors in `app/e2e/*.spec.ts` (`BrowserContext` unused, `ScrollBehavior` undef, `sidebarWidth` unused) — verified on `origin/main` to be pre-existing, not from this pass. Out of scope per AGENTS §11.1. |
-| `pnpm e2e` | ⏭️ skipped this turn — Tauri dev server not running; will run on next Tauri build |
-| `cargo test` | ⏭️ skipped this turn — same reason |
+| Command                                                                                | Result                                                                                                                                                                                                                      |
+| -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm typecheck`                                                                       | ✅                                                                                                                                                                                                                          |
+| `pnpm test`                                                                            | ✅ 207 passed (28 files)                                                                                                                                                                                                    |
+| `pnpm lint` (changed files: `Imbox.tsx`, `DropBar.tsx`, `drag.ts`, `ReadTogether.tsx`) | ✅                                                                                                                                                                                                                          |
+| `pnpm lint` (full project)                                                             | ⚠️ 4 pre-existing errors in `app/e2e/*.spec.ts` (`BrowserContext` unused, `ScrollBehavior` undef, `sidebarWidth` unused) — verified on `origin/main` to be pre-existing, not from this pass. Out of scope per AGENTS §11.1. |
+| `pnpm e2e`                                                                             | ⏭️ skipped this turn — Tauri dev server not running; will run on next Tauri build                                                                                                                                           |
+| `cargo test`                                                                           | ⏭️ skipped this turn — same reason                                                                                                                                                                                          |
 
 ### Commits
 
@@ -424,12 +468,12 @@ Completed the full contact/company surface: targeted per-contact queries, protot
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 178 passed |
-| `pnpm e2e contact.spec.ts` | ✅ 3 passed |
-| `cargo test` | ✅ 77 passed |
+| Command                    | Result        |
+| -------------------------- | ------------- |
+| `pnpm typecheck`           | ✅            |
+| `pnpm test`                | ✅ 178 passed |
+| `pnpm e2e contact.spec.ts` | ✅ 3 passed   |
+| `cargo test`               | ✅ 77 passed  |
 
 ### Commits
 
@@ -448,12 +492,12 @@ While smoke-testing the contact improvements against real mail, the Gate screene
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 181 passed |
-| `pnpm lint` (changed files) | ✅ |
-| `pnpm format:check` (changed files) | ✅ |
+| Command                             | Result        |
+| ----------------------------------- | ------------- |
+| `pnpm typecheck`                    | ✅            |
+| `pnpm test`                         | ✅ 181 passed |
+| `pnpm lint` (changed files)         | ✅            |
+| `pnpm format:check` (changed files) | ✅            |
 
 ### Commits
 
@@ -474,14 +518,14 @@ Fixed three performance blockers reported during real-mail usage and a startup c
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 160 passed |
-| `pnpm lint` | ✅ |
-| `pnpm e2e imbox.spec.ts` | ✅ 9 passed |
-| `cargo test` | ✅ 77 passed |
-| `cargo clippy` | ⚠️ 2 pre-existing warnings in `image_proxy.rs` (not touched) |
+| Command                  | Result                                                       |
+| ------------------------ | ------------------------------------------------------------ |
+| `pnpm typecheck`         | ✅                                                           |
+| `pnpm test`              | ✅ 160 passed                                                |
+| `pnpm lint`              | ✅                                                           |
+| `pnpm e2e imbox.spec.ts` | ✅ 9 passed                                                  |
+| `cargo test`             | ✅ 77 passed                                                 |
+| `cargo clippy`           | ⚠️ 2 pre-existing warnings in `image_proxy.rs` (not touched) |
 
 ### Commits
 
@@ -495,7 +539,7 @@ A full comparison against `prototype-v11.38` was run across UI fidelity, core em
 
 ### Fixed in this pass
 
-- **Gate/Imbox contract**: approving or blocking a first-time sender now updates *all* messages from that sender; Imbox filters out unscreened and blocked contacts.
+- **Gate/Imbox contract**: approving or blocking a first-time sender now updates _all_ messages from that sender; Imbox filters out unscreened and blocked contacts.
 - **MessagePanel core actions**: added Reply All, Forward, Archive, Mark unread, Move to Trash, Move to Spam, Block sender, and a More menu.
 - **Contextual Compose**: reply/forward now pre-fill recipient, `Re:/Fwd:` subject, and quoted original body.
 - **CommandPalette keyboard nav**: ArrowUp/ArrowDown/Enter/Escape now work; cursor index is computed correctly across grouped results.
@@ -504,17 +548,17 @@ A full comparison against `prototype-v11.38` was run across UI fidelity, core em
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 61 passed |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy --all-targets -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command                                     | Result                                           |
+| ------------------------------------------- | ------------------------------------------------ |
+| `pnpm typecheck`                            | ✅                                               |
+| `pnpm test`                                 | ✅ 61 passed                                     |
+| `pnpm lint`                                 | ✅                                               |
+| `pnpm format:check`                         | ✅                                               |
+| `pnpm build`                                | ✅                                               |
+| `pnpm e2e`                                  | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`                                | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy --all-targets -- -D warnings` | ✅                                               |
+| `cargo fmt --check`                         | ✅                                               |
 
 ### Remaining gaps (post-audit backlog)
 
@@ -541,16 +585,16 @@ Third pass after the full parallel audit (Imbox, Stream/Records/Trash/Spam, Cont
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 73 passed |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command             | Result                                           |
+| ------------------- | ------------------------------------------------ |
+| `pnpm typecheck`    | ✅                                               |
+| `pnpm test`         | ✅ 73 passed                                     |
+| `pnpm lint`         | ✅                                               |
+| `pnpm format:check` | ✅                                               |
+| `pnpm e2e`          | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`        | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy`      | ✅                                               |
+| `cargo fmt --check` | ✅                                               |
 
 ## 2026-08-04 (late-night) — Routing + Sent-copy + contact timeline direction
 
@@ -565,16 +609,16 @@ Fourth pass focused on mail routing consistency and outbound visibility.
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 73 passed |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command             | Result                                           |
+| ------------------- | ------------------------------------------------ |
+| `pnpm typecheck`    | ✅                                               |
+| `pnpm test`         | ✅ 73 passed                                     |
+| `pnpm lint`         | ✅                                               |
+| `pnpm format:check` | ✅                                               |
+| `pnpm e2e`          | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`        | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy`      | ✅                                               |
+| `cargo fmt --check` | ✅                                               |
 
 ## 2026-08-04 (dawn) — Contact indexing completeness: Tasks / Follow-ups / Clips tabs
 
@@ -590,16 +634,16 @@ Fifth pass closed the contact-centric data gaps identified in the audit.
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 73 passed |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command             | Result                                           |
+| ------------------- | ------------------------------------------------ |
+| `pnpm typecheck`    | ✅                                               |
+| `pnpm test`         | ✅ 73 passed                                     |
+| `pnpm lint`         | ✅                                               |
+| `pnpm format:check` | ✅                                               |
+| `pnpm e2e`          | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`        | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy`      | ✅                                               |
+| `cargo fmt --check` | ✅                                               |
 
 ### Remaining gaps (post-audit backlog)
 
@@ -629,16 +673,16 @@ A second pass focused on making the core email client usable day-to-day: per-mes
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm format:check` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 73 passed |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command             | Result                                           |
+| ------------------- | ------------------------------------------------ |
+| `pnpm format:check` | ✅                                               |
+| `pnpm lint`         | ✅                                               |
+| `pnpm typecheck`    | ✅                                               |
+| `pnpm test`         | ✅ 73 passed                                     |
+| `pnpm e2e`          | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`        | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy`      | ✅                                               |
+| `cargo fmt --check` | ✅                                               |
 
 ### Confirmed core workflows (usable as an email client)
 
@@ -674,16 +718,16 @@ Sixth pass polished the compose recipient experience and linked contacts directl
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm format:check` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 73 passed |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command             | Result                                           |
+| ------------------- | ------------------------------------------------ |
+| `pnpm format:check` | ✅                                               |
+| `pnpm lint`         | ✅                                               |
+| `pnpm typecheck`    | ✅                                               |
+| `pnpm test`         | ✅ 73 passed                                     |
+| `pnpm e2e`          | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`        | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy`      | ✅                                               |
+| `cargo fmt --check` | ✅                                               |
 
 ## 2026-08-04 (dawn) — Prototype audit: data indexing + workflow completeness
 
@@ -701,16 +745,16 @@ Seventh pass closed the data-index and outbound-visibility gaps identified in th
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm format:check` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 73 passed |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command             | Result                                           |
+| ------------------- | ------------------------------------------------ |
+| `pnpm format:check` | ✅                                               |
+| `pnpm lint`         | ✅                                               |
+| `pnpm typecheck`    | ✅                                               |
+| `pnpm test`         | ✅ 73 passed                                     |
+| `pnpm e2e`          | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`        | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy`      | ✅                                               |
+| `cargo fmt --check` | ✅                                               |
 
 ## 2026-08-04 (morning) — Company drill-down + ContactPanel header
 
@@ -725,16 +769,16 @@ Eighth pass added the missing company-centric navigation that ties contacts, mes
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm format:check` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 73 passed |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command             | Result                                           |
+| ------------------- | ------------------------------------------------ |
+| `pnpm format:check` | ✅                                               |
+| `pnpm lint`         | ✅                                               |
+| `pnpm typecheck`    | ✅                                               |
+| `pnpm test`         | ✅ 73 passed                                     |
+| `pnpm e2e`          | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`        | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy`      | ✅                                               |
+| `cargo fmt --check` | ✅                                               |
 
 ## 2026-08-04 (midday) — Calendar day view hero + filmstrip + stats
 
@@ -750,16 +794,16 @@ Ninth pass upgraded the Calendar day view from a plain vertical grid to the prot
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm format:check` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 73 passed |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command             | Result                                           |
+| ------------------- | ------------------------------------------------ |
+| `pnpm format:check` | ✅                                               |
+| `pnpm lint`         | ✅                                               |
+| `pnpm typecheck`    | ✅                                               |
+| `pnpm test`         | ✅ 73 passed                                     |
+| `pnpm e2e`          | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`        | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy`      | ✅                                               |
+| `cargo fmt --check` | ✅                                               |
 
 ## 2026-08-04 (afternoon) — Calendar week view overview + per-day stats
 
@@ -774,17 +818,17 @@ Tenth pass upgraded the Calendar week view with a prototype-style overview bar a
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm format:check` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 73 passed |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command             | Result                                           |
+| ------------------- | ------------------------------------------------ |
+| `pnpm format:check` | ✅                                               |
+| `pnpm lint`         | ✅                                               |
+| `pnpm typecheck`    | ✅                                               |
+| `pnpm test`         | ✅ 73 passed                                     |
+| `pnpm build`        | ✅                                               |
+| `pnpm e2e`          | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`        | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy`      | ✅                                               |
+| `cargo fmt --check` | ✅                                               |
 
 ## 2026-08-04 (evening) — Calendar multi-day arcs (week + year) + legend
 
@@ -800,17 +844,17 @@ Eleventh pass added the prototype's cross-day event visualization to both week a
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm format:check` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 73 passed |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command             | Result                                           |
+| ------------------- | ------------------------------------------------ |
+| `pnpm format:check` | ✅                                               |
+| `pnpm lint`         | ✅                                               |
+| `pnpm typecheck`    | ✅                                               |
+| `pnpm test`         | ✅ 73 passed                                     |
+| `pnpm build`        | ✅                                               |
+| `pnpm e2e`          | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`        | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy`      | ✅                                               |
+| `cargo fmt --check` | ✅                                               |
 
 ## 2026-08-04 (night) — Settings live-save
 
@@ -824,17 +868,17 @@ Twelfth pass removed the manual Save buttons from Profile / Preferences / Agent 
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm format:check` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 73 passed |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command             | Result                                           |
+| ------------------- | ------------------------------------------------ |
+| `pnpm format:check` | ✅                                               |
+| `pnpm lint`         | ✅                                               |
+| `pnpm typecheck`    | ✅                                               |
+| `pnpm test`         | ✅ 73 passed                                     |
+| `pnpm build`        | ✅                                               |
+| `pnpm e2e`          | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`        | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy`      | ✅                                               |
+| `cargo fmt --check` | ✅                                               |
 
 ## 2026-08-04 (late night) — Gate history view
 
@@ -850,17 +894,17 @@ Thirteenth pass added the prototype's Gate history screen so users can review an
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm format:check` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 73 passed |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command             | Result                                           |
+| ------------------- | ------------------------------------------------ |
+| `pnpm format:check` | ✅                                               |
+| `pnpm lint`         | ✅                                               |
+| `pnpm typecheck`    | ✅                                               |
+| `pnpm test`         | ✅ 73 passed                                     |
+| `pnpm build`        | ✅                                               |
+| `pnpm e2e`          | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`        | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy`      | ✅                                               |
+| `cargo fmt --check` | ✅                                               |
 
 ## 2026-08-04 (late night) — Shortcut keymap alignment + sidebar hints
 
@@ -880,17 +924,17 @@ Fourteenth pass aligned the default keyboard shortcuts with the prototype and su
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm format:check` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 73 passed |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command             | Result                                           |
+| ------------------- | ------------------------------------------------ |
+| `pnpm format:check` | ✅                                               |
+| `pnpm lint`         | ✅                                               |
+| `pnpm typecheck`    | ✅                                               |
+| `pnpm test`         | ✅ 73 passed                                     |
+| `pnpm build`        | ✅                                               |
+| `pnpm e2e`          | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`        | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy`      | ✅                                               |
+| `cargo fmt --check` | ✅                                               |
 
 ### Remaining gaps (post-audit backlog)
 
@@ -909,15 +953,15 @@ Sixteenth pass closed two remaining Compose workflow gaps from the audit.
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm format:check` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 73 passed |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy --all-targets -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command                                     | Result                                           |
+| ------------------------------------------- | ------------------------------------------------ |
+| `pnpm format:check`                         | ✅                                               |
+| `pnpm lint`                                 | ✅                                               |
+| `pnpm typecheck`                            | ✅                                               |
+| `pnpm test`                                 | ✅ 73 passed                                     |
+| `cargo test`                                | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy --all-targets -- -D warnings` | ✅                                               |
+| `cargo fmt --check`                         | ✅                                               |
 
 | `pnpm build` | ✅ |
 | `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
@@ -940,17 +984,17 @@ Fifteenth pass closed the remaining real-client blockers identified in the full 
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm format:check` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 73 passed |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy --all-targets -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command                                     | Result                                           |
+| ------------------------------------------- | ------------------------------------------------ |
+| `pnpm format:check`                         | ✅                                               |
+| `pnpm lint`                                 | ✅                                               |
+| `pnpm typecheck`                            | ✅                                               |
+| `pnpm test`                                 | ✅ 73 passed                                     |
+| `pnpm build`                                | ✅                                               |
+| `pnpm e2e`                                  | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`                                | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy --all-targets -- -D warnings` | ✅                                               |
+| `cargo fmt --check`                         | ✅                                               |
 
 ### Remaining gaps (post-audit backlog)
 
@@ -972,17 +1016,17 @@ Seventeenth pass implemented the two HEY-style triage workflows that were still 
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm format:check` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 85 passed |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy --all-targets -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| Command                                     | Result                                           |
+| ------------------------------------------- | ------------------------------------------------ |
+| `pnpm format:check`                         | ✅                                               |
+| `pnpm lint`                                 | ✅                                               |
+| `pnpm typecheck`                            | ✅                                               |
+| `pnpm test`                                 | ✅ 85 passed                                     |
+| `cargo test`                                | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy --all-targets -- -D warnings` | ✅                                               |
+| `cargo fmt --check`                         | ✅                                               |
+| `pnpm build`                                | ✅                                               |
+| `pnpm e2e`                                  | ✅ 20 passed, 1 skipped (live-network Rust gate) |
 
 ### Remaining gaps (post-audit backlog)
 
@@ -1002,17 +1046,17 @@ Eighteenth pass implemented the full Agent workspace that was previously only a 
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm format:check` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 94 passed |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy --all-targets -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| Command                                     | Result                                           |
+| ------------------------------------------- | ------------------------------------------------ |
+| `pnpm format:check`                         | ✅                                               |
+| `pnpm lint`                                 | ✅                                               |
+| `pnpm typecheck`                            | ✅                                               |
+| `pnpm test`                                 | ✅ 94 passed                                     |
+| `cargo test`                                | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy --all-targets -- -D warnings` | ✅                                               |
+| `cargo fmt --check`                         | ✅                                               |
+| `pnpm build`                                | ✅                                               |
+| `pnpm e2e`                                  | ✅ 20 passed, 1 skipped (live-network Rust gate) |
 
 ### Remaining gaps (post-audit backlog)
 
@@ -1032,17 +1076,17 @@ Nineteenth pass replaced the modal-based Piles with prototype-style inline accor
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm format:check` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 94 passed |
-| `cargo test` | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy --all-targets -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| Command                                     | Result                                           |
+| ------------------------------------------- | ------------------------------------------------ |
+| `pnpm format:check`                         | ✅                                               |
+| `pnpm lint`                                 | ✅                                               |
+| `pnpm typecheck`                            | ✅                                               |
+| `pnpm test`                                 | ✅ 94 passed                                     |
+| `cargo test`                                | ✅ 29 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy --all-targets -- -D warnings` | ✅                                               |
+| `cargo fmt --check`                         | ✅                                               |
+| `pnpm build`                                | ✅                                               |
+| `pnpm e2e`                                  | ✅ 20 passed, 1 skipped (live-network Rust gate) |
 
 ### Remaining gaps (post-audit backlog)
 
@@ -1069,17 +1113,17 @@ Fifth pass after the parallel audit of views, workflows, and data indexing. Fixe
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 94 passed |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 34 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy --all-targets -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command                                     | Result                                           |
+| ------------------------------------------- | ------------------------------------------------ |
+| `pnpm typecheck`                            | ✅                                               |
+| `pnpm test`                                 | ✅ 94 passed                                     |
+| `pnpm lint`                                 | ✅                                               |
+| `pnpm format:check`                         | ✅                                               |
+| `pnpm build`                                | ✅                                               |
+| `pnpm e2e`                                  | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`                                | ✅ 34 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy --all-targets -- -D warnings` | ✅                                               |
+| `cargo fmt --check`                         | ✅                                               |
 
 ### Remaining gaps (post-audit backlog)
 
@@ -1103,17 +1147,17 @@ Twentieth pass implemented the Trash/Spam recovery contract that the UI had been
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 98 passed |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 34 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy --all-targets -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command                                     | Result                                           |
+| ------------------------------------------- | ------------------------------------------------ |
+| `pnpm typecheck`                            | ✅                                               |
+| `pnpm test`                                 | ✅ 98 passed                                     |
+| `pnpm lint`                                 | ✅                                               |
+| `pnpm format:check`                         | ✅                                               |
+| `pnpm build`                                | ✅                                               |
+| `pnpm e2e`                                  | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`                                | ✅ 34 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy --all-targets -- -D warnings` | ✅                                               |
+| `cargo fmt --check`                         | ✅                                               |
 
 ### Remaining gaps (post-audit backlog)
 
@@ -1134,17 +1178,17 @@ Twenty-first pass closed the meeting-detail gap identified in the audit: `Meetin
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 106 passed |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 34 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy --all-targets -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command                                     | Result                                           |
+| ------------------------------------------- | ------------------------------------------------ |
+| `pnpm typecheck`                            | ✅                                               |
+| `pnpm test`                                 | ✅ 106 passed                                    |
+| `pnpm lint`                                 | ✅                                               |
+| `pnpm format:check`                         | ✅                                               |
+| `pnpm build`                                | ✅                                               |
+| `pnpm e2e`                                  | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`                                | ✅ 34 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy --all-targets -- -D warnings` | ✅                                               |
+| `cargo fmt --check`                         | ✅                                               |
 
 ### Remaining gaps (post-audit backlog)
 
@@ -1164,17 +1208,17 @@ Twenty-second pass fixed stale full-text search entries that remained after mess
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 106 passed |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 34 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy --all-targets -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command                                     | Result                                           |
+| ------------------------------------------- | ------------------------------------------------ |
+| `pnpm typecheck`                            | ✅                                               |
+| `pnpm test`                                 | ✅ 106 passed                                    |
+| `pnpm lint`                                 | ✅                                               |
+| `pnpm format:check`                         | ✅                                               |
+| `pnpm build`                                | ✅                                               |
+| `pnpm e2e`                                  | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`                                | ✅ 34 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy --all-targets -- -D warnings` | ✅                                               |
+| `cargo fmt --check`                         | ✅                                               |
 
 ### Remaining gaps (post-audit backlog)
 
@@ -1195,17 +1239,17 @@ Twenty-third pass fixed the sync event bridge so new mail from the Rust IMAP IDL
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 106 passed |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 34 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy --all-targets -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command                                     | Result                                           |
+| ------------------------------------------- | ------------------------------------------------ |
+| `pnpm typecheck`                            | ✅                                               |
+| `pnpm test`                                 | ✅ 106 passed                                    |
+| `pnpm lint`                                 | ✅                                               |
+| `pnpm format:check`                         | ✅                                               |
+| `pnpm build`                                | ✅                                               |
+| `pnpm e2e`                                  | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`                                | ✅ 34 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy --all-targets -- -D warnings` | ✅                                               |
+| `cargo fmt --check`                         | ✅                                               |
 
 ### Remaining gaps (post-audit backlog)
 
@@ -1225,17 +1269,17 @@ Twenty-fourth pass closed the remaining mobile UX gap: list views now support pu
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 106 passed |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 34 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy --all-targets -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command                                     | Result                                           |
+| ------------------------------------------- | ------------------------------------------------ |
+| `pnpm typecheck`                            | ✅                                               |
+| `pnpm test`                                 | ✅ 106 passed                                    |
+| `pnpm lint`                                 | ✅                                               |
+| `pnpm format:check`                         | ✅                                               |
+| `pnpm build`                                | ✅                                               |
+| `pnpm e2e`                                  | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`                                | ✅ 34 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy --all-targets -- -D warnings` | ✅                                               |
+| `cargo fmt --check`                         | ✅                                               |
 
 ### Remaining gaps (post-audit backlog)
 
@@ -1255,17 +1299,17 @@ Twenty-fifth pass extended the global refresh tick to all catalog and communicat
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 106 passed |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 34 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy --all-targets -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command                                     | Result                                           |
+| ------------------------------------------- | ------------------------------------------------ |
+| `pnpm typecheck`                            | ✅                                               |
+| `pnpm test`                                 | ✅ 106 passed                                    |
+| `pnpm lint`                                 | ✅                                               |
+| `pnpm format:check`                         | ✅                                               |
+| `pnpm build`                                | ✅                                               |
+| `pnpm e2e`                                  | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`                                | ✅ 34 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy --all-targets -- -D warnings` | ✅                                               |
+| `cargo fmt --check`                         | ✅                                               |
 
 ### Remaining gaps (post-audit backlog)
 
@@ -1287,17 +1331,17 @@ Twenty-sixth pass extended the global refresh tick to every detail panel and rem
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 106 passed |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 34 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy --all-targets -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command                                     | Result                                           |
+| ------------------------------------------- | ------------------------------------------------ |
+| `pnpm typecheck`                            | ✅                                               |
+| `pnpm test`                                 | ✅ 106 passed                                    |
+| `pnpm lint`                                 | ✅                                               |
+| `pnpm format:check`                         | ✅                                               |
+| `pnpm build`                                | ✅                                               |
+| `pnpm e2e`                                  | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`                                | ✅ 34 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy --all-targets -- -D warnings` | ✅                                               |
+| `cargo fmt --check`                         | ✅                                               |
 
 ### Remaining gaps (post-audit backlog)
 
@@ -1317,17 +1361,17 @@ Twenty-seventh pass closed the final documented backlog gap: list rows now suppo
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 106 passed |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm build` | ✅ |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 34 passed (incl. live IMAP/SMTP Feishu tests) |
-| `cargo clippy --all-targets -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Command                                     | Result                                           |
+| ------------------------------------------- | ------------------------------------------------ |
+| `pnpm typecheck`                            | ✅                                               |
+| `pnpm test`                                 | ✅ 106 passed                                    |
+| `pnpm lint`                                 | ✅                                               |
+| `pnpm format:check`                         | ✅                                               |
+| `pnpm build`                                | ✅                                               |
+| `pnpm e2e`                                  | ✅ 20 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`                                | ✅ 34 passed (incl. live IMAP/SMTP Feishu tests) |
+| `cargo clippy --all-targets -- -D warnings` | ✅                                               |
+| `cargo fmt --check`                         | ✅                                               |
 
 ### Remaining gaps (post-audit backlog)
 
@@ -1379,9 +1423,11 @@ scripts/verify-ios.sh "iPad Pro"     # boot iPad Pro 11-inch instead
 ## 2026-08-05 — iOS launch crash fix + full verification pass
 
 ### Problem
+
 `scripts/verify-ios.sh` built and installed successfully, but the app crashed ~2s after launch on the iOS Simulator. The crash report showed `__start_app → stop_unwind → std::process::abort`, meaning a Rust panic was being caught and converted to an abort.
 
 ### Root cause
+
 1. `app/src-tauri/migrations/0001_init.sql` had been modified in-place (added `from_alias` column), but that column was already covered by migration `0008_drafts_from_alias.sql`. `tauri-plugin-sql` hashes migration contents, so the changed hash for migration 1 caused:
    ```
    PluginInitialization("sql", "migration 1 was previously applied but has been modified")
@@ -1393,31 +1439,36 @@ scripts/verify-ios.sh "iPad Pro"     # boot iPad Pro 11-inch instead
    This dynamic import conflicted with the static import in `utils/shortcuts.ts` and never resolved inside the WKWebView.
 
 ### Fixes
+
 - Reverted `app/src-tauri/migrations/0001_init.sql` to its original content.
 - Converted `DEFAULT_SHORTCUTS` to a static import in `app/src/stores/data.ts`.
 - Converted the `bulk:menu` shortcut handler in `app/src/utils/shortcuts.ts` to use the statically imported `openBulkActionMenu` (removes the second Vite dynamic-import warning).
 - Updated `scripts/verify-ios.sh` to `rm -rf "$GEN/build"` before each build, preventing the Tauri "Directory not empty" rename error on rebuilds.
 
 ### Verification
-| Suite | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm test` | ✅ 106 passed |
-| `cargo fmt --check && cargo clippy -- -D warnings && cargo test` | ✅ 17 unit + 15 integration passed |
-| `pnpm e2e` | ✅ 20 passed, 1 skipped (live Feishu network test) |
-| `scripts/verify-ios.sh` | ✅ builds, installs, launches, captures screenshot |
-| Post-onboarding iOS main app | ✅ renders Imbox empty state + bottom tab bar |
+
+| Suite                                                            | Result                                             |
+| ---------------------------------------------------------------- | -------------------------------------------------- |
+| `pnpm typecheck`                                                 | ✅                                                 |
+| `pnpm lint`                                                      | ✅                                                 |
+| `pnpm format:check`                                              | ✅                                                 |
+| `pnpm test`                                                      | ✅ 106 passed                                      |
+| `cargo fmt --check && cargo clippy -- -D warnings && cargo test` | ✅ 17 unit + 15 integration passed                 |
+| `pnpm e2e`                                                       | ✅ 20 passed, 1 skipped (live Feishu network test) |
+| `scripts/verify-ios.sh`                                          | ✅ builds, installs, launches, captures screenshot |
+| Post-onboarding iOS main app                                     | ✅ renders Imbox empty state + bottom tab bar      |
 
 ### Artifacts
+
 - Onboarding screenshot: `docs/ios-screenshots/iphone-17-01-launch.png`
 - Post-onboarding main app screenshot: `docs/ios-screenshots/iphone-17-03-after-start.png`
 
 ### Quick polish follow-up
+
 - Added **Empty Trash** button to `app/src/views/Trash.tsx` so users can permanently delete all trashed messages in one action.
 
 ### Remaining prototype gaps (priority order)
+
 Based on a focused comparison against `prototype-v11.html/js/css`:
 
 1. **Contact detail depth**: stage-history timeline, recycling toggle + purge job, merge UI, "Delivering to" routing label, topics/accounts/milestones/pattern display, avatar/photo upload.
@@ -1433,6 +1484,7 @@ Based on a focused comparison against `prototype-v11.html/js/css`:
 Added browser-mode Playwright tests for the five core email workflows using an in-memory `MockDb` and `window.__sendpalmE2E` helpers.
 
 ### Added / changed
+
 - `app/e2e/workflows.spec.ts` — Gate approval, Reply, Forward, Calendar invite, Reply Later pile, Set Aside pile.
 - `app/src/services/mock-db.ts` + `app/src/services/mock-db.test.ts` — in-memory SQL shim for browser mode.
 - `app/src/e2e-test-helpers.ts` — Playwright-facing seed/reset/inspect API.
@@ -1441,16 +1493,17 @@ Added browser-mode Playwright tests for the five core email workflows using an i
 - `app/src/views/Gate.tsx` — `data-testid="gate-approve-imbox"`.
 
 ### Verification
-| Suite | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm test src/services/mock-db.test.ts` | ✅ 4 passed |
-| `pnpm e2e` | ✅ 26 passed, 1 skipped (live-network Rust gate) |
+
+| Suite                                    | Result                                           |
+| ---------------------------------------- | ------------------------------------------------ |
+| `pnpm typecheck`                         | ✅                                               |
+| `pnpm lint`                              | ✅                                               |
+| `pnpm test src/services/mock-db.test.ts` | ✅ 4 passed                                      |
+| `pnpm e2e`                               | ✅ 26 passed, 1 skipped (live-network Rust gate) |
 
 ### Report
-- `.superpowers/sdd/task-2-report.md`
 
+- `.superpowers/sdd/task-2-report.md`
 
 Core send/receive/sync workflows are functional end-to-end.
 
@@ -1461,18 +1514,21 @@ Core send/receive/sync workflows are functional end-to-end.
 Fixed three real bugs found while auditing the email read/reply/invite flows.
 
 ### Fixed
+
 - **`app/src/stores/data.ts` `upsertMessage` did not persist `calendar_json`** — the column exists (migration `0002_calendar.sql`) and `rowToMessage` reads it, but any frontend write (mark unread, Reply Later, Set Aside, bucket move) dropped the invite. Added `calendar_json` to the INSERT/UPDATE list and parameters.
 - **`app/src/compose/Compose.tsx` reply/forward quote was empty for HTML-only messages** — `buildDraft` used `m.body` directly. Added `htmlToPlainText()` helper that strips tags and decodes entities, falling back from `bodyHtml` when `body` is empty.
 - **`app/src/panels/MessagePanel.tsx` showed "Sticky notes" section even when empty** — the Show condition was `stickyForMsg().length > 0 || true`; removed the always-true clause.
 
 ### Verification
-| Suite | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm test` | ✅ 106 passed |
+
+| Suite            | Result        |
+| ---------------- | ------------- |
+| `pnpm typecheck` | ✅            |
+| `pnpm lint`      | ✅            |
+| `pnpm test`      | ✅ 106 passed |
 
 ### Report
+
 - `.superpowers/sdd/task-1-report.md`
 
 ---
@@ -1482,20 +1538,22 @@ Fixed three real bugs found while auditing the email read/reply/invite flows.
 The browser-mode `MockDb` and `window.__sendpalmE2E` helpers are required for Playwright, but must not ship in the Tauri production build.
 
 ### Changed
+
 - `app/src/stores/data.ts` — `getDb()` now lazily loads `MockDb` only when `IS_BROWSER() && import.meta.env.DEV`.
 - `app/src/index.tsx` — `e2e-test-helpers.ts` is imported only under `import.meta.env.DEV`.
 
 ### Verification
-| Check | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm test` | ✅ 110 passed |
-| `pnpm e2e` | ✅ 26 passed, 1 skipped |
-| `pnpm format:check` | ✅ |
-| `cargo fmt --check && cargo clippy -- -D warnings && cargo test` | ✅ 35 passed |
-| `scripts/verify-ios.sh` | ✅ builds, installs, launches |
-| Production bundle grep for `MockDb` / `__sendpalmE2E` | ✅ not found |
+
+| Check                                                            | Result                        |
+| ---------------------------------------------------------------- | ----------------------------- |
+| `pnpm typecheck`                                                 | ✅                            |
+| `pnpm lint`                                                      | ✅                            |
+| `pnpm test`                                                      | ✅ 110 passed                 |
+| `pnpm e2e`                                                       | ✅ 26 passed, 1 skipped       |
+| `pnpm format:check`                                              | ✅                            |
+| `cargo fmt --check && cargo clippy -- -D warnings && cargo test` | ✅ 35 passed                  |
+| `scripts/verify-ios.sh`                                          | ✅ builds, installs, launches |
+| Production bundle grep for `MockDb` / `__sendpalmE2E`            | ✅ not found                  |
 
 ---
 
@@ -1504,27 +1562,31 @@ The browser-mode `MockDb` and `window.__sendpalmE2E` helpers are required for Pl
 Refactored `app/src/panels/MessagePanel.tsx` to match the prototype-v11 thread-first reading experience.
 
 ### Added / changed
+
 - **Thread-first layout**: the detail panel now renders the full conversation as a vertical list of message cards instead of a single message body.
 - **Collapse / expand**: current message and the last two messages are expanded by default; older messages collapse to a one-line preview. Clicking a non-current card toggles it.
 - **View-mode toggle**: added `Rendered / Plain / Source` segmented control in the panel header.
-  - *Rendered* — HTML body in iframe when available, otherwise plain text.
-  - *Plain* — `body` as paragraphs.
-  - *Source* — raw `From / To / Subject / Date / body` `<pre>` block.
+  - _Rendered_ — HTML body in iframe when available, otherwise plain text.
+  - _Plain_ — `body` as paragraphs.
+  - _Source_ — raw `From / To / Subject / Date / body` `<pre>` block.
 - **Participant chips** shown below the subject when a thread has multiple senders.
 - **Attachments and calendar invite** now render inside the current-message card rather than as separate panel sections.
 - New helper + tests: `app/src/panels/message-source.ts` and `app/src/test/message-source.test.ts`.
 - New E2E test: `Thread-first detail expands older message and shows both bodies`.
 
 ### Verification
-| Suite | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm test` | ✅ 117 passed |
-| `pnpm e2e` | ✅ 27 passed, 1 skipped |
+
+| Suite            | Result                  |
+| ---------------- | ----------------------- |
+| `pnpm typecheck` | ✅                      |
+| `pnpm lint`      | ✅                      |
+| `pnpm test`      | ✅ 117 passed           |
+| `pnpm e2e`       | ✅ 27 passed, 1 skipped |
 
 ### Report
+
 - `.superpowers/sdd/task-4-report.md`
+
 ---
 
 ## 2026-08-05 — Mobile Settings layout + bottom tab bar crowding fix
@@ -1541,14 +1603,14 @@ User feedback: on iPhone 17 the Settings → Shortcuts page was side-by-side ins
 
 ### Verification
 
-| Suite | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm test` | ✅ 117 passed |
-| `pnpm e2e` | ✅ 28 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 35 passed |
+| Suite                   | Result                                             |
+| ----------------------- | -------------------------------------------------- |
+| `pnpm typecheck`        | ✅                                                 |
+| `pnpm lint`             | ✅                                                 |
+| `pnpm format:check`     | ✅                                                 |
+| `pnpm test`             | ✅ 117 passed                                      |
+| `pnpm e2e`              | ✅ 28 passed, 1 skipped (live-network Rust gate)   |
+| `cargo test`            | ✅ 35 passed                                       |
 | `scripts/verify-ios.sh` | ✅ builds, installs, launches, captures screenshot |
 
 ### Artifacts
@@ -1577,16 +1639,16 @@ User feedback: on iPhone 17 the Settings → Shortcuts page was side-by-side ins
 
 ### Verification
 
-| Suite | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm test` | ✅ 117 passed |
-| `pnpm e2e` | ✅ 29 passed, 1 skipped (live-network Rust gate) |
-| `cargo test` | ✅ 35 passed |
-| `cargo clippy -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Suite                         | Result                                           |
+| ----------------------------- | ------------------------------------------------ |
+| `pnpm typecheck`              | ✅                                               |
+| `pnpm lint`                   | ✅                                               |
+| `pnpm format:check`           | ✅                                               |
+| `pnpm test`                   | ✅ 117 passed                                    |
+| `pnpm e2e`                    | ✅ 29 passed, 1 skipped (live-network Rust gate) |
+| `cargo test`                  | ✅ 35 passed                                     |
+| `cargo clippy -- -D warnings` | ✅                                               |
+| `cargo fmt --check`           | ✅                                               |
 
 ---
 
@@ -1616,16 +1678,16 @@ User feedback: on iPhone 17 the Settings → Shortcuts page was side-by-side ins
 
 ### Verification
 
-| Suite | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm test` | ✅ 122 passed |
-| `pnpm e2e` | ✅ 29 passed, 1 skipped |
-| `cargo test` | ✅ 36 passed |
-| `cargo clippy -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Suite                         | Result                  |
+| ----------------------------- | ----------------------- |
+| `pnpm typecheck`              | ✅                      |
+| `pnpm lint`                   | ✅                      |
+| `pnpm format:check`           | ✅                      |
+| `pnpm test`                   | ✅ 122 passed           |
+| `pnpm e2e`                    | ✅ 29 passed, 1 skipped |
+| `cargo test`                  | ✅ 36 passed            |
+| `cargo clippy -- -D warnings` | ✅                      |
+| `cargo fmt --check`           | ✅                      |
 
 ### Remaining gap
 
@@ -1651,16 +1713,16 @@ Destructive mail actions need a safety net. Added an undo path for the MessagePa
 
 ### Verification
 
-| Suite | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm test` | ✅ 122 passed |
-| `pnpm e2e` | ✅ 30 passed, 1 skipped |
-| `cargo test` | ✅ 36 passed |
-| `cargo clippy -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Suite                         | Result                  |
+| ----------------------------- | ----------------------- |
+| `pnpm typecheck`              | ✅                      |
+| `pnpm lint`                   | ✅                      |
+| `pnpm format:check`           | ✅                      |
+| `pnpm test`                   | ✅ 122 passed           |
+| `pnpm e2e`                    | ✅ 30 passed, 1 skipped |
+| `cargo test`                  | ✅ 36 passed            |
+| `cargo clippy -- -D warnings` | ✅                      |
+| `cargo fmt --check`           | ✅                      |
 
 ---
 
@@ -1689,16 +1751,16 @@ A full parallel audit against `prototype-v11.38` surfaced multiple gaps that blo
 
 ### Verification
 
-| Suite | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm test` | ✅ 122 passed |
-| `pnpm e2e` | ✅ 31 passed, 1 skipped |
-| `cargo test` | ✅ 36 passed |
-| `cargo clippy -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Suite                         | Result                  |
+| ----------------------------- | ----------------------- |
+| `pnpm typecheck`              | ✅                      |
+| `pnpm lint`                   | ✅                      |
+| `pnpm format:check`           | ✅                      |
+| `pnpm test`                   | ✅ 122 passed           |
+| `pnpm e2e`                    | ✅ 31 passed, 1 skipped |
+| `cargo test`                  | ✅ 36 passed            |
+| `cargo clippy -- -D warnings` | ✅                      |
+| `cargo fmt --check`           | ✅                      |
 
 ### Remaining significant gaps (post-audit backlog)
 
@@ -1741,16 +1803,16 @@ Second pass after the audit closed three more daily-use gaps in Compose, Setting
 
 ### Verification
 
-| Suite | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm test` | ✅ 122 passed |
-| `pnpm e2e` | ✅ 31 passed, 1 skipped |
-| `cargo test` | ✅ 37 passed |
-| `cargo clippy -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Suite                         | Result                  |
+| ----------------------------- | ----------------------- |
+| `pnpm typecheck`              | ✅                      |
+| `pnpm lint`                   | ✅                      |
+| `pnpm format:check`           | ✅                      |
+| `pnpm test`                   | ✅ 122 passed           |
+| `pnpm e2e`                    | ✅ 31 passed, 1 skipped |
+| `cargo test`                  | ✅ 37 passed            |
+| `cargo clippy -- -D warnings` | ✅                      |
+| `cargo fmt --check`           | ✅                      |
 
 ---
 
@@ -1776,16 +1838,16 @@ Third pass after the audit focused on making destructive / stateful triage actio
 
 ### Verification
 
-| Suite | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm test` | ✅ 122 passed |
-| `pnpm e2e` | ✅ 32 passed, 1 skipped |
-| `cargo test` | ✅ 37 passed |
-| `cargo clippy -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Suite                         | Result                  |
+| ----------------------------- | ----------------------- |
+| `pnpm typecheck`              | ✅                      |
+| `pnpm lint`                   | ✅                      |
+| `pnpm format:check`           | ✅                      |
+| `pnpm test`                   | ✅ 122 passed           |
+| `pnpm e2e`                    | ✅ 32 passed, 1 skipped |
+| `cargo test`                  | ✅ 37 passed            |
+| `cargo clippy -- -D warnings` | ✅                      |
+| `cargo fmt --check`           | ✅                      |
 
 ---
 
@@ -1810,16 +1872,16 @@ Fourth pass implemented the prototype's `priorityScore` for the "New for you" se
 
 ### Verification
 
-| Suite | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm test` | ✅ 125 passed |
-| `pnpm e2e` | ✅ 32 passed, 1 skipped |
-| `cargo test` | ✅ 37 passed |
-| `cargo clippy -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
+| Suite                         | Result                  |
+| ----------------------------- | ----------------------- |
+| `pnpm typecheck`              | ✅                      |
+| `pnpm lint`                   | ✅                      |
+| `pnpm format:check`           | ✅                      |
+| `pnpm test`                   | ✅ 125 passed           |
+| `pnpm e2e`                    | ✅ 32 passed, 1 skipped |
+| `cargo test`                  | ✅ 37 passed            |
+| `cargo clippy -- -D warnings` | ✅                      |
+| `cargo fmt --check`           | ✅                      |
 
 ---
 
@@ -1851,15 +1913,15 @@ User reported "移动端的界面好奇怪 / 总是 crash". Did a root-cause pas
 
 ### Verification
 
-| Suite | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm test` | ✅ 125 passed |
-| `pnpm e2e` | ✅ 42 passed, 1 skipped (live-network gate) |
-| `cargo fmt --check && cargo clippy -- -D warnings && cargo test` | ✅ 37 passed |
-| `scripts/verify-ios.sh` | ✅ builds, installs, launches iPhone 17 sim |
+| Suite                                                            | Result                                      |
+| ---------------------------------------------------------------- | ------------------------------------------- |
+| `pnpm typecheck`                                                 | ✅                                          |
+| `pnpm lint`                                                      | ✅                                          |
+| `pnpm format:check`                                              | ✅                                          |
+| `pnpm test`                                                      | ✅ 125 passed                               |
+| `pnpm e2e`                                                       | ✅ 42 passed, 1 skipped (live-network gate) |
+| `cargo fmt --check && cargo clippy -- -D warnings && cargo test` | ✅ 37 passed                                |
+| `scripts/verify-ios.sh`                                          | ✅ builds, installs, launches iPhone 17 sim |
 
 ### Artifacts
 
@@ -1901,17 +1963,17 @@ Second focused pass after the user asked to log in to `edwinhao@sendpalm.com` on
 
 ### Verification
 
-| Suite | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm lint` | ✅ |
-| `pnpm format:check` | ✅ |
-| `pnpm test` | ✅ 125 passed |
-| `pnpm e2e` | ✅ 44 passed, 1 skipped (live-network gate) |
-| `cargo test` | ✅ 37 passed |
-| `cargo clippy -- -D warnings` | ✅ |
-| `cargo fmt --check` | ✅ |
-| `scripts/verify-ios.sh` | ✅ builds, installs, launches iPhone 17 sim |
+| Suite                         | Result                                      |
+| ----------------------------- | ------------------------------------------- |
+| `pnpm typecheck`              | ✅                                          |
+| `pnpm lint`                   | ✅                                          |
+| `pnpm format:check`           | ✅                                          |
+| `pnpm test`                   | ✅ 125 passed                               |
+| `pnpm e2e`                    | ✅ 44 passed, 1 skipped (live-network gate) |
+| `cargo test`                  | ✅ 37 passed                                |
+| `cargo clippy -- -D warnings` | ✅                                          |
+| `cargo fmt --check`           | ✅                                          |
+| `scripts/verify-ios.sh`       | ✅ builds, installs, launches iPhone 17 sim |
 
 ### Artifacts
 
@@ -2003,7 +2065,7 @@ Second focused pass after the user asked to log in to `edwinhao@sendpalm.com` on
   `trafficLightPosition` is set to `{x: 14, y: 14}`.
 - The JS `Titlebar.tsx` component and its grid row in `base.css` are
   deleted. `--titlebar-height` is now `0`; a new `--titlebar-traffic-pad:
-  78px` token reserves the macOS safe area.
+78px` token reserves the macOS safe area.
 - New `<BrandMark />` (Phosphor `ph-leaf` + 18 px wordmark) is the
   leftmost topbar element. The topbar body is draggable
   (`-webkit-app-region: drag`); every interactive control carries
@@ -2074,20 +2136,20 @@ This pass is one logical change set spread across seven commits:
 
 - **feat(ui): drag handle between Main and DetailPanel** — adds
   `--main-pane-width` token (default 640px) and a `<PanelResizeHandle
-  panel="main" side="right" />` mounted on Main. Persisted alongside
+panel="main" side="right" />` mounted on Main. Persisted alongside
   detail/agent widths in the existing `sendpalm.panelWidths`
   localStorage entry.
 
 ### Verification
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 156 passed (22 files) |
-| `pnpm lint` | 🟡 1 pre-existing `sidebarWidth` error in `e2e/views.spec.ts:416` (verified by `git stash` — present on `main` before this branch) |
-| `cargo build` | ✅ |
-| `cargo test --lib` | ✅ 29 passed |
-| `cargo test --test mailbox_resolver_test` | ✅ 13 passed |
+| Command                                   | Result                                                                                                                             |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm typecheck`                          | ✅                                                                                                                                 |
+| `pnpm test`                               | ✅ 156 passed (22 files)                                                                                                           |
+| `pnpm lint`                               | 🟡 1 pre-existing `sidebarWidth` error in `e2e/views.spec.ts:416` (verified by `git stash` — present on `main` before this branch) |
+| `cargo build`                             | ✅                                                                                                                                 |
+| `cargo test --lib`                        | ✅ 29 passed                                                                                                                       |
+| `cargo test --test mailbox_resolver_test` | ✅ 13 passed                                                                                                                       |
 
 ## 2026-08-14 (continued) — Incremental sync + optimistic UI
 
@@ -2125,11 +2187,11 @@ Two follow-up commits completing the performance series.
 
 ### Verification
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 156 passed |
-| `cargo test --lib` | ✅ 29 passed |
+| Command            | Result        |
+| ------------------ | ------------- |
+| `pnpm typecheck`   | ✅            |
+| `pnpm test`        | ✅ 156 passed |
+| `cargo test --lib` | ✅ 29 passed  |
 
 ## 2026-08-18 (Imbox UX fixes) — sort filter, Read Together wiring, pile drawer redesign
 
@@ -2149,13 +2211,13 @@ Three user-reported gaps in the Imbox surface, all closed in one branch.
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 187 passed (was 181; +6 sort cases) |
-| `pnpm build` | ✅ |
-| `cargo check` | ✅ no Rust changes |
-| `pnpm lint` | �️ 4 pre-existing e2e errors not touched by this branch |
+| Command          | Result                                                 |
+| ---------------- | ------------------------------------------------------ |
+| `pnpm typecheck` | ✅                                                     |
+| `pnpm test`      | ✅ 187 passed (was 181; +6 sort cases)                 |
+| `pnpm build`     | ✅                                                     |
+| `cargo check`    | ✅ no Rust changes                                     |
+| `pnpm lint`      | �️ 4 pre-existing e2e errors not touched by this branch |
 
 ### Commits
 
@@ -2171,6 +2233,7 @@ items addressed; a handful of complex views deferred to follow-up.
 ### Fixed in this pass
 
 **Brand & launch (P0/P1)**
+
 - `BrandMark.tsx` no longer renders a stock Phosphor `ph-leaf`. The
   topbar now shows the bespoke `logo-mark.svg` (paper-plane + palm)
   at 22×22, matching the splash and the Tauri bundle icons. The
@@ -2184,6 +2247,7 @@ items addressed; a handful of complex views deferred to follow-up.
   renders.
 
 **Settings (P1)**
+
 - `Settings.tsx` AccountsTab and ShortcutsTab had `For each={...() ?? []}`
   with NO fallback. A fresh install hit empty Connected accounts and
   zero shortcut rows with nothing to click. Both now render an
@@ -2192,6 +2256,7 @@ items addressed; a handful of complex views deferred to follow-up.
   button uses.
 
 **Records (P2)**
+
 - Removed the unwired "导出为 CSV" per-row quick action that
   hard-coded `showToast({ message: '导出为 CSV（M7 实装）' })`.
   It literally admitted the action wasn't implemented (M7 = a future
@@ -2199,6 +2264,7 @@ items addressed; a handful of complex views deferred to follow-up.
   is worse than not having the button.
 
 **ResourceGate helper (P1, with TDD)**
+
 - New `app/src/components/ResourceGate.tsx` centralises the
   `createResource` guard pattern (loading / error / empty) so views
   stop forgetting the error check. The default predicates treat
@@ -2210,6 +2276,7 @@ items addressed; a handful of complex views deferred to follow-up.
   Total: 194 frontend tests, 80 cargo tests.
 
 **View error fallbacks (P1) — wrapped 13 views**
+
 - Each of these previously showed an empty page on resource failure
   with no error indicator. Each now wraps the existing render in a
   `<Show>` that falls back to `<ErrorState>` with `重试` wired to
@@ -2253,12 +2320,12 @@ refactoring. Will be addressed in a separate pass:
 
 ### Verification matrix
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 194 passed (was 187, +7 for ResourceGate) |
-| `cargo test` | ✅ 80 passed |
-| `pnpm lint` | ⚠️ 4 pre-existing e2e errors unchanged |
+| Command          | Result                                       |
+| ---------------- | -------------------------------------------- |
+| `pnpm typecheck` | ✅                                           |
+| `pnpm test`      | ✅ 194 passed (was 187, +7 for ResourceGate) |
+| `cargo test`     | ✅ 80 passed                                 |
+| `pnpm lint`      | ⚠️ 4 pre-existing e2e errors unchanged       |
 
 ### Commits (this branch)
 
@@ -2297,6 +2364,7 @@ states but left two P1 gaps on the Imbox itself:
    than scrolling 100s of rows.
 
 Stack:
+
 - `listMessagesPaged` gains `readOnly` filter (mutually exclusive
   with `unreadOnly`; `unreadOnly` wins if both set).
 - New `ImboxTabs` component above the list with two pill buttons:
@@ -2323,16 +2391,16 @@ The 2026-08-18 audit deferred 7 views because their render graphs
 were too complex to wrap in a single inline Show. All 7 are now
 covered:
 
-  - Gate          → `queueItems.error`
-  - ScreenerHistory → `contacts.error`
-  - Insights      → aggregate over messages/contacts/tasks/
-                    followUps/agentTasks/events
-  - Agent         → `useAgent().error()` aggregate; useAgent now
-                    exposes a single error() accessor that returns
-                    the first non-undefined error across its 5
-                    resources
-  - Calendar      → `events.error`
-  - PileBoard     → `paged.resource.error`
+- Gate → `queueItems.error`
+- ScreenerHistory → `contacts.error`
+- Insights → aggregate over messages/contacts/tasks/
+  followUps/agentTasks/events
+- Agent → `useAgent().error()` aggregate; useAgent now
+  exposes a single error() accessor that returns
+  the first non-undefined error across its 5
+  resources
+- Calendar → `events.error`
+- PileBoard → `paged.resource.error`
 
 Each falls back to ErrorState with 重试 wired to the appropriate
 refetch. The bespoke empty/skeleton sub-components stay in place.
@@ -2345,11 +2413,11 @@ label formatting including the year-suppressed same-year case).
 
 All previous tests still pass.
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm test` | ✅ 207 passed (was 194, +13 for dateBucket) |
-| `cargo test` | ✅ 80 passed |
+| Command          | Result                                      |
+| ---------------- | ------------------------------------------- |
+| `pnpm typecheck` | ✅                                          |
+| `pnpm test`      | ✅ 207 passed (was 194, +13 for dateBucket) |
+| `cargo test`     | ✅ 80 passed                                |
 
 ### Commits (this branch)
 
@@ -2381,12 +2449,12 @@ and Vite's production-build asset pipeline.
 
 **Verification:**
 
-| Command | Result |
-|---|---|
-| `pnpm typecheck` | ✅ |
-| `pnpm lint` | ✅ (0 warnings) |
-| `pnpm test` | ✅ 279 passed (was 272, +7 for `plainTextToHtml`) |
-| `pnpm build` | ✅ bundles `Phosphor-*.woff2` (147 KB) + 4 KB hashed `logo-*.svg`; CSS contains `.ph.ph-tray:before` rules |
+| Command          | Result                                                                                                     |
+| ---------------- | ---------------------------------------------------------------------------------------------------------- |
+| `pnpm typecheck` | ✅                                                                                                         |
+| `pnpm lint`      | ✅ (0 warnings)                                                                                            |
+| `pnpm test`      | ✅ 279 passed (was 272, +7 for `plainTextToHtml`)                                                          |
+| `pnpm build`     | ✅ bundles `Phosphor-*.woff2` (147 KB) + 4 KB hashed `logo-*.svg`; CSS contains `.ph.ph-tray:before` rules |
 
 `AGENTS.md` §11 captures the icon-CDN regression as a critical lesson: any
 external `<script>` or `<link>` is a future Tauri-CSP regression waiting to
@@ -2415,11 +2483,11 @@ structural problems and one rendering hot path:
    (2264 lines), Imbox (1835), Settings (2214) all had to be parsed by the
    JS engine before the user could click anything. Replaced every static
    import with `lazy(() => import("../views/X").then(m => ({ default: m.X })))`
-   + `<Suspense fallback={<FeedSkeleton />}>`. The active view's chunk
-   downloads after the shell paints; other chunks load on demand when the
-   user navigates to them. Initial bundle dropped from **633 KB → 399 KB
-   raw / 120 KB gzipped**, and the first paint no longer waits for the
-   V8 engine to compile all 22 view components.
+   - `<Suspense fallback={<FeedSkeleton />}>`. The active view's chunk
+     downloads after the shell paints; other chunks load on demand when the
+     user navigates to them. Initial bundle dropped from **633 KB → 399 KB
+     raw / 120 KB gzipped**, and the first paint no longer waits for the
+     V8 engine to compile all 22 view components.
 
 3. The Imbox's `DateGroupedList` was using `Object.assign(item, { _flatIdx })`
    to attach a per-item global index for j/k cursor navigation. That
@@ -2463,4 +2531,5 @@ structural problems and one rendering hot path:
 that paints the top-level shell should NOT block on boot-time IPC. Every
 component pulls its own data via `createResource`; the shell paints
 first, the data catches up.
+
 - `fix(calendar,pileboard): error fallbacks for events / pile loader`
