@@ -168,6 +168,27 @@ User came back with "主要出现在数据多的时候" — wanting to know if t
 
 The cost of a perf fix is only meaningful when measured at the data scale the user actually has. The 1× Feishu-sized perf run said the v1 fixes worked; the 3× stress run said the **structural** fixes (Set lookup, single resource, SQL aggregate) actually scale, vs cosmetic refactors that only moved the bottleneck. A 1.9× Insights mount at 3× data is fine if the underlying shape is "1 resource × N rows" — that's data transfer, no algorithmic shortcut. It's a problem if the underlying shape is "N cascading resources × N rows" — that's quadratic, no fix without a real refactor. Always re-run perf at the data scale you actually care about before declaring victory.
 
+## macOS DMG build (2026-08-21, post-perf-fixes)
+
+User asked for a fresh DMG so they can try the perf-fixed build on their real machine. Built with `pnpm tauri build` from the app dir, output in `~/.cargo/shared-target/release/bundle/` (the project uses a shared cargo target dir).
+
+| Field           | Value                                                              |
+| --------------- | ------------------------------------------------------------------ |
+| Commit          | d0689bc                                                            |
+| Rust compile    | 6 m 27 s (first cold build from scratch)                           |
+| DMG bundle step | ~30 s                                                              |
+| DMG path        | `dist/SendPalm-0.1.0-arm64-perf.dmg`                               |
+| DMG size        | 8.8 MB (9 215 096 bytes)                                           |
+| DMG sha256      | `c74347d0fab88130b9b0a4f77ec3cf1528b16860f80ece855c02888f2057d616` |
+| App bundle      | `dist/SendPalm-perf.app` (24 MB binary, 25 485 504 bytes)          |
+| App identifier  | `com.sendpalm.app`                                                 |
+| App version     | 0.1.0                                                              |
+| Min macOS       | 10.13                                                              |
+
+The first cold Rust build from scratch took 6 m 27 s — this is the all-deps-from-scratch cost (Tauri 2 + tokio + objc2 + aws-lc-sys + brotli + sqlx + lettre + …). Subsequent builds will be ~10-30 s for incremental changes (cargo's shared target dir keeps the build cache across runs).
+
+The previous DMG from `2c41277` (the Imbox hover-only toolbar refactor) is preserved in `dist/SendPalm-0.1.0-arm64.dmg` for comparison. The `-perf` suffix marks the new build so the user can pick the right one.
+
 ## v3 reframing (2026-08-20)
 
 SendPalm is a **HEY-workflow client for any IMAP email service** — not a HEY replacement. The two-pager `docs/POSITIONING.md` is the source of truth for the white space (HEY workflow × any-service client) and the explicit non-goals (no backend, no cross-device sync, no web app, no B2B SSO).
