@@ -23,7 +23,7 @@ import { Modal } from "../components/Modal";
 import { RecipientInput } from "../components/RecipientInput";
 import {
   listAccounts,
-  listContacts,
+  listContactsForRecipient,
   listSnippets,
   upsertDraft,
   upsertScheduledSend,
@@ -72,7 +72,16 @@ interface DraftState {
 
 export function Compose() {
   const [accounts] = createResource(listAccounts);
-  const [contacts] = createResource(listContacts);
+  // Lightweight projection — the recipient picker only needs
+  // id/name/emails/avatar. The previous `listContacts` pull
+  // included notes/pattern/stageHistory/topics/labels/photo per
+  // row, ~75-300 KB of payload that Compose never reads, plus 5
+  // safeParse calls per row. With 1500 contacts that was 7500
+  // JSON.parse calls + ~600 KB of unused payload on every Compose
+  // open. The full Contact row is still fetched by the detail
+  // panel when the user clicks a contact, so no data is lost —
+  // just deferred to the point of use.
+  const [contacts] = createResource(listContactsForRecipient);
   const [snippets] = createResource(listSnippets);
 
   const defaultAccount = () =>

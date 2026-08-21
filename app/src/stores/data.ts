@@ -599,6 +599,46 @@ export async function listContacts(): Promise<Contact[]> {
   return rows.map(rowToContact);
 }
 
+/** Recipient-picker projection of the contacts table.
+ *
+ *  The previous Compose flow did `createResource(listContacts)` to
+ *  power the To/Cc/Bcc recipient autocomplete. `listContacts` pulls
+ *  every column including the heavy ones (notes, pattern, stage
+ *  history JSON, topics, labels, photo, accounts), then runs 5
+ *  `safeParse` calls per row in `rowToContact`. On a 1500-contact
+ *  corpus that's ~7500 JSON.parse calls + ~75 KB of `notes` + ~300 KB
+ *  of `pattern` + ~200 KB of `stageHistory` crossing the IPC bridge
+ *  for every Compose open — visible jank on real Tauri.
+ *
+ *  The recipient picker only reads `id`, `name`, `emails`, `avatar`.
+ *  This function projects exactly those 4 columns server-side. The
+ *  full row is still fetched by the detail panel via `getContact(id)`
+ *  when the user clicks through, so no data is lost — just deferred
+ *  to the point of use. */
+export interface ContactRecipient {
+  id: ID;
+  name: string;
+  emails: Contact["emails"];
+  avatar: string;
+}
+
+export async function listContactsForRecipient(): Promise<ContactRecipient[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT id, name, emails_json, avatar
+       FROM contacts
+       WHERE emails_json IS NOT NULL
+         AND emails_json != '[]'
+       ORDER BY name`,
+  );
+  return rows.map((r) => ({
+    id: r.id as ID,
+    name: r.name as string,
+    emails: safeParse<Contact["emails"]>(r.emails_json as string, []),
+    avatar: r.avatar as string,
+  }));
+}
+
 /** Aggregated Companies view data — one row per company.
  *
  *  Pre-computes the per-company counts (people, messages, events, files)

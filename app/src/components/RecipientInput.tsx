@@ -5,13 +5,25 @@
 
 import { For, Show, createMemo, createSignal } from "solid-js";
 import { Icon } from "./Icon";
-import type { Contact } from "../types";
+
+/** Structural subset of `Contact` that the recipient picker needs.
+ *  Accepting this instead of the full `Contact` lets callers pass
+ *  the lightweight `listContactsForRecipient` projection (only
+ *  id / name / emails / avatar) instead of the full 25-field row,
+ *  which matters because Compose opens the recipient picker on every
+ *  reply and the previous full-table pull was visible jank. */
+export interface RecipientContact {
+  id: string;
+  name: string;
+  emails: { value: string; label?: string }[];
+  avatar?: string;
+}
 
 interface RecipientInputProps {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
-  contacts: Contact[];
+  contacts: RecipientContact[];
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
