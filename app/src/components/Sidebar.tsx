@@ -3,13 +3,15 @@
  *  a "More" sheet so tap targets stay >= 44px.
  */
 
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createResource, createSignal } from "solid-js";
 import { Portal } from "solid-js/web";
 import { Icon } from "./Icon";
 import { SidebarTooltip } from "./SidebarTooltip";
 import { setView, view } from "../stores/ui";
 import { NAV_SECTIONS, type NavSection } from "../utils/labels";
 import { useLongPress, useViewport } from "../utils/gestures";
+import { countGateCandidates } from "../stores/data";
+import { useSoftRefreshEffect } from "../utils/gestures";
 
 const MOBILE_PRIMARY_VIEWS = new Set([
   "imbox",
@@ -23,6 +25,16 @@ const MOBILE_PRIMARY_VIEWS = new Set([
 export function Sidebar() {
   const { isMobile } = useViewport();
   const [moreOpen, setMoreOpen] = createSignal(false);
+
+  // P0-8: badge for the Gate (Screener) sidebar entry. The count is
+  // re-pulled on the soft refresh tick so a brand-new first-time sender
+  // from the IMAP sync shows up without a full app reload.
+  const [gateCount, { refetch: refetchGateCount }] = createResource(
+    countGateCandidates,
+  );
+  useSoftRefreshEffect(() => {
+    void refetchGateCount();
+  });
 
   const primary = () =>
     NAV_SECTIONS.filter((s) => MOBILE_PRIMARY_VIEWS.has(s.view));
@@ -65,6 +77,9 @@ export function Sidebar() {
               view={section.view}
               active={view() === section.view}
               onClick={() => navigate(section.view)}
+              badgeCount={
+                section.view === "screener" ? () => gateCount() ?? 0 : undefined
+              }
             />
           )}
         </For>
@@ -84,6 +99,7 @@ export function Sidebar() {
           items={overflow()}
           onNavigate={navigate}
           onClose={() => setMoreOpen(false)}
+          gateCount={() => gateCount() ?? 0}
         />
       </Show>
     </>
@@ -97,6 +113,8 @@ function NavItem(props: {
   view: string;
   active: boolean;
   onClick: () => void;
+  /** Optional badge count to render in the top-right corner. */
+  badgeCount?: () => number;
 }) {
   const { isMobile } = useViewport();
   let buttonRef: HTMLButtonElement | undefined;
@@ -188,6 +206,35 @@ function NavItem(props: {
             props.active && !isMobile() ? { transform: "scale(1.08)" } : undefined
           }
         />
+        {/* Badge — top-right corner when count > 0 */}
+        <Show when={props.badgeCount && props.badgeCount() > 0}>
+          <span
+            data-nav-badge={props.label}
+            data-count={props.badgeCount!()}
+            aria-label={`${props.badgeCount!()} 项待处理`}
+            style={{
+              position: "absolute",
+              top: isMobile() ? "2px" : "6px",
+              right: isMobile() ? "8px" : "12px",
+              "min-width": isMobile() ? "14px" : "16px",
+              height: isMobile() ? "14px" : "16px",
+              padding: "0 4px",
+              "border-radius": "var(--radius-pill)",
+              background: "var(--palm)",
+              color: "#fff",
+              "font-size": isMobile() ? "9px" : "10px",
+              "font-weight": "700",
+              "line-height": 1,
+              display: "flex",
+              "align-items": "center",
+              "justify-content": "center",
+              "pointer-events": "none",
+              "box-shadow": "0 0 0 2px var(--paper-mid)",
+            }}
+          >
+            {props.badgeCount!() > 99 ? "99+" : props.badgeCount!()}
+          </span>
+        </Show>
         {/* Mobile: keep the label visible (10px). Desktop: hide it. */}
         <Show when={isMobile()}>
           <span
@@ -236,6 +283,7 @@ function MobileMoreSheet(props: {
   items: NavSection[];
   onNavigate: (view: string) => void;
   onClose: () => void;
+  gateCount: () => number;
 }) {
   return (
     <Portal mount={document.body}>
@@ -289,6 +337,7 @@ function MobileMoreSheet(props: {
                   data-nav={item.label}
                   data-nav-view={item.view}
                   style={{
+                    position: "relative",
                     display: "flex",
                     "flex-direction": "column",
                     "align-items": "center",
@@ -315,6 +364,32 @@ function MobileMoreSheet(props: {
                   >
                     {item.label}
                   </span>
+                  {/* Badge for the screener entry inside the More sheet */}
+                  <Show when={item.view === "screener" && (props.gateCount() ?? 0) > 0}>
+                    <span
+                      data-nav-badge={item.label}
+                      data-count={props.gateCount() ?? 0}
+                      style={{
+                        position: "absolute",
+                        top: "6px",
+                        right: "12px",
+                        "min-width": "16px",
+                        height: "16px",
+                        padding: "0 4px",
+                        "border-radius": "var(--radius-pill)",
+                        background: "var(--palm)",
+                        color: "#fff",
+                        "font-size": "10px",
+                        "font-weight": "700",
+                        "line-height": 1,
+                        display: "flex",
+                        "align-items": "center",
+                        "justify-content": "center",
+                      }}
+                    >
+                      {(props.gateCount() ?? 0) > 99 ? "99+" : props.gateCount() ?? 0}
+                    </span>
+                  </Show>
                 </button>
               )}
             </For>

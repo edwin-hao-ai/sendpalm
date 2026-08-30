@@ -709,15 +709,76 @@ function AddAccountModal(props: { onClose: () => void }) {
           style={inputStyle}
         />
       </Field>
-      <Field label="密码 / App password / 授权码">
-        <input
-          type="password"
-          value={accountPassword()}
-          onInput={(e) => setAccountPassword(e.currentTarget.value)}
-          placeholder="见上方服务商提示"
-          style={inputStyle}
-        />
-      </Field>
+      {(() => {
+        // P0-9: branch the credential input on `auth_mode`. The previous
+        // code always showed a single password field regardless of the
+        // provider's auth mode, which made Gmail (oauth2-required) and
+        // QQ/163/126 (password-with-auth-code) impossible to set up
+        // correctly: the user typed a login password, IMAP rejected
+        // it, and the account appeared connected with no usable creds.
+        const prov = providerList()?.find((p) => p.id === selectedProviderId());
+        const mode = prov?.auth_mode ?? "app-password";
+        if (mode === "oauth2-required") {
+          return (
+            <>
+              <p
+                style={{
+                  padding: "12px 16px",
+                  background: "var(--paper-mid)",
+                  "border-radius": "var(--radius-md)",
+                  "font-size": "var(--text-caption)",
+                  color: "var(--text-secondary)",
+                  "line-height": 1.5,
+                }}
+              >
+                {prov?.label} 使用 OAuth 授权。点击下方按钮在系统浏览器中完成授权，SendPalm
+                会自动接收返回的 refresh token。
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  showToast({
+                    message: `OAuth 流程开发中：${prov?.label} — 请先用「自定义 IMAP」方式接入`,
+                    kind: "info",
+                    ttlMs: 6000,
+                  });
+                }}
+                style={{
+                  width: "100%",
+                  padding: "12px 18px",
+                  background: "var(--palm)",
+                  color: "#fff",
+                  "border-radius": "var(--radius-pill)",
+                  "font-weight": "700",
+                  "font-size": "var(--text-caption)",
+                  "margin-top": "var(--space-2)",
+                }}
+              >
+                用 {prov?.label} 授权
+              </button>
+            </>
+          );
+        }
+        const labelByMode: Record<string, string> = {
+          "app-password": "App Password（推荐）",
+          "password-with-auth-code": "授权码（非登录密码）",
+        };
+        const placeholderByMode: Record<string, string> = {
+          "app-password": "16 位 App Password",
+          "password-with-auth-code": "在 webmail 设置里生成的授权码",
+        };
+        return (
+          <Field label={labelByMode[mode] ?? "密码"}>
+            <input
+              type="password"
+              value={accountPassword()}
+              onInput={(e) => setAccountPassword(e.currentTarget.value)}
+              placeholder={placeholderByMode[mode] ?? "见上方服务商提示"}
+              style={inputStyle}
+            />
+          </Field>
+        );
+      })()}
       <p
         style={{
           "font-size": "var(--text-micro)",

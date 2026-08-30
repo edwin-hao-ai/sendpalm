@@ -728,7 +728,7 @@ export function Imbox() {
     endDrag();
   };
 
-  /* ── Keyboard shortcuts (j/k/x/Enter/l/s/a/r/t/b/o/u) ─────────────── */
+  /* ── Keyboard shortcuts (j/k/x/Enter/l/s/a/r/t/b/!/u) ────────────── */
 
   const handleKey = (e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
@@ -775,9 +775,30 @@ export function Imbox() {
       const item = renderList()[cur];
       if (item && !("messages" in item)) void trash(item);
     } else if (e.key === "b") {
+      // P0-10: align with prototype-v11 (`b` = bubble-up / Remind,
+      // per renderContextMenuForMessage). The previous code mapped `b`
+      // to spam(), which was destructive and silently set `deleted_at`
+      // (then 30-day expiry). `!` is the spam shortcut (per
+      // DEFAULT_SHORTCUTS sc-message-spam "!").
       const cur = cursorIndex();
       const item = renderList()[cur];
-      if (item && !("messages" in item)) void spam(item);
+      if (item && !("messages" in item)) {
+        const m = item as Message;
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(9, 0, 0, 0);
+        void upsertMessage({ ...m, bubbleUpAt: tomorrow.toISOString() });
+        showToast({
+          message: `已 Remind 到 ${tomorrow.toLocaleString()}`,
+          kind: "success",
+        });
+      }
+    } else if (e.key === "!") {
+      // P0-10: explicit shortcut for Spam. The previous code put spam
+      // on `b` which was both wrong and unrecoverable.
+      const cur = cursorIndex();
+      const item = renderList()[cur];
+      if (item && !("messages" in item)) void spam(item as Message);
     } else if (e.key === "u") {
       const cur = cursorIndex();
       const item = renderList()[cur];

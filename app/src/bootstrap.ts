@@ -69,13 +69,20 @@ export async function initApp() {
           setOnboardingCompleted(true);
           setOnboardingStep(null);
         } else {
-          // Mark onboarding as completed on first successful store load so the
-          // app is immediately usable (especially on iOS, where URL hash
-          // overrides do not survive into the WKWebView). The user can still
-          // replay onboarding from Settings → Profile.
-          setOnboardingCompleted(true);
-          setOnboardingStep(null);
-          await store.set("onboarding_completed", true);
+          // P0-6: on a true first run, actually run the 4-step wizard
+          // instead of auto-completing it. The previous code auto-completed
+          // for "iOS WKWebView hash doesn't survive" reasons, but on desktop
+          // the user never saw step 3 (sync) or step 4 (done) at all.
+          // We still keep the file marker so the wizard doesn't replay on
+          // every cold start — the wizard is gated by `onboardingStep`
+          // which is null until the user opens it via Settings → Profile.
+          setOnboardingCompleted(false);
+          setOnboardingStep(0);
+          // P0-7: do NOT mark completed=true here. The wizard's last
+          // step (or "Skip" button) writes the flag. Steps 1 and 2
+          // (currently visible) need to play through; "Skip" lets
+          // power users bypass without seeing steps 3/4.
+          await store.set("onboarding_started_at", new Date().toISOString());
           await store.save();
         }
       } catch (storeErr) {

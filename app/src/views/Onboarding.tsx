@@ -90,8 +90,23 @@ export function Onboarding() {
   };
 
   const goToAccounts = () => {
+    // P0-7: navigating to Settings to add an account must NOT mark
+    // the wizard complete. The previous code called `complete()` here,
+    // which meant clicking "去连接" on step 2 jumped past steps 3 (sync)
+    // and 4 (done). The user never saw the rest of the wizard.
+    //
+    // Flow now:
+    //   - step 2 "去连接" → setView("settings"), keep wizard state at 1
+    //   - user adds an account in Settings, then either:
+    //       a) clicks "继续" on the wizard (we'll add a "重新显示" affordance
+    //          via the Settings → Profile "重放 Onboarding" button)
+    //       b) navigates back manually and finishes step 2
+    //   - on step 3 / 4 the user sees the sync progress + final card.
+    //
+    // We move the wizard one step forward so the "back" arrow on Settings
+    // doesn't drag them back into a stale step 2.
     setView("settings");
-    complete();
+    setOnboardingStep(1);
   };
 
   return (
