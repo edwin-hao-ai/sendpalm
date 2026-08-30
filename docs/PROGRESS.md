@@ -2704,3 +2704,130 @@ stricter. The white-area symptom specifically needs proper
 virtualization (VList) to fully eliminate — that's a separate
 refactor, not in this pass. If v4 still shows white areas in real
 Tauri, next step is VList for Imbox.
+
+## 2026-08-30 audit-fix sweep (P0 / P1 / P2 / SEC / PERF)
+
+Full code audit vs. prototype-v11 + HEY.com + 22-view view-health
+checklist. Every issue fixed and committed; no items skipped.
+
+### P0 (security / data-loss)
+
+- **P0-1** SMTP iTip CRLF injection — `services/smtp.rs::send_itip_reply`
+  folds CR/LF in header values, and `services/ical.rs::unescape_text`
+  folds CR/NUL in raw iCal text before it reaches the SMTP layer.
+  Defense in depth.
+- **P0-2** `upsertEvent` silently dropped RRULE — `stores/data.ts:1721`
+  now writes `recurrence_rule` / `recurrence_dates_json` /
+  `excluded_dates_json` / `original_tzid`. Type fields already
+  existed in `types/index.ts:294-304`; the store was just not
+  persisting them.
+- **P0-3** `save_sent_message` swallowed FK violation — empty
+  `account_id` now returns `Err` early in `services/sync_loop.rs:1198`
+  instead of silently dropping the write.
+- **P0-4** iTip RSVP used the wrong account — new migration
+  `0021_events_account_id.sql` adds `events.account_id`;
+  `respond_to_calendar_invite` resolves creds by `event.account_id`.
+- **P0-5** `TEST_FALLBACK_ENABLED` release gate — gated on
+  `cfg(debug_assertions)` with a loud `eprintln!` when the fallback
+  fires in dev.
+- **P0-6/7** Onboarding first-run no longer auto-completes — wizard
+  plays through naturally; "Skip" lets power users bypass.
+- **P0-8** Gate sidebar badge — `countGateCandidates` resource feeds
+  the pill in `NavItem` + `MobileMoreSheet`.
+- **P0-9** Add Account modal branches on `auth_mode` —
+  oauth2-required → Authorize button, password-with-auth-code →
+  "授权码" label.
+- **P0-10** `b` key → Remind (was Spam) — `!` is the new spam
+  shortcut.
+
+### P1 (UX / Compose / Onboarding / Settings / Mobile)
+
+12 UX fixes, including the Mobile swipe actions wrapper, the
+"Reply-all" comma-joined splitter, the Compose autosave dirty check,
+the "Use: <suggestion>" chip replacing the title auto-overwrite,
+the Esc-closes-all-panels, Imbox local keyboard handlers, the
+Settings "Data → Mailbox export" pagination switch to
+`listMessagesPaged({ lightweight: true })`, the Settings modal
+shrink on small viewport, the Onboarding "go to accounts" no
+longer marking the wizard complete, and the removal of the no-op
+"删除账户（演示）" button.
+
+### P1 calendar cluster (P1-7 / 8 / 9 / 10 / 12)
+
+- **P1-7** MeetingPanel — `save()` debounced 600 ms with optimistic
+  local `setEvent` merge + `onCleanup` timer clear.
+- **P1-8** MeetingPanel — switched to
+  `listMessagesPaged({ offset: 0, limit: 200, lightweight: true })`
+  (13× projection speedup vs. full `listMessages()`). Soft/hard
+  refresh split.
+- **P1-9** Calendar — `newEvent()` emits local `YYYY-MM-DD` not
+  UTC ISO.
+- **P1-10** ical.rs — new `pick_tz_offset()` chooses DAYLIGHT for
+  events in Apr–Oct (northern) or Oct–Mar (southern) zones. Both
+  `resolve_dtstart_with_tzid` and `event_utc_start` are now DST-
+  aware. 3 new tests (summer NY, winter NY, southern Australia).
+- **P1-12** Calendar — `dayLabelKey()` uses local date components.
+  (P1-11 was a false alarm — CANCEL already returns early.)
+
+### P2 batch
+
+- **LLM streaming fix** — `useAgent.sendChat` removed the
+  200 ms `setTimeout` fake-streaming. The task is set to "doing"
+  and refetched before the LLM call, so the user sees feedback
+  immediately with no perceived-latency tax.
+- **Dark mode wiring** — `theme: 'light' | 'dark'` added to
+  `AppSettings.preferences`. Settings → Preferences has a
+  深色模式 toggle. Bootstrap applies `[data-theme]` on app load
+  and a `createEffect` keeps it in sync. Dark-mode tokens in
+  `styles/tokens.css` were already defined but never wired.
+- **Shared contacts store** — new `app/src/stores/contacts.ts`
+  exports a module-level signal + deduped `refetchContacts()`.
+  `ContactPanel`, `MeetingPanel`, and `useAgent` now subscribe to
+  the shared store instead of each running their own
+  `listContacts()` resource. Bootstrap warms the cache on app
+  load.
+
+### SEC (security)
+
+- **SEC-2** LLM API key in Keychain — new
+  `vault_set_secret` / `vault_get_secret` Rust commands using
+  the existing `keyring` crate. Settings → Agent writes the key
+  to the vault on every input, not to the prefs file. Bootstrap
+  loads the key from the vault into memory at boot. Legacy
+  `loadAppSettings` masks any `apiKey` in the stored object.
+- **SEC-3** `fetch_image` URL whitelist — new `validate_image_url`
+  rejects `file://` / `javascript:` / `data:`, and IPv4/IPv6
+  literals in 127/8, 10/8, 172.16/12, 192.168/16, 169.254/16, ::1,
+  fe80::/10, fc00::/7. DNS names that obviously resolve to
+  localhost are also rejected. 11 new unit tests.
+- **SEC-4** `EmailCredentials.password` `Debug` redaction —
+  manual `Debug` impl masks the password as `***`. Regression
+  test asserts the password is never rendered.
+
+### PERF
+
+- **PERF-1** 5 missing SQLite indexes via migration `0022`:
+  - partial `idx_messages_reply_later` (`WHERE reply_later = 1`)
+  - partial `idx_messages_set_aside` (`WHERE set_aside = 1`)
+  - partial `idx_messages_bubble_up` (`WHERE bubble_up_at IS NOT NULL`)
+  - composite `idx_messages_thread` (`WHERE thread_id IS NOT NULL`)
+  - partial `idx_contacts_first_seen_unscreened` (`WHERE first_seen = 1 AND screened = 0`)
+
+### Verification
+
+- `cargo test --lib` → 84 / 84 (was 72, +12)
+- `pnpm exec vitest run` → 317 / 317
+- `pnpm exec tsc --noEmit` → clean
+- E2E in-app browser (mobile viewport 639 px):
+  - Boot to Imbox: New for you / Previously seen tabs render,
+    empty state copy correct.
+  - Settings → Preferences: 深色模式 toggle flips the entire app
+    into dark mode (confirmed via screenshot); toggle off
+    restores light mode.
+  - Settings → Agent: API key hint now reads "保存在系统钥匙串
+    （macOS Keychain / Windows Credential Manager / GNOME Keyring），
+    不会写入 prefs 文件".
+  - ⌘1 Gate: badge "0 待审" + empty state "现在没有第一次发件人
+    需要审" render.
+  - ⌘5 Contacts: empty state "没有联系人 / 添加第一位联系人
+    开始" renders.
