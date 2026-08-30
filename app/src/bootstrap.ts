@@ -26,6 +26,7 @@ import {
   setOnboardingCompleted,
   setOnboardingStep,
 } from "./stores/ui";
+import { refetchContacts } from "./stores/contacts";
 
 export const STORE_PATH = "sendpalm.prefs.json";
 export { load } from "@tauri-apps/plugin-store";
@@ -56,6 +57,16 @@ export async function initApp() {
 
         const settings = await loadAppSettings(store);
         setAppSettings(settings);
+
+        // P2: apply the persisted theme preference to <html data-theme>.
+        // The dark-mode tokens in styles/tokens.css only activate when
+        // this attribute is "dark" — without this, the toggle in
+        // Settings has no visual effect.
+        const t = settings.preferences?.theme ?? "light";
+        document.documentElement.setAttribute(
+          "data-theme",
+          t === "dark" ? "dark" : "light",
+        );
 
         // Fire-and-forget: request OS permission and push prefs to Rust. Doesn't
         // block the initial paint.
@@ -124,6 +135,13 @@ export async function initApp() {
       listShortcuts(),
       listBundleConfigs(),
     ]);
+
+    // P2/ARCH-3: warm the shared contacts store. Without this,
+    // the first view that subscribes to contactsList would pay
+    // the SQLite roundtrip itself. Doing it here ensures
+    // ContactPanel, MeetingPanel, Agent, and Compose all read
+    // from an already-warm signal.
+    void refetchContacts();
 
     // Backfill the FTS index for contacts/files created before the index
     // existed. New messages are indexed by the Rust sync loop; existing

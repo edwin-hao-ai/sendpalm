@@ -1299,8 +1299,27 @@ function defaultEmailSettings(): AccountSettings {
 
 function PreferencesTab() {
   const s = appSettings;
+  // P2: react to theme changes and apply to <html data-theme>. The
+  // dark-mode CSS in tokens.css is gated on [data-theme="dark"], so
+  // this is the single bridge between the toggle and the visual.
+  createEffect(() => {
+    const t = s.preferences.theme;
+    document.documentElement.setAttribute(
+      "data-theme",
+      t === "dark" ? "dark" : "light",
+    );
+  });
   return (
     <div>
+      <SectionTitle>Appearance</SectionTitle>
+      <Toggle
+        label="深色模式"
+        checked={s.preferences.theme === "dark"}
+        onChange={(v) =>
+          setAppSettings("preferences", "theme", v ? "dark" : "light")
+        }
+      />
+
       <SectionTitle>Notifications</SectionTitle>
       <PreferencesNotificationsTab />
 

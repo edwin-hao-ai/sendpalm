@@ -535,6 +535,7 @@ export interface AppSettings {
     signature: string;
   };
   preferences: {
+    theme: "light" | "dark";
     notifications: {
       desktop: boolean;
       digest: boolean;

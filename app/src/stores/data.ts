@@ -2487,6 +2487,7 @@ export async function loadAppSettings(
         signature: "Best,\nEdwin",
       },
       preferences: {
+        theme: "light",
         notifications: {
           desktop: true,
           digest: false,

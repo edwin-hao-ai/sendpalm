@@ -8,7 +8,6 @@ import {
   listAgentTasks,
   listAgentDrafts,
   listAgentAudit,
-  listContacts,
   upsertAgentSession,
   upsertAgentTask,
   upsertAgentAudit,
@@ -20,6 +19,7 @@ import {
   showToast,
   appSettings,
 } from "../stores/ui";
+import { contactsList, refetchContacts } from "../stores/contacts";
 import { agentChat } from "../services/backend";
 import { IS_BROWSER } from "../services/tauri-shim";
 import { uid } from "../utils/id";
@@ -42,7 +42,10 @@ export function useAgent() {
     listAgentDrafts(),
   );
   const [audit, { refetch: refetchAudit }] = createResource(listAgentAudit);
-  const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
+  // P2/ARCH-3: contacts now come from the shared store, not a
+  // per-hook resource. Multiple views subscribing to the same
+  // Contact list share one roundtrip.
+  const contacts = contactsList;
 
   useRefreshEffect(() => {
     void refetchSessions();
@@ -96,19 +99,18 @@ export function useAgent() {
     sessions.error ??
     tasks.error ??
     drafts.error ??
-    audit.error ??
-    contacts.error;
+    audit.error;
 
-  /** `true` while ANY of the 5 Agent resources is still resolving.
+  /** `true` while ANY of the 4 Agent-owned resources is still resolving.
    *  Pairs with `error()` so a ResourceGate can show one Skeleton
    *  / ErrorState across the whole Agent surface instead of having
-   *  to check each individual resource. */
+   *  to check each individual resource. Contacts now live in the
+   *  shared store, so its loading state is opaque to this hook. */
   const isLoading = () =>
     sessions.loading ||
     tasks.loading ||
     drafts.loading ||
-    audit.loading ||
-    contacts.loading;
+    audit.loading;
 
   const appendAudit = async (
     kind: string,
@@ -196,58 +198,62 @@ export function useAgent() {
       return;
     }
 
-    setTimeout(async () => {
-      const t: AgentTask = {
-        id: uid("at"),
-        sessionId: currentSession()!.id,
-        title: input,
-        description: "调用真实 LLM 中…",
-        status: "doing",
-        steps: [
-          { id: uid("st"), label: "分析请求", done: true },
-          { id: uid("st"), label: "调用 LLM", done: false },
-          { id: uid("st"), label: "生成结果", done: false },
-        ],
-        confidence: 0,
-        trigger: input,
-        createdAt: isoNow(),
-      };
+    // Mark the task as "doing" before awaiting the LLM. SolidJS
+    // re-runs `tasks` resource after `refetchTasks()` so the user
+    // sees the spinner without any artificial delay. The previous
+    // `setTimeout(..., 200)` was a fake-streaming hack that the
+    // P2 audit identified: a 200ms wait before the network call
+    // is a perceived-latency tax for no user-visible benefit.
+    const t: AgentTask = {
+      id: uid("at"),
+      sessionId: currentSession()!.id,
+      title: input,
+      description: "调用真实 LLM 中…",
+      status: "doing",
+      steps: [
+        { id: uid("st"), label: "分析请求", done: true },
+        { id: uid("st"), label: "调用 LLM", done: false },
+        { id: uid("st"), label: "生成结果", done: false },
+      ],
+      confidence: 0,
+      trigger: input,
+      createdAt: isoNow(),
+    };
+    await upsertAgentTask(t);
+    await refetchTasks();
+    showToast({ message: "Agent 正在调用 LLM…", kind: "info" });
+
+    try {
+      const reply = await agentChat(
+        {
+          base_url: llm.baseUrl.trim() || "https://api.openai.com/v1",
+          api_key: llm.apiKey,
+          model: llm.model.trim(),
+          temperature: llm.temperature,
+          max_tokens: llm.maxTokens,
+        },
+        messages,
+      );
+      const text = reply?.content?.trim() || "（模型未返回内容）";
+      await appendAudit("agent_response", text);
+      // Mark the second step done and the third done, then save the
+      // reply into the task description so the user can see it.
+      t.steps[1]!.done = true;
+      t.steps[2]!.done = true;
+      t.status = "done";
+      t.description = text;
       await upsertAgentTask(t);
       await refetchTasks();
-      showToast({ message: "Agent 正在调用 LLM…", kind: "info" });
-
-      try {
-        const reply = await agentChat(
-          {
-            base_url: llm.baseUrl.trim() || "https://api.openai.com/v1",
-            api_key: llm.apiKey,
-            model: llm.model.trim(),
-            temperature: llm.temperature,
-            max_tokens: llm.maxTokens,
-          },
-          messages,
-        );
-        const text = reply?.content?.trim() || "（模型未返回内容）";
-        await appendAudit("agent_response", text);
-        // Mark the second step done and the third done, then save the
-        // reply into the task description so the user can see it.
-        t.steps[1]!.done = true;
-        t.steps[2]!.done = true;
-        t.status = "done";
-        t.description = text;
-        await upsertAgentTask(t);
-        await refetchTasks();
-        showToast({ message: "LLM 已返回", kind: "success" });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        await appendAudit("agent_error", `LLM 调用失败：${msg}`);
-        t.status = "error";
-        t.description = `失败：${msg}`;
-        await upsertAgentTask(t);
-        await refetchTasks();
-        showToast({ message: `LLM 失败：${msg}`, kind: "error" });
-      }
-    }, 200);
+      showToast({ message: "LLM 已返回", kind: "success" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await appendAudit("agent_error", `LLM 调用失败：${msg}`);
+      t.status = "error";
+      t.description = `失败：${msg}`;
+      await upsertAgentTask(t);
+      await refetchTasks();
+      showToast({ message: `LLM 失败：${msg}`, kind: "error" });
+    }
   };
 
   const approveDraft = async (d: AgentDraft) => {

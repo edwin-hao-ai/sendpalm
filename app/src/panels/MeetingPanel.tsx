@@ -18,7 +18,6 @@ import {
 } from "solid-js";
 import {
   getEvent,
-  listContacts,
   listFiles,
   upsertEvent,
 } from "../stores/data";
@@ -28,6 +27,7 @@ import {
   setSelectedFileId,
   showToast,
 } from "../stores/ui";
+import { contactsList, refetchContacts } from "../stores/contacts";
 import { Icon } from "../components/Icon";
 import { uid } from "../utils/id";
 import { generateMeetingBrief, linkedMaterialIds } from "../utils/meeting";
@@ -46,7 +46,11 @@ export function MeetingPanel(props: { meetingId: string }) {
     () => props.meetingId,
     getEvent,
   );
-  const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
+  // P2/ARCH-3: contacts come from the shared store. MeetingPanel
+  // already called listContacts() once on mount, but with the
+  // shared store it joins the same signal used by ContactPanel,
+  // Agent, Compose, and the rest.
+  const contacts = contactsList;
   // P1-8: listMessages() pulled body / body_html for every row.
   // The MeetingPanel only needs id / subj / pid / tm for the brief
   // builder and the "linked materials" list. Use the lightweight

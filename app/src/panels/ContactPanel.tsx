@@ -10,7 +10,6 @@ import {
   listContactEvents,
   listContactFiles,
   listContactNotes,
-  listContacts,
   listEvents,
   listContactTasks,
   listContactFollowUps,
@@ -36,6 +35,7 @@ import {
   setComposeContext,
   openCompanyDetail,
 } from "../stores/ui";
+import { contactsList } from "../stores/contacts";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { SkeletonList } from "../components/Skeleton";
@@ -1139,14 +1139,17 @@ function Insight(props: { label: string; value: string; icon: string }) {
 }
 
 function NetworkTab(props: { contactId: string }) {
-  const [contacts] = createResource(() => listContacts());
+  // P2/ARCH-3: contacts come from the shared store now. Multiple
+  // views subscribing to contactsList share one roundtrip; we
+  // don't need a per-component resource here.
+  const contacts = contactsList;
   const [events] = createResource(() => listEvents());
 
   const connections = createMemo(() => {
     const list = contacts();
-    const c = list?.find((x: { id: string }) => x.id === props.contactId);
+    const c = list.find((x: { id: string }) => x.id === props.contactId);
     if (!c) return [];
-    return (list ?? []).filter(
+    return list.filter(
       (x: { id: string; company: string }) =>
         x.id !== props.contactId && x.company === c.company && c.company,
     );

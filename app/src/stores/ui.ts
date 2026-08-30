@@ -223,6 +223,7 @@ export const [appSettings, setAppSettings] = createStore<AppSettings>({
     signature: "Best,\nEdwin",
   },
   preferences: {
+    theme: "light",
     notifications: {
       desktop: true,
       digest: false,
