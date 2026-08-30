@@ -966,7 +966,7 @@ async fn insert_message(
     // Auto-import calendar invites so they appear in the sender's Contact
     // Calendar tab and in the Calendar view without requiring a manual click.
     if let Some(invite) = &parsed.calendar_invite {
-        let _ = insert_event_from_invite(pool, invite, &contact_id).await;
+        let _ = insert_event_from_invite(pool, invite, &contact_id, &account.account_id).await;
     }
 
     // Only notify for genuinely new mail (skip the historic backlog on
@@ -1138,6 +1138,7 @@ pub async fn insert_event_from_invite(
     pool: &SqlitePool,
     invite: &crate::services::ical::IcalEvent,
     contact_id: &str,
+    account_id: &str,
 ) -> Result<(), String> {
     let method = invite.method.as_deref().unwrap_or("REQUEST");
 
@@ -1153,7 +1154,13 @@ pub async fn insert_event_from_invite(
     // REQUEST / CANCEL / unknown: delegate to the shared upsert helper
     // so the user-initiated "Add to calendar" path and the auto-import
     // path share the exact same dedup / sequence / CANCEL semantics.
-    let _id = upsert_calendar_event(pool, invite, Some(contact_id)).await?;
+    let _id = upsert_calendar_event(
+        pool,
+        invite,
+        Some(contact_id),
+        Some(account_id),
+    )
+    .await?;
     Ok(())
 }
 

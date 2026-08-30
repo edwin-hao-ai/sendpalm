@@ -152,8 +152,13 @@ export interface IcalEvent {
 export async function addCalendarEvent(
   invite: IcalEvent,
   contactId?: string,
+  accountId?: string,
 ): Promise<string | null> {
-  return safeInvoke<string>("add_calendar_event", { invite, contactId });
+  return safeInvoke<string>("add_calendar_event", {
+    invite,
+    contactId,
+    accountId,
+  });
 }
 
 export type RsvpResponse = "ACCEPTED" | "DECLINED" | "TENTATIVE";

@@ -149,6 +149,12 @@ pub fn run() {
             sql: include_str!("../migrations/0020_calendar_recurrence.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 21,
+            description: "events.account_id for iTip RSVP account resolution",
+            sql: include_str!("../migrations/0021_events_account_id.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     eprintln!("[sendpalm] starting tauri builder");

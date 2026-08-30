@@ -266,9 +266,16 @@ pub async fn vault_delete(account_id: String) -> Result<(), String> {
 pub async fn add_calendar_event(
     invite: crate::services::ical::IcalEvent,
     contact_id: Option<String>,
+    account_id: Option<String>,
 ) -> Result<String, String> {
     let pool = crate::services::sync_loop::open_pool().await?;
-    upsert_calendar_event(&pool, &invite, contact_id.as_deref()).await
+    upsert_calendar_event(
+        &pool,
+        &invite,
+        contact_id.as_deref(),
+        account_id.as_deref(),
+    )
+    .await
 }
 
 /// Pure upsert logic, separated from the Tauri command so it can be
@@ -277,6 +284,7 @@ pub async fn upsert_calendar_event(
     pool: &sqlx::SqlitePool,
     invite: &crate::services::ical::IcalEvent,
     contact_id: Option<&str>,
+    account_id: Option<&str>,
 ) -> Result<String, String> {
     let method = invite.method.as_deref().unwrap_or("REQUEST");
     let uid = invite.uid.as_deref();
@@ -376,8 +384,8 @@ pub async fn upsert_calendar_event(
 
     let id = format!("evt_{}", uuid::Uuid::new_v4().simple());
     sqlx::query(
-        "INSERT INTO events (id, title, dt, end_dt, all_day, tm, dur, location, agenda_json, pids_json, brief, color, ical_uid, ical_method, ical_sequence, organizer_email, recurrence_rule, recurrence_dates_json, excluded_dates_json, original_tzid) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '[]', $9, $10, '#0A8F63', $11, $12, $13, $14, $15, $16, $17, $18)",
+        "INSERT INTO events (id, title, dt, end_dt, all_day, tm, dur, location, agenda_json, pids_json, brief, color, ical_uid, ical_method, ical_sequence, organizer_email, recurrence_rule, recurrence_dates_json, excluded_dates_json, original_tzid, account_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '[]', $9, $10, '#0A8F63', $11, $12, $13, $14, $15, $16, $17, $18, $19)",
     )
     .bind(&id)
     .bind(&invite.summary)
@@ -397,6 +405,7 @@ pub async fn upsert_calendar_event(
     .bind(serde_json::to_string(&invite.rdates).unwrap_or_else(|_| "[]".into()))
     .bind(serde_json::to_string(&invite.exdates).unwrap_or_else(|_| "[]".into()))
     .bind(invite.dtstart_tzid.as_deref().unwrap_or(""))
+    .bind(account_id.unwrap_or(""))
     .execute(pool)
     .await
     .map_err(|e| format!("insert event: {e}"))?;
@@ -435,16 +444,17 @@ pub async fn respond_to_calendar_invite(
         Option<String>,    // location
         Option<i64>,       // ical_sequence
         Option<String>,    // ical_method
+        Option<String>,    // account_id
     )> = sqlx::query_as(
         "SELECT ical_uid, organizer_email, title, dt, tm, end_dt, dur, \
-                location, ical_sequence, ical_method \
+                location, ical_sequence, ical_method, account_id \
            FROM events WHERE id = $1",
     )
     .bind(&event_id)
     .fetch_optional(&pool)
     .await
     .map_err(|e| format!("load event: {e}"))?;
-    let Some((uid, organizer, title, dt, _tm, _end_dt, _dur, location, seq, _method)) = row else {
+    let Some((uid, organizer, title, dt, _tm, _end_dt, _dur, location, seq, _method, event_account_id)) = row else {
         return Err(format!("event not found: {event_id}"));
     };
     let Some(uid) = uid else {
@@ -480,9 +490,21 @@ pub async fn respond_to_calendar_invite(
         vtimezones: Vec::new(),
     };
 
-    // Get SMTP creds for the local user. We use the test fallback if
-    // no real account is configured (the same one the sync loop uses).
-    let creds = get_creds().await?;
+    // P0-4: resolve SMTP creds by the event's account_id (which account
+    // actually received the invite). If the event has no account_id
+    // (e.g. a locally-created event with no iCal origin), fall back to
+    // the test account. Previously we always used the test fallback,
+    // so multi-account users had their RSVP sent from the wrong
+    // address — the organizer would see "from: <test-account>".
+    let creds = match event_account_id.as_deref() {
+        Some(acct_id) if !acct_id.is_empty() => {
+            match crate::services::sync_loop::resolve_account_credentials(acct_id).await {
+                Ok(c) => c,
+                Err(_) => get_creds().await?,
+            }
+        }
+        _ => get_creds().await?,
+    };
     let from = creds.email.clone();
     let responder_email = from.clone();
 
