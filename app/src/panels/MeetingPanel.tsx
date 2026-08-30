@@ -13,12 +13,12 @@ import {
   createResource,
   createMemo,
   createSignal,
+  onCleanup,
   type JSX,
 } from "solid-js";
 import {
   getEvent,
   listContacts,
-  listMessages,
   listFiles,
   upsertEvent,
 } from "../stores/data";
@@ -38,21 +38,34 @@ import {
   type RsvpResponse,
 } from "../services/backend";
 import type { CalendarEvent, ActionItem, AgendaItem } from "../types";
-import { useRefreshEffect } from "../utils/gestures";
+import { useRefreshEffect, useSoftRefreshEffect } from "../utils/gestures";
+import { listMessagesPaged } from "../stores/data";
 
 export function MeetingPanel(props: { meetingId: string }) {
-  const [event, { refetch: refetchEvent }] = createResource(
+  const [event, { refetch: refetchEvent, mutate: setEvent }] = createResource(
     () => props.meetingId,
     getEvent,
   );
   const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
-  const [messages, { refetch: refetchMessages }] = createResource(listMessages);
+  // P1-8: listMessages() pulled body / body_html for every row.
+  // The MeetingPanel only needs id / subj / pid / tm for the brief
+  // builder and the "linked materials" list. Use the lightweight
+  // paginated query, default to the first 200 most-recent rows.
+  const [messages, { refetch: refetchMessages }] = createResource(() =>
+    listMessagesPaged({ offset: 0, limit: 200, lightweight: true })
+      .then((p) => p.items)
+  );
   const [files, { refetch: refetchFiles }] = createResource(listFiles);
   const [rsvpBusy, setRsvpBusy] = createSignal(false);
 
+  // P1-8: hard refresh for the event/contacts; soft refresh for
+  // messages/files. The full table scan on every sync tick was the
+  // biggest single-source of perf pain in the meeting panel.
   useRefreshEffect(() => {
     void refetchEvent();
     void refetchContacts();
+  });
+  useSoftRefreshEffect(() => {
     void refetchMessages();
     void refetchFiles();
   });
@@ -104,12 +117,35 @@ export function MeetingPanel(props: { meetingId: string }) {
     return (files() ?? []).filter((f) => ids.has(f.id));
   });
 
-  const save = async (patch: Partial<CalendarEvent>) => {
+  // P1-7: debounce agenda / notes / brief / action_items edits so
+  // typing a long notes textarea doesn't trigger one full
+  // upsertEvent (25 columns + FTS re-index) per keystroke. 600 ms
+  // is the same delay Gmail uses for autosave; long enough that a
+  // fast typist batches multiple chars, short enough that a
+  // tab-switch feels instant.
+  let saveTimer: number | undefined;
+  const save = (patch: Partial<CalendarEvent>) => {
     const e = event();
     if (!e) return;
-    await upsertEvent({ ...e, ...patch });
-    await refetchEvent();
+    // Optimistic local merge: the in-memory event carries the
+    // pending patch so the UI updates without waiting for the DB.
+    setEvent({ ...e, ...patch });
+    if (saveTimer !== undefined) clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(async () => {
+      try {
+        await upsertEvent({ ...event()!, ...patch });
+        await refetchEvent();
+      } catch (err) {
+        showToast({
+          message: `保存失败：${String(err)}`,
+          kind: "error",
+        });
+      }
+    }, 600);
   };
+  onCleanup(() => {
+    if (saveTimer !== undefined) clearTimeout(saveTimer);
+  });
 
   const updateAgenda = (agenda: AgendaItem[]) => save({ agenda });
   const updateNotes = (notes: string) => save({ notes });

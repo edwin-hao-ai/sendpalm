@@ -203,13 +203,23 @@ export function Calendar() {
 
   const visibleHasEvents = createMemo(() => sortedEvents().length > 0);
 
+  // P1-9: build the canonical local-time dt string instead of
+  // `new Date().toISOString()`. The previous code produced a UTC
+  // ISO (e.g. "2026-08-30T02:00:00.000Z" for 10am UTC+8), but
+  // `tm` was a local "HH:MM". When the date input later overwrote
+  // `dt` to a bare "YYYY-MM-DD", week view did `new Date(e.dt)` and
+  // placed the event on the wrong day. Use the same YYYY-MM-DD
+  // split as the rest of the calendar.
   const newEvent = (): CalendarEvent => {
-    const dt = new Date(cursor());
-    dt.setHours(10, 0, 0, 0);
+    const d = new Date(cursor());
+    d.setHours(10, 0, 0, 0);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
     return {
       id: uid("ev"),
       title: "",
-      dt: dt.toISOString(),
+      dt: `${yyyy}-${mm}-${dd}`,
       tm: "10:00",
       dur: 30,
       pids: [],
@@ -1117,7 +1127,13 @@ function DayAgenda(props: {
 }
 
 function dayLabelKey(date: Date): string {
-  return `sp:day-label:${date.toISOString().split("T")[0]}`;
+  // Use local YYYY-MM-DD, not UTC, so a label set in Beijing for
+  // "August 30" doesn't land on the 29th or 31st when viewed in
+  // another zone.
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `sp:day-label:${yyyy}-${mm}-${dd}`;
 }
 
 /* ── Week grid ──────────────────────────────────────────── */

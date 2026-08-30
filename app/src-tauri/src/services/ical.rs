@@ -994,11 +994,11 @@ pub fn resolve_dtstart_with_tzid(
             // show up as off-by-N-hours in the calendar view).
             let offset_minutes = tzid
                 .and_then(|id| timezones.iter().find(|t| t.tzid == id))
-                .and_then(|t| t.standard_offset_minutes);
+                .map(|t| pick_tz_offset(t, naive));
             match offset_minutes {
                 Some(off) => {
                     // The naive value is a *local* time in the TZID's
-                    // standard offset. Use from_local_datetime to treat
+                    // active offset. Use from_local_datetime to treat
                     // it as local (not UTC) before converting to UTC.
                     let fixed = chrono::FixedOffset::east_opt(off * 60)?;
                     fixed
@@ -1011,6 +1011,66 @@ pub fn resolve_dtstart_with_tzid(
         }
     };
     dt
+}
+
+/// Pick the right VTIMEZONE offset for a given local naive
+/// datetime. We need this because an iCal VTIMEZONE block can carry
+/// both a STANDARD offset (winter) and a DAYLIGHT offset (summer);
+/// the DTSTART's local time is in whichever offset is active on
+/// that date.
+///
+/// We do not evaluate the RRULE-driven DST transition rules in
+/// this in-tree parser (too much code, wrong layer). Instead we
+/// use a small heuristic that is correct for the vast majority of
+/// real-world invites:
+///
+/// 1. If the timezone has only one offset, return it.
+/// 2. If the timezone's tzid is a well-known southern-hemisphere
+///    zone, treat months 4..=9 as standard (winter) and the rest
+///    as daylight (summer).
+/// 3. Otherwise (northern hemisphere default), treat months
+///    4..=10 as daylight and the rest as standard.
+fn pick_tz_offset(tz: &VTimezone, naive: NaiveDateTime) -> i32 {
+    let std_off = tz.standard_offset_minutes;
+    let dst_off = tz.daylight_offset_minutes;
+    match (std_off, dst_off) {
+        (Some(s), Some(d)) if s != d => {
+            let month = naive.format("%m").to_string();
+            // IANA names we know are southern hemisphere.
+            let is_southern = matches!(
+                tz.tzid.as_str(),
+                "Pacific/Auckland"
+                    | "Australia/Sydney"
+                    | "Australia/Melbourne"
+                    | "Australia/Brisbane"
+                    | "Australia/Adelaide"
+                    | "Australia/Perth"
+                    | "Australia/Hobart"
+                    | "Australia/Darwin"
+                    | "Australia/Canberra"
+                    | "Australia/Lord_Howe"
+                    | "Antarctica/McMurdo"
+                    | "Pacific/Chatham"
+            );
+            let in_dst_window = if is_southern {
+                // Southern hemisphere: DST is roughly Oct-Mar.
+                let m: u32 = month.parse().unwrap_or(1);
+                m >= 10 || m <= 3
+            } else {
+                // Northern hemisphere: DST is roughly Apr-Oct.
+                let m: u32 = month.parse().unwrap_or(1);
+                (4..=10).contains(&m)
+            };
+            if in_dst_window {
+                d
+            } else {
+                s
+            }
+        }
+        (Some(s), _) => s,
+        (None, Some(d)) => d,
+        (None, None) => 0,
+    }
 }
 
 fn parse_naive_datetime(s: &str) -> Option<NaiveDateTime> {
@@ -1045,7 +1105,7 @@ pub fn event_utc_start(ev: &IcalEvent) -> Option<DateTime<Utc>> {
             .vtimezones
             .iter()
             .find(|t| t.tzid == id)
-            .and_then(|t| t.standard_offset_minutes);
+            .map(|t| pick_tz_offset(t, naive));
         match off {
             Some(o) => chrono::FixedOffset::east_opt(o * 60)
                 .and_then(|f| f.from_local_datetime(&naive).single())
@@ -1508,5 +1568,54 @@ END:VCALENDAR\r\n";
         let utc = resolve_dtstart_with_tzid("20260101T100000Z", Some("ignored"), &[])
             .expect("utc");
         assert_eq!(utc.to_rfc3339(), "2026-01-01T10:00:00+00:00");
+    }
+
+    #[test]
+    fn resolve_dtstart_dst_summer_picks_daylight_offset() {
+        // America/New_York: standard = -5h (-300 min), daylight = -4h (-240 min)
+        let ics = "BEGIN:VTIMEZONE\r\nTZID:America/New_York\r\n\
+                   BEGIN:STANDARD\r\nDTSTART:19701101T020000\r\nTZOFFSETFROM:-0400\r\nTZOFFSETTO:-0500\r\n\
+                   END:STANDARD\r\n\
+                   BEGIN:DAYLIGHT\r\nDTSTART:19700308T020000\r\nTZOFFSETFROM:-0500\r\nTZOFFSETTO:-0400\r\n\
+                   END:DAYLIGHT\r\nEND:VTIMEZONE\r\n";
+        let tzs = parse_vtimezones(ics);
+        // July 4, 2026 is during US DST — local 10:00 EDT = 14:00 UTC
+        let utc = resolve_dtstart_with_tzid("20260704T100000", Some("America/New_York"), &tzs)
+            .expect("summer resolved");
+        assert_eq!(utc.to_rfc3339(), "2026-07-04T14:00:00+00:00");
+    }
+
+    #[test]
+    fn resolve_dtstart_dst_winter_picks_standard_offset() {
+        // America/New_York: standard = -5h, daylight = -4h
+        let ics = "BEGIN:VTIMEZONE\r\nTZID:America/New_York\r\n\
+                   BEGIN:STANDARD\r\nDTSTART:19701101T020000\r\nTZOFFSETFROM:-0400\r\nTZOFFSETTO:-0500\r\n\
+                   END:STANDARD\r\n\
+                   BEGIN:DAYLIGHT\r\nDTSTART:19700308T020000\r\nTZOFFSETFROM:-0500\r\nTZOFFSETTO:-0400\r\n\
+                   END:DAYLIGHT\r\nEND:VTIMEZONE\r\n";
+        let tzs = parse_vtimezones(ics);
+        // January 4, 2026 is during US standard time — local 10:00 EST = 15:00 UTC
+        let utc = resolve_dtstart_with_tzid("20260104T100000", Some("America/New_York"), &tzs)
+            .expect("winter resolved");
+        assert_eq!(utc.to_rfc3339(), "2026-01-04T15:00:00+00:00");
+    }
+
+    #[test]
+    fn resolve_dtstart_dst_southern_hemisphere_window() {
+        // Australia/Sydney: standard = +10h (600 min), daylight = +11h (660 min)
+        let ics = "BEGIN:VTIMEZONE\r\nTZID:Australia/Sydney\r\n\
+                   BEGIN:STANDARD\r\nDTSTART:19700405T030000\r\nTZOFFSETFROM:+1100\r\nTZOFFSETTO:+1000\r\n\
+                   END:STANDARD\r\n\
+                   BEGIN:DAYLIGHT\r\nDTSTART:19701004T020000\r\nTZOFFSETFROM:+1000\r\nTZOFFSETTO:+1100\r\n\
+                   END:DAYLIGHT\r\nEND:VTIMEZONE\r\n";
+        let tzs = parse_vtimezones(ics);
+        // December 15, 2026 is during Australian summer (DST) — 10:00 AEDT = 23:00 UTC (the previous day)
+        let utc = resolve_dtstart_with_tzid("20261215T100000", Some("Australia/Sydney"), &tzs)
+            .expect("aest resolved");
+        assert_eq!(utc.to_rfc3339(), "2026-12-14T23:00:00+00:00");
+        // July 15, 2026 is during Australian winter (standard) — 10:00 AEST = 00:00 UTC
+        let utc = resolve_dtstart_with_tzid("20260715T100000", Some("Australia/Sydney"), &tzs)
+            .expect("aest winter");
+        assert_eq!(utc.to_rfc3339(), "2026-07-15T00:00:00+00:00");
     }
 }
