@@ -8,6 +8,7 @@
 import { load } from "@tauri-apps/plugin-store";
 import { IS_BROWSER } from "./services/tauri-shim";
 import { ensureNotificationPermission } from "./services/notifications";
+import { vaultGetSecret, LLM_API_KEY_VAULT_KEY } from "./services/backend";
 import {
   listAccounts,
   listBundleConfigs,
@@ -57,6 +58,23 @@ export async function initApp() {
 
         const settings = await loadAppSettings(store);
         setAppSettings(settings);
+
+        // SEC-2: the LLM API key never lives in the prefs file.
+        // Load it from the OS keychain at boot so Settings →
+        // Agent can show the placeholder. The vault is the only
+        // source of truth; `settings.agent.llm.apiKey` is masked
+        // by loadAppSettings (always empty string on read).
+        try {
+          const llmKey = await vaultGetSecret(LLM_API_KEY_VAULT_KEY);
+          if (llmKey) {
+            setAppSettings("agent", "llm", "apiKey", llmKey);
+          }
+        } catch (vaultErr) {
+          // Keychain unavailable (e.g. Linux without gnome-keyring).
+          // The user can still type a key — it just won't persist
+          // across restarts on this machine.
+          console.warn("[bootstrap] LLM keychain load failed:", vaultErr);
+        }
 
         // P2: apply the persisted theme preference to <html data-theme>.
         // The dark-mode tokens in styles/tokens.css only activate when

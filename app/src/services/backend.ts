@@ -136,6 +136,23 @@ export async function vaultDelete(accountId: string): Promise<boolean> {
   return r !== null;
 }
 
+// ── Generic keychain secrets (SEC-2) ──
+//
+// Used for secrets that aren't tied to a single account — e.g.
+// the LLM API key. These never touch the plain-text
+// `sendpalm.prefs.json` file; they live in the OS keychain only.
+
+export async function vaultSetSecret(key: string, value: string): Promise<boolean> {
+  const r = await safeInvoke<void>("vault_set_secret", { key, value });
+  return r !== null;
+}
+
+export async function vaultGetSecret(key: string): Promise<string | null> {
+  return safeInvoke<string | null>("vault_get_secret", { key });
+}
+
+export const LLM_API_KEY_VAULT_KEY = "llm_api_key";
+
 // ── Calendar invites ──
 
 export interface IcalEvent {

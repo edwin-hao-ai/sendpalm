@@ -59,6 +59,8 @@ import {
   listProviders as fetchProviders,
   vaultSave,
   vaultDelete,
+  vaultSetSecret,
+  LLM_API_KEY_VAULT_KEY,
   getSyncState,
   syncNow,
 } from "../services/backend";
@@ -1409,14 +1411,28 @@ function AgentTab() {
           style={inputStyle}
         />
       </Field>
-      <Field label="API key" hint="Bearer token。本地模型可留空。">
+      <Field label="API key" hint="Bearer token。保存在系统钥匙串（macOS Keychain / Windows Credential Manager / GNOME Keyring），不会写入 prefs 文件。本地模型可留空。">
         <input
           type="password"
           placeholder="sk-…"
           value={llm().apiKey}
-          onInput={(e) =>
-            setAppSettings("agent", "llm", "apiKey", e.currentTarget.value)
-          }
+          onInput={async (e) => {
+            const v = e.currentTarget.value;
+            // Update the in-memory store so the input is responsive.
+            setAppSettings("agent", "llm", "apiKey", v);
+            // SEC-2: persist to OS keychain. We never let the key
+            // touch the prefs file. Fire-and-forget; failures
+            // surface as a toast so the user knows their key
+            // didn't persist.
+            try {
+              await vaultSetSecret(LLM_API_KEY_VAULT_KEY, v);
+            } catch (err) {
+              showToast({
+                message: `API key 保存失败：${String(err)}`,
+                kind: "error",
+              });
+            }
+          }}
           style={inputStyle}
         />
       </Field>

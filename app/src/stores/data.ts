@@ -2477,6 +2477,14 @@ export async function loadAppSettings(
   store: import("@tauri-apps/plugin-store").Store,
 ): Promise<AppSettings> {
   const v = await store.get<AppSettings>(APP_SETTINGS_KEY);
+  // SEC-2: the LLM API key is never persisted in the prefs file —
+  // it's stored in the OS keychain under `llm_api_key` and read
+  // from the vault at boot (see bootstrap.ts). Strip any legacy
+  // key from the loaded value so a stale write can't accidentally
+  // surface in the UI.
+  if (v?.agent?.llm?.apiKey) {
+    v.agent.llm.apiKey = "";
+  }
   return (
     v ?? {
       profile: {

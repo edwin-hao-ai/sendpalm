@@ -23,7 +23,14 @@ use serde::{Deserialize, Serialize};
 /// Credentials for connecting to one email account.
 /// Sourced from `tauri-plugin-store` (per-account, not from `.env` directly)
 /// or, for the test account, from `.env` at startup.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// SEC-4: `Debug` is implemented manually so the `password` field
+/// is redacted. A `#[derive(Debug)]` on this struct would have
+/// logged the password verbatim to stdout/stderr whenever a
+/// `Result<EmailCredentials, _>` was `unwrap()`ed, formatted with
+/// `{:?}`, or routed through `eprintln!`. The custom impl below
+/// prints `password: "***"` instead.
+#[derive(Clone, Serialize, Deserialize)]
 pub struct EmailCredentials {
     pub email: String,
     pub password: String,
@@ -34,6 +41,20 @@ pub struct EmailCredentials {
     /// `true` for SMTPS (TLS wrapper, usually port 465); `false` for STARTTLS
     /// (usually port 587).
     pub smtp_implicit_tls: bool,
+}
+
+impl std::fmt::Debug for EmailCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EmailCredentials")
+            .field("email", &self.email)
+            .field("password", &"***")
+            .field("imap_host", &self.imap_host)
+            .field("imap_port", &self.imap_port)
+            .field("smtp_host", &self.smtp_host)
+            .field("smtp_port", &self.smtp_port)
+            .field("smtp_implicit_tls", &self.smtp_implicit_tls)
+            .finish()
+    }
 }
 
 /// Load credentials from environment variables.
@@ -78,4 +99,40 @@ pub struct SyncReport {
     #[serde(default)]
     pub new_message_ids: Vec<String>,
     pub error: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// SEC-4 regression test. A leaked password in production logs
+    /// is a P0 data breach — the redaction must be present and the
+    /// test must fail loudly if the field ever loses its
+    /// redaction (e.g. someone replaces the manual `Debug` impl
+    /// with `#[derive(Debug)]`).
+    #[test]
+    fn email_credentials_debug_redacts_password() {
+        let c = EmailCredentials {
+            email: "user@example.com".into(),
+            password: "s3cret-app-password".into(),
+            imap_host: "imap.example.com".into(),
+            imap_port: 993,
+            smtp_host: "smtp.example.com".into(),
+            smtp_port: 465,
+            smtp_implicit_tls: true,
+        };
+        let rendered = format!("{:?}", c);
+        assert!(
+            !rendered.contains("s3cret-app-password"),
+            "EmailCredentials Debug output leaked the password: {rendered}"
+        );
+        assert!(
+            rendered.contains("***"),
+            "EmailCredentials Debug output should mask the password: {rendered}"
+        );
+        assert!(
+            rendered.contains("user@example.com"),
+            "EmailCredentials Debug output should still show the email: {rendered}"
+        );
+    }
 }

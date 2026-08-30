@@ -251,6 +251,22 @@ pub async fn vault_delete(account_id: String) -> Result<(), String> {
     crate::services::vault::delete_password(&account_id)
 }
 
+/// SEC-2: store an arbitrary secret under a named key in the OS
+/// keychain. Used by Settings → Agent to keep the LLM API key out
+/// of the plain-text `sendpalm.prefs.json` file. The well-known key
+/// `llm_api_key` is the LLM key; arbitrary keys are allowed so
+/// other future secrets (e.g. a webhook URL or a personal access
+/// token) can land in the same place.
+#[tauri::command]
+pub async fn vault_set_secret(key: String, value: String) -> Result<(), String> {
+    crate::services::vault::set_password(&key, &value)
+}
+
+#[tauri::command]
+pub async fn vault_get_secret(key: String) -> Result<Option<String>, String> {
+    crate::services::vault::get_password(&key)
+}
+
 /// Create or update a calendar event from a parsed iCal VEVENT.
 ///
 /// Behaviour by iTip METHOD:

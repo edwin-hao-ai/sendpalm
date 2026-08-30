@@ -36,6 +36,16 @@ pub async fn fetch_and_cache(
     url: &str,
     cache_dir: &PathBuf,
 ) -> Result<(Vec<u8>, String), String> {
+    // SEC-3: validate the URL before issuing a network request. The
+    // email content we render is attacker-controlled, so an `<img>`
+    // src could point at `file:///etc/passwd` or `http://127.0.0.1:...`
+    // to probe local services. Reject anything that isn't a plain
+    // http/https URL and block the obvious loopback / link-local
+    // hosts that the user's email client has no reason to talk to.
+    if let Err(e) = validate_image_url(url) {
+        return Err(format!("image_proxy: {e}"));
+    }
+
     let hash = Sha256::digest(url.as_bytes());
     let cache_path = cache_dir.join(hex::encode(&hash[..8]));
 
@@ -75,6 +85,81 @@ pub async fn fetch_and_cache(
     }
 
     Ok((bytes, mime))
+}
+
+/// SEC-3: whitelist check for `<img>` URLs that we are willing to
+/// fetch on the user's behalf. The threat model is an attacker who
+/// controls an email and crafts an `<img src>` to either (a) read a
+/// local file via `file://` or (b) probe an internal service via
+/// `http://127.0.0.1/...` / `http://10.0.0.1/...` (SSRF).
+///
+/// Policy:
+/// - Scheme must be `http` or `https` (case-insensitive).
+/// - Host must be a normal DNS name OR a public IPv4/IPv6 address.
+///   We reject loopback (127/8, ::1), link-local (169.254/16, fe80::/10),
+///   and the three RFC 1918 private ranges (10/8, 172.16/12, 192.168/16).
+///
+/// The check is intentionally conservative — a false negative on a
+/// legitimate image (rare) is cheaper than a true positive on a
+/// probe (an information disclosure on the user's machine).
+fn validate_image_url(url: &str) -> Result<(), &'static str> {
+    let parsed = url::Url::parse(url).map_err(|_| "url: parse failed")?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        _ => return Err("url: scheme not allowed (only http/https)"),
+    }
+    let host = parsed.host().ok_or("url: missing host")?;
+    // If it's an IP literal, apply the blocklist directly.
+    if let Some(ip) = host_to_ip(&host) {
+        if is_blocked_ip(&ip) {
+            return Err("url: host resolves to a private/loopback address");
+        }
+        return Ok(());
+    }
+    // Otherwise it's a DNS name. We don't resolve here (would block
+    // the IPC thread for the duration of a DNS lookup) — the check
+    // at fetch time is performed by `reqwest::get` via the
+    // standard resolver. As an extra guard, we reject names that
+    // resolve obviously to localhost by string match.
+    use url::Host;
+    let name = match host {
+        Host::Domain(d) => d.to_ascii_lowercase(),
+        _ => return Ok(()),
+    };
+    if name == "localhost" || name.ends_with(".localhost") || name.ends_with(".local") {
+        return Err("url: host is loopback");
+    }
+    Ok(())
+}
+
+fn host_to_ip(host: &url::Host<&str>) -> Option<std::net::IpAddr> {
+    use url::Host;
+    match host {
+        Host::Ipv4(v) => Some(std::net::IpAddr::V4(*v)),
+        Host::Ipv6(v) => Some(std::net::IpAddr::V6(*v)),
+        Host::Domain(_) => None,
+    }
+}
+
+fn is_blocked_ip(ip: &std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()               // 127.0.0.0/8
+                || v4.is_link_local()       // 169.254.0.0/16
+                || v4.is_private()          // 10/8, 172.16/12, 192.168/16
+                || v4.is_unspecified()      // 0.0.0.0
+                || v4.is_broadcast()        // 255.255.255.255
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()               // ::1
+                || v6.is_unspecified()      // ::
+                // is_unique_local covers fc00::/7 (ULA)
+                // is_unicast_link_local covers fe80::/10
+                || v6.segments()[0] & 0xfe00 == 0xfc00
+                || v6.segments()[0] == 0xfe80
+        }
+    }
 }
 
 /// True if `bytes` look like a 1×1 (or smaller) image — the classic
@@ -308,5 +393,68 @@ mod tests {
         bytes.extend_from_slice(&[0, 0, 0, 100]); // height = 100
         bytes.extend_from_slice(&[8, 6, 0, 0, 0]);
         assert!(!looks_like_tracking_pixel(&bytes));
+    }
+
+    // ── SEC-3: URL whitelist ──────────────────────────────────────
+
+    #[test]
+    fn validate_image_url_allows_https() {
+        assert!(validate_image_url("https://cdn.example.com/logo.png").is_ok());
+    }
+
+    #[test]
+    fn validate_image_url_allows_http() {
+        assert!(validate_image_url("http://example.com/pixel.gif").is_ok());
+    }
+
+    #[test]
+    fn validate_image_url_rejects_file_scheme() {
+        assert!(validate_image_url("file:///etc/passwd").is_err());
+    }
+
+    #[test]
+    fn validate_image_url_rejects_javascript_scheme() {
+        assert!(validate_image_url("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn validate_image_url_rejects_data_scheme() {
+        assert!(validate_image_url("data:image/png;base64,AAAA").is_err());
+    }
+
+    #[test]
+    fn validate_image_url_rejects_loopback_ipv4() {
+        assert!(validate_image_url("http://127.0.0.1/x.png").is_err());
+        assert!(validate_image_url("http://127.5.5.5/x.png").is_err());
+    }
+
+    #[test]
+    fn validate_image_url_rejects_rfc1918() {
+        assert!(validate_image_url("http://10.0.0.1/x.png").is_err());
+        assert!(validate_image_url("http://172.16.5.5/x.png").is_err());
+        assert!(validate_image_url("http://192.168.1.1/x.png").is_err());
+    }
+
+    #[test]
+    fn validate_image_url_rejects_link_local() {
+        assert!(validate_image_url("http://169.254.169.254/latest/meta-data/").is_err());
+    }
+
+    #[test]
+    fn validate_image_url_rejects_loopback_ipv6() {
+        assert!(validate_image_url("http://[::1]/x.png").is_err());
+    }
+
+    #[test]
+    fn validate_image_url_rejects_localhost_name() {
+        assert!(validate_image_url("http://localhost/x.png").is_err());
+        assert!(validate_image_url("http://foo.localhost/x.png").is_err());
+        assert!(validate_image_url("http://printer.local/x.png").is_err());
+    }
+
+    #[test]
+    fn validate_image_url_rejects_garbage() {
+        assert!(validate_image_url("not a url").is_err());
+        assert!(validate_image_url("").is_err());
     }
 }

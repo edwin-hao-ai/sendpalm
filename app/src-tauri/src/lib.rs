@@ -155,6 +155,12 @@ pub fn run() {
             sql: include_str!("../migrations/0021_events_account_id.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 22,
+            description: "PERF-1 partial indexes for pile/bubble-up/Gate queries",
+            sql: include_str!("../migrations/0022_messages_pile_indexes.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     eprintln!("[sendpalm] starting tauri builder");
@@ -195,6 +201,8 @@ pub fn run() {
             commands::vault_save,
             commands::vault_load,
             commands::vault_delete,
+            commands::vault_set_secret,
+            commands::vault_get_secret,
             commands::add_calendar_event,
             commands::respond_to_calendar_invite,
             commands::get_attachment_content,
