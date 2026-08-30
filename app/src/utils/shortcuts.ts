@@ -21,6 +21,16 @@ import {
   setSelectedMessageId,
   selectedContactId,
   setSelectedContactId,
+  selectedFileId,
+  setSelectedFileId,
+  selectedTaskId,
+  setSelectedTaskId,
+  selectedDraftId,
+  setSelectedDraftId,
+  selectedMeetingId,
+  setSelectedMeetingId,
+  selectedCompanyName,
+  setSelectedCompanyName,
   setAgentPanelOpen,
   agentPanelOpen,
   showToast,
@@ -312,13 +322,44 @@ export function useGlobalShortcuts() {
       if (notificationsOpen()) setNotificationsOpen(false);
       if (composeOpen()) setComposeOpen(false);
       if (helpOpen()) setHelpOpen(false);
+      // P1-2: Esc must close every kind of detail panel, not just
+      // message / contact. The previous code only cleared
+      // selectedMessageId / selectedContactId, leaving file/task/
+      // draft/meeting/company panels open when Esc was pressed.
       if (selectedMessageId()) {
         setSelectedMessageId(null);
         setDetailOpen(false);
+        return;
       }
       if (selectedContactId()) {
         setSelectedContactId(null);
         setDetailOpen(false);
+        return;
+      }
+      if (selectedFileId()) {
+        setSelectedFileId(null);
+        setDetailOpen(false);
+        return;
+      }
+      if (selectedTaskId()) {
+        setSelectedTaskId(null);
+        setDetailOpen(false);
+        return;
+      }
+      if (selectedDraftId()) {
+        setSelectedDraftId(null);
+        setDetailOpen(false);
+        return;
+      }
+      if (selectedMeetingId()) {
+        setSelectedMeetingId(null);
+        setDetailOpen(false);
+        return;
+      }
+      if (selectedCompanyName()) {
+        setSelectedCompanyName(null);
+        setDetailOpen(false);
+        return;
       }
       return;
     }

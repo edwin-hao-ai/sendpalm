@@ -33,8 +33,14 @@ export function ToastStack() {
       id="toast"
       style={{
         position: "fixed",
-        bottom: "var(--space-5)",
+        // P1-15: on mobile the bottom tab bar is 64px tall plus the
+        // iOS home indicator (env safe-area-inset-bottom, typically
+        // 34px on iPhones with notch). The old `bottom: 20px` placed
+        // toasts underneath both, invisible to the user. Stack them
+        // above the tab bar + safe area.
+        bottom: "calc(64px + var(--space-5) + env(safe-area-inset-bottom, 0px))",
         right: "var(--space-5)",
+        left: "var(--space-3)",
         display: "flex",
         "flex-direction": "column-reverse",
         gap: "var(--space-2)",

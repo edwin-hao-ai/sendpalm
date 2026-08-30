@@ -79,7 +79,14 @@ export function NotificationPanel() {
         position: "fixed",
         top: "calc(var(--titlebar-height) + var(--topbar-height) + 4px)",
         right: "var(--space-5)",
-        width: "360px",
+        left: "auto",
+        // P1-14: on mobile the fixed `width: 360px` + `right: 20px`
+        // pushed the panel past the right edge of a 375px viewport
+        // (360 + 40 margin = 400px wide). Clamp to the viewport so
+        // iPhone users see the full panel instead of a clipped right
+        // edge.
+        "max-width": "min(360px, calc(100vw - 32px))",
+        width: "min(360px, calc(100vw - 32px))",
         background: "var(--paper-light)",
         "border-radius": "var(--radius-lg)",
         "box-shadow": "var(--shadow-xl)",

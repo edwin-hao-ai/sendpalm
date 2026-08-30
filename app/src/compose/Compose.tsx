@@ -126,9 +126,24 @@ export function Compose() {
       };
     }
     if (ctx.mode === "replyAll") {
-      const others = [m.to, ...(m.cc ?? [])]
-        .filter((e): e is string => typeof e === "string" && !!e)
-        .filter((e) => e !== senderEmail);
+      // P1-4: split each address on comma / semicolon / whitespace.
+      // The old code did `[m.to, ...(m.cc ?? [])]` and joined with
+      // ", " — but `m.to` is a single string like
+      // "alice@x.com, bob@x.com" from IMAP, so the join dumped the
+      // entire comma-joined blob into the Cc field. The recipient
+      // then saw an invalid Cc header (one giant address with
+      // embedded commas).
+      const splitAddrs = (raw: unknown): string[] => {
+        if (typeof raw !== "string" || !raw) return [];
+        return raw
+          .split(/[,;\s]+/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+      };
+      const others = [...splitAddrs(m.to), ...splitAddrs(m.cc ?? "")]
+        .filter((e) => e !== senderEmail)
+        // Deduplicate while preserving order.
+        .filter((e, i, arr) => arr.indexOf(e) === i);
       return {
         ...base,
         recipient: senderEmail,
@@ -260,23 +275,61 @@ export function Compose() {
     setComposeContext({ mode: "new", to: undefined, subject: undefined });
   };
 
-  /* Auto-title: when body has content and subject is empty, pre-fill the
-   * subject with the first line of the body (truncated to 60 chars). */
+  /* P1-6: Auto-title becomes a *suggestion*, not a forced overwrite.
+   * Previously the effect ran on every body change and overwrote the
+   * subject even when the user had manually cleared it to retype.
+   * Now we:
+   *   - show a non-destructive hint chip in the subject row
+   *   - only auto-apply when the user hasn't typed anything yet
+   *     (i.e. the field is still the placeholder-equivalent empty)
+   *   - let the user click the chip to "Use" the suggestion
+   */
+  const [autoTitleSuggestion, setAutoTitleSuggestion] = createSignal<
+    string | null
+  >(null);
   createEffect(() => {
     const d = draft();
-    if (d.subject.trim()) return;
     const body = d.body.trim();
-    if (body.length < 8) return;
+    if (d.subject.trim() || body.length < 8) {
+      setAutoTitleSuggestion(null);
+      return;
+    }
     const firstLine = body.split(/\r?\n/).find((l) => l.trim()) ?? body;
     const title = firstLine.trim().slice(0, 60);
-    if (title) setDraft((prev) => ({ ...prev, subject: title }));
+    setAutoTitleSuggestion(title || null);
   });
 
-  /* Autosave: persist draft every 4s if dirty. */
-  let saveTimer: number | undefined;
+  /* P1-5: Autosave only when the draft is actually dirty.
+   * Previously `if (composeOpen() && draft().body)` ran every 4s and
+   * called persistDraft which did a full upsertDraft (including the
+   * JSON-serialized attachments). For a 5 MB attachment, that was a
+   * 1.25 MB/s sustained IO during a 30 min draft. Now we compare
+   * against a serialised "last saved" snapshot and skip if equal.
+   */
+  let lastSavedSnapshot = "";
+  const serializeForDirty = (d: DraftState): string =>
+    JSON.stringify({
+      r: d.recipient,
+      c: d.cc,
+      b: d.bcc,
+      s: d.subject,
+      y: d.body,
+      a: d.accountId,
+      f: d.fromAlias,
+      at: d.attachments.length,
+      // Skip the actual attachment bytes in the dirty check — we
+      // only care if the user added/removed attachments, not whether
+      // the binary content shifted. Re-saving the same attachments
+      // is still wasteful but harmless.
+    });
   const persistDraft = async (status: Draft["status"] = "edited") => {
     const d = draft();
     if (!d.recipient && !d.subject && !d.body) return;
+    const snapshot = serializeForDirty(d);
+    if (snapshot === lastSavedSnapshot && status === "edited") {
+      // nothing changed since the last save; skip the IO.
+      return;
+    }
     setDraft({ ...d, savingState: "saving" });
     const draftRow: Draft = {
       id: d.id,
@@ -302,14 +355,18 @@ export function Compose() {
       attachments: d.attachments,
     };
     await upsertDraft(draftRow);
+    lastSavedSnapshot = snapshot;
     setDraft({ ...d, savingState: "saved", lastSaved: Date.now() });
   };
 
+  let saveTimer: number | undefined;
   onMount(() => {
     saveTimer = window.setInterval(() => {
-      if (composeOpen() && draft().body) persistDraft();
+      if (composeOpen()) void persistDraft();
     }, 4000);
-    onCleanup(() => clearInterval(saveTimer));
+    onCleanup(() => {
+      if (saveTimer !== undefined) clearInterval(saveTimer);
+    });
   });
 
   /* Apply snippet */
@@ -657,17 +714,52 @@ export function Compose() {
                   </Show>
                 </div>
 
-                {/* Subject */}
+                {/* Subject + P1-6 auto-title suggestion chip */}
                 <Field label="Subject" field="subject">
-                  <input
-                    type="text"
-                    value={draft().subject}
-                    onInput={(e) =>
-                      setDraft({ ...draft(), subject: e.currentTarget.value })
-                    }
-                    placeholder={draft().subject ? "" : "主题"}
-                    style={inputStyle}
-                  />
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "var(--space-2)",
+                      "align-items": "center",
+                    }}
+                  >
+                    <input
+                      type="text"
+                      value={draft().subject}
+                      onInput={(e) =>
+                        setDraft({ ...draft(), subject: e.currentTarget.value })
+                      }
+                      placeholder={draft().subject ? "" : "主题"}
+                      style={{ ...inputStyle, flex: 1 }}
+                    />
+                    <Show when={!draft().subject.trim() && autoTitleSuggestion()}>
+                      {(title) => (
+                        <button
+                          type="button"
+                          data-testid="autotitle-suggestion"
+                          onClick={() =>
+                            setDraft({ ...draft(), subject: title() })
+                          }
+                          style={{
+                            padding: "6px 10px",
+                            background: "var(--palm-soft)",
+                            color: "var(--palm)",
+                            "border-radius": "var(--radius-pill)",
+                            "font-size": "var(--text-caption)",
+                            "font-weight": "600",
+                            "white-space": "nowrap",
+                            border: "0.5px solid var(--palm)",
+                            "max-width": "60%",
+                            overflow: "hidden",
+                            "text-overflow": "ellipsis",
+                          }}
+                          title={`点击使用建议主题：${title()}`}
+                        >
+                          Use: {title()}
+                        </button>
+                      )}
+                    </Show>
+                  </div>
                 </Field>
 
                 {/* Body */}

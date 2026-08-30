@@ -128,13 +128,21 @@ export function Onboarding() {
     >
       <div
         style={{
-          width: "560px",
-          "max-width": "90vw",
+          // P1-16: shrink the card and padding on small viewports
+          // so the 96x96 hero icon doesn't get clipped on iPhone SE
+          // (375x667). The old fixed `560px` + 40px padding meant the
+          // inner content area was 480px wide; on a 320-px-wide
+          // iPhone 5 the card was 90vw = 288 px and the 96-px icon
+          // was clipped on both sides.
+          width: "min(560px, 92vw)",
+          "max-width": "92vw",
           background: "var(--paper-light)",
           "border-radius": "24px",
-          padding: "var(--space-10)",
+          padding: "min(var(--space-10), 6vw)",
           "box-shadow": "0 32px 64px rgba(0,0,0,0.18)",
           animation: "modal-enter 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both",
+          "max-height": "88vh",
+          "overflow-y": "auto",
         }}
       >
         <Show when={onboardingStep() !== null}>

@@ -53,6 +53,7 @@ import {
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { SkeletonList } from "../components/Skeleton";
+import { SwipeActions } from "../components/SwipeActions";
 import { priorityScore } from "../utils/priority";
 import { SORT_LABELS, type SortMode } from "../utils/sort-imbox";
 import { registerPrepend } from "../services/sync-events";
@@ -317,11 +318,16 @@ export function Imbox() {
         icon: "ph-clock",
         title: "Pending",
         messages: all.filter((m) => m.replyLater),
-        // The "Pending" pile drills into the reply-later board, which
-        // is the focused-reply view. (Was "focusReply" — that name is
-        // also a ViewName for the read-together flow, but Main only
-        // mounts the pile boards under "replyLater" / "setAside" /
-        // "bubbleUp", so we have to match the wire.)
+        // P1-1: route to the dedicated Focus & Reply view (the HEY-style
+        // focused reply flow). Previously this routed to the regular
+        // "replyLater" PileBoard, which was just a list with no focus
+        // action. The Main.tsx router already mounts <FocusReply /> at
+        // view="focusReply" — the dev comment from 2026-08-15 said
+        // the routing didn't work; the actual blocker was the
+        // <PileCard> buttons all calling setView(openBoardView)
+        // unconditionally, so the user always landed on the plain
+        // board. Now Pending's Open board → replyLater, Focus & Reply
+        // button → focusReply.
         openBoardView: "replyLater",
         hasFocusAction: true,
       },
@@ -733,6 +739,14 @@ export function Imbox() {
   const handleKey = (e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
     if (tag === "input" || tag === "textarea") return;
+    // P1-3: preventDefault on every branch so the global handler in
+    // utils/shortcuts.ts doesn't ALSO fire. Previously the global
+    // handler ran first → it called e.preventDefault() → but because
+    // the local handler didn't, two DB writes (one local via
+    // moveMessageToBucket, one global via upsertMessage) raced on
+    // the same key press, and `moveMessageToBucket` set deleted_at
+    // while `upsertMessage` did not. Net effect: bucket changes from
+    // l/s/e/t/b/! flipped back and forth.
     if (e.key === "j") {
       e.preventDefault();
       moveCursor(1);
@@ -740,6 +754,7 @@ export function Imbox() {
       e.preventDefault();
       moveCursor(-1);
     } else if (e.key === "Enter") {
+      e.preventDefault();
       const cur = cursorIndex();
       if (cur >= 0) {
         const item = renderList()[cur];
@@ -753,28 +768,34 @@ export function Imbox() {
         }
       }
     } else if (e.key === "x") {
+      e.preventDefault();
       const cur = cursorIndex();
       const item = renderList()[cur];
       if (!item) return;
       if ("messages" in item) toggleBundleSelection(item);
       else toggleSelect(item.id);
     } else if (e.key === "l") {
+      e.preventDefault();
       const cur = cursorIndex();
       const item = renderList()[cur];
       if (item && !("messages" in item)) void replyLater(item);
     } else if (e.key === "s") {
+      e.preventDefault();
       const cur = cursorIndex();
       const item = renderList()[cur];
       if (item && !("messages" in item)) void setAside(item);
     } else if (e.key === "e") {
+      e.preventDefault();
       const cur = cursorIndex();
       const item = renderList()[cur];
       if (item && !("messages" in item)) void archive(item);
     } else if (e.key === "t" || e.key === "#") {
+      e.preventDefault();
       const cur = cursorIndex();
       const item = renderList()[cur];
       if (item && !("messages" in item)) void trash(item);
     } else if (e.key === "b") {
+      e.preventDefault();
       // P0-10: align with prototype-v11 (`b` = bubble-up / Remind,
       // per renderContextMenuForMessage). The previous code mapped `b`
       // to spam(), which was destructive and silently set `deleted_at`
@@ -794,12 +815,14 @@ export function Imbox() {
         });
       }
     } else if (e.key === "!") {
+      e.preventDefault();
       // P0-10: explicit shortcut for Spam. The previous code put spam
       // on `b` which was both wrong and unrecoverable.
       const cur = cursorIndex();
       const item = renderList()[cur];
       if (item && !("messages" in item)) void spam(item as Message);
     } else if (e.key === "u") {
+      e.preventDefault();
       const cur = cursorIndex();
       const item = renderList()[cur];
       if (item && !("messages" in item)) void toggleUnread(item);
@@ -1413,7 +1436,12 @@ function MessageCard(props: MessageCardProps) {
     return true;
   };
 
-  return (
+  // P1-13: wrap the card in SwipeActions on mobile so the user can
+  // trash / reply-later without opening the detail panel. The
+  // SwipeActions component (used in Gate + Records) already has full
+  // touch + mouse handling; we just need to gate it on `isMobile()`
+  // and pass the right callbacks.
+  const card = (
     <article
       class={
         "feed-card" +
@@ -1592,6 +1620,37 @@ function MessageCard(props: MessageCardProps) {
         </div>
       </Show>
     </article>
+  );
+
+  // P1-13: only wrap on mobile. On desktop the user has the hover
+  // toolbar + keyboard shortcuts; mobile users previously had no
+  // way to act on a message without opening the detail panel (3 taps).
+  const [isMobile, setIsMobile] = createSignal(false);
+  onMount(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener("change", handler);
+    onCleanup(() => mq.removeEventListener("change", handler));
+  });
+  return (
+    <SwipeActions
+      disabled={!isMobile() || props.m.bucket !== "imbox"}
+      leftAction={{
+        label: "Trash",
+        icon: "ph-trash",
+        color: "red",
+        onClick: () => props.onTrash(props.m),
+      }}
+      rightAction={{
+        label: "Reply Later",
+        icon: "ph-clock",
+        color: "yellow",
+        onClick: () => props.onReplyLater(props.m),
+      }}
+    >
+      {card}
+    </SwipeActions>
   );
 }
 
@@ -1796,7 +1855,11 @@ function PileCard(props: {
                 data-pile-focus-drawer
                 onClick={(ev) => {
                   ev.stopPropagation();
-                  setView(props.pile.openBoardView);
+                  // P1-1: route to the dedicated Focus & Reply view, not
+                  // the plain board. The user explicitly wants the
+                  // focused-reply flow; landing on the plain board
+                  // was the bug from 2026-08-15.
+                  setView("focusReply");
                 }}
               >
                 <Icon name="ph-target" size={12} />

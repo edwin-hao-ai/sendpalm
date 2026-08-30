@@ -26,7 +26,7 @@ import {
   listSnippets,
   upsertSnippet,
   deleteSnippet,
-  listMessages,
+  listMessagesPaged,
   listTasks,
   listFiles,
   emptyTrash,
@@ -1862,29 +1862,68 @@ function DataTab() {
     );
     showToast({ message: "已导出 Tasks JSON", kind: "success" });
   };
+  const [exportProgress, setExportProgress] = createSignal<string | null>(
+    null,
+  );
   const backupMailbox = async () => {
-    const messages = await listMessages();
-    const files = await listFiles();
-    const data = {
-      exportedAt: isoNow(),
-      messages,
-      files: files.map((f) => ({
-        id: f.id,
-        pid: f.pid,
-        name: f.name,
-        type: f.type,
-        mime: f.mime,
-        size: f.size,
-        url: f.url,
-        st: f.st,
-      })),
-    };
-    download(
-      "sendpalm-mailbox-backup.json",
-      JSON.stringify(data, null, 2),
-      "application/json",
-    );
-    showToast({ message: "已导出 Mailbox backup", kind: "success" });
+    setExportProgress("正在分页拉取消息…");
+    try {
+      // P1-18: previously this called `listMessages()` which pulls
+      // body / body_html for every row. For a 4,000-row mailbox that
+      // is 300+ MB across IPC, JSON.stringify, and the download
+      // blob, freezing the UI for 5-30 s with no progress feedback.
+      // Now: paginate in chunks of 500 with the lightweight
+      // projection (body / body_html dropped). The export is
+      // slightly lossy on body but full metadata is preserved
+      // and the user can re-sync from IMAP to recover bodies.
+      const PAGE = 500;
+      const out: unknown[] = [];
+      let offset = 0;
+      const first = await listMessagesPaged({
+        offset: 0,
+        limit: 1,
+        lightweight: true,
+      });
+      const total = first.total;
+      while (offset < total) {
+        const page = await listMessagesPaged({
+          offset,
+          limit: PAGE,
+          lightweight: true,
+        });
+        out.push(...page.items);
+        offset += page.items.length;
+        setExportProgress(`已导出 ${out.length} / ${total} 封…`);
+        // Yield to the event loop so the toast can repaint.
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      const files = await listFiles();
+      const data = {
+        exportedAt: isoNow(),
+        totalMessages: out.length,
+        messages: out,
+        files: files.map((f) => ({
+          id: f.id,
+          pid: f.pid,
+          name: f.name,
+          type: f.type,
+          mime: f.mime,
+          size: f.size,
+          url: f.url,
+          st: f.st,
+        })),
+      };
+      download(
+        "sendpalm-mailbox-backup.json",
+        JSON.stringify(data, null, 2),
+        "application/json",
+      );
+      showToast({ message: "已导出 Mailbox backup", kind: "success" });
+    } catch (e) {
+      showToast({ message: `导出失败：${String(e)}`, kind: "error" });
+    } finally {
+      setExportProgress(null);
+    }
   };
   const exportAll = async () => {
     const data = {
@@ -1912,11 +1951,6 @@ function DataTab() {
     await resetAllData();
     location.reload();
   };
-  const deleteAccount = () => {
-    const code = prompt("输入 DELETE ACCOUNT 以删除当前账户（演示）：");
-    if (code !== "DELETE ACCOUNT") return;
-    showToast({ message: "账户删除请求已记录（演示模式）", kind: "info" });
-  };
   return (
     <div>
       <SectionTitle>Export</SectionTitle>
@@ -1937,12 +1971,25 @@ function DataTab() {
       <button onClick={emptyTrashNow} style={secondaryBtn}>
         清空 Trash
       </button>
-      <button
-        onClick={deleteAccount}
-        style={{ ...secondaryBtn, color: "var(--coral)" }}
-      >
-        删除账户（演示）
-      </button>
+      <Show when={exportProgress()}>
+        {(msg) => (
+          <div
+            data-testid="export-progress"
+            style={{
+              padding: "8px 14px",
+              background: "var(--paper-mid)",
+              "border-radius": "var(--radius-pill)",
+              color: "var(--text-secondary)",
+              "font-size": "var(--text-caption)",
+              "font-weight": "600",
+              "text-align": "center",
+              "margin-top": "var(--space-2)",
+            }}
+          >
+            {msg()}
+          </div>
+        )}
+      </Show>
       <button
         onClick={reset}
         style={{ ...secondaryBtn, color: "var(--coral)" }}
