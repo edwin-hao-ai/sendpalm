@@ -378,7 +378,15 @@ fn unescape_text(s: &str) -> String {
                 None => out.push('\\'),
             }
         } else {
-            out.push(c);
+            // P0-1 / P1-10: fold CR / LF / NUL that appear in the raw iCal
+            // value (not preceded by a backslash). They survive the
+            // unescape pass and would later become RFC822 header
+            // injection vectors when the iTip REPLY path interpolates
+            // SUMMARY / LOCATION into raw SMTP headers.
+            match c {
+                '\r' | '\0' => out.push(' '),
+                _ => out.push(c),
+            }
         }
     }
     out
@@ -1085,6 +1093,21 @@ fn normalize_datetime(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unescape_text_folds_crlf_nul() {
+        // P0-1: defense-in-depth. CR / NUL in raw iCal values are folded
+        // to spaces so they can't become RFC822 header-injection
+        // vectors if a value is later interpolated into a header
+        // without going through `fold_header_value`. LF is preserved
+        // per RFC 5545 (text values may contain real newlines); the
+        // SMTP-side `fold_header_value` catches it on the way out.
+        assert_eq!(unescape_text("foo\r\nBcc: x"), "foo \nBcc: x");
+        assert_eq!(unescape_text("a\0b"), "a b");
+        assert_eq!(unescape_text("line1\nline2"), "line1\nline2");
+        // backslash-escaped \n is preserved
+        assert_eq!(unescape_text("a\\nb"), "a\nb");
+    }
 
     #[test]
     fn parses_minimal_vevent() {

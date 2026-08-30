@@ -1,0 +1,59 @@
+{
+  "timestamp": "2026-08-21T16:07:05.264Z",
+  "corpus": {
+    "contacts": 1500,
+    "messages": 4000
+  },
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "regions": {
+    "top": {
+      "region": "top",
+      "frames": 80,
+      "medianFrameMs": 16.600000008940697,
+      "p95FrameMs": 17.80000001192093,
+      "maxFrameMs": 19.700000002980232,
+      "longTasksOver50ms": 0,
+      "longTasksOver100ms": 0,
+      "layoutShiftPx": 0,
+      "whiteAreaCount": 0
+    },
+    "middle": {
+      "region": "middle",
+      "frames": 80,
+      "medianFrameMs": 16.69999998807907,
+      "p95FrameMs": 17.700000002980232,
+      "maxFrameMs": 299,
+      "longTasksOver50ms": 1,
+      "longTasksOver100ms": 1,
+      "layoutShiftPx": 0,
+      "whiteAreaCount": 0
+    },
+    "bottom": {
+      "region": "bottom",
+      "frames": 80,
+      "medianFrameMs": 16.700000002980232,
+      "p95FrameMs": 17.600000008940697,
+      "maxFrameMs": 18.100000008940697,
+      "longTasksOver50ms": 0,
+      "longTasksOver100ms": 0,
+      "layoutShiftPx": 0,
+      "whiteAreaCount": 0
+    }
+  },
+  "heapBeforeMB": null,
+  "heapAfterMB": null,
+  "heapDeltaMB": null,
+  "totalLongTasksOver50ms": 1,
+  "pass": {
+    "topFps": true,
+    "middleFps": true,
+    "bottomFps": true,
+    "noLongTasks": false,
+    "noWhiteAreas": true,
+    "noLayoutShift": true,
+    "heapStable": false
+  }
+}

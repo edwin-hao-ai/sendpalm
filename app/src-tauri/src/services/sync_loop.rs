@@ -46,7 +46,18 @@ const PURGE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// If the database has no configured email accounts, fall back to the
 /// `SENDPALM_TEST_*` credentials so `pnpm tauri dev` still syncs mail.
+///
+/// P0-5: gated to debug builds only. Previously `const true`, so a release
+/// binary would silently spin up a 60 s IDLE loop on the Feishu test
+/// account if `SENDPALM_TEST_*` happened to be in the process env (e.g.
+/// the user ran another tool that exports them, or a CI artifact kept
+/// them around). On a multi-account user this means a release build
+/// could send from / sync to the test account without the user
+/// knowing. In dev we still want this on; release builds skip it.
+#[cfg(debug_assertions)]
 const TEST_FALLBACK_ENABLED: bool = true;
+#[cfg(not(debug_assertions))]
+const TEST_FALLBACK_ENABLED: bool = false;
 
 #[derive(Debug, Clone)]
 pub struct SyncAccount {
@@ -304,6 +315,13 @@ async fn load_sync_accounts(pool: &SqlitePool) -> Result<Vec<SyncAccount>, Strin
         return Ok(db_accounts);
     }
     if TEST_FALLBACK_ENABLED {
+        // P0-5: log loudly when the test fallback fires — even in
+        // dev, the user should be able to tell from the console that
+        // they're not syncing a real account.
+        eprintln!(
+            "[sync] WARNING: no real accounts configured — falling back to SENDPALM_TEST_EMAIL ({})",
+            std::env::var("SENDPALM_TEST_EMAIL").unwrap_or_default()
+        );
         match build_test_fallback_account().await {
             Ok(a) => Ok(vec![a]),
             Err(e) => {
@@ -1204,6 +1222,18 @@ pub async fn save_sent_message(
     body: &str,
     attachments: &[crate::services::smtp::OutgoingAttachment],
 ) -> Result<String, String> {
+    // P0-3: account_id may be empty in the dev / no-account fallback
+    // path (e.g. test-fallback credentials). The messages table has
+    // `ac TEXT REFERENCES accounts(id) ON DELETE SET NULL`, so an
+    // empty `ac` would violate the FK and the error used to be
+    // silently swallowed by 3 layers of `.ok()` in the call site.
+    // Skip the Sent row entirely when no account is available.
+    if account_id.trim().is_empty() {
+        return Err(
+            "save_sent_message: no account_id — Sent copy skipped. Connect a real account to keep a Sent record."
+                .into(),
+        );
+    }
     let route = upsert_contact(pool, to_email, None, false).await?;
     let mid = format!("sent_{}", uuid::Uuid::new_v4().simple());
     let prev_excerpt = body

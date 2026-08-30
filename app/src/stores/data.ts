@@ -1720,13 +1720,18 @@ export async function listCompanyEvents(
 
 export async function upsertEvent(e: CalendarEvent): Promise<void> {
   const db = await getDb();
+  // P0-2: include the four RRULE / TZID columns that the Rust importer
+  // writes (commands/mod.rs:346-352). The previous version omitted them,
+  // so any JS-side edit (agenda, notes, location) silently dropped the
+  // recurrence metadata on the next save.
   await db.execute(
     `INSERT INTO events (
       id, title, dt, end_dt, all_day, tm, dur, pids_json, color, location, video_link, reminder,
       agenda_json, notes, brief, action_items_json, materials_json,
       transcript_url, recording_url, habit, sometime_bucket, time_tracking_ms,
-      photo_url, circled, day_note
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+      photo_url, circled, day_note,
+      recurrence_rule, recurrence_dates_json, excluded_dates_json, original_tzid
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
     ON CONFLICT(id) DO UPDATE SET
       title=excluded.title, dt=excluded.dt, end_dt=excluded.end_dt, all_day=excluded.all_day,
       tm=excluded.tm, dur=excluded.dur,
@@ -1737,7 +1742,11 @@ export async function upsertEvent(e: CalendarEvent): Promise<void> {
       transcript_url=excluded.transcript_url, recording_url=excluded.recording_url,
       habit=excluded.habit, sometime_bucket=excluded.sometime_bucket,
       time_tracking_ms=excluded.time_tracking_ms, photo_url=excluded.photo_url,
-      circled=excluded.circled, day_note=excluded.day_note`,
+      circled=excluded.circled, day_note=excluded.day_note,
+      recurrence_rule=excluded.recurrence_rule,
+      recurrence_dates_json=excluded.recurrence_dates_json,
+      excluded_dates_json=excluded.excluded_dates_json,
+      original_tzid=excluded.original_tzid`,
     [
       e.id,
       e.title,
@@ -1764,6 +1773,10 @@ export async function upsertEvent(e: CalendarEvent): Promise<void> {
       e.photoUrl ?? null,
       e.circled ? 1 : 0,
       e.dayNote ?? null,
+      e.recurrenceRule ?? null,
+      safeStringify(e.recurrenceDates ?? []),
+      safeStringify(e.excludedDates ?? []),
+      e.originalTzid ?? null,
     ],
   );
   await indexEntity(

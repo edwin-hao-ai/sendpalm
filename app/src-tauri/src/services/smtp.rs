@@ -19,6 +19,24 @@ pub struct OutgoingAttachment {
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+/// Strip CR/LF/NUL from an RFC822 header value to prevent header-injection
+/// (CVE-style: `Subject: foo\r\nBcc: attacker@evil.com`).
+///
+/// Per RFC 5322 §3.6.8, header values may not contain CR or LF outside of
+/// a quoted-string + quoted-pair. We use whitespace folding instead of
+/// quoting because the same string also flows into envelope parameters
+/// (e.g. the RCPT-TO argument) where quoting is invalid.
+pub fn fold_header_value(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '\r' | '\n' | '\0' => ' ',
+            _ => c,
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
 /// One SMTP connection per account, lazily opened. Reused across sends.
 #[derive(Clone)]
 pub struct SmtpClient {
@@ -177,6 +195,15 @@ impl SmtpClient {
         ics_body: &str,
         responder_email: &str,
     ) -> Result<String, String> {
+        // P0-1: strip CRLF/NUL from headers interpolated into the raw
+        // RFC822 message — `subject` originates from an attacker-controlled
+        // iCal SUMMARY (unescape_text preserves CR/LF in source). Without
+        // this, `Subject: foo\r\nBcc: attacker@evil.com` becomes a real
+        // Bcc header in the outgoing mail.
+        let from = fold_header_value(from);
+        let to = fold_header_value(to);
+        let subject = fold_header_value(subject);
+
         let from_addr: lettre::Address = from
             .parse()
             .map_err(|e| format!("bad from: {e}"))?;
@@ -187,6 +214,10 @@ impl SmtpClient {
         // `Content-Type: text/calendar; method=REPLY` header exactly.
         // lettre's `Message::builder` API doesn't expose per-MIME-part
         // headers cleanly enough for this.
+        //
+        // P0-1: ics_body is a MIME body part; CRLF inside it is legitimate
+        // (the iCal line-folding), so we do NOT fold it. We only fold the
+        // header-line values above.
         let raw = format!(
             "From: {from}\r\n\
 To: {to}\r\n\
@@ -221,6 +252,63 @@ Content-Transfer-Encoding: 8bit\r\n\
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strips_crlf_injection() {
+        // Classic CRLF injection: insert a Bcc header into a Subject.
+        // The CR/LF must go — without it, RFC822 parsers would treat
+        // "Bcc: ..." as the start of a new header line.
+        let raw = "foo\r\nBcc: attacker@evil.com";
+        let out = fold_header_value(raw);
+        assert!(!out.contains('\r'), "CR survived: {out:?}");
+        assert!(!out.contains('\n'), "LF survived: {out:?}");
+        // Verify the output is a single line (no embedded CRLF) — even
+        // though "Bcc:" may appear in the text, the parser cannot see
+        // it as a header boundary.
+        assert_eq!(out.lines().count(), 1, "must be one line: {out:?}");
+    }
+
+    #[test]
+    fn prevents_bcc_header_injection_end_to_end() {
+        // A more thorough check: the folded value, prefixed with a
+        // "Subject: " header, must NOT contain any line that starts
+        // with a header name. This simulates what an SMTP receiver
+        // sees.
+        let raw = "hi\r\nBcc: attacker@evil.com\r\nX: y";
+        let folded = fold_header_value(raw);
+        let envelope = format!("Subject: {folded}\r\n");
+        // After "Subject: hi Bcc: attacker@evil.com X: y", no line
+        // except the first should look like a header (i.e. the second
+        // and later lines must not start with a bare header name).
+        let lines: Vec<&str> = envelope.split("\r\n").collect();
+        for line in &lines[1..] {
+            // A header line has form "Name: value" with Name
+            // containing no spaces. The folded value uses spaces
+            // only, so any "Name:" after a space can't start a line.
+            assert!(
+                !line.contains(':') || line.starts_with(' '),
+                "possible injected header line: {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn strips_lone_lf() {
+        let raw = "Subject\nwith\nnewlines";
+        assert_eq!(fold_header_value(raw), "Subject with newlines");
+    }
+
+    #[test]
+    fn strips_nul() {
+        let raw = "addr\0@evil.com";
+        assert!(!fold_header_value(raw).contains('\0'));
+    }
+
+    #[test]
+    fn preserves_normal_text() {
+        assert_eq!(fold_header_value("hello world"), "hello world");
+        assert_eq!(fold_header_value("中文主题"), "中文主题");
+    }
 
     #[test]
     fn builds_without_network() {
