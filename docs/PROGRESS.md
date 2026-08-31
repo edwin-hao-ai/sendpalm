@@ -2856,3 +2856,48 @@ The full audit-fix sweep covers: 10 P0 items, 18 P1 items,
 P1 calendar cluster (5 items), 3 P2 items, 3 SEC items, 1 PERF
 item, 1 perf helper, and the v5 DMG. Documented in
 `docs/PROGRESS.md` (2026-08-30 entry above).
+
+## 2026-08-31 v6 DMG (ARCH-1/4 + PERF-3 + final pass)
+
+Build: cargo release took 9 m 19 s (5 partial-index migrations +
+new `vault_*` + new `image_proxy` whitelist tests + 2 new
+features). DMG is 9.2 MB,
+sha256 `d58775c4087e61ac988e8b132d8dd8c67c4aeb91211dbdbb3813e27a5139290f`.
+
+`dist/SendPalm-0.1.0-arm64-v6.dmg` is the new installable.
+
+### ARCH / PERF / i18n summary
+
+- **ARCH-1** minimal i18n: new `app/src/i18n/index.ts` with
+  `t(key, fallback, vars?)`, `setLocale()`, `defineTranslation()`.
+  Default `zh-CN`, partial `en-US`. Bootstrap reads
+  `settings.profile.language`. Gate view is the proof-of-concept
+  (4 hard-coded strings now t() calls). 5 new vitest cases.
+- **ARCH-4** global error log: new `errorLog` signal in
+  `stores/ui.ts` (200-entry cap, FIFO). `recordError(source,
+  message, detail)`. `showToast({kind:'error'})` auto-records
+  (37 existing call sites benefit). New `ErrorLog` button + slide
+  down panel in Topbar with badge.
+- **PERF-3** ContactPanel bundle: new `getContactBundle(contactId)`
+  runs all 7 list reads via `Promise.all`. ContactPanel swapped
+  8 individual `createResource` → 1 bundle resource. Compat
+  aliases for `refetchX` keep zero consumer changes. Frozen
+  `EMPTY_*` arrays for `===`-stable fallbacks.
+- **Calendar perf**: pre-filter `ev.dt > wEnd` early-exit; new
+  `allDayOccurrences` memo (all-day events bypass time sort);
+  `sortedEvents()` concatenates `[allDay, timed]`.
+
+### Verification
+
+- `cargo test --lib` → 84 / 84 (+12 vs 72)
+- `pnpm exec vitest run` → 322 / 322 (+5 i18n)
+- `pnpm exec tsc --noEmit` → clean
+- E2E in-app browser (desktop viewport 1440 px):
+  - Settings → Preferences: dark mode toggle visually confirmed.
+  - Settings → Agent: API key hint now reads Keychain / Credential
+    Manager / GNOME Keyring. Save writes to vault.
+  - Topbar: new "Error log" button with badge visible in light
+    and dark mode.
+  - Contacts (⌘5): bundle-loaded panel renders without console
+    errors when navigating between two seeded contacts
+    (`e2e/contact-bundle.spec.ts`).
