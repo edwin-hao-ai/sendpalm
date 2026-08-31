@@ -9,6 +9,7 @@ import { load } from "@tauri-apps/plugin-store";
 import { IS_BROWSER } from "./services/tauri-shim";
 import { ensureNotificationPermission } from "./services/notifications";
 import { vaultGetSecret, LLM_API_KEY_VAULT_KEY } from "./services/backend";
+import { setLocale, type Locale } from "./i18n";
 import {
   listAccounts,
   listBundleConfigs,
@@ -74,6 +75,15 @@ export async function initApp() {
           // The user can still type a key — it just won't persist
           // across restarts on this machine.
           console.warn("[bootstrap] LLM keychain load failed:", vaultErr);
+        }
+
+        // ARCH-1: apply the persisted locale. The default is
+        // "zh-CN" — unchanged for existing users. Future
+        // Settings UI can flip this to "en-US" and any
+        // registered translation keys will resolve.
+        const lang = settings.profile?.language as Locale | undefined;
+        if (lang === "zh-CN" || lang === "en-US") {
+          setLocale(lang);
         }
 
         // P2: apply the persisted theme preference to <html data-theme>.

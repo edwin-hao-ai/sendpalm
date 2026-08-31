@@ -1,19 +1,25 @@
 /** ContactPanel — right-side detail panel with tabs.
  * Tabs: Timeline · Notes · Files · Insights · Network · Calendar
  * Spec: prototype-v11 §3.3.
+ *
+ * PERF-3: this panel used to fire 8 separate `createResource`
+ * reads on mount (contact + messages + events + files + notes +
+ * tasks + follow-ups + clips). Each was its own IPC roundtrip
+ * and its own SQLite pool checkout, so the slowest query gated
+ * every other tab's first render. We now issue a single
+ * `getContactBundle(contactId)` (defined in `stores/data.ts`)
+ * which runs all 7 list reads via `Promise.all` — the panel
+ * waits for one batched promise instead of 7 staggered ones.
+ * Per-tab mutations (`upsertContact`, `upsertContactNote`, …)
+ * still go through the per-resource Rust commands; the
+ * `setBundle` mutate hook patches the bundle in place so the
+ * render is optimistic without a full refetch.
  */
 
 import { For, Show, createMemo, createResource, createSignal } from "solid-js";
 import {
-  getContact,
-  listContactMessages,
-  listContactEvents,
-  listContactFiles,
-  listContactNotes,
+  getContactBundle,
   listEvents,
-  listContactTasks,
-  listContactFollowUps,
-  listContactClips,
   upsertContact,
   upsertContactNote,
   deleteContactNote,
@@ -70,79 +76,77 @@ const TABS = [
   "Calendar",
 ] as const;
 
+// Frozen empty arrays used as fallbacks while the bundle is
+// pending or errored. Sharing these across renders (instead of
+// `?? []`) lets Solid's `===` checks avoid re-running memos.
+const EMPTY_MESSAGES = Object.freeze([]) as unknown as Message[];
+const EMPTY_EVENTS = Object.freeze([]) as unknown as CalendarEvent[];
+const EMPTY_FILES = Object.freeze([]) as unknown as FileItem[];
+const EMPTY_NOTES = Object.freeze([]) as unknown as ContactNote[];
+const EMPTY_TASKS = Object.freeze([]) as unknown as Task[];
+const EMPTY_FOLLOWUPS = Object.freeze([]) as unknown as FollowUp[];
+const EMPTY_CLIPS = Object.freeze([]) as unknown as Clip[];
+
 export function ContactPanel(props: { contactId: string }) {
-  const [contact, { refetch: refetchContact }] = createResource(
+  // PERF-3: one batched resource for the whole panel payload.
+  // The bundle carries 8 fields; the accessors below re-export
+  // each as a SolidJS `Resource`-shaped object so the 30+ call
+  // sites in this file don't need to change. The new shape is
+  // a 1-roundtrip `Promise.all` instead of 8 staggered ones.
+  const [bundle, { refetch: refetchBundle, mutate: setBundleRaw }] = createResource(
     () => props.contactId,
-    getContact,
+    getContactBundle,
   );
-  const [messages, { refetch: refetchMessages }] = createResource(
-    () => props.contactId,
-    listContactMessages,
-  );
-  const [events, { refetch: refetchEvents }] = createResource(
-    () => props.contactId,
-    listContactEvents,
-  );
-  const [files, { refetch: refetchFiles }] = createResource(
-    () => props.contactId,
-    listContactFiles,
-  );
-  const [notes, { mutate: setNotes, refetch: refetchNotes }] = createResource(
-    () => props.contactId,
-    (id) => listContactNotes(id),
-  );
-  const [tasks, { refetch: refetchTasks }] = createResource(
-    () => props.contactId,
-    listContactTasks,
-  );
-  const [followUps, { refetch: refetchFU }] = createResource(
-    () => props.contactId,
-    listContactFollowUps,
-  );
-  const [clips, { refetch: refetchClips }] = createResource(
-    () => props.contactId,
-    listContactClips,
-  );
+  // The bundle carries all 8 fields; the accessors below are
+  // thin call-site-stable wrappers that fall back to a frozen
+  // empty array (typed correctly) on pending/error. The empty
+  // arrays are module-singletons so Solid's `===` checks
+  // short-circuit memo invalidation across re-renders.
+  const contact = (): Contact | null => bundle()?.contact ?? null;
+  const messages = (): Message[] => bundle()?.messages ?? EMPTY_MESSAGES;
+  const events = (): CalendarEvent[] => bundle()?.events ?? EMPTY_EVENTS;
+  const files = (): FileItem[] => bundle()?.files ?? EMPTY_FILES;
+  const notes = (): ContactNote[] => bundle()?.notes ?? EMPTY_NOTES;
+  const tasks = (): Task[] => bundle()?.tasks ?? EMPTY_TASKS;
+  const followUps = (): FollowUp[] => bundle()?.followUps ?? EMPTY_FOLLOWUPS;
+  const clips = (): Clip[] => bundle()?.clips ?? EMPTY_CLIPS;
+
+  // Per-tab `setNotes` mutate helper — preserves the optimistic
+  // semantics the old `mutate` accessor had. Tasks / follow-ups
+  // / clips don't have an in-panel mutator today, so a single
+  // helper is enough; future per-tab mutators can follow the
+  // same pattern.
+  const setNotes = (fn: (prev: ContactNote[]) => ContactNote[]) =>
+    setBundleRaw((prev) => (prev ? { ...prev, notes: fn(prev.notes) } : prev));
+
+  // Compat aliases — all 8 `refetchX` paths collapse to a
+  // single bundle refetch. The 30+ call sites that named a
+  // specific refetch now all do the same thing, but we keep
+  // the per-name surface so the diff is minimal.
+  const refetchContact = refetchBundle;
+  const refetchMessages = refetchBundle;
+  const refetchEvents = refetchBundle;
+  const refetchFiles = refetchBundle;
+  const refetchNotes = refetchBundle;
+  const refetchTasks = refetchBundle;
+  const refetchFU = refetchBundle;
+  const refetchClips = refetchBundle;
+
   const [editing, setEditing] = createSignal(false);
 
   useRefreshEffect(() => {
-    void refetchContact();
-    void refetchMessages();
-    void refetchEvents();
-    void refetchFiles();
-    void refetchNotes();
-    void refetchTasks();
-    void refetchFU();
-    void refetchClips();
+    void refetchBundle();
   });
 
-  const msgs = createMemo(() => messages() ?? []);
-  const evts = createMemo(() => events() ?? []);
-  const fls = createMemo(() => files() ?? []);
-  const tks = createMemo(() => tasks() ?? []);
-  const fus = createMemo(() => followUps() ?? []);
-  const cls = createMemo(() => clips() ?? []);
+  const msgs = createMemo(() => messages());
+  const evts = createMemo(() => events());
+  const fls = createMemo(() => files());
+  const tks = createMemo(() => tasks());
+  const fus = createMemo(() => followUps());
+  const cls = createMemo(() => clips());
 
-  const anyPending = createMemo(
-    () =>
-      messages.state === "pending" ||
-      events.state === "pending" ||
-      files.state === "pending" ||
-      notes.state === "pending" ||
-      tasks.state === "pending" ||
-      followUps.state === "pending" ||
-      clips.state === "pending",
-  );
-  const anyError = createMemo(
-    () =>
-      messages.state === "errored" ||
-      events.state === "errored" ||
-      files.state === "errored" ||
-      notes.state === "errored" ||
-      tasks.state === "errored" ||
-      followUps.state === "errored" ||
-      clips.state === "errored",
-  );
+  const anyPending = createMemo(() => bundle.state === "pending");
+  const anyError = createMemo(() => bundle.state === "errored");
   const retryAll = () => {
     void refetchMessages();
     void refetchEvents();
@@ -474,7 +478,7 @@ export function ContactPanel(props: { contactId: string }) {
           </Show>
           <Show when={contactTab() === "Notes"}>
             <NotesTab
-              notes={notes() ?? []}
+              notes={notes()}
               contactId={props.contactId}
               onAdd={(n) => setNotes((prev) => [n, ...(prev ?? [])])}
               onRemove={(id) =>
@@ -1143,7 +1147,7 @@ function NetworkTab(props: { contactId: string }) {
   // views subscribing to contactsList share one roundtrip; we
   // don't need a per-component resource here.
   const contacts = contactsList;
-  const [events] = createResource(() => listEvents());
+  const [allEvents] = createResource(() => listEvents());
 
   const connections = createMemo(() => {
     const list = contacts();
@@ -1156,7 +1160,7 @@ function NetworkTab(props: { contactId: string }) {
   });
 
   const sharedMeetings = createMemo(() => {
-    return (events() ?? []).filter(
+    return (allEvents() ?? []).filter(
       (e) => e.pids.includes(props.contactId) && e.pids.length > 1,
     );
   });

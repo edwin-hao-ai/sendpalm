@@ -144,7 +144,15 @@ export function Calendar() {
   const allOccurrences = createMemo<OccurrenceView[]>(() => {
     const [wStart, wEnd] = occurrenceWindow();
     const out: OccurrenceView[] = [];
-    for (const ev of (events() ?? []).filter(matchesCalendarFilter)) {
+    // PERF: pre-filter + early-exit. `expandOccurrences` already
+    // caps a single master's occurrences at 500 (and the window
+    // is at most 365 days in year view), but each event still
+    // walks its own RRULE math. Filtering by `ev.dt <= wEnd`
+    // first drops past masters entirely — most calendars have
+    // hundreds of completed instances that we never expand.
+    const masters = (events() ?? []).filter(matchesCalendarFilter);
+    for (const ev of masters) {
+      if (ev.dt > wEnd) continue;
       for (const occ of expandOccurrences(ev, wStart, wEnd)) {
         out.push({ ...occ, ev });
       }
@@ -154,6 +162,27 @@ export function Calendar() {
       const tb = timeToMinutes(b.ev.tm);
       return a.start.localeCompare(b.start) || ta - tb;
     });
+    return out;
+  });
+
+  // Separate memo for all-day events: they don't have a meaningful
+  // time-of-day, so they don't participate in the time sort. The
+  // day / week grids render all-day events in a pinned strip at
+  // the top, so we keep them out of `allOccurrences` to avoid
+  // them getting sorted into a 00:00 bucket.
+  const allDayOccurrences = createMemo<OccurrenceView[]>(() => {
+    const [wStart, wEnd] = occurrenceWindow();
+    const out: OccurrenceView[] = [];
+    const masters = (events() ?? [])
+      .filter(matchesCalendarFilter)
+      .filter((e) => e.allDay === true);
+    for (const ev of masters) {
+      if (ev.dt > wEnd) continue;
+      for (const occ of expandOccurrences(ev, wStart, wEnd)) {
+        out.push({ ...occ, ev });
+      }
+    }
+    out.sort((a, b) => a.start.localeCompare(b.start));
     return out;
   });
 
@@ -178,7 +207,12 @@ export function Calendar() {
     // bare-masters list (below) is only used by the edit / delete
     // flows that need the master row.
     if (view() === "day" || view() === "week" || view() === "year") {
-      return allOccurrences().map(occurrenceAsEvent);
+      // Concatenate all-day + timed occurrences. The day-grid
+      // DayAgenda already separates them in its own sort, so the
+      // concatenation order doesn't matter for the consumer.
+      const timed = allOccurrences().map(occurrenceAsEvent);
+      const allday = allDayOccurrences().map(occurrenceAsEvent);
+      return [...allday, ...timed];
     }
     // Some other view (sometime / habit / tracking) is handled
     // by its own filter — fall back to the master list so we

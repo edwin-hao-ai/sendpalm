@@ -4,6 +4,7 @@
  */
 
 import { For, Show, createMemo, createResource, createSignal } from "solid-js";
+import { t } from "../i18n";
 import {
   listContacts,
   listGateQueue,
@@ -156,7 +157,7 @@ export function Gate() {
             margin: 0,
           }}
         >
-          第一次发件人需要你点头。批准后归入对应分类；拒绝后永久屏蔽。
+          {t("gate.empty.body", "第一次发件人需要你点头。批准后归入对应分类；拒绝后永久屏蔽。")}
         </p>
         <button
           onClick={() => setView("screenerHistory")}
@@ -361,9 +362,13 @@ function DoneState(props: { count: number }) {
   return (
     <Empty
       icon="ph-check-circle"
-      title={props.count === 0 ? "Inbox 清爽" : "全部审完"}
+      title={props.count === 0
+        ? t("gate.empty.title", "Inbox 清爽")
+        : "全部审完"}
       description={
-        props.count === 0 ? "现在没有第一次发件人需要审。" : "Screener 已清空。"
+        props.count === 0
+          ? t("gate.empty.body", "现在没有第一次发件人需要审。")
+          : "Screener 已清空。"
       }
       action={{ label: "回到 Imbox", onClick: () => setView("imbox") }}
     />

@@ -3,6 +3,7 @@
 import { Show, For, onMount } from "solid-js";
 import { Icon } from "./Icon";
 import { BrandMark } from "./BrandMark";
+import { ErrorLogButton } from "./ErrorLog";
 import { useViewport, useSoftRefreshEffect } from "../utils/gestures";
 import {
   commandPaletteOpen,
@@ -131,6 +132,7 @@ export function Topbar() {
         <NotificationBell
           onClick={() => setNotificationsOpen(!notificationsOpen())}
         />
+        <ErrorLogButton />
         <Avatar name="Edwin Hao" size={28} />
       </div>
     </header>

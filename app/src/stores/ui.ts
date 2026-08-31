@@ -278,10 +278,73 @@ export interface Toast {
 }
 export const [toasts, setToasts] = createSignal<Toast[]>([]);
 
+/** ARCH-4: persistent error log — every `kind: "error"` toast
+ *  that auto-dismisses is also recorded here so the user can
+ *  scroll back through what went wrong. A topbar bell icon
+ *  (`ErrorLogButton`) shows the unread count; the panel
+ *  (`ErrorLogPanel`) lists everything with timestamp + source.
+ *
+ *  The log is in-memory only (deliberate — errors that survive
+ *  a restart would be noise; the IMAP sync loop logs the
+ *  same events to disk in `tauri-plugin-store` if needed).
+ *
+ *  Cap: 200 entries. We trim FIFO when the cap is hit. */
+export interface ErrorLogEntry {
+  id: ID;
+  message: string;
+  /** Free-form source tag — "sync", "smtp", "imap", "vault",
+   *  "agent", "compose", "favicon", etc. — useful for filtering. */
+  source: string;
+  at: number;
+  /** Optional technical detail (e.g. the underlying error
+   *  string the user wouldn't normally see). */
+  detail?: string;
+}
+const ERROR_LOG_CAP = 200;
+export const [errorLog, setErrorLog] = createSignal<ErrorLogEntry[]>([]);
+let errorSeq = 0;
+export function recordError(
+  source: string,
+  message: string,
+  detail?: string,
+): ErrorLogEntry {
+  const entry: ErrorLogEntry = {
+    id: `err_${++errorSeq}`,
+    source,
+    message,
+    detail,
+    at: Date.now(),
+  };
+  setErrorLog((xs) => {
+    const next = xs.length >= ERROR_LOG_CAP ? xs.slice(1) : xs.slice();
+    next.push(entry);
+    return next;
+  });
+  return entry;
+}
+export function clearErrorLog() {
+  setErrorLog([]);
+}
+
+/** Marker the ErrorLogButton uses when the user opens the panel
+ *  — once shown, errors that arrive afterwards are not "unread",
+ *  but the count stays accurate. We don't gate the badge on
+ *  unread because the user may want to see the full history. */
+export const [errorLogOpenedAt, setErrorLogOpened] = createSignal<number>(0);
+
 let toastSeq = 0;
-export function showToast(t: Omit<Toast, "id">) {
+export function showToast(t: Omit<Toast, "id"> & { source?: string; detail?: string }) {
   const id = `t_${++toastSeq}`;
   const ttl = t.ttlMs ?? 4000;
+
+  // ARCH-4: every error toast is also recorded in the persistent
+  // error log so the user can scroll back through transient
+  // failures after the toast auto-dismisses. The `source` tag
+  // is best-effort; callers that need accurate source should
+  // call `recordError` directly. Default source: "toast".
+  if (t.kind === "error") {
+    recordError(t.source ?? "toast", t.message, t.detail);
+  }
   setToasts((xs) => [...xs, { id, ...t }]);
   if (ttl > 0) {
     setTimeout(() => dismissToast(id), ttl);
