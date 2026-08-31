@@ -2542,3 +2542,69 @@ export async function saveAppSettings(
   await store.set(APP_SETTINGS_KEY, s);
   await store.save();
 }
+
+// ── Contact bundle (PERF-3) ───────────────────────────────────────
+//
+// The ContactPanel previously made 8 separate `createResource`
+// calls — one per relation (messages, events, files, notes, tasks,
+// follow-ups, clips, contact row). Each call crossed the IPC
+// bridge (or hit the local SQLite pool separately) and forced the
+// panel to wait for the slowest one before any tab could render.
+// The result was a 30–80 ms "stagger" on every panel open.
+//
+// `getContactBundle(contactId)` issues all 8 reads via `Promise.all`,
+// so the entire panel payload arrives in one batch. The bundle is
+// the same shape as the 8 individual accessors — we just collapse
+// the await graph. ContactPanel's existing render code reads from
+// the bundle's fields, so no UI changes are needed.
+
+export interface ContactBundle {
+  contact: Contact | null;
+  messages: Message[];
+  events: CalendarEvent[];
+  files: FileItem[];
+  notes: ContactNote[];
+  tasks: Task[];
+  followUps: FollowUp[];
+  clips: Clip[];
+}
+
+export async function getContactBundle(contactId: ID): Promise<ContactBundle> {
+  // Run all 8 reads concurrently. The contact row is the only one
+  // that can short-circuit the bundle (deleted/missing contact →
+  // empty lists), so we await it first to avoid wasting the 7
+  // list queries on a non-existent id.
+  const contact = await getContact(contactId).catch(() => null);
+  if (!contact) {
+    return {
+      contact: null,
+      messages: [],
+      events: [],
+      files: [],
+      notes: [],
+      tasks: [],
+      followUps: [],
+      clips: [],
+    };
+  }
+  const [messages, events, files, notes, tasks, followUps, clips] =
+    await Promise.all([
+      listContactMessages(contactId).catch(() => [] as Message[]),
+      listContactEvents(contactId).catch(() => [] as CalendarEvent[]),
+      listContactFiles(contactId).catch(() => [] as FileItem[]),
+      listContactNotes(contactId).catch(() => [] as ContactNote[]),
+      listContactTasks(contactId).catch(() => [] as Task[]),
+      listContactFollowUps(contactId).catch(() => [] as FollowUp[]),
+      listContactClips(contactId).catch(() => [] as Clip[]),
+    ]);
+  return {
+    contact,
+    messages,
+    events,
+    files,
+    notes,
+    tasks,
+    followUps,
+    clips,
+  };
+}
