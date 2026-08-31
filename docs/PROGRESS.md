@@ -2831,3 +2831,28 @@ longer marking the wizard complete, and the removal of the no-op
     需要审" render.
   - ⌘5 Contacts: empty state "没有联系人 / 添加第一位联系人
     开始" renders.
+
+## 2026-08-31 v5 DMG (P0/P1/P2/SEC/PERF final)
+
+Build: 8.81 s vite + ~3 min cargo (release). DMG is 9.2 MB,
+sha256 `95750ec8d2d1215ac9f8e1497da867be8bdf337ccfb550b80520ca943f7196d8`.
+
+`dist/SendPalm-0.1.0-arm64-v5.dmg` is the new installable.
+
+### Final P2 / PERF / SEC summary
+
+- 5 missing SQLite indexes via migration 0022 (PERF-1).
+- 12 SEC/perf tests added in image_proxy URL whitelist + EmailCredentials
+  Debug redaction. Rust 72 → 84 tests.
+- New `app/src/stores/contacts.ts` shared signal — ContactPanel /
+  MeetingPanel / useAgent now subscribe to one store. P2
+  LLM streaming fix removed 200 ms `setTimeout` fake-streaming
+  hack. Dark mode wired through Settings → Preferences.
+- `getContactBundle(contactId)` added for the next ContactPanel
+  refactor (PERF-3, in progress).
+- vitest 317 / 317. tsc clean.
+
+The full audit-fix sweep covers: 10 P0 items, 18 P1 items,
+P1 calendar cluster (5 items), 3 P2 items, 3 SEC items, 1 PERF
+item, 1 perf helper, and the v5 DMG. Documented in
+`docs/PROGRESS.md` (2026-08-30 entry above).
