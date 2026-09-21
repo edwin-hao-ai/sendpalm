@@ -45,7 +45,13 @@ import {
   setCalendarWeekStart,
   setCalendarYearAnchor,
 } from "../stores/ui";
-import { getMessage, listShortcuts, upsertMessage } from "../stores/data";
+import {
+  getMessage,
+  listShortcuts,
+  markMessageUnread,
+  moveMessageToBucket,
+  setMessagePileFlags,
+} from "../stores/data";
 import { startOfWeek } from "./date";
 import { DEFAULT_SHORTCUTS } from "./shortcut-defaults";
 import { openBulkActionMenu } from "../components/BulkActionMenu";
@@ -158,7 +164,7 @@ export function useGlobalShortcuts() {
       // Imbox has its own local x-key handler; avoid double toast.
       if (view() === "imbox") return;
       e.preventDefault();
-      showToast({ message: "多选（M3 完整实现）", kind: "info" });
+      showToast({ message: "多选暂只在 Imbox 可用", kind: "info" });
     },
     "list:open": (e) => {
       if (!isListView(view())) return;
@@ -192,39 +198,48 @@ export function useGlobalShortcuts() {
     "message:reply-later": async (e) => {
       // Imbox handles 'l' locally for Reply Later.
       if (view() === "imbox") return;
-      await toggleMessageFlag(e, "replyLater", "已设为 Reply Later");
+      await toggleMessageFlag(e, "replyLater", "已加入稍后回复");
     },
     "message:set-aside": async (e) => {
-      await toggleMessageFlag(e, "setAside", "已设为 Set Aside");
+      // Imbox handles 'a' locally (cursor-scoped). Without this gate the
+      // same keypress fires BOTH handlers and double-writes the DB.
+      if (view() === "imbox") return;
+      await toggleMessageFlag(e, "setAside", "已搁置");
     },
     "message:bubble-up": async (e) => {
+      if (view() === "imbox") return;
       const id = selectedMessageId();
       if (!id) return;
       e.preventDefault();
-      const m = await getMessage(id);
-      if (!m) return;
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(9, 0, 0, 0);
-      await upsertMessage({ ...m, bubbleUpAt: tomorrow.toISOString() });
-      showToast({ message: "已 Bubble Up 到明天 9:00", kind: "success" });
+      await setMessagePileFlags(id, {
+        replyLater: false,
+        setAside: false,
+        bubbleUpAt: tomorrowNineAm(),
+      });
+      showToast({ message: "已设为明天 9:00 提醒", kind: "success" });
     },
     "message:archive": async (e) => {
+      if (view() === "imbox") return;
       await setMessageBucket(e, "paperTrail", "已归档到 Records");
     },
     "message:trash": async (e) => {
-      await setMessageBucket(e, "trash", "已移到 Trash");
+      if (view() === "imbox") return;
+      await setMessageBucket(e, "trash", "已移到回收站");
     },
     "message:spam": async (e) => {
-      await setMessageBucket(e, "spam", "已移到 Spam");
+      if (view() === "imbox") return;
+      await setMessageBucket(e, "spam", "已移到垃圾邮件");
     },
     "message:unread": async (e) => {
+      if (view() === "imbox") return;
       const id = selectedMessageId();
       if (!id) return;
       e.preventDefault();
       const m = await getMessage(id);
       if (!m) return;
-      await upsertMessage({ ...m, unread: !m.unread });
+      // Scoped single-column update — never round-trip the row through
+      // upsertMessage from a keyboard handler.
+      await markMessageUnread(id, !m.unread);
       showToast({
         message: m.unread ? "已标为已读" : "已标为未读",
         kind: "success",
@@ -317,6 +332,30 @@ export function useGlobalShortcuts() {
     ];
 
     if (e.key === "Escape") {
+      // Component-local overlays whose open state lives inside the
+      // component (SyncBadge popover in Topbar, the ErrorLog panel, the
+      // mobile "more" sheet in Sidebar) can't be read from this module.
+      // They listen for `sp:escape` on window and close themselves.
+      // We dispatch only when none of the store-backed overlays below
+      // handled this Esc, so one press closes exactly one layer.
+      const handledByStore =
+        commandPaletteOpen() ||
+        searchOpen() ||
+        notificationsOpen() ||
+        composeOpen() ||
+        helpOpen() ||
+        !!(
+          selectedMessageId() ||
+          selectedContactId() ||
+          selectedFileId() ||
+          selectedTaskId() ||
+          selectedDraftId() ||
+          selectedMeetingId() ||
+          selectedCompanyName()
+        );
+      if (!handledByStore) {
+        window.dispatchEvent(new CustomEvent("sp:escape"));
+      }
       if (commandPaletteOpen()) setCommandPaletteOpen(false);
       if (searchOpen()) setSearchOpen(false);
       if (notificationsOpen()) setNotificationsOpen(false);
@@ -402,9 +441,14 @@ async function toggleMessageFlag(
   const id = selectedMessageId();
   if (!id) return;
   e.preventDefault();
-  const m = await getMessage(id);
-  if (!m) return;
-  await upsertMessage({ ...m, [key]: !m[key] });
+  // Scoped flag update: setting one pile flag clears the other two
+  // (prototype `clearWorkflowFlags` semantics) and never touches the
+  // body columns.
+  await setMessagePileFlags(id, {
+    replyLater: key === "replyLater",
+    setAside: key === "setAside",
+    bubbleUpAt: null,
+  });
   showToast({ message: successMsg, kind: "success" });
 }
 
@@ -416,10 +460,19 @@ async function setMessageBucket(
   const id = selectedMessageId();
   if (!id) return;
   e.preventDefault();
-  const m = await getMessage(id);
-  if (!m) return;
-  await upsertMessage({ ...m, bucket });
+  // moveMessageToBucket (not upsertMessage) so trash/spam get their
+  // deleted_at expiry timestamp and workflow flags are cleared —
+  // upserting a stale in-memory row here used to race with the Imbox
+  // local handler and flip the bucket back.
+  await moveMessageToBucket(id, bucket);
   showToast({ message: successMsg, kind: "success" });
+}
+
+function tomorrowNineAm(): string {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(9, 0, 0, 0);
+  return tomorrow.toISOString();
 }
 
 function shiftCalendar(dir: 1 | -1) {

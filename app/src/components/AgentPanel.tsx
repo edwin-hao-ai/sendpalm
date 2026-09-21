@@ -2,31 +2,207 @@
  * Spec: prototype-v11 §3.9.
  */
 
-import { For, Show, createMemo, createSignal } from "solid-js";
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createSignal,
+  onCleanup,
+} from "solid-js";
 import { produce } from "solid-js/store";
-import { useAgent } from "../agent/useAgent";
+import {
+  useAgent,
+  sessionKindLabel,
+  taskStatusLabel,
+  draftStatusLabel,
+  auditKindLabel,
+  confidenceLabel,
+} from "../agent/useAgent";
 import { deleteAgentAudit, saveAgentMemory } from "../stores/data";
 import { Icon } from "../components/Icon";
 import { Empty } from "../components/Empty";
+import { Avatar } from "../components/Avatar";
+import { Modal } from "../components/Modal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
   agentMemory,
   setAgentMemory,
   setAgentPanelOpen,
   selectedContactId,
   showToast,
+  appSettings,
 } from "../stores/ui";
 import { PanelResizeHandle } from "./PanelResizeHandle";
 import { relativeTime } from "../utils/date";
+import { sessionIcon } from "../utils/agent";
 import { load } from "@tauri-apps/plugin-store";
 import { STORE_PATH } from "../bootstrap";
+import { IS_BROWSER } from "../services/tauri-shim";
+
+/** Modal contact picker — used by the Agent workspace and this panel
+ *  when starting a contact-scoped session without a selected contact. */
+export function ContactPickerModal(props: {
+  contacts: { id: string; name: string; avatar?: string }[];
+  onPick: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [q, setQ] = createSignal("");
+  const filtered = createMemo(() => {
+    const needle = q().trim().toLowerCase();
+    if (!needle) return props.contacts;
+    return props.contacts.filter((c) => c.name.toLowerCase().includes(needle));
+  });
+  return (
+    <Modal open onClose={props.onClose} title="选择联系人" width="420px">
+      <input
+        value={q()}
+        onInput={(e) => setQ(e.currentTarget.value)}
+        placeholder="搜索联系人…"
+        aria-label="搜索联系人"
+        style={{
+          width: "100%",
+          padding: "8px 12px",
+          border: "0.5px solid var(--border)",
+          "border-radius": "var(--radius-md)",
+          background: "var(--paper-light)",
+          "font-size": "var(--text-body-sm)",
+          "margin-bottom": "var(--space-2)",
+        }}
+      />
+      <div style={{ "max-height": "320px", "overflow-y": "auto" }}>
+        <Show
+          when={filtered().length > 0}
+          fallback={<Empty icon="ph-user" title="没有匹配的联系人" />}
+        >
+          <For each={filtered()}>
+            {(c) => (
+              <button
+                onClick={() => props.onPick(c.id)}
+                style={{
+                  display: "flex",
+                  "align-items": "center",
+                  gap: "var(--space-3)",
+                  width: "100%",
+                  padding: "var(--space-2) var(--space-3)",
+                  "min-height": "44px",
+                  background: "transparent",
+                  "border-radius": "var(--radius-md)",
+                  "text-align": "left",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                <Avatar name={c.name} size={28} />
+                <span
+                  style={{
+                    flex: 1,
+                    "min-width": 0,
+                    "font-size": "var(--text-body-sm)",
+                    "font-weight": "600",
+                    "white-space": "nowrap",
+                    overflow: "hidden",
+                    "text-overflow": "ellipsis",
+                  }}
+                >
+                  {c.name}
+                </span>
+              </button>
+            )}
+          </For>
+        </Show>
+      </div>
+    </Modal>
+  );
+}
 
 export function AgentPanel() {
   const agent = useAgent();
   const [tab, setTab] = createSignal<
     "sessions" | "tasks" | "drafts" | "memory" | "audit"
   >("sessions");
+  const [pickingContact, setPickingContact] = createSignal(false);
+  const [confirmClearAudit, setConfirmClearAudit] = createSignal(false);
 
   const contactById = agent.contactById;
+
+  /* Memory edits auto-save (debounced). The store effect skips the
+   * initial run so simply opening the panel doesn't write to disk. */
+  const [memState, setMemState] = createSignal<
+    "idle" | "dirty" | "saving" | "saved"
+  >("idle");
+  let memTimer: ReturnType<typeof setTimeout> | undefined;
+  let memSavedReset: ReturnType<typeof setTimeout> | undefined;
+  let memFirstRun = true;
+
+  const persistMemory = async (snapshotJson: string) => {
+    setMemState("saving");
+    try {
+      const store = await load(STORE_PATH);
+      await saveAgentMemory(store, JSON.parse(snapshotJson));
+      setMemState("saved");
+      clearTimeout(memSavedReset);
+      memSavedReset = setTimeout(() => {
+        setMemState((s) => (s === "saved" ? "idle" : s));
+      }, 2000);
+    } catch (e) {
+      setMemState("idle");
+      if (IS_BROWSER()) {
+        showToast({
+          message: "浏览器预览模式下，记忆只保留在当前会话",
+          kind: "info",
+        });
+      } else {
+        showToast({
+          message: "记忆保存失败，请重试",
+          kind: "error",
+          source: "agent",
+          detail: String(e),
+        });
+      }
+    }
+  };
+
+  createEffect(() => {
+    const snapshot = JSON.stringify(agentMemory);
+    if (memFirstRun) {
+      memFirstRun = false;
+      return;
+    }
+    setMemState("dirty");
+    clearTimeout(memTimer);
+    memTimer = setTimeout(() => void persistMemory(snapshot), 600);
+  });
+  onCleanup(() => {
+    clearTimeout(memTimer);
+    clearTimeout(memSavedReset);
+  });
+
+  /** 设置 → Agent 里的「记忆可编辑」开关。 */
+  const memoryEditable = () => appSettings.agent.memoryEditable;
+
+  const newContactSession = () => {
+    const preselected = selectedContactId();
+    if (preselected) {
+      void agent.newSession("contact", preselected);
+      return;
+    }
+    if ((agent.contacts() ?? []).length === 0) {
+      showToast({
+        message: "还没有联系人，先在联系人页添加",
+        kind: "warning",
+      });
+      return;
+    }
+    setPickingContact(true);
+  };
+
+  const clearAudit = async () => {
+    const list = agent.audit() ?? [];
+    for (const a of list) await deleteAgentAudit(a.id);
+    await agent.refetchAll();
+    showToast({ message: "审计记录已清空", kind: "info" });
+  };
 
   const tabs = [
     { id: "sessions", label: "会话", icon: "ph-chat-circle" },
@@ -70,8 +246,15 @@ export function AgentPanel() {
         </strong>
         <button
           onClick={() => setAgentPanelOpen(false)}
-          aria-label="Close agent panel"
-          style={{ color: "var(--text-muted)", padding: "4px" }}
+          aria-label="关闭 Agent 面板"
+          style={{
+            color: "var(--text-muted)",
+            width: "32px",
+            height: "32px",
+            display: "flex",
+            "align-items": "center",
+            "justify-content": "center",
+          }}
         >
           <Icon name="ph-x" size={14} />
         </button>
@@ -91,17 +274,19 @@ export function AgentPanel() {
               onClick={() => setTab(t.id)}
               style={{
                 flex: 1,
-                padding: "8px 4px",
+                padding: "10px 4px",
+                "min-height": "44px",
                 "border-bottom":
                   tab() === t.id
                     ? "2px solid var(--agent)"
                     : "2px solid transparent",
                 color: tab() === t.id ? "var(--agent)" : "var(--text-muted)",
-                "font-size": "10px",
+                "font-size": "var(--text-micro)",
                 "font-weight": tab() === t.id ? "700" : "500",
                 display: "flex",
                 "flex-direction": "column",
                 "align-items": "center",
+                "justify-content": "center",
                 gap: "2px",
               }}
             >
@@ -128,24 +313,13 @@ export function AgentPanel() {
               onClick={() => agent.newSession("freeform")}
               style={miniBtn}
             >
-              + Freeform
+              + 自由对话
             </button>
             <button onClick={() => agent.newSession("message")} style={miniBtn}>
-              + Message
+              + 邮件
             </button>
-            <button
-              onClick={() => {
-                const ref =
-                  selectedContactId() ?? (agent.contacts() ?? [])[0]?.id;
-                if (!ref) {
-                  showToast({ message: "没有可选的联系人", kind: "warning" });
-                  return;
-                }
-                void agent.newSession("contact", ref);
-              }}
-              style={miniBtn}
-            >
-              + Contact
+            <button onClick={newContactSession} style={miniBtn}>
+              + 联系人
             </button>
           </div>
 
@@ -154,8 +328,8 @@ export function AgentPanel() {
             fallback={
               <Empty
                 icon="ph-chat-circle"
-                title="还没会话"
-                description="点 + 新建一个。"
+                title="还没有会话"
+                description="点上方按钮新建一个会话。"
               />
             }
           >
@@ -185,20 +359,7 @@ export function AgentPanel() {
                       gap: "var(--space-2)",
                     }}
                   >
-                    <Icon
-                      name={
-                        s.kind === "freeform"
-                          ? "ph-chat-circle"
-                          : s.kind === "message"
-                            ? "ph-envelope"
-                            : s.kind === "contact"
-                              ? "ph-user"
-                              : s.kind === "event"
-                                ? "ph-calendar-blank"
-                                : "ph-file"
-                      }
-                      size={14}
-                    />
+                    <Icon name={sessionIcon(s.kind)} size={14} />
                     <span
                       style={{
                         flex: 1,
@@ -212,11 +373,11 @@ export function AgentPanel() {
                   <p
                     style={{
                       margin: "4px 0 0",
-                      "font-size": "10px",
+                      "font-size": "var(--text-micro)",
                       color: "var(--text-muted)",
                     }}
                   >
-                    {s.kind} · {relativeTime(s.createdAt)}
+                    {sessionKindLabel(s.kind)} · {relativeTime(s.createdAt)}
                   </p>
                 </button>
               )}
@@ -237,20 +398,22 @@ export function AgentPanel() {
                   "font-size": "var(--text-micro)",
                   "font-weight": "700",
                   "letter-spacing": "0.06em",
-                  "text-transform": "uppercase",
                   color: "var(--text-muted)",
                   margin: "0 0 var(--space-2)",
                 }}
               >
-                Active tasks
+                当前会话的任务
               </h4>
               <Show
                 when={agent.sessionTasks().length > 0}
                 fallback={
                   <p
-                    style={{ color: "var(--text-muted)", "font-size": "10px" }}
+                    style={{
+                      color: "var(--text-muted)",
+                      "font-size": "var(--text-caption)",
+                    }}
                   >
-                    无
+                    当前会话没有任务
                   </p>
                 }
               >
@@ -286,11 +449,11 @@ export function AgentPanel() {
                             padding: "2px 8px",
                             background: "var(--paper-mid)",
                             "border-radius": "var(--radius-pill)",
-                            "font-size": "10px",
+                            "font-size": "var(--text-micro)",
                             "font-weight": "700",
                           }}
                         >
-                          {t.status}
+                          {taskStatusLabel(t.status)}
                         </span>
                       </div>
                       <Show when={t.steps.length > 0}>
@@ -302,7 +465,7 @@ export function AgentPanel() {
                                   display: "flex",
                                   "align-items": "center",
                                   gap: "4px",
-                                  "font-size": "10px",
+                                  "font-size": "var(--text-micro)",
                                   color: s.done
                                     ? "var(--palm)"
                                     : "var(--text-muted)",
@@ -320,17 +483,18 @@ export function AgentPanel() {
                           </For>
                         </div>
                       </Show>
-                      <Show when={t.confidence}>
-                        <div
-                          style={{
-                            "font-size": "10px",
-                            color: "var(--text-muted)",
-                            "margin-top": "var(--space-2)",
-                          }}
-                        >
-                          <Icon name="ph-percent" size={10} /> confidence{" "}
-                          {t.confidence}%
-                        </div>
+                      <Show when={confidenceLabel(t.confidence)}>
+                        {(label) => (
+                          <div
+                            style={{
+                              "font-size": "var(--text-micro)",
+                              color: "var(--text-muted)",
+                              "margin-top": "var(--space-2)",
+                            }}
+                          >
+                            把握度：{label()}
+                          </div>
+                        )}
                       </Show>
                     </div>
                   )}
@@ -344,7 +508,13 @@ export function AgentPanel() {
         <Show when={tab() === "tasks"}>
           <Show
             when={(agent.tasks() ?? []).length > 0}
-            fallback={<Empty icon="ph-list-checks" title="没有任务" />}
+            fallback={
+              <Empty
+                icon="ph-list-checks"
+                title="没有任务"
+                description="在会话里向 Agent 提问，它会自动生成任务。"
+              />
+            }
           >
             <For each={agent.tasks() ?? []}>
               {(t) => (
@@ -374,11 +544,11 @@ export function AgentPanel() {
                     </span>
                     <span
                       style={{
-                        "font-size": "10px",
+                        "font-size": "var(--text-micro)",
                         color: "var(--text-muted)",
                       }}
                     >
-                      {t.status}
+                      {taskStatusLabel(t.status)}
                     </span>
                   </div>
                 </div>
@@ -391,7 +561,13 @@ export function AgentPanel() {
         <Show when={tab() === "drafts"}>
           <Show
             when={(agent.drafts() ?? []).length > 0}
-            fallback={<Empty icon="ph-pencil-line" title="没有草稿" />}
+            fallback={
+              <Empty
+                icon="ph-pencil-line"
+                title="没有草稿"
+                description="让 Agent 起草回复后，草稿会出现在这里。"
+              />
+            }
           >
             <For each={agent.drafts() ?? []}>
               {(d) => (
@@ -413,14 +589,16 @@ export function AgentPanel() {
                       color: "var(--text-muted)",
                     }}
                   >
-                    to {d.recipient} · {d.status}
+                    发给 {d.recipient} · {draftStatusLabel(d.status)}
                   </p>
                   <p
                     style={{
                       margin: 0,
-                      "font-size": "10px",
+                      "font-size": "var(--text-caption)",
                       color: "var(--text-secondary)",
-                      "max-height": "60px",
+                      display: "-webkit-box",
+                      "-webkit-line-clamp": "3",
+                      "-webkit-box-orient": "vertical",
                       overflow: "hidden",
                     }}
                   >
@@ -436,39 +614,28 @@ export function AgentPanel() {
                     <button
                       onClick={() => agent.approveDraft(d)}
                       style={{
-                        padding: "4px 10px",
+                        padding: "6px 12px",
                         background: "var(--palm-soft)",
                         color: "var(--palm)",
                         "border-radius": "var(--radius-pill)",
-                        "font-size": "10px",
+                        "font-size": "var(--text-caption)",
                         "font-weight": "700",
                       }}
                     >
-                      Send
+                      批准
                     </button>
                     <button
                       onClick={() => agent.editDraft(d)}
                       style={{
-                        padding: "4px 10px",
+                        padding: "6px 12px",
                         background: "var(--paper-mid)",
                         color: "var(--text-secondary)",
                         "border-radius": "var(--radius-pill)",
-                        "font-size": "10px",
+                        "font-size": "var(--text-caption)",
                         "font-weight": "700",
                       }}
                     >
-                      Edit
-                    </button>
-                    <button
-                      style={{
-                        padding: "4px 10px",
-                        background: "transparent",
-                        color: "var(--text-muted)",
-                        "border-radius": "var(--radius-pill)",
-                        "font-size": "10px",
-                      }}
-                    >
-                      Edit manually
+                      编辑
                     </button>
                   </div>
                 </div>
@@ -487,19 +654,6 @@ export function AgentPanel() {
               const ctx = agent.currentSession()?.context;
               return ctx?.type === "contact" ? ctx.ref : null;
             });
-            const persistMemory = async () => {
-              try {
-                const store = await load(STORE_PATH);
-                const snapshot = JSON.parse(JSON.stringify(agentMemory));
-                await saveAgentMemory(store, snapshot);
-                showToast({ message: "记忆已保存", kind: "success" });
-              } catch {
-                showToast({
-                  message: "浏览器模式下记忆不会持久化",
-                  kind: "info",
-                });
-              }
-            };
             return (
               <>
                 <div
@@ -515,27 +669,42 @@ export function AgentPanel() {
                       "font-size": "var(--text-micro)",
                       "font-weight": "700",
                       "letter-spacing": "0.06em",
-                      "text-transform": "uppercase",
                       color: "var(--text-muted)",
                       margin: 0,
                     }}
                   >
-                    Global memory
+                    全局记忆
                   </h4>
-                  <button
-                    onClick={persistMemory}
+                  <span
+                    data-testid="memory-save-state"
                     style={{
-                      padding: "4px 10px",
-                      background: "var(--palm-soft)",
-                      color: "var(--palm)",
-                      "border-radius": "var(--radius-pill)",
-                      "font-size": "10px",
-                      "font-weight": "600",
+                      "font-size": "var(--text-micro)",
+                      color:
+                        memState() === "saved"
+                          ? "var(--palm)"
+                          : "var(--text-muted)",
                     }}
                   >
-                    Save memory
-                  </button>
+                    {memState() === "saving"
+                      ? "保存中…"
+                      : memState() === "saved"
+                        ? "已自动保存 ✓"
+                        : memState() === "dirty"
+                          ? "编辑中…"
+                          : ""}
+                  </span>
                 </div>
+                <Show when={!memoryEditable()}>
+                  <p
+                    style={{
+                      "font-size": "var(--text-caption)",
+                      color: "var(--text-muted)",
+                      "margin-bottom": "var(--space-2)",
+                    }}
+                  >
+                    记忆编辑已在 设置 → Agent 中关闭，当前为只读。
+                  </p>
+                </Show>
                 <For
                   each={globalEntries()}
                   fallback={
@@ -545,7 +714,7 @@ export function AgentPanel() {
                         color: "var(--text-muted)",
                       }}
                     >
-                      No global memory yet.
+                      还没有全局记忆，点下方「添加记忆」创建第一条。
                     </p>
                   }
                 >
@@ -554,16 +723,23 @@ export function AgentPanel() {
                     const commitKey = () => {
                       const oldKey = entry[0];
                       const newKey = localKey().trim();
-                      if (newKey && newKey !== oldKey) {
-                        const value = agentMemory.global[oldKey] ?? "";
-                        setAgentMemory(
-                          "global",
-                          produce((d) => {
-                            delete d[oldKey];
-                            d[newKey] = value;
-                          }),
-                        );
+                      if (!newKey || newKey === oldKey) return;
+                      if (newKey in agentMemory.global) {
+                        showToast({
+                          message: `已存在名为「${newKey}」的记忆，未重命名`,
+                          kind: "warning",
+                        });
+                        setLocalKey(oldKey);
+                        return;
                       }
+                      const value = agentMemory.global[oldKey] ?? "";
+                      setAgentMemory(
+                        "global",
+                        produce((d) => {
+                          delete d[oldKey];
+                          d[newKey] = value;
+                        }),
+                      );
                     };
                     return (
                       <div
@@ -585,9 +761,12 @@ export function AgentPanel() {
                             value={localKey()}
                             onInput={(e) => setLocalKey(e.currentTarget.value)}
                             onBlur={commitKey}
-                            placeholder="Key"
+                            disabled={!memoryEditable()}
+                            placeholder="名称"
+                            aria-label="记忆名称"
                             style={{
                               flex: 1,
+                              "min-width": 0,
                               padding: "4px 8px",
                               "border-radius": "var(--radius-sm)",
                               border: "0.5px solid var(--border)",
@@ -596,20 +775,27 @@ export function AgentPanel() {
                               "font-weight": "600",
                             }}
                           />
-                          <button
-                            onClick={() =>
-                              setAgentMemory(
-                                "global",
-                                produce((d) => {
-                                  delete d[entry[0]];
-                                }),
-                              )
-                            }
-                            aria-label="Delete memory"
-                            style={{ color: "var(--danger)" }}
-                          >
-                            <Icon name="ph-trash" size={14} />
-                          </button>
+                          <Show when={memoryEditable()}>
+                            <button
+                              onClick={() =>
+                                setAgentMemory(
+                                  "global",
+                                  produce((d) => {
+                                    delete d[entry[0]];
+                                  }),
+                                )
+                              }
+                              aria-label="删除这条记忆"
+                              title="删除这条记忆"
+                              style={{
+                                color: "var(--status-danger)",
+                                padding: "6px",
+                                display: "flex",
+                              }}
+                            >
+                              <Icon name="ph-trash" size={14} />
+                            </button>
+                          </Show>
                         </div>
                         <textarea
                           value={entry[1]}
@@ -620,7 +806,9 @@ export function AgentPanel() {
                               e.currentTarget.value,
                             )
                           }
-                          placeholder="Value"
+                          disabled={!memoryEditable()}
+                          placeholder="内容"
+                          aria-label="记忆内容"
                           rows={3}
                           style={{
                             width: "100%",
@@ -636,34 +824,36 @@ export function AgentPanel() {
                     );
                   }}
                 </For>
-                <button
-                  onClick={() =>
-                    setAgentMemory("global", `entry_${Date.now()}`, "")
-                  }
-                  style={{
-                    "margin-bottom": "var(--space-4)",
-                    padding: "6px 12px",
-                    background: "var(--paper-mid)",
-                    color: "var(--text-secondary)",
-                    "border-radius": "var(--radius-pill)",
-                    "font-size": "var(--text-caption)",
-                    "font-weight": "600",
-                  }}
-                >
-                  <Icon name="ph-plus" size={12} /> Add global memory
-                </button>
+                <Show when={memoryEditable()}>
+                  <button
+                    onClick={() =>
+                      setAgentMemory("global", `条目 ${Date.now()}`, "")
+                    }
+                    style={{
+                      "margin-bottom": "var(--space-4)",
+                      padding: "8px 14px",
+                      "min-height": "36px",
+                      background: "var(--paper-mid)",
+                      color: "var(--text-secondary)",
+                      "border-radius": "var(--radius-pill)",
+                      "font-size": "var(--text-caption)",
+                      "font-weight": "600",
+                    }}
+                  >
+                    <Icon name="ph-plus" size={12} /> 添加记忆
+                  </button>
+                </Show>
 
                 <h4
                   style={{
                     "font-size": "var(--text-micro)",
                     "font-weight": "700",
                     "letter-spacing": "0.06em",
-                    "text-transform": "uppercase",
                     color: "var(--text-muted)",
                     margin: "var(--space-4) 0 var(--space-2)",
                   }}
                 >
-                  Per-contact memory
+                  联系人记忆
                 </h4>
                 <Show when={sessionContactId()}>
                   {(getId) => {
@@ -696,7 +886,8 @@ export function AgentPanel() {
                               e.currentTarget.value,
                             )
                           }
-                          placeholder={`Notes about ${c?.name ?? "this contact"}`}
+                          disabled={!memoryEditable()}
+                          placeholder={`关于 ${c?.name ?? "这位联系人"} 的备注`}
                           rows={4}
                           style={{
                             width: "100%",
@@ -748,7 +939,11 @@ export function AgentPanel() {
           <Show
             when={(agent.audit() ?? []).length > 0}
             fallback={
-              <Empty icon="ph-clock-counter-clockwise" title="还没有审计记录" />
+              <Empty
+                icon="ph-clock-counter-clockwise"
+                title="还没有审计记录"
+                description="Agent 的每步操作都会记录在这里。"
+              />
             }
           >
             <For each={agent.audit() ?? []}>
@@ -781,46 +976,41 @@ export function AgentPanel() {
                       size={12}
                     />
                     <span
-                      style={{ flex: 1, "font-size": "var(--text-caption)" }}
+                      style={{
+                        flex: 1,
+                        "min-width": 0,
+                        "font-size": "var(--text-caption)",
+                      }}
                     >
                       {a.message}
                     </span>
-                    <Show when={a.undoable}>
-                      <button
-                        style={{ "font-size": "10px", color: "var(--palm)" }}
-                      >
-                        Undo
-                      </button>
-                    </Show>
                   </div>
                   <p
                     style={{
                       margin: "2px 0 0 20px",
-                      "font-size": "10px",
+                      "font-size": "var(--text-micro)",
                       color: "var(--text-muted)",
                     }}
                   >
-                    {a.kind} · {relativeTime(a.createdAt)}
+                    {auditKindLabel(a.kind)} · {relativeTime(a.createdAt)}
                   </p>
                 </div>
               )}
             </For>
             <button
-              onClick={async () => {
-                const list = agent.audit() ?? [];
-                for (const a of list) await deleteAgentAudit(a.id);
-                showToast({ message: "审计已清空", kind: "info" });
-              }}
+              onClick={() => setConfirmClearAudit(true)}
               style={{
                 "margin-top": "var(--space-3)",
-                padding: "6px 12px",
+                padding: "8px 14px",
+                "min-height": "36px",
                 background: "var(--paper-mid)",
-                color: "var(--text-muted)",
+                color: "var(--status-danger)",
                 "border-radius": "var(--radius-pill)",
-                "font-size": "10px",
+                "font-size": "var(--text-caption)",
+                "font-weight": "600",
               }}
             >
-              清空审计
+              清空审计记录
             </button>
           </Show>
         </Show>
@@ -843,9 +1033,11 @@ export function AgentPanel() {
             onKeyDown={(e) => {
               if (e.key === "Enter") agent.sendChat();
             }}
-            placeholder="Ask Agent…"
+            placeholder="问 Agent…（Enter 发送）"
+            aria-label="问 Agent"
             style={{
               flex: 1,
+              "min-width": 0,
               padding: "6px 12px",
               "border-radius": "var(--radius-pill)",
               border: "0.5px solid var(--border)",
@@ -856,13 +1048,19 @@ export function AgentPanel() {
           <button
             onClick={() => void agent.sendChat()}
             disabled={!agent.chatInput().trim() || !agent.currentSession()}
+            aria-label="发送"
             style={{
-              padding: "6px 14px",
+              padding: "8px 14px",
+              "min-height": "36px",
               background: "var(--agent)",
               color: "white",
               "border-radius": "var(--radius-pill)",
               "font-size": "var(--text-caption)",
               "font-weight": "700",
+              cursor:
+                agent.chatInput().trim() && agent.currentSession()
+                  ? "pointer"
+                  : "not-allowed",
               opacity:
                 agent.chatInput().trim() && agent.currentSession() ? 1 : 0.4,
             }}
@@ -871,15 +1069,35 @@ export function AgentPanel() {
           </button>
         </div>
       </Show>
+
+      <Show when={pickingContact()}>
+        <ContactPickerModal
+          contacts={agent.contacts() ?? []}
+          onPick={(id) => {
+            setPickingContact(false);
+            void agent.newSession("contact", id);
+          }}
+          onClose={() => setPickingContact(false)}
+        />
+      </Show>
+      <ConfirmDialog
+        open={confirmClearAudit()}
+        title="清空全部审计记录？"
+        body={`将删除全部 ${(agent.audit() ?? []).length} 条记录，不可恢复。`}
+        confirmLabel="清空"
+        onConfirm={() => void clearAudit()}
+        onCancel={() => setConfirmClearAudit(false)}
+      />
     </aside>
   );
 }
 
 const miniBtn = {
-  padding: "4px 10px",
+  padding: "8px 12px",
+  "min-height": "36px",
   background: "var(--paper-mid)",
   "border-radius": "var(--radius-pill)",
-  "font-size": "10px",
+  "font-size": "var(--text-caption)",
   "font-weight": "600",
   color: "var(--text-secondary)",
 };

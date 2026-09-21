@@ -20,8 +20,11 @@ import { For, Show, createMemo, createResource, createSignal } from "solid-js";
 import {
   getContactBundle,
   listEvents,
+  listLabels,
+  listTasks,
   upsertContact,
   upsertContactNote,
+  deleteContact,
   deleteContactNote,
   upsertTask,
   upsertFollowUp,
@@ -40,6 +43,7 @@ import {
   setComposeOpen,
   setComposeContext,
   openCompanyDetail,
+  type ContactTab,
 } from "../stores/ui";
 import { contactsList } from "../stores/contacts";
 import { Avatar } from "../components/Avatar";
@@ -47,8 +51,14 @@ import { Icon } from "../components/Icon";
 import { SkeletonList } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/Empty";
 import { ContactEditModal } from "../components/ContactEditModal";
-import { STAGE_COLOR, STAGE_LABEL, STAGE_SUGGEST } from "../utils/labels";
-import { relativeTime } from "../utils/date";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import {
+  STAGE_COLOR,
+  STAGE_LABEL,
+  STAGE_SUGGEST,
+  fileIconName,
+} from "../utils/labels";
+import { relativeTime, formatBytes } from "../utils/date";
 import { computeReplyTimeStats } from "../utils/reply-time";
 import type {
   Contact,
@@ -59,22 +69,42 @@ import type {
   Message,
   FileItem,
   CalendarEvent,
+  Label,
 } from "../types";
 import { uid } from "../utils/id";
 import { isoNow } from "../utils/date";
 import { useRefreshEffect } from "../utils/gestures";
 
-const TABS = [
-  "Timeline",
-  "Notes",
-  "Files",
-  "Tasks",
-  "Follow-ups",
-  "Clips",
-  "Insights",
-  "Network",
-  "Calendar",
-] as const;
+const TABS: { id: ContactTab; label: string }[] = [
+  { id: "Timeline", label: "时间线" },
+  { id: "Notes", label: "备注" },
+  { id: "Files", label: "文件" },
+  { id: "Tasks", label: "任务" },
+  { id: "Follow-ups", label: "跟进" },
+  { id: "Clips", label: "剪藏" },
+  { id: "Insights", label: "洞察" },
+  { id: "Network", label: "人脉" },
+  { id: "Calendar", label: "日程" },
+];
+
+const BUCKET_OPTIONS: { id: Contact["defaultBucket"]; label: string }[] = [
+  { id: "imbox", label: "Imbox（重要邮件）" },
+  { id: "feed", label: "Stream（资讯与 newsletter）" },
+  { id: "paperTrail", label: "Records（收据与账单）" },
+];
+
+function bucketLabel(b: Contact["defaultBucket"]): string {
+  return b === "imbox" ? "Imbox" : b === "feed" ? "Stream" : "Records";
+}
+
+/** Comma-joined names for a contact's autofile label ids. */
+export function autoLabelNames(c: Contact, labels: Label[] | undefined): string {
+  if (!c.autoLabel.length) return "";
+  return c.autoLabel
+    .map((id) => (labels ?? []).find((l) => l.id === id)?.name ?? "")
+    .filter(Boolean)
+    .join(", ");
+}
 
 // Frozen empty arrays used as fallbacks while the bundle is
 // pending or errored. Sharing these across renders (instead of
@@ -133,6 +163,40 @@ export function ContactPanel(props: { contactId: string }) {
   const refetchClips = refetchBundle;
 
   const [editing, setEditing] = createSignal(false);
+  const [bucketMenuOpen, setBucketMenuOpen] = createSignal(false);
+  const [autofileOpen, setAutofileOpen] = createSignal(false);
+  const [labels] = createResource(listLabels);
+  const [confirmDelete, setConfirmDelete] = createSignal(false);
+  const [deleting, setDeleting] = createSignal(false);
+
+  /** Delete from the panel: cascade-clean related tasks, close the
+   *  edit modal AND the panel so no stale draft can resurrect the
+   *  contact. */
+  const removeContact = async () => {
+    const c = contact();
+    if (!c || deleting()) return;
+    setDeleting(true);
+    try {
+      const related = (await listTasks()).filter(
+        (t) => t.relatedContactId === c.id,
+      );
+      for (const t of related) await deleteTask(t.id);
+      await deleteContact(c.id);
+      setEditing(false);
+      setSelectedContactId(null);
+      setDetailOpen(false);
+      showToast({ message: `已删除 ${c.name || "该联系人"}`, kind: "info" });
+    } catch (err) {
+      showToast({
+        message: "删除失败，请重试",
+        kind: "error",
+        source: "contacts",
+        detail: String(err),
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   useRefreshEffect(() => {
     void refetchBundle();
@@ -173,7 +237,10 @@ export function ContactPanel(props: { contactId: string }) {
           display: "flex",
           "align-items": "center",
           gap: "var(--space-3)",
-          background: "var(--surface-elevated)",
+          background:
+            "color-mix(in srgb, var(--paper-light) 82%, transparent)",
+          "backdrop-filter": "blur(20px) saturate(1.4)",
+          "-webkit-backdrop-filter": "blur(20px) saturate(1.4)",
           position: "sticky",
           top: 0,
           "z-index": 2,
@@ -184,15 +251,16 @@ export function ContactPanel(props: { contactId: string }) {
             setSelectedContactId(null);
             setDetailOpen(false);
           }}
-          aria-label="Close"
-          style={{ color: "var(--text-muted)" }}
+          aria-label="返回"
+          title="返回"
+          style={{ color: "var(--text-muted)", cursor: "pointer" }}
         >
           <Icon name="ph-arrow-left" size={18} />
         </button>
         <strong
           style={{ "font-size": "var(--text-body-sm)", "font-weight": "700" }}
         >
-          Contact
+          联系人
         </strong>
         <button
           onClick={() => setEditing(true)}
@@ -202,11 +270,14 @@ export function ContactPanel(props: { contactId: string }) {
             "align-items": "center",
             gap: "4px",
             padding: "6px 12px",
+            "min-height": "32px",
             background: "var(--paper-mid)",
             color: "var(--text-secondary)",
             "border-radius": "var(--radius-pill)",
+            border: "none",
             "font-size": "var(--text-caption)",
             "font-weight": "700",
+            cursor: "pointer",
           }}
         >
           <Icon name="ph-pencil-simple" size={14} />
@@ -215,25 +286,54 @@ export function ContactPanel(props: { contactId: string }) {
         <button
           onClick={() => {
             const c = contact();
-            if (!c) return;
-            const email = c.emails[0]?.value ?? "";
+            const email = c?.emails[0]?.value ?? "";
+            if (!c || !email) return;
             setComposeContext({ mode: "new", to: email });
             setComposeOpen(true);
           }}
+          disabled={!contact()?.emails[0]?.value}
+          title={
+            contact()?.emails[0]?.value ? "写邮件" : "此联系人还没有邮箱地址"
+          }
           style={{
             display: "inline-flex",
             "align-items": "center",
             gap: "4px",
             padding: "6px 12px",
+            "min-height": "32px",
             background: "var(--palm-soft)",
             color: "var(--palm)",
             "border-radius": "var(--radius-pill)",
+            border: "none",
             "font-size": "var(--text-caption)",
             "font-weight": "700",
+            cursor: contact()?.emails[0]?.value ? "pointer" : "default",
+            opacity: contact()?.emails[0]?.value ? 1 : 0.5,
           }}
         >
           <Icon name="ph-paper-plane-tilt" size={14} />
           写邮件
+        </button>
+        <button
+          onClick={() => setContactTab("Tasks")}
+          title="给此联系人添加跟进任务"
+          style={{
+            display: "inline-flex",
+            "align-items": "center",
+            gap: "4px",
+            padding: "6px 12px",
+            "min-height": "32px",
+            background: "var(--paper-mid)",
+            color: "var(--text-secondary)",
+            "border-radius": "var(--radius-pill)",
+            border: "none",
+            "font-size": "var(--text-caption)",
+            "font-weight": "700",
+            cursor: "pointer",
+          }}
+        >
+          <Icon name="ph-plus" size={14} />
+          跟进
         </button>
       </div>
 
@@ -329,16 +429,26 @@ export function ContactPanel(props: { contactId: string }) {
             >
               <button
                 onClick={async () => {
-                  await upsertContact({ ...c(), notify: !c().notify });
+                  const next = !c().notify;
+                  await upsertContact({ ...c(), notify: next });
                   await refetchContact();
+                  showToast({
+                    message: next
+                      ? `已开启 ${c().name} 的新邮件通知`
+                      : `已关闭 ${c().name} 的新邮件通知`,
+                    kind: "info",
+                  });
                 }}
-                title={c().notify ? "通知已开启" : "通知已关闭"}
+                title={c().notify ? "新邮件通知已开启" : "新邮件通知已关闭"}
                 style={{
                   display: "inline-flex",
                   "align-items": "center",
                   gap: "4px",
-                  padding: "4px 10px",
+                  padding: "6px 12px",
+                  "min-height": "32px",
                   "border-radius": "var(--radius-pill)",
+                  border: "none",
+                  cursor: "pointer",
                   "font-size": "var(--text-micro)",
                   "font-weight": "600",
                   background: c().notify
@@ -351,39 +461,316 @@ export function ContactPanel(props: { contactId: string }) {
                   name={c().notify ? "ph-bell" : "ph-bell-slash"}
                   size={12}
                 />
-                {c().notify ? "Notify on" : "Notify off"}
+                {c().notify ? "通知已开" : "通知已关"}
               </button>
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => setBucketMenuOpen(!bucketMenuOpen())}
+                  title={`当前投递到 ${bucketLabel(c().defaultBucket)}，点击更换`}
+                  aria-haspopup="menu"
+                  aria-expanded={bucketMenuOpen()}
+                  style={{
+                    display: "inline-flex",
+                    "align-items": "center",
+                    gap: "4px",
+                    padding: "6px 12px",
+                    "min-height": "32px",
+                    "border-radius": "var(--radius-pill)",
+                    border: "none",
+                    cursor: "pointer",
+                    "font-size": "var(--text-micro)",
+                    "font-weight": "600",
+                    background: "var(--paper-mid)",
+                    color: "var(--text-secondary)",
+                  }}
+                >
+                  <Icon name="ph-tray" size={12} />
+                  投递到 {bucketLabel(c().defaultBucket)}
+                  <Icon name="ph-caret-down" size={10} />
+                </button>
+                <Show when={bucketMenuOpen()}>
+                  <div
+                    role="menu"
+                    style={{
+                      position: "absolute",
+                      top: "calc(100% + 6px)",
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      "min-width": "220px",
+                      background:
+                        "color-mix(in srgb, var(--paper-light) 82%, transparent)",
+                      "backdrop-filter": "blur(20px) saturate(1.4)",
+                      "-webkit-backdrop-filter": "blur(20px) saturate(1.4)",
+                      border: "0.5px solid var(--border)",
+                      "border-radius": "var(--radius-lg)",
+                      "box-shadow": "var(--shadow-lg)",
+                      padding: "var(--space-1)",
+                      "z-index": 10,
+                    }}
+                  >
+                    <For each={BUCKET_OPTIONS}>
+                      {(opt) => (
+                        <button
+                          role="menuitem"
+                          onClick={async () => {
+                            setBucketMenuOpen(false);
+                            if (opt.id === c().defaultBucket) return;
+                            await upsertContact({
+                              ...c(),
+                              defaultBucket: opt.id,
+                            });
+                            await refetchContact();
+                            showToast({
+                              message: `${c().name} 的邮件将投递到 ${bucketLabel(opt.id)}`,
+                              kind: "success",
+                            });
+                          }}
+                          style={{
+                            display: "flex",
+                            "align-items": "center",
+                            width: "100%",
+                            "text-align": "left",
+                            padding: "8px 12px",
+                            "min-height": "36px",
+                            background: "transparent",
+                            border: "none",
+                            "border-radius": "var(--radius-md)",
+                            "font-size": "var(--text-caption)",
+                            "font-weight":
+                              opt.id === c().defaultBucket ? "700" : "500",
+                            color:
+                              opt.id === c().defaultBucket
+                                ? "var(--palm)"
+                                : "var(--text-primary)",
+                            cursor: "pointer",
+                          }}
+                          onMouseEnter={(e) =>
+                            (e.currentTarget.style.background =
+                              "var(--paper-mid)")
+                          }
+                          onMouseLeave={(e) =>
+                            (e.currentTarget.style.background = "transparent")
+                          }
+                        >
+                          {opt.label}
+                          <Show when={opt.id === c().defaultBucket}>
+                            <Icon
+                              name="ph-check"
+                              size={12}
+                              style={{ "margin-left": "auto" }}
+                            />
+                          </Show>
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </div>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: "var(--space-2)",
+                "justify-content": "center",
+                "margin-top": "var(--space-2)",
+                "flex-wrap": "wrap",
+              }}
+            >
+              <div style={{ position: "relative" }}>
+                <button
+                  onClick={() => setAutofileOpen(!autofileOpen())}
+                  title="自动给此发件人的邮件打标签"
+                  aria-haspopup="menu"
+                  aria-expanded={autofileOpen()}
+                  style={{
+                    display: "inline-flex",
+                    "align-items": "center",
+                    gap: "4px",
+                    padding: "6px 12px",
+                    "min-height": "32px",
+                    "border-radius": "var(--radius-pill)",
+                    border: "none",
+                    cursor: "pointer",
+                    "font-size": "var(--text-micro)",
+                    "font-weight": "600",
+                    background:
+                      c().autoLabel.length > 0
+                        ? "var(--palm-soft)"
+                        : "var(--paper-mid)",
+                    color:
+                      c().autoLabel.length > 0
+                        ? "var(--palm)"
+                        : "var(--text-muted)",
+                  }}
+                >
+                  <Icon name="ph-tag" size={12} />
+                  {autoLabelNames(c(), labels()) || "自动标签"}
+                  <Icon name="ph-caret-down" size={10} />
+                </button>
+                <Show when={autofileOpen()}>
+                  <div
+                    role="menu"
+                    style={{
+                      position: "absolute",
+                      top: "calc(100% + 6px)",
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      "min-width": "200px",
+                      background:
+                        "color-mix(in srgb, var(--paper-light) 82%, transparent)",
+                      "backdrop-filter": "blur(20px) saturate(1.4)",
+                      "-webkit-backdrop-filter": "blur(20px) saturate(1.4)",
+                      border: "0.5px solid var(--border)",
+                      "border-radius": "var(--radius-lg)",
+                      "box-shadow": "var(--shadow-lg)",
+                      padding: "var(--space-1)",
+                      "z-index": 10,
+                    }}
+                  >
+                    <Show
+                      when={(labels() ?? []).length > 0}
+                      fallback={
+                        <p
+                          style={{
+                            margin: 0,
+                            padding: "var(--space-3)",
+                            "font-size": "var(--text-caption)",
+                            color: "var(--text-muted)",
+                          }}
+                        >
+                          还没有标签，去「设置 → 标签」里创建。
+                        </p>
+                      }
+                    >
+                      <For each={labels() ?? []}>
+                        {(label) => {
+                          const active = () =>
+                            c().autoLabel.includes(label.id);
+                          return (
+                            <button
+                              role="menuitemcheckbox"
+                              aria-checked={active()}
+                              onClick={async () => {
+                                const next = active()
+                                  ? c().autoLabel.filter(
+                                      (id) => id !== label.id,
+                                    )
+                                  : [...c().autoLabel, label.id];
+                                await upsertContact({
+                                  ...c(),
+                                  autoLabel: next,
+                                });
+                                await refetchContact();
+                                showToast({
+                                  message: "自动标签已更新",
+                                  kind: "success",
+                                });
+                              }}
+                              style={{
+                                display: "flex",
+                                "align-items": "center",
+                                gap: "var(--space-2)",
+                                width: "100%",
+                                "text-align": "left",
+                                padding: "8px 12px",
+                                "min-height": "36px",
+                                background: "transparent",
+                                border: "none",
+                                "border-radius": "var(--radius-md)",
+                                "font-size": "var(--text-caption)",
+                                color: "var(--text-primary)",
+                                cursor: "pointer",
+                              }}
+                              onMouseEnter={(e) =>
+                                (e.currentTarget.style.background =
+                                  "var(--paper-mid)")
+                              }
+                              onMouseLeave={(e) =>
+                                (e.currentTarget.style.background =
+                                  "transparent")
+                              }
+                            >
+                              <span
+                                aria-hidden="true"
+                                style={{
+                                  width: "10px",
+                                  height: "10px",
+                                  "border-radius": "50%",
+                                  background: label.color,
+                                }}
+                              />
+                              {label.name}
+                              <Show when={active()}>
+                                <Icon
+                                  name="ph-check"
+                                  size={12}
+                                  style={{
+                                    "margin-left": "auto",
+                                    color: "var(--palm)",
+                                  }}
+                                />
+                              </Show>
+                            </button>
+                          );
+                        }}
+                      </For>
+                    </Show>
+                  </div>
+                </Show>
+              </div>
               <button
                 onClick={async () => {
-                  const buckets: Contact["defaultBucket"][] = [
-                    "imbox",
-                    "feed",
-                    "paperTrail",
-                  ];
-                  const idx = buckets.indexOf(c().defaultBucket);
-                  const next = buckets[(idx + 1) % buckets.length] ?? "imbox";
-                  await upsertContact({ ...c(), defaultBucket: next });
+                  const next = !c().recycling;
+                  await upsertContact({ ...c(), recycling: next });
                   await refetchContact();
+                  showToast({
+                    message: next
+                      ? `已开启 ${c().name} 的旧邮件自动清理`
+                      : `已关闭 ${c().name} 的旧邮件自动清理`,
+                    kind: "info",
+                  });
                 }}
-                title="Default bucket"
+                title="自动清理此发件人的旧邮件"
                 style={{
                   display: "inline-flex",
                   "align-items": "center",
                   gap: "4px",
-                  padding: "4px 10px",
+                  padding: "6px 12px",
+                  "min-height": "32px",
                   "border-radius": "var(--radius-pill)",
+                  border: "none",
+                  cursor: "pointer",
+                  "font-size": "var(--text-micro)",
+                  "font-weight": "600",
+                  background: c().recycling
+                    ? "var(--palm-soft)"
+                    : "var(--paper-mid)",
+                  color: c().recycling ? "var(--palm)" : "var(--text-muted)",
+                }}
+              >
+                <Icon name="ph-arrow-clockwise" size={12} />
+                {c().recycling ? "自动清理已开" : "自动清理旧邮件"}
+              </button>
+              <button
+                onClick={() => setContactTab("Notes")}
+                title="跳到备注"
+                style={{
+                  display: "inline-flex",
+                  "align-items": "center",
+                  gap: "4px",
+                  padding: "6px 12px",
+                  "min-height": "32px",
+                  "border-radius": "var(--radius-pill)",
+                  border: "none",
+                  cursor: "pointer",
                   "font-size": "var(--text-micro)",
                   "font-weight": "600",
                   background: "var(--paper-mid)",
-                  color: "var(--text-secondary)",
+                  color: "var(--text-muted)",
                 }}
               >
-                <Icon name="ph-tray" size={12} />
-                {c().defaultBucket === "imbox"
-                  ? "Imbox"
-                  : c().defaultBucket === "feed"
-                    ? "Stream"
-                    : "Records"}
+                <Icon name="ph-note" size={12} />
+                {c().notes ? "查看备注" : "记笔记"}
               </button>
             </div>
             <Show when={c().notes}>
@@ -427,21 +814,24 @@ export function ContactPanel(props: { contactId: string }) {
         <For each={TABS}>
           {(t) => (
             <button
-              data-testid={`contact-tab-${t.toLowerCase()}`}
-              onClick={() => setContactTab(t)}
+              data-testid={`contact-tab-${t.id.toLowerCase()}`}
+              onClick={() => setContactTab(t.id)}
               style={{
-                padding: "6px 12px",
+                padding: "8px 12px",
+                "min-height": "36px",
                 "border-radius": "var(--radius-pill)",
+                border: "none",
+                cursor: "pointer",
                 background:
-                  contactTab() === t ? "var(--palm-soft)" : "transparent",
+                  contactTab() === t.id ? "var(--palm-soft)" : "transparent",
                 color:
-                  contactTab() === t ? "var(--palm)" : "var(--text-secondary)",
-                "font-weight": contactTab() === t ? "700" : "500",
+                  contactTab() === t.id ? "var(--palm)" : "var(--text-secondary)",
+                "font-weight": contactTab() === t.id ? "700" : "500",
                 "font-size": "var(--text-caption)",
                 "white-space": "nowrap",
               }}
             >
-              {t}
+              {t.label}
             </button>
           )}
         </For>
@@ -538,8 +928,17 @@ export function ContactPanel(props: { contactId: string }) {
             setEditing(false);
             showToast({ message: "联系人已保存", kind: "success" });
           }}
+          onDelete={() => setConfirmDelete(true)}
         />
       </Show>
+      <ConfirmDialog
+        open={confirmDelete()}
+        title={`删除 ${contact()?.name || "该联系人"}？`}
+        body="与该联系人相关的任务也会一并删除，此操作无法撤销。"
+        confirmLabel={deleting() ? "正在删除…" : "删除"}
+        onConfirm={() => void removeContact()}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </div>
   );
 }
@@ -560,6 +959,21 @@ function Tag(props: { color?: string; children: string }) {
       {props.children}
     </span>
   );
+}
+
+/** User-facing label for a follow-up status. Internal values
+ *  (todo/wait/done) never reach the UI. */
+export function followUpStatusLabel(status: FollowUp["status"]): string {
+  switch (status) {
+    case "todo":
+      return "待跟进";
+    case "wait":
+      return "等待中";
+    case "done":
+      return "已完成";
+    default:
+      return "待跟进";
+  }
 }
 
 function TimelineTab(props: {
@@ -596,53 +1010,36 @@ function TimelineTab(props: {
           "margin-bottom": "var(--space-3)",
         }}
       >
-        <button
-          onClick={() => setFilter("all")}
-          style={{
-            padding: "4px 10px",
-            "border-radius": "var(--radius-pill)",
-            background: filter() === "all" ? "var(--palm-soft)" : "transparent",
-            color: filter() === "all" ? "var(--palm)" : "var(--text-secondary)",
-            "font-weight": filter() === "all" ? "700" : "500",
-            "font-size": "var(--text-micro)",
-            border: "none",
-            cursor: "pointer",
-          }}
+        <For
+          each={
+            [
+              { id: "all", label: "全部" },
+              { id: "from", label: "来自 TA" },
+              { id: "to", label: "发给 TA" },
+            ] as const
+          }
         >
-          All
-        </button>
-        <button
-          onClick={() => setFilter("from")}
-          style={{
-            padding: "4px 10px",
-            "border-radius": "var(--radius-pill)",
-            background:
-              filter() === "from" ? "var(--palm-soft)" : "transparent",
-            color:
-              filter() === "from" ? "var(--palm)" : "var(--text-secondary)",
-            "font-weight": filter() === "from" ? "700" : "500",
-            "font-size": "var(--text-micro)",
-            border: "none",
-            cursor: "pointer",
-          }}
-        >
-          From them
-        </button>
-        <button
-          onClick={() => setFilter("to")}
-          style={{
-            padding: "4px 10px",
-            "border-radius": "var(--radius-pill)",
-            background: filter() === "to" ? "var(--palm-soft)" : "transparent",
-            color: filter() === "to" ? "var(--palm)" : "var(--text-secondary)",
-            "font-weight": filter() === "to" ? "700" : "500",
-            "font-size": "var(--text-micro)",
-            border: "none",
-            cursor: "pointer",
-          }}
-        >
-          To them
-        </button>
+          {(f) => (
+            <button
+              onClick={() => setFilter(f.id)}
+              style={{
+                padding: "6px 12px",
+                "min-height": "32px",
+                "border-radius": "var(--radius-pill)",
+                background:
+                  filter() === f.id ? "var(--palm-soft)" : "transparent",
+                color:
+                  filter() === f.id ? "var(--palm)" : "var(--text-secondary)",
+                "font-weight": filter() === f.id ? "700" : "500",
+                "font-size": "var(--text-micro)",
+                border: "none",
+                cursor: "pointer",
+              }}
+            >
+              {f.label}
+            </button>
+          )}
+        </For>
       </div>
       <For each={filtered()}>
         {(m) => (
@@ -722,7 +1119,7 @@ function TimelineRow(props: {
               "letter-spacing": "0.02em",
             }}
           >
-            {props.message.direction === "out" ? "To" : "From"}
+            {props.message.direction === "out" ? "发给 TA" : "来自 TA"}
           </span>
           <strong
             style={{
@@ -756,11 +1153,20 @@ function TimelineRow(props: {
       </div>
       <button
         onClick={(e) => void cycle(e)}
-        title={fu() ? `Follow-up: ${fu()!.status}` : "Add follow-up"}
-        aria-label={fu() ? `Follow-up: ${fu()!.status}` : "Add follow-up"}
+        title={
+          fu()
+            ? `跟进状态：${followUpStatusLabel(fu()!.status)}`
+            : "添加跟进提醒"
+        }
+        aria-label={
+          fu()
+            ? `跟进状态：${followUpStatusLabel(fu()!.status)}`
+            : "添加跟进提醒"
+        }
         style={{
           "margin-top": "2px",
-          padding: "2px 8px",
+          padding: "4px 10px",
+          "min-height": "28px",
           "border-radius": "var(--radius-pill)",
           background: fu() ? "var(--palm-soft)" : "var(--paper-mid)",
           color: fu() ? "var(--palm)" : "var(--text-muted)",
@@ -771,7 +1177,7 @@ function TimelineRow(props: {
           "white-space": "nowrap",
         }}
       >
-        {fu()?.status ?? "+"}
+        {fu() ? followUpStatusLabel(fu()!.status) : "+ 跟进"}
       </button>
     </div>
   );
@@ -820,7 +1226,7 @@ function NotesTab(props: {
         <textarea
           value={draft()}
           onInput={(e) => setDraft(e.currentTarget.value)}
-          placeholder="Add a note about this contact…"
+          placeholder="记录关于这位联系人的事…"
           rows={3}
           style={{
             width: "100%",
@@ -845,15 +1251,18 @@ function NotesTab(props: {
             disabled={!draft().trim()}
             style={{
               padding: "6px 16px",
+              "min-height": "32px",
               background: "var(--ink)",
               color: "white",
               "border-radius": "var(--radius-pill)",
+              border: "none",
               "font-size": "var(--text-caption)",
               "font-weight": "700",
+              cursor: "pointer",
               opacity: draft().trim() ? 1 : 0.4,
             }}
           >
-            Save
+            保存
           </button>
         </div>
       </div>
@@ -896,8 +1305,13 @@ function NotesTab(props: {
                   await upsertContactNote(updated);
                   props.onPinChange(updated);
                 }}
-                style={{ color: "var(--text-muted)", "margin-left": "auto" }}
-                title={n.pinned ? "Unpin" : "Pin"}
+                style={{
+                  color: "var(--text-muted)",
+                  "margin-left": "auto",
+                  padding: "8px",
+                  cursor: "pointer",
+                }}
+                title={n.pinned ? "取消置顶" : "置顶"}
               >
                 <Icon
                   name={n.pinned ? "ph-push-pin-slash" : "ph-push-pin"}
@@ -909,8 +1323,13 @@ function NotesTab(props: {
                   await deleteContactNote(n.id);
                   props.onRemove(n.id);
                 }}
-                style={{ color: "var(--text-muted)" }}
-                title="Delete"
+                style={{
+                  color: "var(--text-muted)",
+                  padding: "8px",
+                  cursor: "pointer",
+                }}
+                title="删除这条备注"
+                aria-label="删除这条备注"
               >
                 <Icon name="ph-trash" size={12} />
               </button>
@@ -926,12 +1345,6 @@ function FilesTab(props: {
   files: FileItem[];
   onOpen: (id: string) => void;
 }) {
-  const iconForType = (type: string) => {
-    if (type === "pdf") return "ph-file-pdf";
-    if (type === "image") return "ph-file-image";
-    return "ph-file-text";
-  };
-
   return (
     <div
       style={{
@@ -973,7 +1386,7 @@ function FilesTab(props: {
               (e.currentTarget.style.background = "var(--paper-mid)")
             }
           >
-            <Icon name={iconForType(f.type)} size={40} />
+            <Icon name={fileIconName(f.type)} size={40} />
             <div style={{ width: "100%", "min-width": 0 }}>
               <div
                 style={{
@@ -992,7 +1405,7 @@ function FilesTab(props: {
                   "margin-top": "var(--space-1)",
                 }}
               >
-                {(f.size / 1024).toFixed(0)} KB · {f.type}
+                {formatBytes(f.size)} · {f.type}
               </div>
             </div>
           </button>
@@ -1493,7 +1906,7 @@ function FollowUpsTab(props: {
                       f.status === "done"
                         ? "var(--text-muted)"
                         : new Date(f.dueAt) <= new Date()
-                          ? "var(--danger)"
+                          ? "var(--status-danger)"
                           : "var(--palm)",
                   }}
                 >

@@ -99,8 +99,8 @@ export function Clips() {
     >
       <header
         style={{
-          padding: "var(--space-5)",
-          "border-bottom": "0.5px solid var(--border)",
+          padding: "var(--space-6) var(--space-5) var(--space-3)",
+          "text-align": "center",
         }}
       >
         <h2
@@ -120,7 +120,7 @@ export function Clips() {
             margin: "var(--space-1) 0 0",
           }}
         >
-          从消息里摘下来的文字片段 · 复制可粘贴
+          从邮件里摘下来的文字片段 · 一键复制粘贴
         </p>
       </header>
 
@@ -140,8 +140,8 @@ export function Clips() {
         }
         errorView={() => (
           <ErrorState
-            title="Clips 加载失败"
-            message={String(clips.error ?? "")}
+            title="剪辑加载失败"
+            message="请稍后重试；若持续失败，请检查本地数据库状态。"
             retry={() => void refetchClips()}
           />
         )}
@@ -149,7 +149,7 @@ export function Clips() {
           <Empty
             icon="ph-bookmarks"
             title="还没有 Clip"
-            description="在消息面板点 'Clip' 即可保存文字片段。"
+            description="在邮件里选中文字后点「Clip」，金句、地址、代码片段都收在这里，一键复制。"
           />
         }
       >
@@ -162,7 +162,7 @@ export function Clips() {
             }}
           >
             <Show when={grouped().today.length > 0}>
-              <Group title="Today">
+              <Group title="今天">
                 <For each={grouped().today}>
                   {(c) => (
                     <Row
@@ -177,7 +177,7 @@ export function Clips() {
               </Group>
             </Show>
             <Show when={grouped().yesterday.length > 0}>
-              <Group title="Yesterday">
+              <Group title="昨天">
                 <For each={grouped().yesterday}>
                   {(c) => (
                     <Row
@@ -192,7 +192,7 @@ export function Clips() {
               </Group>
             </Show>
             <Show when={grouped().earlier.length > 0}>
-              <Group title="Earlier">
+              <Group title="更早">
                 <For each={grouped().earlier}>
                   {(c) => (
                     <Row
@@ -279,7 +279,7 @@ function Row(props: {
               color: "var(--text-muted)",
             }}
           >
-            Unknown
+            未知联系人
           </strong>
         </Show>
         <Show when={props.msg}>
@@ -337,7 +337,7 @@ function Row(props: {
             gap: "4px",
           }}
         >
-          <Icon name="ph-copy" size={11} /> Copy
+          <Icon name="ph-copy" size={11} /> 复制
         </button>
         <button
           onClick={() => props.onRemove(props.c.id)}
@@ -349,7 +349,7 @@ function Row(props: {
             color: "var(--text-muted)",
           }}
         >
-          Remove
+          删除
         </button>
       </div>
     </div>

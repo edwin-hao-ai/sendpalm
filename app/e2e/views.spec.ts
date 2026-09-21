@@ -37,9 +37,9 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
       "SendPalm",
     );
     // Search placeholder is there
-    await expect(page.getByPlaceholder(/Search contacts/)).toBeVisible();
-    // Sync badge is "未连接" because no real account in browser mode
-    await expect(page.getByText("未连接")).toBeVisible();
+    await expect(page.getByPlaceholder(/搜索邮件、联系人/)).toBeVisible();
+    // Sync badge offers account setup because no real account in browser mode
+    await expect(page.getByText("添加邮箱账户 →")).toBeVisible();
     await shoot(page, "01-topbar");
   });
 
@@ -52,7 +52,7 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     // the value proposition explicit ("重要邮件" rather than the
     // generic "空的") and to drop the "Settings → Accounts" pointer
     // (onboarding handles account creation in a dedicated view now).
-    await expect(page.getByText(/Inbox 是给你的重要邮件/)).toBeVisible();
+    await expect(page.getByText(/Imbox 是给你的重要邮件/)).toBeVisible();
     // 'Inbox zero' was the OLD mock-data copy — it must NOT appear.
     await expect(page.getByText("Inbox zero")).toHaveCount(0);
     await shoot(page, "02-imbox-empty");
@@ -82,7 +82,7 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
   test("Calendar view empty state", async ({ page }) => {
     await page.goto("/");
     await page.locator('[data-nav-view="calendar"]').click();
-    await expect(page.getByText("这段时间没有会议")).toBeVisible();
+    await expect(page.getByText("这段时间还没有安排")).toBeVisible();
     await shoot(page, "06-calendar");
   });
 
@@ -127,24 +127,23 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     await page.goto("/");
     await page.locator('[data-nav-view="settings"]').click();
     // Switch to Accounts tab (default is Profile)
-    await page
-      .getByRole("button", { name: /Accounts/ })
-      .first()
-      .click();
-    // Wait for Accounts view to mount
-    await expect(page.getByText("Connected accounts")).toBeVisible({
+    await page.locator('[data-testid="settings-menu-item-accounts"]').click();
+    // Wait for Accounts view to mount (no accounts → empty state)
+    await expect(page.getByText("还没有连接邮箱")).toBeVisible({
       timeout: 10_000,
     });
     await page.waitForTimeout(300);
     await shoot(page, "12-settings-accounts");
 
-    // Click "Add account" — provider dropdown should appear
+    // Click "添加账户" — provider dropdown should appear
     await page
-      .getByRole("button", { name: /Add account/ })
+      .getByRole("button", { name: "添加账户" })
       .first()
       .click();
-    // The modal title is unique enough
-    await expect(page.getByText("添加邮箱账户")).toBeVisible({
+    // Scope to the dialog: the topbar sync badge also carries
+    // "添加邮箱账户 →" copy and would trip strict mode.
+    const dialog = page.getByRole("dialog", { name: "添加邮箱账户" });
+    await expect(dialog).toBeVisible({
       timeout: 10_000,
     });
     await page.waitForTimeout(300);
@@ -152,15 +151,14 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     // Wait for the modal to be fully mounted (select with options appears).
     // The Add Account modal contains the provider dropdown.
     await page.waitForTimeout(500);
-    const selectCount = await page.locator("select").count();
-    expect(selectCount).toBeGreaterThanOrEqual(1);
-    const select = page.locator("select").last();
+    const select = dialog.locator("select").last();
     await expect(select).toBeVisible();
     // The provider list comes from the listProviders() resource, which
     // returns a 10-item array via the Tauri shim. Wait for options to render.
     await page.waitForFunction(
       () => {
-        const sels = document.querySelectorAll("select");
+        const dlg = document.querySelector('[role="dialog"]');
+        const sels = dlg?.querySelectorAll("select") ?? [];
         const last = sels[sels.length - 1];
         return last && last.options.length >= 7;
       },
@@ -186,25 +184,18 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     page,
   }) => {
     await page.goto("/");
-    // The badge reads "未连接" when no accounts are configured.
-    await expect(page.getByText("未连接")).toBeVisible({ timeout: 5_000 });
+    // With no accounts configured, the badge is a direct "add account" CTA
+    // that jumps to Settings → Accounts instead of opening a popover.
+    await expect(page.getByText("添加邮箱账户 →")).toBeVisible({
+      timeout: 5_000,
+    });
     await shoot(page, "14a-sync-badge-closed");
 
-    // Click the badge to open the popover.
     await page.locator("[data-sync-badge]").click();
-    await expect(page.locator("[data-sync-popover]")).toBeVisible({
-      timeout: 3_000,
+    await expect(page.locator("#topbar")).toContainText("设置", {
+      timeout: 5_000,
     });
-    // Empty-state copy is shown.
-    await expect(
-      page.getByText(/请到 Settings → Accounts 添加邮箱账户/),
-    ).toBeVisible();
-    await shoot(page, "14b-sync-badge-popover");
-
-    // Click the backdrop overlay to close.
-    await page.locator("[data-sync-popover]").waitFor();
-    await page.locator("[data-sync-overlay]").click();
-    await expect(page.locator("[data-sync-popover]")).toHaveCount(0);
+    await shoot(page, "14b-sync-badge-add-account");
   });
 
   test("Command palette opens with ⌘K and shows search across views/people", async ({
@@ -218,7 +209,7 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     const isMac = process.platform === "darwin";
     await page.keyboard.press(isMac ? "Meta+k" : "Control+k");
     await expect(
-      page.locator('input[placeholder*="Search views"]'),
+      page.locator('input[placeholder*="搜索视图"]'),
     ).toBeVisible({ timeout: 5_000 });
     await page.waitForTimeout(200);
     await shoot(page, "14-command-palette");
@@ -257,35 +248,77 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     page,
   }) => {
     await page.goto("/");
+    await page.locator("body.app-ready").waitFor({ timeout: 10_000 });
+    // Seed one email account so the compose form renders (without an
+    // account the dialog shows the "还没有绑定邮箱账户" empty state and
+    // the send button is disabled).
+    await page.evaluate(async () => {
+      const helpers = (
+        window as unknown as {
+          __sendpalmE2E: {
+            seedAccount: (a: unknown) => Promise<void>;
+          };
+        }
+      ).__sendpalmE2E;
+      await helpers.seedAccount({
+        id: "acct-e2e-compose",
+        type: "email",
+        provider: "gmail",
+        email: "edwinhao@sendpalm.com",
+        label: "E2E 测试邮箱",
+        displayName: "Edwin",
+        status: "connected",
+        synced: 0,
+        total: 0,
+        privacy: "unified",
+        color: "#2f6f4f",
+        avatar: "",
+        lastSync: new Date().toISOString(),
+        settings: {
+          aliases: [],
+          signature: "",
+          replyTo: "",
+          defaultFrom: "",
+          syncFolders: [],
+          syncFrequency: "manual",
+          autoBcc: false,
+          autoBccAddress: "",
+          vacationResponder: { enabled: false, subject: "", body: "" },
+        },
+      });
+    });
     // Open compose with the global shortcut.
     await page.locator("body").click();
     const isMac = process.platform === "darwin";
     await page.keyboard.press(isMac ? "Meta+n" : "Control+n");
-    // The compose modal title is unique.
-    await expect(page.getByText("新邮件")).toBeVisible();
+    // Scope to the dialog: the Imbox "新邮件" tab and the empty-state
+    // paragraph also contain the string and would trip strict mode.
+    const dialog = page.getByRole("dialog", { name: "新邮件" });
+    await expect(dialog).toBeVisible();
 
     // Fill recipient, subject and body using stable placeholders.
-    const recipientInput = page.locator(
+    const recipientInput = dialog.locator(
       '[data-field="to"] input[placeholder="recipient@example.com"]',
     );
     await recipientInput.fill("test@example.com");
     await recipientInput.press("Enter");
-    await page.locator('input[placeholder="主题"]').fill("E2E test");
-    await page
+    await dialog.locator('input[placeholder="主题"]').fill("E2E test");
+    await dialog
       .locator('textarea[placeholder="正文…"]')
       .fill("This is a test message from Playwright.");
 
     // Use Cmd/Ctrl+Enter to send (the prototype's keyboard shortcut).
-    await page
+    await dialog
       .locator('textarea[placeholder="正文…"]')
       .press(isMac ? "Meta+Enter" : "Control+Enter");
 
-    // In browser mode the shim returns null, so the app falls back to saving
-    // the message as a draft and shows the fallback toast.
-    await expect(page.getByText(/已保存为草稿|已发送/)).toBeVisible({
+    // In browser mode the shim returns null for send_email_via_backend,
+    // so the app falls back to saving the message as a draft and shows
+    // the fallback toast.
+    await expect(page.getByText(/已保存为草稿|草稿已保存|已发送/)).toBeVisible({
       timeout: 5_000,
     });
-    await expect(page.getByText("新邮件")).not.toBeVisible();
+    await expect(dialog).toHaveCount(0);
     await shoot(page, "17-compose-sent");
   });
 });
@@ -331,7 +364,7 @@ test.describe("Responsive layout", () => {
   test("Settings page uses iOS-style menu on mobile", async ({ page }) => {
     await page.goto("/");
     await page.locator('#sidebar [data-nav-view="settings"]').click();
-    await expect(page.locator('#topbar:has-text("Settings")')).toBeVisible();
+    await expect(page.locator('#topbar:has-text("设置")')).toBeVisible();
 
     const settingsRoot = page.locator('[data-testid="settings-view"]');
     await expect(settingsRoot).toBeVisible();
@@ -346,7 +379,7 @@ test.describe("Responsive layout", () => {
       page.locator('[data-testid="settings-mobile-header"]'),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Keyboard shortcuts" }),
+      page.getByRole("heading", { name: "键盘快捷键" }),
     ).toBeVisible();
 
     await shoot(page, "19-mobile-settings-shortcuts");
@@ -398,7 +431,7 @@ test.describe("Responsive layout — iPad portrait", () => {
     await expect(nav).toBeVisible();
     await nav.hover();
     const tip = page.locator("[data-testid='sidebar-tooltip']");
-    await expect(tip).toContainText("Follow-ups");
+    await expect(tip).toContainText("跟进");
   });
 });
 

@@ -12,7 +12,7 @@ describe("date utils", () => {
 
   it("relativeTime handles now", () => {
     const now = new Date().toISOString();
-    expect(relativeTime(now)).toMatch(/just now|ago/);
+    expect(relativeTime(now)).toBe("刚刚");
   });
 
   it("isToday", () => {

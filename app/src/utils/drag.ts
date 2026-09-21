@@ -17,7 +17,9 @@ export type DragTarget = MessageBucket | "pending" | "saved" | "remind";
 export interface DragState {
   active: boolean;
   messageId?: string;
-  commit?: (target: DragTarget) => void;
+  /** Commit may be async (DB write + toast); DropBar awaits it and
+   *  always closes the bar in a `finally`. */
+  commit?: (target: DragTarget) => void | Promise<void>;
 }
 
 const [drag, setDrag] = createSignal<DragState>({ active: false });
@@ -28,7 +30,7 @@ export function useDragContext() {
 
 export function startDrag(
   message: { id: string },
-  commit: (target: DragTarget) => void,
+  commit: (target: DragTarget) => void | Promise<void>,
 ) {
   setDrag({ active: true, messageId: message.id, commit });
 }

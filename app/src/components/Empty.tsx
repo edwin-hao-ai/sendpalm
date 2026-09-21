@@ -7,6 +7,8 @@ interface EmptyProps {
   icon?: string;
   title: string;
   description?: string;
+  /** Secondary guidance line under the description (smaller, muted). */
+  hint?: string;
   action?: { label: string; onClick: () => void };
 }
 
@@ -26,18 +28,20 @@ export function Empty(props: EmptyProps) {
     >
       <div
         style={{
-          width: "64px",
-          height: "64px",
+          width: "76px",
+          height: "76px",
           "border-radius": "50%",
-          background: "var(--paper-mid)",
+          background:
+            "linear-gradient(135deg, var(--paper-light) 0%, var(--paper-mid) 100%)",
+          "box-shadow": "var(--shadow-md)",
           display: "flex",
           "align-items": "center",
           "justify-content": "center",
-          "margin-bottom": "var(--space-4)",
+          "margin-bottom": "var(--space-5)",
           color: "var(--text-muted)",
         }}
       >
-        <Icon name={props.icon ?? "ph-tray"} size={28} />
+        <Icon name={props.icon ?? "ph-tray"} size={30} />
       </div>
       <h3
         style={{
@@ -64,6 +68,20 @@ export function Empty(props: EmptyProps) {
           {props.description}
         </p>
       </Show>
+      <Show when={props.hint}>
+        <p
+          style={{
+            "max-width": "320px",
+            "font-size": "var(--text-caption)",
+            color: "var(--text-muted)",
+            margin: 0,
+            "margin-top": "var(--space-2)",
+            "line-height": "1.5",
+          }}
+        >
+          {props.hint}
+        </p>
+      </Show>
       <Show when={props.action}>
         <button
           onClick={props.action!.onClick}
@@ -81,26 +99,6 @@ export function Empty(props: EmptyProps) {
         </button>
       </Show>
     </div>
-  );
-}
-
-export function Skeleton(props: {
-  height?: string;
-  width?: string;
-  radius?: string;
-}) {
-  return (
-    <div
-      style={{
-        height: props.height ?? "16px",
-        width: props.width ?? "100%",
-        "border-radius": props.radius ?? "var(--radius-sm)",
-        background:
-          "linear-gradient(90deg, var(--paper-mid), var(--paper-dark), var(--paper-mid))",
-        "background-size": "200% 100%",
-        animation: "shimmer 1.6s linear infinite",
-      }}
-    />
   );
 }
 

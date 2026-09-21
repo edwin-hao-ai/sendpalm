@@ -44,6 +44,7 @@ import {
 } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
+import { glassPanelStyle } from "../components/glass";
 import { Skeleton, SkeletonList } from "../components/Skeleton";
 import { FollowUpPicker } from "../components/FollowUpPicker";
 import { RemindPicker } from "../components/RemindPicker";
@@ -175,6 +176,19 @@ export function MessagePanel(props: { messageId: string }) {
 
   const [viewMode, setViewMode] = createSignal<ViewMode>("rendered");
   const [expandedIds, setExpandedIds] = createSignal<Set<string>>(new Set());
+  // Narrow-panel flag (<420px): the three-way view-mode toggle collapses
+  // into a compact dropdown so it doesn't crush the header actions.
+  const [panelNarrow, setPanelNarrow] = createSignal(false);
+  let rootEl: HTMLDivElement | undefined;
+  onMount(() => {
+    if (!rootEl) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      setPanelNarrow(w > 0 && w < 420);
+    });
+    ro.observe(rootEl);
+    onCleanup(() => ro.disconnect());
+  });
 
   // The current-message iframe is rendered by a per-message
   // <MessageBodyIframe> component defined later in this file. Each
@@ -267,7 +281,7 @@ export function MessagePanel(props: { messageId: string }) {
     isMe: boolean;
   } {
     if (m.direction === "out") {
-      return { name: "You", email: "me@example.com", isMe: true };
+      return { name: "我", email: "me@example.com", isMe: true };
     }
     const c = contactsById()[m.pid];
     if (c) {
@@ -277,7 +291,7 @@ export function MessagePanel(props: { messageId: string }) {
         isMe: false,
       };
     }
-    return { name: "Unknown", email: "", isMe: false };
+    return { name: "未知发件人", email: "", isMe: false };
   }
 
   function openContactFromMessage(m: Message, e: MouseEvent) {
@@ -338,7 +352,7 @@ export function MessagePanel(props: { messageId: string }) {
     setDetailOpen(false);
     setSelectedMessageId(null);
     showToast({
-      message: "已移到 Trash",
+      message: "已移到回收站",
       kind: "success",
       action: {
         label: "撤销",
@@ -371,7 +385,7 @@ export function MessagePanel(props: { messageId: string }) {
     bumpRefreshTick();
     setDetailOpen(false);
     setSelectedMessageId(null);
-    showToast({ message: "已移到 Spam", kind: "success" });
+    showToast({ message: "已移到垃圾邮件", kind: "success" });
   };
 
   const blockSender = async () => {
@@ -412,8 +426,8 @@ export function MessagePanel(props: { messageId: string }) {
       imbox: "Imbox",
       feed: "Stream",
       paperTrail: "Records",
-      trash: "Trash",
-      spam: "Spam",
+      trash: "回收站",
+      spam: "垃圾邮件",
     };
     return map[bucket] ?? bucket;
   };
@@ -464,10 +478,10 @@ export function MessagePanel(props: { messageId: string }) {
     if (!m) return;
     const c = contact();
     const text = [
-      `Subject: ${m.subj}`,
-      `From: ${c?.name ?? "Unknown"} <${c?.emails[0]?.value ?? ""}>`,
-      `To: ${m.to ?? ""}`,
-      `Date: ${m.tm}`,
+      `主题: ${m.subj}`,
+      `发件人: ${c?.name ?? "未知"} <${c?.emails[0]?.value ?? ""}>`,
+      `收件人: ${m.to ?? ""}`,
+      `日期: ${m.tm}`,
       "",
       m.body || m.prev || "",
     ].join("\n");
@@ -489,10 +503,10 @@ export function MessagePanel(props: { messageId: string }) {
     if (!m) return;
     const c = contact();
     const text = [
-      `Subject: ${m.subj}`,
-      `From: ${c?.name ?? "Unknown"} <${c?.emails[0]?.value ?? ""}>`,
-      `To: ${m.to ?? ""}`,
-      `Date: ${m.tm}`,
+      `主题: ${m.subj}`,
+      `发件人: ${c?.name ?? "未知"} <${c?.emails[0]?.value ?? ""}>`,
+      `收件人: ${m.to ?? ""}`,
+      `日期: ${m.tm}`,
       "",
       m.body || m.prev || "",
     ].join("\n");
@@ -517,7 +531,7 @@ export function MessagePanel(props: { messageId: string }) {
     // (no local list to refresh — global bumpRefreshTick below covers other views)
     bumpRefreshTick();
     showToast({
-      message: m.replyLater ? "已取消 Reply Later" : "已 Reply Later",
+      message: m.replyLater ? "已取消稍后回复" : "已标记稍后回复",
       kind: "success",
     });
   };
@@ -530,7 +544,7 @@ export function MessagePanel(props: { messageId: string }) {
     // (no local list to refresh — global bumpRefreshTick below covers other views)
     bumpRefreshTick();
     showToast({
-      message: m.setAside ? "已取消 Set Aside" : "已 Set Aside",
+      message: m.setAside ? "已取消搁置" : "已搁置",
       kind: "success",
     });
   };
@@ -686,7 +700,7 @@ export function MessagePanel(props: { messageId: string }) {
   );
 
   const addSticky = async () => {
-    const body = prompt("写一条 sticky note…");
+    const body = prompt("写一条便签…");
     if (!body || !body.trim()) return;
     const s: Sticky = {
       id: uid("st"),
@@ -709,7 +723,7 @@ export function MessagePanel(props: { messageId: string }) {
     const selection = window.getSelection()?.toString().trim();
     if (!selection) {
       showToast({
-        message: "请先在邮件正文里选中文字，再点 Clip",
+        message: "请先在邮件正文里选中文字，再点『更多 → 保存为 Clip』",
         kind: "info",
       });
       return;
@@ -773,12 +787,17 @@ export function MessagePanel(props: { messageId: string }) {
 
   return (
     <div
+      ref={(el) => (rootEl = el)}
       class="message-panel-root"
       style={{
         display: "flex",
         "flex-direction": "column",
         height: "100%",
         position: "relative",
+        background: "var(--glass-bg)",
+        "backdrop-filter": "var(--glass-blur)",
+        "-webkit-backdrop-filter": "var(--glass-blur)",
+        "box-shadow": "-12px 0 40px rgba(35, 28, 51, 0.08)",
         animation: "panel-slide 0.28s var(--ease-out) both",
       }}
     >
@@ -789,7 +808,7 @@ export function MessagePanel(props: { messageId: string }) {
           display: "flex",
           "align-items": "center",
           gap: "var(--space-3)",
-          background: "var(--surface-elevated)",
+          background: "var(--glass-bg-strong)",
           position: "sticky",
           top: 0,
           "z-index": 2,
@@ -800,20 +819,26 @@ export function MessagePanel(props: { messageId: string }) {
             setSelectedMessageId(null);
             setDetailOpen(false);
           }}
-          aria-label="Close"
+          aria-label="返回列表"
+          title="返回列表"
           style={{ color: "var(--text-muted)" }}
         >
           <Icon name="ph-arrow-left" size={18} />
         </button>
         <strong
-          style={{ "font-size": "var(--text-body-sm)", "font-weight": "700" }}
+          style={{
+            "font-size": "var(--text-body-sm)",
+            "font-weight": "700",
+            "white-space": "nowrap",
+            "flex-shrink": 0,
+          }}
         >
-          Message
+          邮件
         </strong>
         <Show when={trackCount() > 0}>
           <button
             onClick={() => setTrackerExpanded(!trackerExpanded())}
-            title={`${trackCount()} tracker blocked`}
+            title={`已屏蔽 ${trackCount()} 个跟踪器`}
             style={{
               display: "inline-flex",
               "align-items": "center",
@@ -828,7 +853,7 @@ export function MessagePanel(props: { messageId: string }) {
             }}
           >
             <Icon name="ph-shield-check" size={11} />
-            {trackCount()} tracker blocked
+            已屏蔽 {trackCount()} 个跟踪器
           </button>
         </Show>
         <div style={{ "margin-left": "auto" }} />
@@ -837,7 +862,11 @@ export function MessagePanel(props: { messageId: string }) {
           onCopy={copyMessage}
           onDownload={downloadMessage}
         />
-        <ViewModeToggle mode={viewMode()} onChange={setViewMode} />
+        <ViewModeToggle
+          mode={viewMode()}
+          onChange={setViewMode}
+          narrow={panelNarrow()}
+        />
       </div>
 
       <Show when={trackerExpanded() && trackCount() > 0}>
@@ -850,7 +879,7 @@ export function MessagePanel(props: { messageId: string }) {
           }}
         >
           <p style={{ margin: 0, color: "var(--text-secondary)" }}>
-            检测到以下 tracker 类型（已自动剥离）：
+            检测到以下类型的跟踪器（已自动剥离）：
           </p>
           <div
             style={{
@@ -956,6 +985,9 @@ export function MessagePanel(props: { messageId: string }) {
               "font-weight": "800",
               margin: 0,
               "margin-bottom": "var(--space-2)",
+              "text-wrap": "balance",
+              "word-break": "keep-all",
+              "overflow-wrap": "anywhere",
             }}
           >
             {message()!.subj}
@@ -1032,7 +1064,9 @@ export function MessagePanel(props: { messageId: string }) {
                         "background var(--duration-fast) var(--ease-out), transform 0.16s var(--ease-out)",
                     }}
                   >
-                    {/* Card meta */}
+                    {/* Card meta — hidden for single-message threads:
+                        the hero above already shows the sender identity
+                        once, so repeating it here is pure duplication. */}
                     <div
                       style={{
                         display: "flex",
@@ -1040,54 +1074,57 @@ export function MessagePanel(props: { messageId: string }) {
                         gap: "var(--space-3)",
                       }}
                     >
-                      <Avatar
-                        name={sender().name}
-                        src={c()?.avatar}
-                        size={34}
-                        color={
-                          sender().isMe
-                            ? "linear-gradient(135deg, #0A8F63, #0CB87D)"
-                            : undefined
-                        }
-                      />
-                      <div style={{ flex: 1, "min-width": 0 }}>
-                        <div
-                          style={{
-                            display: "flex",
-                            "align-items": "baseline",
-                            gap: "var(--space-2)",
-                          }}
-                        >
-                          <strong
-                            onClick={(e) =>
-                              !sender().isMe && openContactFromMessage(m, e)
-                            }
+                      <Show when={thread().length > 1}>
+                        <Avatar
+                          name={sender().name}
+                          src={c()?.avatar}
+                          size={34}
+                          color={
+                            sender().isMe
+                              ? "linear-gradient(135deg, #0A8F63, #0CB87D)"
+                              : undefined
+                          }
+                        />
+                        <div style={{ flex: 1, "min-width": 0 }}>
+                          <div
                             style={{
-                              "font-size": "var(--text-caption)",
-                              "font-weight": m.unread ? "700" : "600",
-                              color: "var(--text-primary)",
-                              cursor:
-                                !sender().isMe && c() ? "pointer" : "default",
-                            }}
-                            title={c() ? "View contact" : undefined}
-                          >
-                            {sender().name}
-                          </strong>
-                          <span
-                            style={{
-                              "font-size": "var(--text-micro)",
-                              color: "var(--text-muted)",
-                              overflow: "hidden",
-                              "text-overflow": "ellipsis",
-                              "white-space": "nowrap",
+                              display: "flex",
+                              "align-items": "baseline",
+                              gap: "var(--space-2)",
                             }}
                           >
-                            {sender().email}
-                          </span>
+                            <strong
+                              onClick={(e) =>
+                                !sender().isMe && openContactFromMessage(m, e)
+                              }
+                              style={{
+                                "font-size": "var(--text-caption)",
+                                "font-weight": m.unread ? "700" : "600",
+                                color: "var(--text-primary)",
+                                cursor:
+                                  !sender().isMe && c() ? "pointer" : "default",
+                              }}
+                              title={c() ? "查看联系人" : undefined}
+                            >
+                              {sender().name}
+                            </strong>
+                            <span
+                              style={{
+                                "font-size": "var(--text-micro)",
+                                color: "var(--text-muted)",
+                                overflow: "hidden",
+                                "text-overflow": "ellipsis",
+                                "white-space": "nowrap",
+                              }}
+                            >
+                              {sender().email}
+                            </span>
+                          </div>
                         </div>
-                      </div>
+                      </Show>
                       <span
                         style={{
+                          "margin-left": "auto",
                           "font-size": "var(--text-micro)",
                           color: "var(--text-muted)",
                           "white-space": "nowrap",
@@ -1143,8 +1180,8 @@ export function MessagePanel(props: { messageId: string }) {
                               onClick={handlePlainTextLinkClick}
                               style={{
                                 "font-size": "var(--text-body-sm)",
-                                color: "var(--text-secondary)",
-                                "line-height": 1.6,
+                                color: "var(--text-primary)",
+                                "line-height": 1.7,
                                 "overflow-wrap": "anywhere",
                                 "word-break": "break-word",
                               }}
@@ -1400,15 +1437,14 @@ export function MessagePanel(props: { messageId: string }) {
                                   });
                                 } else {
                                   showToast({
-                                    message: "未配置 Tauri 运行时，无法添加",
+                                    message: "当前环境不支持添加到日历",
                                     kind: "info",
                                   });
                                 }
                               } catch (e) {
-                                const msg =
-                                  e instanceof Error ? e.message : String(e);
+                                console.error("addCalendarEvent failed", e);
                                 showToast({
-                                  message: `添加失败：${msg}`,
+                                  message: "添加到日历失败，请重试",
                                   kind: "error",
                                 });
                               }
@@ -1452,7 +1488,7 @@ export function MessagePanel(props: { messageId: string }) {
 
           {/* Stickies */}
           <Show when={stickyForMsg().length > 0}>
-            <SectionHeader title="Sticky notes" icon="ph-note" />
+            <SectionHeader title="便签" icon="ph-note" />
             <For each={stickyForMsg()}>
               {(s) => (
                 <div
@@ -1484,7 +1520,8 @@ export function MessagePanel(props: { messageId: string }) {
                     </span>
                     <button
                       onClick={() => removeSticky(s.id)}
-                      aria-label="Remove sticky"
+                      aria-label="删除便签"
+                      title="删除便签"
                       style={{ color: "var(--text-muted)" }}
                     >
                       <Icon name="ph-x" size={12} />
@@ -1496,22 +1533,10 @@ export function MessagePanel(props: { messageId: string }) {
             </For>
           </Show>
 
-          {/* Follow-ups */}
-          <SectionHeader title="Follow-ups" icon="ph-bell-ringing" />
-          <Show
-            when={fuForMsg().length > 0}
-            fallback={
-              <p
-                style={{
-                  color: "var(--text-muted)",
-                  "font-size": "var(--text-caption)",
-                  "margin-bottom": "var(--space-2)",
-                }}
-              >
-                暂无跟进。
-              </p>
-            }
-          >
+          {/* Follow-ups — the whole section stays hidden when there is
+              nothing to track; an empty "暂无跟进" block was just noise. */}
+          <Show when={fuForMsg().length > 0}>
+            <SectionHeader title="跟进提醒" icon="ph-bell-ringing" />
             <For each={fuForMsg()}>
               {(f) => (
                 <div
@@ -1527,7 +1552,8 @@ export function MessagePanel(props: { messageId: string }) {
                 >
                   <Icon name="ph-clock" size={14} />
                   <span style={{ flex: 1, "font-size": "var(--text-body-sm)" }}>
-                    {relativeTime(f.dueAt)} · {f.status}
+                    {relativeTime(f.dueAt)} ·{" "}
+                    {f.status === "done" ? "已完成" : "待处理"}
                   </span>
                   <Show when={f.status === "pending"}>
                     <button
@@ -1541,7 +1567,7 @@ export function MessagePanel(props: { messageId: string }) {
                         "font-weight": "700",
                       }}
                     >
-                      Mark done
+                      完成
                     </button>
                   </Show>
                 </div>
@@ -1610,76 +1636,42 @@ export function MessagePanel(props: { messageId: string }) {
           </div>
         </Show>
 
-        {/* Bottom action bar — scrollable on mobile so 10 actions don't crush. */}
+        {/* Bottom action bar — the ten prototype actions collapse into a
+            primary row (回复 / 稍后 / 更多) so the bar never wraps or
+            scrolls; everything else lives in the ⋯ menu. */}
         <div
           style={{
             display: "flex",
-            gap: isMobile() ? "0" : "var(--space-1)",
-            "flex-wrap": isMobile() ? "nowrap" : "wrap",
-            "overflow-x": isMobile() ? "auto" : "visible",
+            gap: "var(--space-1)",
             padding: "var(--space-3) var(--space-4)",
             "border-top": "0.5px solid var(--border)",
-            background: "var(--surface-elevated)",
+            background: "var(--glass-bg-strong)",
           }}
         >
           <ActionBtn
             icon="ph-arrow-u-up-left"
-            label="Reply"
+            label="回复"
             onClick={reply}
             compact={isMobile()}
           />
           <ActionBtn
-            icon="ph-users"
-            label="Reply All"
-            onClick={replyAll}
-            compact={isMobile()}
-          />
-          <ActionBtn
-            icon="ph-share-fat"
-            label="Forward"
-            onClick={forward}
-            compact={isMobile()}
-          />
-          <ActionBtn
             icon="ph-clock"
-            label={message()!.replyLater ? "Unmark Later" : "Later"}
+            label={message()!.replyLater ? "取消稍后" : "稍后"}
             active={!!message()!.replyLater}
             onClick={toggleReplyLater}
             compact={isMobile()}
           />
-          <ActionBtn
-            icon="ph-push-pin"
-            label={message()!.setAside ? "Unmark Aside" : "Save"}
-            active={!!message()!.setAside}
-            onClick={toggleSetAside}
-            compact={isMobile()}
-          />
-          <ActionBtn
-            icon="ph-arrow-fat-line-up"
-            label="Remind"
-            onClick={bubbleUp}
-            compact={isMobile()}
-          />
-          <ActionBtn
-            icon="ph-bell-ringing"
-            label="Follow-up"
-            onClick={() => setFuPickerOpen(true)}
-            compact={isMobile()}
-          />
-          <ActionBtn
-            icon="ph-note"
-            label="Sticky"
-            onClick={addSticky}
-            compact={isMobile()}
-          />
-          <ActionBtn
-            icon="ph-bookmark-simple"
-            label="Clip"
-            onClick={addClip}
-            compact={isMobile()}
-          />
           <MoreMenu
             bucket={message()!.bucket}
+            replyLaterActive={!!message()!.replyLater}
+            setAsideActive={!!message()!.setAside}
+            onReplyAll={replyAll}
+            onForward={forward}
+            onToggleSetAside={toggleSetAside}
+            onRemind={bubbleUp}
+            onFollowUp={() => setFuPickerOpen(true)}
+            onSticky={addSticky}
+            onClip={addClip}
             onArchive={archiveMessage}
             onTrash={moveToTrash}
             onSpam={moveToSpam}
@@ -1751,19 +1743,19 @@ function HeaderActions(props: {
     >
       <HeaderActionBtn
         icon="ph-sparkle"
-        label="Summarize"
+        label="总结"
         testId="message-summarize"
         onClick={props.onSummarize}
       />
       <HeaderActionBtn
         icon="ph-copy"
-        label="Copy"
+        label="复制"
         testId="message-copy"
         onClick={props.onCopy}
       />
       <HeaderActionBtn
         icon="ph-download-simple"
-        label="Download"
+        label="下载"
         testId="message-download"
         onClick={props.onDownload}
       />
@@ -1804,15 +1796,43 @@ function HeaderActionBtn(props: {
   );
 }
 
+const VIEW_MODES: { value: ViewMode; label: string }[] = [
+  { value: "rendered", label: "富文本" },
+  { value: "plain", label: "纯文本" },
+  { value: "source", label: "源码" },
+];
+
 function ViewModeToggle(props: {
   mode: ViewMode;
   onChange: (mode: ViewMode) => void;
+  narrow?: boolean;
 }) {
-  const modes: { value: ViewMode; label: string }[] = [
-    { value: "rendered", label: "Rendered" },
-    { value: "plain", label: "Plain" },
-    { value: "source", label: "Source" },
-  ];
+  // Narrow panels (<420px, e.g. a resized detail pane or mobile sheet)
+  // collapse the three-way pill toggle into a compact dropdown so the
+  // header actions stay reachable.
+  if (props.narrow) {
+    return (
+      <select
+        aria-label="正文显示方式"
+        title="正文显示方式"
+        value={props.mode}
+        onChange={(e) => props.onChange(e.currentTarget.value as ViewMode)}
+        style={{
+          padding: "4px 8px",
+          "border-radius": "var(--radius-pill)",
+          border: "0.5px solid var(--border)",
+          background: "var(--paper-mid)",
+          "font-size": "var(--text-micro)",
+          "font-weight": "600",
+          color: "var(--text-primary)",
+        }}
+      >
+        <For each={VIEW_MODES}>
+          {(m) => <option value={m.value}>{m.label}</option>}
+        </For>
+      </select>
+    );
+  }
   return (
     <div
       style={{
@@ -1823,7 +1843,7 @@ function ViewModeToggle(props: {
         border: "0.5px solid var(--border)",
       }}
     >
-      <For each={modes}>
+      <For each={VIEW_MODES}>
         {(m) => (
           <button
             data-view-mode={m.value}
@@ -1833,6 +1853,7 @@ function ViewModeToggle(props: {
               "border-radius": "var(--radius-pill)",
               "font-size": "var(--text-micro)",
               "font-weight": "600",
+              "white-space": "nowrap",
               background:
                 props.mode === m.value
                   ? "var(--surface-elevated)"
@@ -1944,8 +1965,102 @@ function ActionBtn(props: {
   );
 }
 
+export interface MoreMenuItemDef {
+  id: string;
+  icon: string;
+  label: string;
+  testId?: string;
+  danger?: boolean;
+  /** Visual separator rendered above this item. */
+  separator?: boolean;
+}
+
+/** Pure item list for the message ⋯ menu — exported for tests. The
+ *  current bucket's move target and any not-applicable actions are
+ *  filtered out here so the component stays a dumb renderer. */
+export function moreMenuItemDefs(opts: {
+  bucket: Message["bucket"];
+  setAsideActive: boolean;
+}): MoreMenuItemDef[] {
+  const defs: MoreMenuItemDef[] = [
+    { id: "reply-all", icon: "ph-users", label: "回复全部" },
+    { id: "forward", icon: "ph-share-fat", label: "转发" },
+    {
+      id: "set-aside",
+      icon: "ph-push-pin",
+      label: opts.setAsideActive ? "取消搁置" : "搁置",
+    },
+    { id: "remind", icon: "ph-arrow-fat-line-up", label: "提醒我" },
+    { id: "follow-up", icon: "ph-bell-ringing", label: "跟进提醒" },
+    { id: "sticky", icon: "ph-note", label: "添加便签" },
+    { id: "clip", icon: "ph-bookmark-simple", label: "保存为 Clip" },
+  ];
+  const moves: MoreMenuItemDef[] = (
+    [
+      {
+        id: "move-imbox",
+        icon: "ph-tray",
+        label: "移到 Imbox",
+        testId: "message-move-imbox",
+        bucket: "imbox",
+      },
+      {
+        id: "move-feed",
+        icon: "ph-newspaper",
+        label: "移到 Stream",
+        testId: "message-move-feed",
+        bucket: "feed",
+      },
+      {
+        id: "move-paperTrail",
+        icon: "ph-folder",
+        label: "移到 Records",
+        testId: "message-move-paperTrail",
+        bucket: "paperTrail",
+      },
+    ] as (MoreMenuItemDef & { bucket: Message["bucket"] })[]
+  )
+    .filter((it) => it.bucket !== opts.bucket)
+    .map(({ bucket: _bucket, ...rest }) => ({
+      ...rest,
+      separator: rest.id === "move-imbox" || undefined,
+    }));
+  // The separator belongs on the first surviving move item, not
+  // specifically on move-imbox (which is filtered out when the message
+  // is already in the Imbox).
+  if (moves.length > 0) moves[0]!.separator = true;
+  return [
+    ...defs,
+    ...moves,
+    { id: "ask-agent", icon: "ph-sparkle", label: "问 Agent", testId: "message-ask-agent", separator: moves.length === 0 || undefined },
+    { id: "label", icon: "ph-tag", label: "标签" },
+    { id: "move", icon: "ph-folder", label: "移动到…" },
+    { id: "save-draft", icon: "ph-file-dotted", label: "保存为草稿" },
+    { id: "archive", icon: "ph-archive", label: "归档" },
+    { id: "unread", icon: "ph-envelope-open", label: "标为未读" },
+    {
+      id: "trash",
+      icon: "ph-trash",
+      label: "移到回收站",
+      testId: "message-move-trash",
+      danger: true,
+    },
+    { id: "spam", icon: "ph-warning-circle", label: "移到垃圾邮件", danger: true },
+    { id: "block", icon: "ph-prohibit", label: "屏蔽发件人", danger: true },
+  ];
+}
+
 function MoreMenu(props: {
   bucket: Message["bucket"];
+  replyLaterActive: boolean;
+  setAsideActive: boolean;
+  onReplyAll: () => void;
+  onForward: () => void;
+  onToggleSetAside: () => Promise<void> | void;
+  onRemind: () => void;
+  onFollowUp: () => void;
+  onSticky: () => Promise<void> | void;
+  onClip: () => Promise<void> | void;
   onArchive: () => Promise<void> | void;
   onTrash: () => Promise<void> | void;
   onSpam: () => Promise<void> | void;
@@ -1959,128 +2074,36 @@ function MoreMenu(props: {
 }) {
   const [open, setOpen] = createSignal(false);
 
-  const directMoveItems: {
-    icon: string;
-    label: string;
-    testId: string;
-    bucket: Message["bucket"];
-  }[] = [
-    {
-      icon: "ph-tray",
-      label: "移到 Imbox",
-      testId: "message-move-imbox",
-      bucket: "imbox",
-    },
-    {
-      icon: "ph-newspaper",
-      label: "移到 Stream",
-      testId: "message-move-feed",
-      bucket: "feed",
-    },
-    {
-      icon: "ph-folder",
-      label: "移到 Records",
-      testId: "message-move-paperTrail",
-      bucket: "paperTrail",
-    },
-  ];
-
-  type MenuItem = {
-    icon: string;
-    label: string;
-    testId?: string;
-    action: () => void;
+  const handlers: Record<string, () => void> = {
+    "reply-all": () => props.onReplyAll(),
+    forward: () => props.onForward(),
+    "set-aside": () => void props.onToggleSetAside(),
+    remind: () => props.onRemind(),
+    "follow-up": () => props.onFollowUp(),
+    sticky: () => void props.onSticky(),
+    clip: () => void props.onClip(),
+    "move-imbox": () => void props.onMoveToBucket("imbox"),
+    "move-feed": () => void props.onMoveToBucket("feed"),
+    "move-paperTrail": () => void props.onMoveToBucket("paperTrail"),
+    "ask-agent": () => void props.onAskAgent(),
+    label: () => props.onLabel(),
+    move: () => props.onMove(),
+    "save-draft": () => void props.onSaveDraft(),
+    archive: () => void props.onArchive(),
+    unread: () => void props.onUnread(),
+    trash: () => void props.onTrash(),
+    spam: () => void props.onSpam(),
+    block: () => void props.onBlock(),
   };
 
-  const items: MenuItem[] = [
-    ...directMoveItems
-      .filter((it) => it.bucket !== props.bucket)
-      .map((it) => ({
-        icon: it.icon,
-        label: it.label,
-        testId: it.testId,
-        action: () => {
-          setOpen(false);
-          void props.onMoveToBucket(it.bucket);
-        },
-      })),
-    {
-      icon: "ph-sparkle",
-      label: "Ask Agent",
-      testId: "message-ask-agent",
-      action: () => {
-        setOpen(false);
-        void props.onAskAgent();
-      },
-    },
-    {
-      icon: "ph-archive",
-      label: "归档",
-      action: () => {
-        setOpen(false);
-        void props.onArchive();
-      },
-    },
-    {
-      icon: "ph-file-dotted",
-      label: "保存为草稿",
-      action: () => {
-        setOpen(false);
-        void props.onSaveDraft();
-      },
-    },
-    {
-      icon: "ph-tag",
-      label: "标签",
-      action: () => {
-        setOpen(false);
-        props.onLabel();
-      },
-    },
-    {
-      icon: "ph-folder",
-      label: "移动",
-      action: () => {
-        setOpen(false);
-        props.onMove();
-      },
-    },
-    {
-      icon: "ph-envelope-open",
-      label: "标为未读",
-      action: () => {
-        setOpen(false);
-        void props.onUnread();
-      },
-    },
-    {
-      icon: "ph-trash",
-      label: "移到 Trash",
-      testId: "message-move-trash",
-      action: () => {
-        setOpen(false);
-        void props.onTrash();
-      },
-    },
-    {
-      icon: "ph-warning-circle",
-      label: "移到 Spam",
-      action: () => {
-        setOpen(false);
-        void props.onSpam();
-      },
-    },
-    {
-      icon: "ph-prohibit",
-      label: "屏蔽发件人",
-      action: () => {
-        setOpen(false);
-        void props.onBlock();
-      },
-    },
-  ];
+  const items = () =>
+    moreMenuItemDefs({
+      bucket: props.bucket,
+      setAsideActive: props.setAsideActive,
+    });
+
   return (
-    <div style={{ position: "relative" }}>
+    <div style={{ position: "relative", flex: 1, display: "flex" }}>
       <ActionBtn
         icon="ph-dots-three"
         label="更多"
@@ -2093,42 +2116,64 @@ function MoreMenu(props: {
             position: "absolute",
             bottom: "calc(100% + 8px)",
             right: 0,
-            "min-width": "160px",
-            background: "var(--surface-elevated)",
-            border: "0.5px solid var(--border)",
-            "border-radius": "var(--radius-md)",
-            "box-shadow": "var(--shadow-md)",
+            "min-width": "180px",
+            ...glassPanelStyle,
+            "border-radius": "var(--radius-lg, var(--radius-md))",
             padding: "4px",
             "z-index": 10,
+            "max-height": "70vh",
+            "overflow-y": "auto",
           }}
         >
-          <For each={items}>
+          <For each={items()}>
             {(item) => (
-              <button
-                data-testid={item.testId}
-                onClick={item.action}
-                style={{
-                  display: "flex",
-                  "align-items": "center",
-                  gap: "var(--space-2)",
-                  width: "100%",
-                  padding: "8px 10px",
-                  "border-radius": "var(--radius-sm)",
-                  "font-size": "var(--text-caption)",
-                  color: "var(--text-primary)",
-                  background: "transparent",
-                  cursor: "pointer",
-                }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.background = "var(--paper-mid)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.background = "transparent")
-                }
-              >
-                <Icon name={item.icon} size={16} />
-                {item.label}
-              </button>
+              <>
+                <Show when={item.separator}>
+                  <div
+                    style={{
+                      height: "0.5px",
+                      background: "var(--border)",
+                      margin: "4px 6px",
+                    }}
+                  />
+                </Show>
+                <button
+                  data-testid={item.testId}
+                  onClick={() => {
+                    setOpen(false);
+                    handlers[item.id]?.();
+                  }}
+                  style={{
+                    display: "flex",
+                    "align-items": "center",
+                    gap: "var(--space-2)",
+                    width: "100%",
+                    padding: "8px 10px",
+                    "border-radius": "var(--radius-sm)",
+                    "font-size": "var(--text-caption)",
+                    color: item.danger
+                      ? "var(--status-danger)"
+                      : "var(--text-primary)",
+                    background: "transparent",
+                    cursor: "pointer",
+                  }}
+                  onMouseEnter={(e) =>
+                    (e.currentTarget.style.background = "var(--paper-mid)")
+                  }
+                  onMouseLeave={(e) =>
+                    (e.currentTarget.style.background = "transparent")
+                  }
+                  onFocus={(e) =>
+                    (e.currentTarget.style.background = "var(--paper-mid)")
+                  }
+                  onBlur={(e) =>
+                    (e.currentTarget.style.background = "transparent")
+                  }
+                >
+                  <Icon name={item.icon} size={16} />
+                  {item.label}
+                </button>
+              </>
             )}
           </For>
         </div>
@@ -2383,8 +2428,8 @@ function MessageBodyIframe(props: { message: Message; senderEmail?: string }) {
           onClick={handlePlainTextLinkClick}
           style={{
             "font-size": "var(--text-body-sm)",
-            color: "var(--text-secondary)",
-            "line-height": 1.6,
+            color: "var(--text-primary)",
+            "line-height": 1.7,
             "overflow-wrap": "anywhere",
             "word-break": "break-word",
             "margin-bottom": "var(--space-2)",
@@ -2525,7 +2570,7 @@ function MessageBodyIframe(props: { message: Message; senderEmail?: string }) {
           border: "none",
           "background-color": "transparent",
         }}
-        title="Message body"
+        title="邮件正文"
       />
       {/* Show images + per-sender "always show" — only mount when the
           sanitized HTML actually contains external <img> tags. The

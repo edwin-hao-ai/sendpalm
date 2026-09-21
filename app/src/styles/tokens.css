@@ -61,6 +61,27 @@
   --status-danger: #ff3b30;
   --status-info: #5ac8fa;
 
+  /* ── Semantic danger / toast aliases ─────────────────────────── */
+  /* --danger is referenced by Settings/Trash danger-zone styles;
+     toast kinds are consumed by ToastStack. Keep them token-based. */
+  --danger: var(--status-danger);
+  --danger-soft: rgba(255, 59, 48, 0.1);
+  --toast-success: var(--palm);
+  --toast-error: var(--status-danger);
+  --toast-info: var(--cobalt);
+
+  /* ── Liquid glass (Apple-style translucent overlays) ─────────── */
+  /* Apply via the `.glass-panel` utility in base.css, or compose
+     these tokens inline for floating surfaces (popover, toast,
+     sheet, bottom tab bar). Never hard-code the recipe elsewhere. */
+  --glass-bg: color-mix(in srgb, var(--paper-light) 82%, transparent);
+  --glass-bg-strong: color-mix(in srgb, var(--paper-light) 92%, transparent);
+  --glass-border: rgba(255, 255, 255, 0.55);
+  --glass-blur: blur(20px) saturate(1.4);
+  --glass-shadow:
+    0 12px 40px rgba(35, 28, 51, 0.12), 0 2px 8px rgba(35, 28, 51, 0.06);
+  --glass-radius: var(--radius-xl);
+
   /* ── Typography ──────────────────────────────────────────────── */
   --font-display:
     "Really Sans Large", -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
@@ -187,4 +208,11 @@
   --text-primary: var(--ink);
   --text-secondary: var(--ink-soft);
   --text-muted: var(--ink-muted);
+
+  /* Glass tokens re-derived from the dark paper palette. */
+  --glass-bg: color-mix(in srgb, var(--paper-light) 78%, transparent);
+  --glass-bg-strong: color-mix(in srgb, var(--paper-light) 90%, transparent);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.24);
 }

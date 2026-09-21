@@ -14,9 +14,9 @@ import type { Contact, Message } from "../types";
 export type SortMode = "newest" | "oldest" | "most_relevant";
 
 export const SORT_LABELS: Record<SortMode, string> = {
-  newest: "Newest first",
-  oldest: "Oldest first",
-  most_relevant: "Most relevant",
+  newest: "最新优先",
+  oldest: "最早优先",
+  most_relevant: "最相关",
 };
 
 export const DEFAULT_SORT: SortMode = "newest";

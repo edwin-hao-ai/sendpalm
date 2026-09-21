@@ -143,13 +143,13 @@ test.describe("Settings → Data backup / restore", () => {
     await page.locator('[data-nav-view="settings"]').click();
     await page.locator('[data-testid="settings-menu-item-data"]').click();
     await expect(
-      page.getByRole("button", { name: /导出 Mailbox backup/ }),
+      page.getByRole("button", { name: /导出邮箱备份/ }),
     ).toBeVisible({ timeout: 5_000 });
     await shoot(page, "01-settings-data");
 
     const { name, body } = await clickAndCaptureDownload(
       page,
-      "button:has-text('导出 Mailbox backup')",
+      "button:has-text('导出邮箱备份')",
     );
 
     expect(name).toBe("sendpalm-mailbox-backup.json");
@@ -172,12 +172,12 @@ test.describe("Settings → Data backup / restore", () => {
     await page.locator('[data-nav-view="settings"]').click();
     await page.locator('[data-testid="settings-menu-item-data"]').click();
     await expect(
-      page.getByRole("button", { name: /导出 Contacts CSV/ }),
+      page.getByRole("button", { name: /导出联系人/ }),
     ).toBeVisible({ timeout: 5_000 });
 
     const { name, body } = await clickAndCaptureDownload(
       page,
-      "button:has-text('导出 Contacts CSV')",
+      "button:has-text('导出联系人')",
     );
 
     expect(name).toBe("sendpalm-contacts.csv");
@@ -199,12 +199,12 @@ test.describe("Settings → Data backup / restore", () => {
     await page.locator('[data-nav-view="settings"]').click();
     await page.locator('[data-testid="settings-menu-item-data"]').click();
     await expect(
-      page.getByRole("button", { name: /导出 Tasks JSON/ }),
+      page.getByRole("button", { name: /导出任务/ }),
     ).toBeVisible({ timeout: 5_000 });
 
     const { name, body } = await clickAndCaptureDownload(
       page,
-      "button:has-text('导出 Tasks JSON')",
+      "button:has-text('导出任务')",
     );
 
     expect(name).toBe("sendpalm-tasks.json");

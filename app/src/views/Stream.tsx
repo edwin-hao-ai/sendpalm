@@ -13,6 +13,7 @@
 import {
   For,
   Show,
+  createEffect,
   createMemo,
   createResource,
   createSignal,
@@ -21,18 +22,14 @@ import {
 import { VList, type VListHandle } from "virtua/solid";
 import { listContacts } from "../stores/data";
 import type { Contact, Message } from "../types";
-import {
-  listFiles,
-  upsertMessage,
-} from "../stores/data";
+import { listFiles, upsertMessage } from "../stores/data";
 import { usePaginatedMessages } from "../utils/paginated-messages";
 import { Avatar } from "../components/Avatar";
 import { Empty } from "../components/Empty";
 import { ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { htmlEmailSrcdoc } from "../utils/html";
-import { showToast } from "../stores/ui";
-import { useViewport } from "../utils/gestures";
+import { setView, showToast } from "../stores/ui";
 import { registerPrepend } from "../services/sync-events";
 
 const PREVIEW_PARAGRAPHS = 2;
@@ -47,12 +44,10 @@ function splitParagraphs(body: string): string[] {
 export function Stream() {
   const [contacts] = createResource(listContacts);
   const [files] = createResource(listFiles);
-  const { isMobile } = useViewport();
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
 
   const paged = usePaginatedMessages({ bucket: "feed" });
   const items = paged.items;
-  const refresh = paged.refresh;
 
   // Live-prepend on sync:new-messages so a freshly delivered newsletter
   // appears at the top of the list within one IPC round-trip instead of
@@ -87,25 +82,48 @@ export function Stream() {
 
   const isExpanded = (id: string) => expanded().has(id);
 
+  // Flag changes (setAside / replyLater) do NOT change the bucket, so the
+  // card stays in the Stream list — removing it optimistically would make
+  // the message "come back" on the next refresh, which reads as a bug.
   const setAside = async (m: Message) => {
-    paged.removeByIds([m.id]);
     try {
       await upsertMessage({ ...m, setAside: true });
-      showToast({ message: "已 Set Aside", kind: "success" });
+      paged.patchMessage(m.id, { setAside: true });
+      showToast({
+        message: "已搁置，仍保留在 Stream 中",
+        kind: "success",
+        action: { label: "查看搁置堆", run: () => {
+            setView("setAside");
+          } },
+      });
     } catch (err) {
-      await refresh();
-      showToast({ message: `Set Aside 失败：${String(err)}`, kind: "error" });
+      showToast({
+        message: "操作失败，请重试",
+        kind: "error",
+        source: "stream",
+        detail: String(err),
+      });
     }
   };
 
   const replyLater = async (m: Message) => {
-    paged.removeByIds([m.id]);
     try {
       await upsertMessage({ ...m, replyLater: true });
-      showToast({ message: "已 Reply Later", kind: "success" });
+      paged.patchMessage(m.id, { replyLater: true });
+      showToast({
+        message: "已加入稍后回复，仍保留在 Stream 中",
+        kind: "success",
+        action: { label: "查看稍后回复", run: () => {
+            setView("replyLater");
+          } },
+      });
     } catch (err) {
-      await refresh();
-      showToast({ message: `Reply Later 失败：${String(err)}`, kind: "error" });
+      showToast({
+        message: "操作失败，请重试",
+        kind: "error",
+        source: "stream",
+        detail: String(err),
+      });
     }
   };
 
@@ -133,66 +151,67 @@ export function Stream() {
         fallback={
           <ErrorState
             title="Stream 加载失败"
-            message={String(paged.resource.error ?? "")}
+            message="请检查网络后重试。"
             retry={() => void paged.refresh()}
           />
         }
       >
         <SectionHeader
-        title="The Stream"
-        subtitle={`订阅邮件、长文慢慢看。点击展开全文，多篇可同时展开。无 DetailPanel，光滑滚动。${
-          paged.hasMore() ? ` · 已加载 ${items().length}/${paged.total()}` : ""
-        }`}
-      />
-      <Show
-        when={paged.resource.state !== "pending"}
-        fallback={
-          <div
-            style={{
-              "max-width": "720px",
-              margin: "var(--space-4) auto",
-              padding: "0 var(--space-5)",
-            }}
-          >
-            <SkeletonBlock />
-          </div>
-        }
-      >
-        <Show when={items().length > 0} fallback={<EmptyState />}>
-          <div
-            style={{
-              "max-width": "720px",
-              width: "100%",
-              margin: "0 auto",
-              padding: "0 var(--space-5) var(--space-7)",
-              flex: 1,
-              "min-height": 0,
-            }}
-          >
-            <VList
-              ref={(h) => (listRef = (h ?? undefined) as VListHandle | undefined)}
-              data={items()}
-              onScroll={loadMoreIfNearEnd}
-              style={{ height: "100%" }}
+          title="The Stream"
+          subtitle={`订阅邮件、长文慢慢看。点击卡片展开全文，可同时展开多篇。${
+            paged.hasMore() ? ` 已加载 ${items().length}/${paged.total()}` : ""
+          }`}
+        />
+        <Show
+          when={paged.resource.state !== "pending"}
+          fallback={
+            <div
+              style={{
+                "max-width": "720px",
+                margin: "var(--space-4) auto",
+                padding: "0 var(--space-5)",
+              }}
             >
-              {(m: Message) => (
-                <StreamCard
-                  m={m}
-                  contact={contactById().get(m.pid)}
-                  attachments={(m.attachments ?? [])
-                    .map((id) => fileById().get(id))
-                    .filter((f): f is { name: string; mime: string } => !!f)}
-                  expanded={isExpanded(m.id)}
-                  onToggle={() => toggle(m.id)}
-                  onSetAside={() => void setAside(m)}
-                  onReplyLater={() => void replyLater(m)}
-                  isMobile={isMobile()}
-                />
-              )}
-            </VList>
-          </div>
+              <SkeletonBlock />
+            </div>
+          }
+        >
+          <Show when={items().length > 0} fallback={<EmptyState />}>
+            <div
+              style={{
+                "max-width": "720px",
+                width: "100%",
+                margin: "0 auto",
+                padding: "0 var(--space-5) var(--space-7)",
+                flex: 1,
+                "min-height": 0,
+              }}
+            >
+              <VList
+                ref={(h) =>
+                  (listRef = (h ?? undefined) as VListHandle | undefined)
+                }
+                data={items()}
+                onScroll={loadMoreIfNearEnd}
+                style={{ height: "100%" }}
+              >
+                {(m: Message) => (
+                  <StreamCard
+                    m={m}
+                    contact={contactById().get(m.pid)}
+                    attachments={(m.attachments ?? [])
+                      .map((id) => fileById().get(id))
+                      .filter((f): f is { name: string; mime: string } => !!f)}
+                    expanded={isExpanded(m.id)}
+                    onToggle={() => toggle(m.id)}
+                    onSetAside={() => void setAside(m)}
+                    onReplyLater={() => void replyLater(m)}
+                  />
+                )}
+              </VList>
+            </div>
+          </Show>
         </Show>
-      </Show>
       </Show>
     </div>
   );
@@ -206,11 +225,18 @@ interface StreamCardProps {
   onToggle: () => void;
   onSetAside: () => void;
   onReplyLater: () => void;
-  isMobile: boolean;
 }
 
 function StreamCard(props: StreamCardProps) {
   const paragraphs = createMemo(() => splitParagraphs(props.m.body || ""));
+  const hasHtml = () => !!props.m.bodyHtml;
+  // Text paragraphs are the fallback rendering for plain-text mail and
+  // the collapsed preview for HTML mail. When an HTML body is expanded,
+  // the iframe is the single rendering path — showing the paragraphs too
+  // would print the same content twice.
+  const showParagraphs = createMemo(
+    () => !(hasHtml() && props.expanded) && paragraphs().length > 0,
+  );
   const visibleParagraphs = createMemo(() =>
     props.expanded
       ? paragraphs()
@@ -229,13 +255,14 @@ function StreamCard(props: StreamCardProps) {
       }}
       style={{
         "border-radius": "var(--radius-lg)",
-        "border-bottom": "0.5px solid var(--border)",
         padding: "var(--space-5) var(--space-4)",
-        background: props.expanded ? "var(--paper-light)" : "transparent",
+        background: "var(--paper-light)",
+        border: "0.5px solid var(--border)",
+        "box-shadow": props.expanded ? "var(--shadow-md)" : "var(--shadow-sm)",
         cursor: "pointer",
         transition:
-          "background var(--duration-fast) var(--ease-out)",
-        "margin-bottom": "var(--space-2)",
+          "box-shadow var(--duration-fast) var(--ease-out)",
+        "margin-bottom": "var(--space-3)",
       }}
     >
       <header
@@ -247,13 +274,13 @@ function StreamCard(props: StreamCardProps) {
         }}
       >
         <Avatar
-          name={props.contact?.name ?? "Newsletter"}
+          name={props.contact?.name ?? "订阅"}
           src={props.contact?.avatar}
           size={40}
         />
         <div style={{ flex: 1, "min-width": 0 }}>
           <strong style={{ "font-weight": 700 }}>
-            {props.contact?.name ?? "Newsletter"}
+            {props.contact?.name ?? "订阅"}
           </strong>
           <div
             style={{
@@ -269,21 +296,26 @@ function StreamCard(props: StreamCardProps) {
             e.stopPropagation();
             props.onToggle();
           }}
-          title={props.expanded ? "收起" : "展开"}
-          aria-label={props.expanded ? "收起" : "展开"}
+          title={props.expanded ? "收起" : "展开全文"}
+          aria-label={props.expanded ? "收起" : "展开全文"}
           style={{
             background: "transparent",
             border: "0",
             color: "var(--text-muted)",
             cursor: "pointer",
-            padding: "6px",
+            width: "44px",
+            height: "44px",
+            margin: "-10px -10px -10px 0",
             "border-radius": "var(--radius-pill)",
             display: "inline-flex",
             "align-items": "center",
             "justify-content": "center",
           }}
         >
-          <Icon name={props.expanded ? "ph-caret-up" : "ph-caret-down"} size={14} />
+          <Icon
+            name={props.expanded ? "ph-caret-up" : "ph-caret-down"}
+            size={16}
+          />
         </button>
       </header>
 
@@ -298,33 +330,11 @@ function StreamCard(props: StreamCardProps) {
         {props.m.subj}
       </h3>
 
-      <Show when={props.m.bodyHtml && props.expanded}>
-        <div
-          data-stream-html
-          style={{
-            margin: "0 0 var(--space-3)",
-            "border-radius": "var(--radius-md)",
-            overflow: "hidden",
-            border: "0.5px solid var(--border)",
-            background: "var(--paper)",
-          }}
-        >
-          <iframe
-            srcdoc={htmlEmailSrcdoc(props.m.bodyHtml!)}
-            sandbox=""
-            title={props.m.subj}
-            style={{
-              width: "100%",
-              border: "0",
-              "min-height": "200px",
-              height: "480px",
-              display: "block",
-            }}
-          />
-        </div>
+      <Show when={hasHtml() && props.expanded}>
+        <StreamHtmlBody html={props.m.bodyHtml!} title={props.m.subj} />
       </Show>
 
-      <Show when={visibleParagraphs().length > 0}>
+      <Show when={showParagraphs()}>
         <div
           style={{
             color: "var(--text-secondary)",
@@ -338,23 +348,34 @@ function StreamCard(props: StreamCardProps) {
         </div>
       </Show>
 
-      <Show when={!props.expanded && paragraphs().length > PREVIEW_PARAGRAPHS}>
+      <Show
+        when={
+          !props.expanded &&
+          !hasHtml() &&
+          paragraphs().length > PREVIEW_PARAGRAPHS
+        }
+      >
         <button
           onClick={(e) => {
             e.stopPropagation();
             props.onToggle();
           }}
           style={{
-            background: "transparent",
+            background: "var(--palm-soft)",
             border: "0",
             color: "var(--palm)",
             "font-weight": 700,
             "font-size": "var(--text-caption)",
-            padding: "var(--space-2) 0",
+            padding: "6px 14px",
+            "border-radius": "var(--radius-pill)",
             cursor: "pointer",
+            display: "inline-flex",
+            "align-items": "center",
+            gap: "4px",
           }}
         >
-          展开全文 ({paragraphs().length - PREVIEW_PARAGRAPHS} 段更多) ↓
+          展开全文（还有 {paragraphs().length - PREVIEW_PARAGRAPHS} 段）
+          <Icon name="ph-caret-down" size={12} />
         </button>
       </Show>
 
@@ -373,12 +394,12 @@ function StreamCard(props: StreamCardProps) {
         >
           <ActionButton
             icon="ph-clock"
-            label={props.isMobile ? "" : "Reply Later"}
+            label="稍后回复"
             onClick={props.onReplyLater}
           />
           <ActionButton
             icon="ph-push-pin"
-            label={props.isMobile ? "" : "Set Aside"}
+            label="搁置"
             onClick={props.onSetAside}
           />
           <Show when={props.attachments.length > 0}>
@@ -405,6 +426,61 @@ function StreamCard(props: StreamCardProps) {
   );
 }
 
+/** HTML body renderer for an expanded Stream card.
+ *  Follows the §11.6 defer pattern: DOMPurify runs in a `setTimeout(0)`
+ *  effect so expanding a card never blocks the main thread, and the
+ *  iframe auto-sizes to its content on load. */
+function StreamHtmlBody(props: { html: string; title: string }) {
+  const [srcdoc, setSrcdoc] = createSignal("");
+  let stale = 0;
+
+  createEffect(() => {
+    const html = props.html;
+    const myId = ++stale;
+    setTimeout(() => {
+      if (myId !== stale) return;
+      setSrcdoc(htmlEmailSrcdoc(html));
+    }, 0);
+  });
+
+  return (
+    <div
+      data-stream-html
+      style={{
+        margin: "0 0 var(--space-3)",
+        "border-radius": "var(--radius-md)",
+        overflow: "hidden",
+        border: "0.5px solid var(--border)",
+        background: "var(--paper)",
+      }}
+    >
+      <iframe
+        srcdoc={srcdoc()}
+        sandbox=""
+        title={props.title}
+        onLoad={(e) => {
+          const el = e.currentTarget;
+          try {
+            const doc = el.contentDocument;
+            if (doc?.body) {
+              el.style.height = `${doc.body.scrollHeight + 24}px`;
+            }
+          } catch {
+            /* sandboxed — keep default height */
+          }
+        }}
+        style={{
+          width: "100%",
+          border: "0",
+          "min-height": "200px",
+          height: "480px",
+          display: "block",
+        }}
+      />
+    </div>
+  );
+}
+
 function ActionButton(props: {
   icon: string;
   label: string;
@@ -413,22 +489,24 @@ function ActionButton(props: {
   return (
     <button
       onClick={props.onClick}
+      title={props.label}
+      aria-label={props.label}
       style={{
         display: "inline-flex",
         "align-items": "center",
         gap: "4px",
-        padding: "6px 10px",
+        padding: "8px 12px",
         background: "var(--paper-mid)",
         "border-radius": "var(--radius-pill)",
         border: "0",
-        "font-size": "var(--text-micro)",
+        "font-size": "var(--text-caption)",
         "font-weight": 700,
         color: "var(--text-secondary)",
         cursor: "pointer",
       }}
     >
-      <Icon name={props.icon} size={12} />
-      {props.label || <span style={{ width: "12px" }} />}
+      <Icon name={props.icon} size={13} />
+      {props.label}
     </button>
   );
 }
@@ -441,17 +519,17 @@ function SectionHeader(props: { title: string; subtitle?: string }) {
         "text-align": "center",
       }}
     >
-      <h2
+      <h1
         style={{
           "font-family": "var(--font-display)",
-          "font-size": "var(--text-h3)",
+          "font-size": "var(--text-h1)",
           "font-weight": 800,
           margin: 0,
           "margin-bottom": "var(--space-1)",
         }}
       >
         {props.title}
-      </h2>
+      </h1>
       <Show when={props.subtitle}>
         <p
           style={{
@@ -482,7 +560,7 @@ function SkeletonBlock() {
             style={{
               padding: "var(--space-5) var(--space-4)",
               "border-radius": "var(--radius-lg)",
-              "border-bottom": "0.5px solid var(--border)",
+              border: "0.5px solid var(--border)",
             }}
           >
             <div
@@ -559,7 +637,7 @@ function EmptyState() {
     <Empty
       icon="ph-newspaper"
       title="Stream 是空的"
-      description="还没有订阅类邮件。等你的下一次签到。"
+      description="订阅邮件和 newsletter 到了会出现在这里。"
     />
   );
 }

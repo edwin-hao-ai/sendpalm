@@ -8,6 +8,7 @@ import {
   listScheduledSends,
   upsertDraft,
   deleteDraft,
+  deleteScheduledSend,
 } from "../stores/data";
 import {
   setComposeOpen,
@@ -17,10 +18,12 @@ import {
 } from "../stores/ui";
 import { Icon } from "../components/Icon";
 import { Empty, ErrorState } from "../components/Empty";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ResourceGate } from "../components/ResourceGate";
 import { SkeletonList } from "../components/Skeleton";
 import type { Draft } from "../types";
 import { relativeTime } from "../utils/date";
+import { draftStatusLabel } from "../utils/draft-status";
 import { useRefreshEffect } from "../utils/gestures";
 
 export function Drafts() {
@@ -28,6 +31,8 @@ export function Drafts() {
   const [scheduled, { refetch: refetchScheduled }] =
     createResource(listScheduledSends);
   const [selected, setSelected] = createSignal<Set<string>>(new Set());
+  const [confirmDiscard, setConfirmDiscard] = createSignal(false);
+  const [cancelSendId, setCancelSendId] = createSignal<string | null>(null);
 
   useRefreshEffect(() => {
     void refetchDrafts();
@@ -79,6 +84,21 @@ export function Drafts() {
     showToast({ message: "已批量删除", kind: "info" });
   };
 
+  const cancelScheduledSend = async (scheduledId: string) => {
+    const s = (scheduled() ?? []).find((x) => x.id === scheduledId);
+    await deleteScheduledSend(scheduledId);
+    const d = s ? (drafts() ?? []).find((x) => x.id === s.draftId) : undefined;
+    if (d) {
+      await upsertDraft({
+        ...d,
+        status: "edited",
+        lastEdited: new Date().toISOString(),
+      });
+    }
+    await Promise.all([refetchDrafts(), refetchScheduled()]);
+    showToast({ message: "已取消定时发送，草稿已退回编辑", kind: "info" });
+  };
+
   return (
     <div
       style={{
@@ -88,8 +108,8 @@ export function Drafts() {
     >
       <header
         style={{
-          padding: "var(--space-5)",
-          "border-bottom": "0.5px solid var(--border)",
+          padding: "var(--space-6) var(--space-5) var(--space-3)",
+          "text-align": "center",
         }}
       >
         <h2
@@ -100,7 +120,7 @@ export function Drafts() {
             margin: 0,
           }}
         >
-          Drafts
+          草稿
         </h2>
         <p
           style={{
@@ -136,7 +156,10 @@ export function Drafts() {
           <button onClick={batchApprove} style={batchBtn("var(--palm)")}>
             批量审批
           </button>
-          <button onClick={batchDiscard} style={batchBtn("var(--coral)")}>
+          <button
+            onClick={() => setConfirmDiscard(true)}
+            style={batchBtn("var(--coral)")}
+          >
             批量删除
           </button>
           <button
@@ -151,6 +174,26 @@ export function Drafts() {
           </button>
         </div>
       </Show>
+
+      <ConfirmDialog
+        open={confirmDiscard()}
+        title={`删除 ${selected().size} 份草稿？`}
+        body="删除后无法恢复。"
+        confirmLabel="删除"
+        onConfirm={() => void batchDiscard()}
+        onCancel={() => setConfirmDiscard(false)}
+      />
+      <ConfirmDialog
+        open={cancelSendId() !== null}
+        title="取消定时发送？"
+        body="邮件不会发出，草稿会退回编辑状态。"
+        confirmLabel="取消发送"
+        onConfirm={() => {
+          const id = cancelSendId();
+          if (id) void cancelScheduledSend(id);
+        }}
+        onCancel={() => setCancelSendId(null)}
+      />
 
       <ResourceGate
         resource={drafts}
@@ -169,7 +212,7 @@ export function Drafts() {
         errorView={(_err, retry) => (
           <ErrorState
             title="草稿加载失败"
-            message={String(drafts.error ?? scheduled.error ?? "")}
+            message="请稍后重试；若持续失败，请检查本地数据库状态。"
             retry={() => {
               retry();
               void refetchScheduled();
@@ -180,7 +223,7 @@ export function Drafts() {
           <Empty
             icon="ph-pencil-line"
             title="还没有草稿"
-            description="按 ⌘N 写一封新邮件，或在 Imbox 里 Reply。"
+            description="按 ⌘N 写一封新邮件，或在 Imbox 里回复任意邮件。"
             action={{ label: "新邮件", onClick: () => setComposeOpen(true) }}
           />
         }
@@ -200,7 +243,7 @@ export function Drafts() {
             }}
           >
             <Show when={grouped().scheduled.length > 0}>
-              <Section title="Scheduled" icon="ph-clock-countdown">
+              <Section title="定时发送" icon="ph-clock-countdown">
                 <For each={grouped().scheduled}>
                   {(s) => {
                     const d = (drafts() ?? []).find((x) => x.id === s.draftId);
@@ -212,6 +255,7 @@ export function Drafts() {
                         onOpen={open}
                         selected={selected().has(d.id)}
                         onSelect={() => toggleSelect(d.id)}
+                        onCancelScheduled={() => setCancelSendId(s.id)}
                       />
                     );
                   }}
@@ -220,7 +264,7 @@ export function Drafts() {
             </Show>
 
             <Show when={grouped().pending.length > 0}>
-              <Section title="Pending approval" icon="ph-hourglass-medium">
+              <Section title="待审批" icon="ph-hourglass-medium">
                 <For each={grouped().pending}>
                   {(d) => (
                     <DraftRow
@@ -235,7 +279,7 @@ export function Drafts() {
             </Show>
 
             <Show when={grouped().manual.length > 0}>
-              <Section title="Manual drafts" icon="ph-file-text">
+              <Section title="手动草稿" icon="ph-file-text">
                 <For each={grouped().manual}>
                   {(d) => (
                     <DraftRow
@@ -250,7 +294,7 @@ export function Drafts() {
             </Show>
 
             <Show when={grouped().sent.length > 0}>
-              <Section title="Sent" icon="ph-paper-plane-tilt">
+              <Section title="已发送" icon="ph-paper-plane-tilt">
                 <For each={grouped().sent}>
                   {(d) => (
                     <DraftRow
@@ -274,7 +318,7 @@ function batchBtn(color: string) {
   return {
     padding: "6px 14px",
     background: color,
-    color: "white",
+    color: "var(--paper-light)",
     "border-radius": "var(--radius-pill)",
     "font-size": "var(--text-caption)",
     "font-weight": "700",
@@ -309,6 +353,7 @@ function DraftRow(props: {
   onOpen: (d: Draft) => void;
   selected: boolean;
   onSelect: () => void;
+  onCancelScheduled?: () => void;
 }) {
   const statusColor: Record<string, string> = {
     pending: "var(--yellow)",
@@ -355,15 +400,12 @@ function DraftRow(props: {
               padding: "2px 8px",
               background: statusColor[props.draft.status],
               "border-radius": "var(--radius-pill)",
-              "font-size": "10px",
+              "font-size": "var(--text-micro)",
               "font-weight": "700",
-              color:
-                props.draft.status === "edited"
-                  ? "var(--text-primary)"
-                  : "var(--text-primary)",
+              color: "var(--text-primary)",
             }}
           >
-            {props.draft.status}
+            {draftStatusLabel(props.draft.status)}
           </span>
         </div>
         <p
@@ -373,22 +415,45 @@ function DraftRow(props: {
             "font-size": "var(--text-caption)",
           }}
         >
-          to {props.draft.recipient} · {relativeTime(props.draft.lastEdited)}
+          发给 {props.draft.recipient || "（未填收件人）"} ·{" "}
+          {relativeTime(props.draft.lastEdited)}
         </p>
       </div>
       <Show when={props.scheduledAt}>
-        <span
+        <div
           style={{
-            "font-size": "var(--text-micro)",
-            color: "var(--text-muted)",
             display: "flex",
-            "align-items": "center",
+            "flex-direction": "column",
+            "align-items": "flex-end",
             gap: "4px",
+            "flex-shrink": 0,
           }}
         >
-          <Icon name="ph-clock" size={11} />
-          发送于 {new Date(props.scheduledAt!).toLocaleString()}
-        </span>
+          <span
+            style={{
+              "font-size": "var(--text-micro)",
+              color: "var(--text-muted)",
+              display: "flex",
+              "align-items": "center",
+              gap: "4px",
+            }}
+          >
+            <Icon name="ph-clock" size={11} />
+            将于 {new Date(props.scheduledAt!).toLocaleString("zh-CN")} 发送
+          </span>
+          <Show when={props.onCancelScheduled}>
+            <button
+              onClick={() => props.onCancelScheduled?.()}
+              style={{
+                "font-size": "var(--text-micro)",
+                color: "var(--coral)",
+                padding: "2px 6px",
+              }}
+            >
+              取消发送
+            </button>
+          </Show>
+        </div>
       </Show>
     </div>
   );

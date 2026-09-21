@@ -159,7 +159,7 @@ async function seedAndOpenMessage(
   // first, then the sanitized srcdoc iframe. The iframe is the
   // `title="Message body"` element in MessageBodyIframe.
   await page
-    .locator('iframe[title="Message body"]')
+    .locator('iframe[title="邮件正文"]')
     .first()
     .waitFor({ timeout: 5_000 });
 }
@@ -186,6 +186,18 @@ test.describe("MessageBodyIframe — 50× rapid resize → 1 height write per co
       st: isoDaysAgo(0, 9),
     });
     await seedAndOpenMessage(page, [contact], [message]);
+    // Wait for the initial measure() write to land, then let the
+    // 200ms cooldown tail elapse so the spy starts from a quiet state.
+    await page.waitForFunction(
+      () => {
+        const f = document.querySelector<HTMLIFrameElement>(
+          'iframe[title="邮件正文"]',
+        );
+        return !!f && /^\d+(\.\d+)?px$/.test(f.style.height);
+      },
+      { timeout: 8_000 },
+    );
+    await page.waitForTimeout(300);
 
     // 1. Install a setter spy on the iframe's `style.height` so we can
     //    count how many times the cooldown-gated measure() path
@@ -193,7 +205,7 @@ test.describe("MessageBodyIframe — 50× rapid resize → 1 height write per co
     //    change the value (skip-equality) don't increment the counter.
     await page.evaluate(() => {
       const iframe = document.querySelector<HTMLIFrameElement>(
-        'iframe[title="Message body"]',
+        'iframe[title="邮件正文"]',
       );
       if (!iframe) throw new Error("iframe not found");
       // We replace the entire `style` object with a Proxy that
@@ -260,7 +272,7 @@ test.describe("MessageBodyIframe — 50× rapid resize → 1 height write per co
     //    has access because the sandbox includes `allow-same-origin`).
     const writeCount = await page.evaluate(async () => {
       const iframe = document.querySelector<HTMLIFrameElement>(
-        'iframe[title="Message body"]',
+        'iframe[title="邮件正文"]',
       );
       if (!iframe) throw new Error("iframe not found");
       const win = iframe.contentWindow as unknown as {
@@ -273,21 +285,24 @@ test.describe("MessageBodyIframe — 50× rapid resize → 1 height write per co
       const writesBefore = win.__sendpalmHeightWrites!.length;
       const doc = iframe.contentDocument;
       if (!doc || !doc.body) throw new Error("iframe body not available");
-      // Add + remove 50 child elements in a tight loop. Each
-      // invalidates the body's contentDocument box, firing a
-      // ResizeObserver entry. Long emails with many inline images
-      // can do this 10-50 times during the first second of paint.
-      for (let i = 0; i < 50; i++) {
-        const div = doc.createElement("div");
-        div.style.height = `${10 + i}px`;
-        doc.body.appendChild(div);
-        doc.body.removeChild(div);
+      // The RO observes the HOST iframe element, not the body — body
+      // mutations alone never fire an entry. First make the body
+      // permanently taller so the scrollHeight really changes (the
+      // doWrite skip-equality check would otherwise suppress writes),
+      // then jiggle the host element's width 10× across rAFs (~160ms,
+      // inside a single 200ms cooldown window) to fire host RO entries.
+      const grow = doc.createElement("div");
+      grow.style.height = "500px";
+      doc.body.appendChild(grow);
+      for (let i = 0; i < 10; i++) {
+        iframe.style.width = i % 2 === 0 ? "99%" : "100%";
+        await new Promise((r) => requestAnimationFrame(r));
       }
-      // Give the cooldown timer a tick to fire (wait 250ms, well past
-      // the 200ms cooldown). All 50 RO entries have been delivered by
-      // now; the cooldown window has had time to expire; exactly one
+      // Give the cooldown timer a tick to fire (wait 300ms, well past
+      // the 200ms cooldown). All host RO entries have been delivered by
+      // now; the cooldown window has had time to expire; at most one
       // height write should have happened.
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 300));
       const writesAfter = win.__sendpalmHeightWrites!.length;
       return {
         delta: writesAfter - writesBefore,
@@ -335,10 +350,20 @@ test.describe("MessageBodyIframe — 50× rapid resize → 1 height write per co
       st: isoDaysAgo(0, 9),
     });
     await seedAndOpenMessage(page, [contact], [message]);
+    await page.waitForFunction(
+      () => {
+        const f = document.querySelector<HTMLIFrameElement>(
+          'iframe[title="邮件正文"]',
+        );
+        return !!f && /^\d+(\.\d+)?px$/.test(f.style.height);
+      },
+      { timeout: 8_000 },
+    );
+    await page.waitForTimeout(300);
 
     await page.evaluate(() => {
       const iframe = document.querySelector<HTMLIFrameElement>(
-        'iframe[title="Message body"]',
+        'iframe[title="邮件正文"]',
       );
       if (!iframe) throw new Error("iframe not found");
       const realStyle = iframe.style;
@@ -390,7 +415,7 @@ test.describe("MessageBodyIframe — 50× rapid resize → 1 height write per co
     // first/last windows each split into 2.
     const result = await page.evaluate(async () => {
       const iframe = document.querySelector<HTMLIFrameElement>(
-        'iframe[title="Message body"]',
+        'iframe[title="邮件正文"]',
       );
       if (!iframe) throw new Error("iframe not found");
       const win = iframe.contentWindow as unknown as {
@@ -400,22 +425,30 @@ test.describe("MessageBodyIframe — 50× rapid resize → 1 height write per co
       if (!doc || !doc.body) throw new Error("iframe body not available");
       const writesBefore = win.__sendpalmHeightWrites!.length;
 
-      const burst = (n: number) => {
-        for (let i = 0; i < n; i++) {
-          const div = doc.createElement("div");
-          div.style.height = `${10 + i}px`;
-          doc.body.appendChild(div);
-          doc.body.removeChild(div);
+      // The RO observes the HOST iframe element, not the body. Each
+      // burst permanently grows the body (so scrollHeight really
+      // changes per window and the skip-equality check can't suppress
+      // writes) and jiggles the host width across rAFs to fire host
+      // RO entries.
+      let windowIndex = 0;
+      const burst = async (n: number) => {
+        const grow = doc.createElement("div");
+        grow.style.height = `${600 + windowIndex * 100}px`;
+        doc.body.appendChild(grow);
+        windowIndex += 1;
+        for (let i = 0; i < Math.min(n, 3); i++) {
+          iframe.style.width = i % 2 === 0 ? "99%" : "100%";
+          await new Promise((r) => requestAnimationFrame(r));
         }
       };
       const sleep = (ms: number) =>
         new Promise<void>((r) => setTimeout(r, ms));
 
-      burst(20);
+      await burst(20);
       await sleep(250); // first cooldown window elapsed
-      burst(20);
+      await burst(20);
       await sleep(250); // second cooldown window elapsed
-      burst(10);
+      await burst(10);
       await sleep(250); // third cooldown window elapsed
       const writesAfter = win.__sendpalmHeightWrites!.length;
       return { delta: writesAfter - writesBefore };

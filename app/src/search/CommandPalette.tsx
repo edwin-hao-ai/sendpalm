@@ -24,141 +24,163 @@ import {
   setSelectedMeetingId,
   setComposeOpen,
   setSelectedDraftId,
+  setHelpOpen,
 } from "../stores/ui";
 import { Icon } from "../components/Icon";
+import { Avatar } from "../components/Avatar";
+
+type CommandGroup =
+  | "Views"
+  | "Actions"
+  | "People"
+  | "Messages"
+  | "Files"
+  | "Drafts"
+  | "Meetings";
+
+/** Group headers are internal keys; users see Chinese. */
+const GROUP_LABEL_ZH: Record<CommandGroup, string> = {
+  Views: "视图",
+  Actions: "操作",
+  People: "联系人",
+  Messages: "邮件",
+  Files: "文件",
+  Drafts: "草稿",
+  Meetings: "会议",
+};
 
 interface Command {
   id: string;
   label: string;
   hint?: string;
   icon: string;
-  group:
-    | "Views"
-    | "Actions"
-    | "People"
-    | "Messages"
-    | "Files"
-    | "Drafts"
-    | "Meetings";
+  group: CommandGroup;
   run: () => void;
 }
 
 const VIEW_COMMANDS: Command[] = [
   {
     id: "v.gate",
-    label: "Go to Gate (Screener)",
+    label: "打开 Gate（筛选台）",
     icon: "ph-shield-check",
     group: "Views",
     run: () => setView("screener"),
   },
   {
     id: "v.imbox",
-    label: "Go to Imbox",
+    label: "打开 Imbox（收件箱）",
     icon: "ph-tray",
     group: "Views",
     run: () => setView("imbox"),
   },
   {
     id: "v.feed",
-    label: "Go to Stream",
+    label: "打开 Stream（资讯流）",
     icon: "ph-newspaper",
     group: "Views",
     run: () => setView("feed"),
   },
   {
     id: "v.paperTrail",
-    label: "Go to Records",
+    label: "打开 Records（收据账单）",
     icon: "ph-receipt",
     group: "Views",
     run: () => setView("paperTrail"),
   },
   {
     id: "v.contacts",
-    label: "Go to Contacts",
+    label: "打开联系人",
     icon: "ph-users",
     group: "Views",
     run: () => setView("contacts"),
   },
   {
     id: "v.companies",
-    label: "Go to Companies",
+    label: "打开公司",
     icon: "ph-buildings",
     group: "Views",
     run: () => setView("companies"),
   },
   {
     id: "v.calendar",
-    label: "Go to Calendar",
+    label: "打开日历",
     icon: "ph-calendar",
     group: "Views",
     run: () => setView("calendar"),
   },
   {
     id: "v.files",
-    label: "Go to Files",
+    label: "打开文件",
     icon: "ph-paperclip",
     group: "Views",
     run: () => setView("files"),
   },
   {
     id: "v.drafts",
-    label: "Go to Drafts",
+    label: "打开草稿",
     icon: "ph-pencil-line",
     group: "Views",
     run: () => setView("drafts"),
   },
   {
     id: "v.followUps",
-    label: "Go to Follow-ups",
+    label: "打开跟进",
     icon: "ph-bell-ringing",
     group: "Views",
     run: () => setView("followUps"),
   },
   {
     id: "v.clips",
-    label: "Go to Clips",
+    label: "打开 Clips（剪藏）",
     icon: "ph-bookmarks",
     group: "Views",
     run: () => setView("clips"),
   },
   {
     id: "v.pending",
-    label: "Go to Pending",
+    label: "打开稍后回复",
     icon: "ph-clock",
     group: "Views",
     run: () => setView("replyLater"),
   },
   {
     id: "v.saved",
-    label: "Go to Saved",
+    label: "打开已搁置",
     icon: "ph-push-pin",
     group: "Views",
     run: () => setView("setAside"),
   },
   {
     id: "v.remind",
-    label: "Go to Remind",
+    label: "打开提醒",
     icon: "ph-arrow-fat-line-up",
     group: "Views",
     run: () => setView("bubbleUp"),
   },
   {
     id: "v.focusReply",
-    label: "Go to Focus & Reply",
+    label: "打开专注回复",
     icon: "ph-target",
     group: "Views",
     run: () => setView("focusReply"),
   },
   {
     id: "v.insights",
-    label: "Go to Insights",
+    label: "打开洞察",
     icon: "ph-chart-line-up",
     group: "Views",
     run: () => setView("insights"),
   },
   {
+    id: "v.agent",
+    label: "打开 Agent 工作台",
+    icon: "ph-robot",
+    group: "Views",
+    run: () => setView("agent"),
+  },
+  {
     id: "v.settings",
-    label: "Go to Settings",
+    label: "打开设置",
     icon: "ph-gear",
     group: "Views",
     run: () => setView("settings"),
@@ -168,14 +190,14 @@ const VIEW_COMMANDS: Command[] = [
 const ACTION_COMMANDS: Command[] = [
   {
     id: "a.compose",
-    label: "Compose new message",
+    label: "写新邮件",
     icon: "ph-pencil-line",
     group: "Actions",
     run: () => setComposeOpen(true),
   },
   {
     id: "a.contact",
-    label: "Add new contact",
+    label: "新建联系人",
     icon: "ph-user-plus",
     group: "Actions",
     run: () => {
@@ -184,7 +206,7 @@ const ACTION_COMMANDS: Command[] = [
   },
   {
     id: "a.task",
-    label: "Add new task",
+    label: "新建任务",
     icon: "ph-check-square",
     group: "Actions",
     run: () => {
@@ -193,14 +215,28 @@ const ACTION_COMMANDS: Command[] = [
   },
   {
     id: "a.event",
-    label: "Create new event",
+    label: "新建日程",
     icon: "ph-calendar-plus",
     group: "Actions",
     run: () => {
       setView("calendar");
     },
   },
+  {
+    id: "a.help",
+    label: "键盘快捷键",
+    icon: "ph-keyboard",
+    group: "Actions",
+    run: () => setHelpOpen(true),
+  },
 ];
+
+/** Chinese date for meeting hints: 2026-09-21 → "2026年9月21日". */
+export function formatEventDateZh(dt: string | number | Date): string {
+  const d = new Date(dt);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日`;
+}
 
 export function CommandPalette() {
   const [query, setQuery] = createSignal("");
@@ -282,7 +318,7 @@ export function CommandPalette() {
     (drafts() ?? []).slice(0, 15).map((d) => ({
       id: `d.${d.id}`,
       label: d.subject || "(无主题)",
-      hint: `${d.status} · to ${d.recipient}`,
+      hint: d.recipient ? `收件人：${d.recipient}` : undefined,
       icon: "ph-file-text",
       group: "Drafts",
       run: () => {
@@ -296,7 +332,7 @@ export function CommandPalette() {
     (events() ?? []).slice(0, 15).map((e) => ({
       id: `e.${e.id}`,
       label: e.title,
-      hint: `${new Date(e.dt).toLocaleDateString()} · ${e.tm}`,
+      hint: `${formatEventDateZh(e.dt)} · ${e.tm}`,
       icon: "ph-calendar-blank",
       group: "Meetings",
       run: () => {
@@ -374,6 +410,7 @@ export function CommandPalette() {
       if (c) run(c);
     } else if (e.key === "Escape") {
       e.preventDefault();
+      e.stopPropagation();
       setCommandPaletteOpen(false);
       setQuery("");
       setCursor(0);
@@ -391,6 +428,8 @@ export function CommandPalette() {
         position: "fixed",
         inset: 0,
         background: "rgba(35,28,51,0.4)",
+        "backdrop-filter": "blur(6px)",
+        "-webkit-backdrop-filter": "blur(6px)",
         display: "flex",
         "align-items": "flex-start",
         "justify-content": "center",
@@ -401,12 +440,17 @@ export function CommandPalette() {
       onClick={() => setCommandPaletteOpen(false)}
     >
       <div
+        role="dialog"
+        aria-label="命令面板"
         style={{
           width: "600px",
           "max-width": "92vw",
-          background: "var(--paper-light)",
-          "border-radius": "var(--radius-lg)",
-          "box-shadow": "var(--shadow-xl)",
+          background: "var(--glass-bg)",
+          "backdrop-filter": "var(--glass-blur)",
+          "-webkit-backdrop-filter": "var(--glass-blur)",
+          border: "0.5px solid var(--glass-border)",
+          "border-radius": "var(--radius-xl)",
+          "box-shadow": "var(--glass-shadow)",
           overflow: "hidden",
           "transform-origin": "top center",
           animation: "modal-enter 0.24s cubic-bezier(0.34, 1.56, 0.64, 1) both",
@@ -430,7 +474,8 @@ export function CommandPalette() {
               setQuery(e.currentTarget.value);
               setCursor(0);
             }}
-            placeholder="Search views, actions, contacts, messages…"
+            placeholder="搜索视图、操作、联系人、邮件…"
+            aria-label="搜索命令"
             style={{
               flex: 1,
               border: "none",
@@ -461,7 +506,7 @@ export function CommandPalette() {
                   "text-align": "center",
                 }}
               >
-                无结果
+                没有匹配的结果
               </li>
             }
           >
@@ -478,10 +523,9 @@ export function CommandPalette() {
                           "font-weight": "700",
                           padding: "var(--space-1) var(--space-3)",
                           "letter-spacing": "0.04em",
-                          "text-transform": "uppercase",
                         }}
                       >
-                        {group}
+                        {GROUP_LABEL_ZH[group as CommandGroup] ?? group}
                       </li>
                       <For each={grouped()[group]}>
                         {(c) => {
@@ -508,7 +552,12 @@ export function CommandPalette() {
                                   "text-align": "left",
                                 }}
                               >
-                                <Icon name={c.icon} size={16} />
+                                <Show
+                                  when={c.group === "People"}
+                                  fallback={<Icon name={c.icon} size={16} />}
+                                >
+                                  <Avatar name={c.label} size={20} />
+                                </Show>
                                 <span
                                   style={{
                                     flex: 1,
@@ -542,6 +591,28 @@ export function CommandPalette() {
             })()}
           </Show>
         </ul>
+        {/* Keyboard hints footer */}
+        <div
+          style={{
+            display: "flex",
+            "align-items": "center",
+            gap: "var(--space-3)",
+            padding: "var(--space-2) var(--space-4)",
+            "border-top": "0.5px solid var(--border)",
+            "font-size": "var(--text-micro)",
+            color: "var(--text-muted)",
+          }}
+        >
+          <span>
+            <kbd style={kbdStyle}>↑↓</kbd> 选择
+          </span>
+          <span>
+            <kbd style={kbdStyle}>↵</kbd> 打开
+          </span>
+          <span>
+            <kbd style={kbdStyle}>esc</kbd> 关闭
+          </span>
+        </div>
       </div>
     </div>
   );

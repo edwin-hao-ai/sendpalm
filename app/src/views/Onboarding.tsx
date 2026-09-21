@@ -1,15 +1,24 @@
 /** Onboarding — 4-step first-run wizard. */
 
-import { Show, createSignal } from "solid-js";
+import { Show, createSignal, onCleanup } from "solid-js";
 import { Icon } from "../components/Icon";
 import {
   onboardingStep,
   setOnboardingStep,
   setOnboardingCompleted,
+  setSettingsTab,
   setView,
 } from "../stores/ui";
 import { load } from "@tauri-apps/plugin-store";
 import { STORE_PATH } from "../bootstrap";
+
+/** When the wizard sends the user to Settings → 账户 to connect their
+ *  first mailbox, the wizard hides without completing. This signal holds
+ *  the step to resume at; Settings renders a「继续新手引导」banner while
+ *  it is non-null. */
+export const [onboardingResumeStep, setOnboardingResumeStep] = createSignal<
+  number | null
+>(null);
 
 interface Step {
   title: string;
@@ -23,30 +32,30 @@ interface Step {
 const STEPS: Step[] = [
   {
     title: "欢迎来到 SendPalm",
-    body: "一个安静的、HEY 风格的本地优先邮件客户端。接你的 Gmail / Outlook / iCloud / 飞书 / 网易 / QQ 任何邮箱，体验 HEY 那种「分门别类」的工作流。",
+    body: "一个安静的、HEY 风格的本地优先邮件客户端。连接你的现有邮箱，用「分门别类」的方式处理邮件，而不是被收件箱淹没。",
     icon: "ph-sparkle",
     color: "var(--palm)",
     cta: "开始",
   },
   {
     title: "连接你的邮箱",
-    body: "支持 10 种邮件服务（Gmail / Outlook / iCloud / 飞书 / QQ / 网易 163 / 126 / Yahoo / Fastmail / 自定义 IMAP）。下一步去添加你的第一个账户。",
+    body: "支持飞书、QQ 邮箱、网易 163 / 126、iCloud、Fastmail 和企业邮箱（自定义域名）。下一步去添加你的第一个账户。",
     icon: "ph-plug-connected",
     color: "var(--cobalt)",
     cta: "去连接",
-    highlight: { label: "凭据存储", value: "OS Keychain" },
+    highlight: { label: "凭据存储", value: "系统钥匙串安全保存" },
   },
   {
     title: "后台自动同步",
-    body: "60 秒 IMAP 循环把新邮件拉到本地 SQLite；Sent 文件夹也同步，所以你用其他客户端发的邮件也能在这里看到。",
+    body: "新邮件每分钟自动收取到本机；已发送文件夹也会同步，所以你用其他客户端发出的邮件同样能在这里看到。",
     icon: "ph-arrows-clockwise",
     color: "var(--purple)",
     cta: "继续",
-    highlight: { label: "拉取协议", value: "60s IMAP 轮询" },
+    highlight: { label: "数据存放", value: "只存在你的电脑上" },
   },
   {
     title: "HEY 工作流，本地运行",
-    body: "Gate 筛选陌生寄件人；L 延迟、A 暂存、Z 提醒；Sticky 黄色便签贴在邮件上；Follow-up 自动跟踪回信。⌘K 全局搜索，j/k 在 Imbox 里穿梭。",
+    body: "Gate（筛选台）替你拦住陌生寄件人；稍后回复、搁置、提醒一键盘点；黄色便签直接贴在邮件上；跟进提醒自动追踪未回复的对话。⌘K 全局搜索，j/k 在列表里穿梭。",
     icon: "ph-paper-plane-tilt",
     color: "var(--orange)",
     cta: "开始使用",
@@ -85,32 +94,47 @@ export function Onboarding() {
     const store = await load(STORE_PATH);
     await store.set("onboarding_completed", true);
     await store.save();
+    setOnboardingResumeStep(null);
     setOnboardingCompleted(true);
     setOnboardingStep(null);
   };
 
   const goToAccounts = () => {
-    // P0-7: navigating to Settings to add an account must NOT mark
-    // the wizard complete. The previous code called `complete()` here,
-    // which meant clicking "去连接" on step 2 jumped past steps 3 (sync)
-    // and 4 (done). The user never saw the rest of the wizard.
-    //
-    // Flow now:
-    //   - step 2 "去连接" → setView("settings"), keep wizard state at 1
-    //   - user adds an account in Settings, then either:
-    //       a) clicks "继续" on the wizard (we'll add a "重新显示" affordance
-    //          via the Settings → Profile "重放 Onboarding" button)
-    //       b) navigates back manually and finishes step 2
-    //   - on step 3 / 4 the user sees the sync progress + final card.
-    //
-    // We move the wizard one step forward so the "back" arrow on Settings
-    // doesn't drag them back into a stale step 2.
+    // "去连接" must NOT mark the wizard complete: hide the overlay
+    // (step → null) but remember where to resume. Settings → 账户 shows
+    // a「继续新手引导」banner while `onboardingResumeStep` is set.
+    setOnboardingResumeStep(2);
+    setOnboardingStep(null);
+    setSettingsTab("accounts");
     setView("settings");
-    setOnboardingStep(1);
   };
+
+  // Keyboard: Enter / → advance, ← back, Esc skips (only when the
+  // 跳过 button is visible — never on the final step).
+  const handleKey = (e: KeyboardEvent) => {
+    const cur = onboardingStep();
+    if (cur === null) return;
+    if (e.key === "Enter" || e.key === "ArrowRight") {
+      e.preventDefault();
+      const step = STEPS[cur];
+      if (step?.cta === "去连接") goToAccounts();
+      else void advance();
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      goBack();
+    } else if (e.key === "Escape" && cur < STEPS.length - 1) {
+      e.preventDefault();
+      void skip();
+    }
+  };
+  document.addEventListener("keydown", handleKey);
+  onCleanup(() => document.removeEventListener("keydown", handleKey));
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="新手引导"
       style={{
         position: "fixed",
         inset: 0,
@@ -122,22 +146,19 @@ export function Onboarding() {
         "z-index": "var(--z-modal)",
         animation: "backdrop-fade-in 0.32s var(--ease-out) both",
       }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) skip();
-      }}
     >
       <div
         style={{
-          // P1-16: shrink the card and padding on small viewports
-          // so the 96x96 hero icon doesn't get clipped on iPhone SE
-          // (375x667). The old fixed `560px` + 40px padding meant the
-          // inner content area was 480px wide; on a 320-px-wide
-          // iPhone 5 the card was 90vw = 288 px and the 96-px icon
-          // was clipped on both sides.
+          // Shrink the card and padding on small viewports so the
+          // 96px hero icon doesn't get clipped on iPhone SE (375x667).
           width: "min(560px, 92vw)",
           "max-width": "92vw",
-          background: "var(--paper-light)",
+          // Liquid glass: semi-transparent paper over the blurred scrim.
+          background:
+            "color-mix(in srgb, var(--paper-light) 82%, transparent)",
+          "backdrop-filter": "blur(20px) saturate(1.4)",
           "border-radius": "24px",
+          border: "0.5px solid var(--border)",
           padding: "min(var(--space-10), 6vw)",
           "box-shadow": "0 32px 64px rgba(0,0,0,0.18)",
           animation: "modal-enter 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both",
@@ -275,6 +296,7 @@ export function Onboarding() {
                       onClick={goBack}
                       style={{
                         padding: "10px 18px",
+                        "min-height": "44px",
                         color: "var(--text-secondary)",
                         "font-weight": "700",
                         "font-size": "var(--text-caption)",
@@ -291,29 +313,36 @@ export function Onboarding() {
                       上一步
                     </button>
                   </Show>
-                  <button
-                    onClick={skip}
-                    style={{
-                      padding: "10px 18px",
-                      color: "var(--text-muted)",
-                      "font-weight": "600",
-                      "font-size": "var(--text-caption)",
-                      transition: "color 0.18s var(--ease-out)",
-                    }}
-                    onMouseEnter={(e) =>
-                      (e.currentTarget.style.color = "var(--text-secondary)")
-                    }
-                    onMouseLeave={(e) =>
-                      (e.currentTarget.style.color = "var(--text-muted)")
-                    }
-                  >
-                    跳过
-                  </button>
+                  {/* 跳过 hidden on the final step — the only way out there
+                      is「开始使用」, so an accidental tap can't permanently
+                      dismiss the wizard at the last moment. */}
+                  <Show when={stepIndex < STEPS.length - 1}>
+                    <button
+                      onClick={skip}
+                      style={{
+                        padding: "10px 18px",
+                        "min-height": "44px",
+                        color: "var(--text-muted)",
+                        "font-weight": "600",
+                        "font-size": "var(--text-caption)",
+                        transition: "color 0.18s var(--ease-out)",
+                      }}
+                      onMouseEnter={(e) =>
+                        (e.currentTarget.style.color = "var(--text-secondary)")
+                      }
+                      onMouseLeave={(e) =>
+                        (e.currentTarget.style.color = "var(--text-muted)")
+                      }
+                    >
+                      跳过
+                    </button>
+                  </Show>
                   <button
                     onClick={onPrimary}
                     data-onboard-primary
                     style={{
                       padding: "12px 26px",
+                      "min-height": "44px",
                       background: step.color,
                       color: "white",
                       "border-radius": "var(--radius-pill)",

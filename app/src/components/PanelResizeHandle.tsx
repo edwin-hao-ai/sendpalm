@@ -11,6 +11,7 @@ import {
   agentPanelWidth,
   setAgentPanelWidth,
 } from "../stores/ui";
+import { useViewport } from "../utils/gestures";
 
 type PanelSide = "left" | "right";
 
@@ -77,6 +78,8 @@ function persist(d: number, a: number) {
 
 export function PanelResizeHandle(props: Props) {
   const [dragging, setDragging] = createSignal(false);
+  const [hovered, setHovered] = createSignal(false);
+  const { isMobile } = useViewport();
   const side = props.side ?? (props.panel === "agent" ? "left" : "right");
 
   const width = () =>
@@ -125,32 +128,52 @@ export function PanelResizeHandle(props: Props) {
   });
 
   return (
-    <div
-      onPointerDown={onPointerDown}
-      style={{
-        position: "absolute",
-        top: "0",
-        [side]: "-4px",
-        width: "8px",
-        height: "100%",
-        cursor: "col-resize",
-        "z-index": "var(--z-sticky)",
-        display: "flex",
-        "align-items": "center",
-        "justify-content": "center",
-      }}
-      title="Drag to resize"
-    >
-      <Show when={dragging()}>
+    <Show when={!isMobile()}>
+      <div
+        onPointerDown={onPointerDown}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="拖拽调整面板宽度"
+        style={{
+          position: "absolute",
+          top: "0",
+          [side]: "-4px",
+          width: "8px",
+          height: "100%",
+          cursor: "col-resize",
+          "z-index": "var(--z-sticky)",
+          display: "flex",
+          "align-items": "center",
+          "justify-content": "center",
+        }}
+        title="拖拽调整面板宽度"
+      >
+        {/* Grip indicator — visible on hover / while dragging */}
         <div
+          aria-hidden="true"
           style={{
-            position: "fixed",
-            inset: "0",
-            "z-index": "9999",
-            cursor: "col-resize",
+            width: "3px",
+            height: "32px",
+            "border-radius": "var(--radius-pill)",
+            background: "var(--border-strong)",
+            opacity: hovered() || dragging() ? 1 : 0,
+            transition: "opacity var(--duration-fast) var(--ease-out)",
+            "pointer-events": "none",
           }}
         />
-      </Show>
-    </div>
+        <Show when={dragging()}>
+          <div
+            style={{
+              position: "fixed",
+              inset: "0",
+              "z-index": "9999",
+              cursor: "col-resize",
+            }}
+          />
+        </Show>
+      </div>
+    </Show>
   );
 }

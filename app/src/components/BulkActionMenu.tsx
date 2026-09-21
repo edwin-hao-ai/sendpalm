@@ -1,6 +1,14 @@
-/** Global bulk-action menu triggered by the `;` shortcut.
- * Mirrors the actions available in the Imbox bottom bulk bar so every list
- * view gets the same power-user workflow.
+/** Global bulk-action menu triggered by the `;` shortcut after selecting
+ * messages with x / Space. There is intentionally no always-visible
+ * toolbar entry — this is a keyboard-first power-user surface.
+ *
+ * All mutations are focused per-message writes:
+ * - bucket moves go through `moveMessageToBucket` (sets deleted_at on
+ *   trash/spam, restores flags on the way out)
+ * - flag / unread toggles load each selected row via `getMessage`
+ *   (bounded by the selection size) before `upsertMessage`
+ * Nothing here calls `listMessages()` — a full-table pull with
+ * ~90KB body_html per row is the §11.7 OOM pattern.
  */
 
 import { For, Show, createSignal } from "solid-js";
@@ -15,8 +23,13 @@ import {
   setRefreshTick,
   refreshTick,
 } from "../stores/ui";
-import { listMessages, upsertMessage } from "../stores/data";
-import type { Message } from "../types";
+import {
+  getMessage,
+  moveMessageToBucket,
+  upsertMessage,
+} from "../stores/data";
+import type { Message, MessageBucket } from "../types";
+import { BUCKET_LABEL } from "../utils/labels";
 
 const ACTIONS: {
   id: string;
@@ -31,36 +44,36 @@ const ACTIONS: {
     label: "归档到 Records",
     icon: "ph-tray",
     shortcut: "e",
-    run: () => setBucket("paperTrail", "已批量归档"),
+    run: () => setBucket("paperTrail"),
   },
   {
     id: "trash",
-    label: "移到 Trash",
+    label: "移到回收站",
     icon: "ph-trash",
-    color: "var(--ruby)",
+    color: "var(--ruby, var(--status-danger))",
     shortcut: "t",
-    run: () => setBucket("trash", "已批量移到 Trash"),
+    run: () => setBucket("trash"),
   },
   {
     id: "spam",
-    label: "移到 Spam",
+    label: "移到垃圾邮件",
     icon: "ph-warning-circle",
     shortcut: "u",
-    run: () => setBucket("spam", "已批量移到 Spam"),
+    run: () => setBucket("spam"),
   },
   {
     id: "set-aside",
-    label: "Set Aside",
+    label: "搁置",
     icon: "ph-push-pin",
     shortcut: "a",
-    run: () => setFlag("setAside", true, "已批量 Set Aside"),
+    run: () => setFlag("setAside", true, "已批量搁置"),
   },
   {
     id: "reply-later",
-    label: "Reply Later",
+    label: "稍后回复",
     icon: "ph-clock",
     shortcut: "l",
-    run: () => setFlag("replyLater", true, "已批量 Reply Later"),
+    run: () => setFlag("replyLater", true, "已批量标记稍后回复"),
   },
   {
     id: "read",
@@ -94,18 +107,42 @@ const ACTIONS: {
   },
 ];
 
-async function withSelectionIds(): Promise<Message[]> {
+/** Selected messages as full rows, loaded per-id. Bounded by the
+ *  user's selection (not the table size), so a 4000-row mailbox costs
+ *  N single-row lookups instead of one full-table pull. */
+async function selectedMessages(): Promise<Message[]> {
   const ids = Array.from(selectedIds());
-  const all = await listMessages();
-  return all.filter((m) => ids.includes(m.id));
+  const out: Message[] = [];
+  for (const id of ids) {
+    const m = await getMessage(id);
+    if (m) out.push(m);
+  }
+  return out;
 }
 
-async function setBucket(bucket: Message["bucket"], successMsg: string) {
-  const messages = await withSelectionIds();
+async function setBucket(bucket: MessageBucket) {
+  // Snapshot current buckets via the focused per-id read so Undo can
+  // restore them (moveMessageToBucket also clears flags on trash —
+  // Undo re-applies only the bucket; flags the user had set before
+  // trashing are part of the trash semantics, not restored).
+  const messages = await selectedMessages();
+  const before = messages.map((m) => ({ id: m.id, bucket: m.bucket }));
   for (const m of messages) {
-    await upsertMessage({ ...m, bucket });
+    await moveMessageToBucket(m.id, bucket);
   }
-  finish(successMsg);
+  const label = BUCKET_LABEL[bucket] ?? bucket;
+  finish(`已批量移动到 ${label}`, {
+    label: "撤销",
+    run: async () => {
+      for (const prev of before) {
+        if (prev.bucket !== bucket) {
+          await moveMessageToBucket(prev.id, prev.bucket);
+        }
+      }
+      setRefreshTick(refreshTick() + 1);
+      showToast({ message: "已撤销批量移动", kind: "success" });
+    },
+  });
 }
 
 async function setFlag(
@@ -113,7 +150,7 @@ async function setFlag(
   value: boolean,
   successMsg: string,
 ) {
-  const messages = await withSelectionIds();
+  const messages = await selectedMessages();
   for (const m of messages) {
     await upsertMessage({ ...m, [key]: value });
   }
@@ -121,17 +158,26 @@ async function setFlag(
 }
 
 async function setUnread(unread: boolean, successMsg: string) {
-  const messages = await withSelectionIds();
+  const messages = await selectedMessages();
   for (const m of messages) {
     await upsertMessage({ ...m, unread });
   }
   finish(successMsg);
 }
 
-function finish(successMsg: string) {
+function finish(
+  successMsg: string,
+  action?: { label: string; run: () => Promise<void> },
+) {
   setSelectedIds(new Set<string>());
   setRefreshTick(refreshTick() + 1);
-  showToast({ message: successMsg, kind: "success" });
+  showToast({
+    message: successMsg,
+    kind: "success",
+    action: action
+      ? { label: action.label, run: () => void action.run() }
+      : undefined,
+  });
 }
 
 const [open, setOpen] = createSignal(false);
@@ -202,6 +248,12 @@ export function BulkActionMenu() {
                 onMouseLeave={(e) =>
                   (e.currentTarget.style.background = "var(--paper-light)")
                 }
+                onFocus={(e) =>
+                  (e.currentTarget.style.background = "var(--paper-mid)")
+                }
+                onBlur={(e) =>
+                  (e.currentTarget.style.background = "var(--paper-light)")
+                }
               >
                 <Icon name={action.icon} size={18} />
                 <span style={{ flex: 1 }}>{action.label}</span>
@@ -234,7 +286,7 @@ export function BulkActionMenu() {
         onChange={() => {
           setLabelOpen(false);
           setOpen(false);
-          finish("已批量添加标签");
+          finish("已批量更新标签");
         }}
       />
       <MovePicker
@@ -247,7 +299,9 @@ export function BulkActionMenu() {
         onChange={() => {
           setMoveOpen(false);
           setOpen(false);
-          finish("已批量移动");
+          // MovePicker already shows its own success toast with Undo.
+          setSelectedIds(new Set<string>());
+          setRefreshTick(refreshTick() + 1);
         }}
       />
     </>

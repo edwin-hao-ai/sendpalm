@@ -6,8 +6,15 @@
  */
 
 import { IS_BROWSER } from "./services/tauri-shim";
-import type { CalendarEvent, Contact, FileItem, Message } from "./types";
+import type {
+  Account,
+  CalendarEvent,
+  Contact,
+  FileItem,
+  Message,
+} from "./types";
 import {
+  upsertAccount,
   upsertContact,
   upsertMessage,
   upsertEvent,
@@ -21,6 +28,7 @@ import {
 import { bumpRefreshTick } from "./stores/ui";
 
 interface SeedPayload {
+  accounts?: Account[];
   contacts?: Contact[];
   messages?: Message[];
   events?: CalendarEvent[];
@@ -29,6 +37,7 @@ interface SeedPayload {
 
 interface E2EHelpers {
   resetData: () => Promise<void>;
+  seedAccount: (a: Account) => Promise<void>;
   seedContact: (c: Contact) => Promise<void>;
   seedMessage: (m: Message) => Promise<void>;
   seedEvent: (e: CalendarEvent) => Promise<void>;
@@ -61,6 +70,7 @@ declare global {
 const SEED_KEY = "__sendpalm_e2e_seed";
 
 async function applySeed(payload: SeedPayload): Promise<void> {
+  for (const a of payload.accounts ?? []) await upsertAccount(a);
   for (const c of payload.contacts ?? []) await upsertContact(c);
   for (const m of payload.messages ?? []) await upsertMessage(m);
   for (const e of payload.events ?? []) await upsertEvent(e);
@@ -89,6 +99,7 @@ if (IS_BROWSER() && typeof window !== "undefined") {
 
   window.__sendpalmE2E = {
     resetData: resetAllData,
+    seedAccount: upsertAccount,
     seedContact: upsertContact,
     seedMessage: upsertMessage,
     seedEvent: upsertEvent,

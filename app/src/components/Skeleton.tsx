@@ -37,7 +37,7 @@ export function Skeleton(props: SkeletonProps) {
     width: props.width ?? (props.circle ? `${props.height ?? 40}px` : "100%"),
     ...props.style,
   };
-  return <div style={baseStyle} aria-busy="true" aria-label="Loading" />;
+  return <div style={baseStyle} aria-busy="true" aria-label="加载中" />;
 }
 
 export function SkeletonList(props: { count?: number; height?: number }) {

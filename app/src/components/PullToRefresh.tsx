@@ -115,7 +115,7 @@ export function PullToRefresh(props: PullToRefreshProps) {
             top: 0,
             left: 0,
             right: 0,
-            height: "60px",
+            height: "76px",
             display: "flex",
             "align-items": "center",
             "justify-content": "center",
@@ -130,28 +130,54 @@ export function PullToRefresh(props: PullToRefreshProps) {
         >
           <div
             style={{
-              width: "32px",
-              height: "32px",
-              "border-radius": "50%",
-              background: "var(--palm-soft)",
               display: "flex",
+              "flex-direction": "column",
               "align-items": "center",
-              "justify-content": "center",
+              gap: "4px",
               transform: refreshing()
-                ? "rotate(360deg)"
-                : `rotate(${progress() * 180 - 180}deg)`,
-              transition: refreshing()
-                ? "transform 0.6s linear"
-                : pulling()
-                  ? "none"
-                  : "transform 0.28s var(--ease-out)",
+                ? "none"
+                : undefined,
             }}
           >
-            <Icon
-              name={refreshing() ? "ph-spinner" : "ph-arrow-down"}
-              size={16}
-              style={{ color: "var(--palm)" }}
-            />
+            <div
+              style={{
+                width: "32px",
+                height: "32px",
+                "border-radius": "50%",
+                background: "var(--palm-soft)",
+                display: "flex",
+                "align-items": "center",
+                "justify-content": "center",
+                transform: refreshing()
+                  ? "rotate(360deg)"
+                  : `rotate(${progress() * 180 - 180}deg)`,
+                transition: refreshing()
+                  ? "transform 0.6s linear"
+                  : pulling()
+                    ? "none"
+                    : "transform 0.28s var(--ease-out)",
+              }}
+            >
+              <Icon
+                name={refreshing() ? "ph-spinner" : "ph-arrow-down"}
+                size={16}
+                style={{ color: "var(--palm)" }}
+              />
+            </div>
+            <span
+              style={{
+                "font-size": "var(--text-micro)",
+                "font-weight": "600",
+                color: "var(--text-secondary)",
+                "text-shadow": "0 0 6px var(--paper-light)",
+              }}
+            >
+              {refreshing()
+                ? "正在刷新…"
+                : distance() >= THRESHOLD
+                  ? "释放刷新"
+                  : "继续下拉"}
+            </span>
           </div>
         </div>
       </Show>

@@ -1,5 +1,19 @@
 /** Focus & Reply view — HEY-style distraction-free reply flow.
- * Lists every message marked Reply Later with an inline draft textarea.
+ * Lists every message parked in the Pending pile (reply_later = 1)
+ * with an inline draft textarea.
+ *
+ * Data contract: the list comes from the scoped `listFocusReplyMessages`
+ * query (reply_later = 1, trash/spam excluded, body included, body_html
+ * omitted, LIMIT-bounded). The previous full-table `listMessages()` pull
+ * was the §11.7 OOM pattern — ~360 MB across the IPC bridge on a real
+ * mailbox.
+ *
+ * Draft contract: user edits are debounced into the `drafts` table
+ * (id `focus-<messageId>`, status "edited") so switching views and
+ * coming back restores the text (SolidJS <Switch> unmounts this view).
+ * Send / Done delete the draft; Skip keeps it (the message stays in
+ * Pending, so the draft stays too — matches the prototype's aiDraft
+ * lifecycle).
  */
 
 import {
@@ -8,8 +22,17 @@ import {
   createResource,
   createSignal,
   onCleanup,
+  onMount,
 } from "solid-js";
-import { listMessages, listContacts, upsertMessage } from "../stores/data";
+import {
+  listFocusReplyMessages,
+  listContacts,
+  getDraft,
+  upsertDraft,
+  deleteDraft,
+  setMessagePileFlags,
+  markMessageUnread,
+} from "../stores/data";
 import {
   setView,
   setComposeOpen,
@@ -24,11 +47,13 @@ import { SkeletonList } from "../components/Skeleton";
 import { sendEmailViaBackend } from "../services/backend";
 import { generateAiDraft } from "../utils/draft";
 import { getFocusReplyCandidates } from "../utils/triage";
-import type { Contact, Message } from "../types";
+import type { Contact, Draft, Message } from "../types";
 
 export function FocusReply() {
   const [contacts] = createResource(listContacts);
-  const [messages, { refetch: refetchMessages }] = createResource(listMessages);
+  const [messages, { refetch: refetchMessages }] = createResource(() =>
+    listFocusReplyMessages(),
+  );
   const [completedIds, setCompletedIds] = createSignal<Set<string>>(new Set());
 
   const contactMap = createMemo(() => {
@@ -75,6 +100,7 @@ export function FocusReply() {
           display: "flex",
           "align-items": "center",
           "justify-content": "space-between",
+          gap: "var(--space-3)",
           padding: "var(--space-4) var(--space-5)",
           "border-bottom": "0.5px solid var(--border)",
         }}
@@ -83,13 +109,13 @@ export function FocusReply() {
           <h1
             style={{
               "font-family": "var(--font-display)",
-              "font-size": "var(--text-h3)",
+              "font-size": "var(--text-h1)",
               "font-weight": "800",
               color: "var(--text-primary)",
               margin: 0,
             }}
           >
-            Focus & Reply
+            专注回复
           </h1>
           <p
             style={{
@@ -98,19 +124,19 @@ export function FocusReply() {
               "font-size": "var(--text-caption)",
             }}
           >
-            {pendingCount()} pending
+            {pendingCount()} 封待回复
           </p>
         </div>
         <button
           onClick={close}
-          title="Close Focus & Reply"
-          aria-label="Close Focus & Reply"
+          title="关闭专注回复"
+          aria-label="关闭专注回复"
           style={{
             display: "inline-flex",
             "align-items": "center",
             "justify-content": "center",
-            width: "36px",
-            height: "36px",
+            width: "44px",
+            height: "44px",
             "border-radius": "var(--radius-pill)",
             background: "var(--paper-mid)",
             color: "var(--text-secondary)",
@@ -148,8 +174,7 @@ export function FocusReply() {
         }
         errorView={() => (
           <ErrorState
-            title="Focus Reply 加载失败"
-            message={String(messages.error ?? "")}
+            title="加载失败，请重试"
             retry={() => void refetchMessages()}
           />
         )}
@@ -212,18 +237,73 @@ function FocusReplyItem(props: {
 }) {
   const fromEmail = () =>
     props.contact?.emails[0]?.value ?? props.contact?.name ?? "";
-  const [draft, setDraft] = createSignal(
-    generateAiDraft(props.m, props.contact, fromEmail()),
-  );
+  const replySubject = () =>
+    `Re: ${props.m.subj.replace(/^Re:\s*/i, "").trim()}`;
+
+  const generatedDraft = generateAiDraft(props.m, props.contact, fromEmail());
+  const [draft, setDraft] = createSignal(generatedDraft);
   const [sending, setSending] = createSignal(false);
+  // True once the user has typed into the textarea — only user edits are
+  // persisted (auto-generated drafts don't belong in the Drafts view).
+  let dirty = false;
+
+  const draftId = `focus-${props.m.id}`;
+
+  const draftRow = (): Draft => ({
+    id: draftId,
+    recipient: fromEmail(),
+    subject: replySubject(),
+    body: draft(),
+    lastEdited: new Date().toISOString(),
+    status: "edited",
+    accountId: props.m.ac,
+  });
+
+  // Restore a previously-saved edit over the generated draft. Only
+  // applied if the user hasn't typed yet this session.
+  onMount(() => {
+    void getDraft(draftId).then((saved) => {
+      if (saved && !dirty) setDraft(saved.body);
+    });
+  });
+
+  let saveTimer: ReturnType<typeof setTimeout> | undefined;
+  const persistNow = async (): Promise<Draft> => {
+    const d = draftRow();
+    await upsertDraft(d);
+    return d;
+  };
+  const schedulePersist = () => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveTimer = undefined;
+      void persistNow().catch((err: unknown) =>
+        console.error("[focus-reply] draft persist failed:", err),
+      );
+    }, 500);
+  };
+  onCleanup(() => {
+    // Flush a pending debounced write so leaving the view mid-typing
+    // doesn't lose the last half-second of edits.
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = undefined;
+      void persistNow().catch((err: unknown) =>
+        console.error("[focus-reply] draft flush failed:", err),
+      );
+    }
+  });
 
   const clearFlags = async () => {
-    await upsertMessage({
-      ...props.m,
+    // Scoped updates only — `props.m` is a body_html-less row from
+    // listFocusReplyMessages and must never be round-tripped through
+    // upsertMessage.
+    await setMessagePileFlags(props.m.id, {
       replyLater: false,
       setAside: false,
       bubbleUpAt: null,
     });
+    await markMessageUnread(props.m.id, false);
   };
 
   const send = async () => {
@@ -232,25 +312,36 @@ function FocusReplyItem(props: {
       showToast({ message: "没有可发送的内容", kind: "warning" });
       return;
     }
+    const to = fromEmail();
+    if (!to.includes("@")) {
+      showToast({
+        message: "该联系人没有邮箱地址，无法发送",
+        kind: "warning",
+      });
+      return;
+    }
     setSending(true);
     try {
-      const to = fromEmail();
       const result = await sendEmailViaBackend(
         to,
-        `Re: ${props.m.subj.replace(/^Re:\s*/i, "").trim()}`,
+        replySubject(),
         body,
         props.m.ac,
       );
       if (result) {
         await clearFlags();
+        await deleteDraft(draftId);
         props.onComplete(props.m.id);
-        showToast({ message: "回复已发送", kind: "success" });
+        showToast({ message: `已回复 ${to}`, kind: "success" });
       } else {
         showToast({
-          message: "未配置真实账户，回复未发送",
+          message: "尚未绑定邮箱账户，回复未发送。草稿已保存。",
           kind: "info",
         });
       }
+    } catch (err) {
+      console.error("[focus-reply] send failed:", err);
+      showToast({ message: "发送失败，请重试", kind: "error" });
     } finally {
       setSending(false);
     }
@@ -259,22 +350,40 @@ function FocusReplyItem(props: {
 
   const regenerate = () => {
     setDraft(generateAiDraft(props.m, props.contact, fromEmail()));
+    dirty = false;
+    // The regenerated text replaces any saved edit.
+    void deleteDraft(draftId).catch(() => undefined);
   };
 
-  const editInCompose = () => {
+  const editInCompose = async () => {
+    // Persist first so Compose opens with the user's edited text, not
+    // the auto-generated one (Compose reads ctx.draft when present).
+    let d: Draft | undefined;
+    try {
+      d = await persistNow();
+    } catch (err) {
+      console.error("[focus-reply] draft persist failed:", err);
+    }
     setComposeContext({
       mode: "reply",
       originalMsg: props.m,
+      draft: d,
     });
     setComposeOpen(true);
   };
 
   const skip = () => {
     props.onComplete(props.m.id);
+    showToast({
+      message: "已跳过，这封仍留在「稍后回复」里",
+      kind: "info",
+      ttlMs: 2500,
+    });
   };
 
   const done = async () => {
     await clearFlags();
+    await deleteDraft(draftId).catch(() => undefined);
     props.onComplete(props.m.id);
     await props.onChange();
     showToast({ message: "已标记为完成", kind: "success" });
@@ -322,7 +431,7 @@ function FocusReplyItem(props: {
                 "text-overflow": "ellipsis",
               }}
             >
-              {props.contact?.name ?? "Unknown"}
+              {props.contact?.name ?? "未知发件人"}
             </div>
             <div
               style={{
@@ -393,12 +502,16 @@ function FocusReplyItem(props: {
           }}
         >
           <Icon name="ph-sparkle" size={16} />
-          <span>SendPalm draft</span>
+          <span>SendPalm 起草的回复</span>
         </div>
         <textarea
           value={draft()}
-          onInput={(e) => setDraft(e.currentTarget.value)}
-          placeholder="Write your reply, or edit the draft below..."
+          onInput={(e) => {
+            setDraft(e.currentTarget.value);
+            dirty = true;
+            schedulePersist();
+          }}
+          placeholder="写下你的回复，或直接修改这份草稿…"
           style={{
             width: "100%",
             "min-height": "160px",
@@ -424,24 +537,24 @@ function FocusReplyItem(props: {
         >
           <ActionBtn
             icon="ph-paper-plane-right"
-            label={sending() ? "Sending…" : "Send"}
+            label={sending() ? "发送中…" : "发送"}
             primary
             onClick={send}
             disabled={sending()}
           />
           <ActionBtn
             icon="ph-arrows-clockwise"
-            label="Regenerate"
+            label="重新生成"
             onClick={regenerate}
           />
           <ActionBtn
             icon="ph-pencil-simple"
-            label="Edit"
-            onClick={editInCompose}
+            label="编辑"
+            onClick={() => void editInCompose()}
           />
           <div style={{ flex: 1 }} />
-          <ActionBtn icon="ph-check" label="Done" onClick={done} />
-          <ActionBtn icon="ph-x" label="Skip" onClick={skip} />
+          <ActionBtn icon="ph-check" label="完成" onClick={() => void done()} />
+          <ActionBtn icon="ph-x" label="跳过" onClick={skip} />
         </div>
       </div>
     </div>
@@ -463,7 +576,8 @@ function ActionBtn(props: {
         display: "inline-flex",
         "align-items": "center",
         gap: "6px",
-        padding: "8px 14px",
+        padding: "10px 14px",
+        "min-height": "44px",
         "border-radius": "var(--radius-md)",
         border: props.primary ? "none" : "0.5px solid var(--border)",
         background: props.primary ? "var(--palm)" : "var(--paper-mid)",
@@ -505,15 +619,16 @@ function DoneState(props: { onBack: () => void }) {
           margin: 0,
         }}
       >
-        All caught up
+        全部回复完了 🎉
       </h2>
       <p style={{ margin: 0, color: "var(--text-muted)" }}>
-        You've cleared your Pending replies.
+        「稍后回复」里的邮件都处理完了。
       </p>
       <button
         onClick={props.onBack}
         style={{
           padding: "10px 20px",
+          "min-height": "44px",
           background: "var(--palm)",
           color: "white",
           "border-radius": "var(--radius-pill)",
@@ -522,7 +637,7 @@ function DoneState(props: { onBack: () => void }) {
           cursor: "pointer",
         }}
       >
-        Back to Inbox
+        返回 Imbox
       </button>
     </div>
   );

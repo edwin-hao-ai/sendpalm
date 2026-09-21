@@ -146,7 +146,7 @@ export const [peopleGroupBy, setPeopleGroupBy] =
 export const [detailOpen, setDetailOpen] = createSignal(false);
 export const [agentPanelOpen, setAgentPanelOpen] = createSignal(false);
 
-export const [detailPanelWidth, setDetailPanelWidth] = createSignal(380);
+export const [detailPanelWidth, setDetailPanelWidth] = createSignal(440);
 export const [agentPanelWidth, setAgentPanelWidth] = createSignal(340);
 
 export interface ComposeContext {
@@ -205,6 +205,10 @@ export const [onboardingCompleted, setOnboardingCompleted] =
   createSignal(false);
 
 export const [helpOpen, setHelpOpen] = createSignal(false);
+
+/** ErrorLog panel visibility. Lives here (not inside ErrorLog.tsx) so the
+ *  topbar avatar menu can open the panel too. */
+export const [errorLogOpen, setErrorLogOpen] = createSignal(false);
 
 export const [loading, setLoading] = createSignal(true);
 export const [error, setError] = createSignal<string | null>(null);
@@ -335,7 +339,10 @@ export const [errorLogOpenedAt, setErrorLogOpened] = createSignal<number>(0);
 let toastSeq = 0;
 export function showToast(t: Omit<Toast, "id"> & { source?: string; detail?: string }) {
   const id = `t_${++toastSeq}`;
-  const ttl = t.ttlMs ?? 4000;
+  // Error toasts are persistent by default: a failure the user never saw
+  // is a failure they can't act on. They still land in the error log, and
+  // the user dismisses them manually (or the caller opts into a TTL).
+  const ttl = t.ttlMs ?? (t.kind === "error" ? 0 : 4000);
 
   // ARCH-4: every error toast is also recorded in the persistent
   // error log so the user can scroll back through transient

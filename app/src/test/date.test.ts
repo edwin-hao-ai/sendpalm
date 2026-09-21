@@ -25,29 +25,33 @@ describe("relativeTime", () => {
     expect(relativeTime("")).toBe("");
   });
 
-  it("returns 'just now' for very recent", () => {
+  it("returns 刚刚 for very recent", () => {
     const now = new Date().toISOString();
-    expect(relativeTime(now)).toMatch(/just now|ago/);
+    expect(relativeTime(now)).toBe("刚刚");
   });
 
-  it("handles hours ago", () => {
-    const d = new Date(Date.now() - 3 * 3600_000);
-    expect(relativeTime(d.toISOString())).toMatch(/h ago/);
+  it("handles same-day past with 今天 HH:MM", () => {
+    const d = new Date();
+    d.setHours(d.getHours() - 3);
+    // May cross midnight in CI, so also accept 昨天 / minute fallback.
+    expect(relativeTime(d.toISOString())).toMatch(
+      /^(今天|昨天) \d{2}:\d{2}$|^\d+ 分钟前$/,
+    );
   });
 
   it("handles days ago", () => {
     const d = new Date(Date.now() - 5 * 86400_000);
-    expect(relativeTime(d.toISOString())).toMatch(/d ago/);
+    expect(relativeTime(d.toISOString())).toMatch(/^\d+ 天前$/);
   });
 
   it("handles months ago", () => {
     const d = new Date(Date.now() - 90 * 86400_000);
-    expect(relativeTime(d.toISOString())).toMatch(/mo ago/);
+    expect(relativeTime(d.toISOString())).toMatch(/^\d+ 个月前$/);
   });
 
   it("handles future dates", () => {
     const d = new Date(Date.now() + 3 * 3600_000);
-    expect(relativeTime(d.toISOString())).toMatch(/from now/);
+    expect(relativeTime(d.toISOString())).toMatch(/^\d+ 小时后$/);
   });
 });
 

@@ -1,17 +1,18 @@
-/** Imbox-style "More filters" modal.
+/** Imbox-style "更多筛选" modal.
  *
- *  Mirrors the prototype's openFilterPanel / renderFilterPanelBody:
- *  - Sort dropdown (Newest first / Oldest first / Most relevant)
- *  - Unread only toggle
+ *  Mirrors the prototype's openFilterPanel / renderFilterPanelBody sort
+ *  dropdown (Newest first / Oldest first / Most relevant). Apply commits
+ *  the in-memory copy to the shared `sortMode` signal so the Imbox header
+ *  reflects the change immediately. "清除全部" resets the current view's
+ *  filter to `DEFAULT_SORT`.
  *
- *  Only the sort dropdown is wired to behavior right now; the unread toggle
- *  is kept for visual parity and future use. Apply commits the in-memory
- *  copy to the shared `sortMode` signal so the Imbox header reflects the
- *  change immediately. "Clear all" resets the current view's filter to
- *  `DEFAULT_SORT`.
+ *  The prototype's extra filter dimensions (date range, channel pills,
+ *  contacts, has-attachment, followed-up) need query support in
+ *  `listMessagesPaged` — tracked as a follow-up; an inert toggle that
+ *  applies to nothing is worse than no toggle (AGENTS §3.2).
  */
 
-import { For, Show, createEffect, createSignal } from "solid-js";
+import { For, createEffect, createSignal } from "solid-js";
 import { Modal } from "./Modal";
 import {
   DEFAULT_SORT,
@@ -31,7 +32,6 @@ const SORT_ORDER: SortMode[] = ["newest", "oldest", "most_relevant"];
 
 export function FilterPanel(props: FilterPanelProps) {
   const [pending, setPending] = createSignal<SortMode>(DEFAULT_SORT);
-  const [unreadOnly, setUnreadOnly] = createSignal(false);
 
   // Sync pending state whenever the modal opens so it reflects the current
   // committed value, not whatever the user was last editing.
@@ -49,7 +49,6 @@ export function FilterPanel(props: FilterPanelProps) {
   const clearAll = () => {
     updateSortMode(props.viewName, DEFAULT_SORT);
     setPending(DEFAULT_SORT);
-    setUnreadOnly(false);
     props.onClose();
   };
 
@@ -57,7 +56,7 @@ export function FilterPanel(props: FilterPanelProps) {
     <Modal
       open={props.open}
       onClose={props.onClose}
-      title="More filters"
+      title="更多筛选"
       width="420px"
       footer={
         <>
@@ -73,7 +72,7 @@ export function FilterPanel(props: FilterPanelProps) {
               cursor: "pointer",
             }}
           >
-            Clear all
+            清除全部
           </button>
           <button
             type="button"
@@ -88,19 +87,30 @@ export function FilterPanel(props: FilterPanelProps) {
               cursor: "pointer",
             }}
           >
-            Apply
+            应用
           </button>
         </>
       }
     >
       <div style={{ display: "flex", "flex-direction": "column", gap: "18px" }}>
-        <Field label="Sort">
+        <div>
+          <div
+            style={{
+              "font-size": "var(--text-caption)",
+              "font-weight": "700",
+              color: "var(--text-muted)",
+              "margin-bottom": "8px",
+            }}
+          >
+            排序
+          </div>
           <select
             value={pending()}
             onChange={(e) =>
               setPending(e.currentTarget.value as SortMode)
             }
             data-filter-sort
+            aria-label="排序方式"
             style={{
               width: "100%",
               padding: "10px 12px",
@@ -116,70 +126,8 @@ export function FilterPanel(props: FilterPanelProps) {
               {(mode) => <option value={mode}>{SORT_LABELS[mode]}</option>}
             </For>
           </select>
-        </Field>
-
-        <Field label="Status">
-          <Toggle
-            label="Unread only"
-            checked={unreadOnly()}
-            onChange={setUnreadOnly}
-          />
-        </Field>
+        </div>
       </div>
     </Modal>
-  );
-}
-
-function Field(props: { label: string; children: unknown }) {
-  return (
-    <div>
-      <div
-        style={{
-          "font-size": "var(--text-caption)",
-          "font-weight": "700",
-          color: "var(--text-muted)",
-          "text-transform": "uppercase",
-          "letter-spacing": "0.06em",
-          "margin-bottom": "8px",
-        }}
-      >
-        {props.label}
-      </div>
-      {props.children as never}
-    </div>
-  );
-}
-
-function Toggle(props: {
-  label: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <Show when={true}>
-      <label
-        style={{
-          display: "flex",
-          "align-items": "center",
-          gap: "10px",
-          cursor: "pointer",
-          "font-size": "var(--text-body-sm)",
-          color: "var(--text-primary)",
-        }}
-      >
-        <input
-          type="checkbox"
-          checked={props.checked}
-          onChange={(e) => props.onChange(e.currentTarget.checked)}
-          style={{
-            width: "16px",
-            height: "16px",
-            "accent-color": "var(--palm)",
-            cursor: "pointer",
-          }}
-        />
-        {props.label}
-      </label>
-    </Show>
   );
 }

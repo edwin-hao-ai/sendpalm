@@ -1509,6 +1509,67 @@ export async function moveMessageToBucket(
   }
 }
 
+/** Update only the `unread` flag of a single message.
+ *
+ *  List views hold LIGHTWEIGHT rows (no body / body_html — see
+ *  `rowToMessageLight`). Routing a read/unread toggle through
+ *  `upsertMessage(lightweightRow)` would overwrite the stored body with
+ *  empty strings — irreversible data loss (the ReadTogether bug from
+ *  2026-09-22). This scoped UPDATE touches exactly one column. */
+export async function markMessageUnread(id: ID, unread: boolean): Promise<void> {
+  const db = await getDb();
+  await db.execute("UPDATE messages SET unread = $1 WHERE id = $2", [
+    unread ? 1 : 0,
+    id,
+  ]);
+}
+
+/** Set the three workflow pile flags (reply_later / set_aside /
+ *  bubble_up_at) on a single message, clearing the others — mirrors the
+ *  prototype's `clearWorkflowFlags` + set-one semantics
+ *  (prototype-v11.js `replyLaterMessage` / `setAsideMessage` /
+ *  `bubbleUpMessage`).
+ *
+ *  Like `markMessageUnread`, this exists so callers holding a
+ *  lightweight list row never have to round-trip the full row through
+ *  `upsertMessage` just to flip a flag. */
+export async function setMessagePileFlags(
+  id: ID,
+  flags: { replyLater: boolean; setAside: boolean; bubbleUpAt: string | null },
+): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    "UPDATE messages SET reply_later = $1, set_aside = $2, bubble_up_at = $3 WHERE id = $4",
+    [flags.replyLater ? 1 : 0, flags.setAside ? 1 : 0, flags.bubbleUpAt, id],
+  );
+}
+
+/** Scoped query for the Focus & Reply view: every message parked in
+ *  the Pending pile (reply_later = 1), minus trash/spam. Includes the
+ *  plain-text `body` (the view renders it above the reply textarea) but
+ *  omits `body_html` (~80 KB/row on real mailboxes) — the view never
+ *  renders HTML. LIMIT-bounded so the IPC payload stays small even for
+ *  a mailbox with hundreds of pending replies.
+ *
+ *  The previous implementation called full-table `listMessages()` and
+ *  filtered in JS — the exact OOM pattern from `docs/lessons.md`
+ *  (2026-08-20 entry). */
+export async function listFocusReplyMessages(limit = 200): Promise<Message[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT id, pid, subj, prev, body, tm, st, ac, bucket, direction, unread,
+            labels_json, attachments_json, trackers_json,
+            reply_later, set_aside, bubble_up_at, remind_at, deleted_at,
+            to_addr, cc_json, bcc_json, thread_id, calendar_json
+       FROM messages
+      WHERE reply_later = 1 AND bucket != 'trash' AND bucket != 'spam'
+      ORDER BY st DESC
+      LIMIT $1`,
+    [Math.max(1, Math.min(limit, 500))],
+  );
+  return rows.map(rowToMessage);
+}
+
 export async function emptyTrash(): Promise<number> {
   const db = await getDb();
   // Keep the full-text index in sync before the rows disappear.

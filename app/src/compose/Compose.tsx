@@ -40,6 +40,8 @@ import {
   setComposeMinimized,
   appSettings,
   showToast,
+  setView,
+  setSettingsTab,
 } from "../stores/ui";
 import { sendEmailViaBackend } from "../services/backend";
 import type { Draft, ScheduledSend, Snippet } from "../types";
@@ -47,6 +49,40 @@ import { uid, arrayBufferToBase64 } from "../utils/id";
 import { addHours, addDays, isoNow, nextWeekday } from "../utils/date";
 import { formFactor } from "../utils/viewport";
 import { htmlToPlainText, plainTextToHtml } from "../utils/html";
+import { glassPanelStyle } from "../components/glass";
+
+/** Email shape shared by the To/Cc/Bcc fields and the recipient pills. */
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** First address in a comma-separated field that fails EMAIL_RE, if any. */
+export function firstInvalidAddress(raw: string): string | null {
+  for (const part of raw.split(",")) {
+    const s = part.trim();
+    if (s && !EMAIL_RE.test(s)) return s;
+  }
+  return null;
+}
+
+/** Palm-green focus ring for compose fields — overrides the global
+ *  `--blurple` :focus-visible outline inside the compose window so the
+ *  composer matches the brand instead of looking like a generic form. */
+const palmFocusHandlers = {
+  onFocus: (e: FocusEvent) => {
+    const el = e.currentTarget as HTMLElement;
+    el.style.outline = "2px solid var(--palm)";
+    el.style.outlineOffset = "0";
+    el.style.boxShadow = "0 0 0 3px var(--palm-glow)";
+  },
+  onBlur: (e: FocusEvent) => {
+    const el = e.currentTarget as HTMLElement;
+    el.style.outline = "none";
+    el.style.boxShadow = "none";
+  },
+};
+
+/** SMTP providers commonly reject messages over ~25MB; warn early
+ *  instead of letting a giant base64 blob ride the autosave loop. */
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 interface DraftAttachment {
   id: string;
@@ -71,7 +107,9 @@ interface DraftState {
 }
 
 export function Compose() {
-  const [accounts] = createResource(listAccounts);
+  const [accounts, { refetch: refetchAccounts }] =
+    createResource(listAccounts);
+
   // Lightweight projection — the recipient picker only needs
   // id/name/emails/avatar. The previous `listContacts` pull
   // included notes/pattern/stageHistory/topics/labels/photo per
@@ -81,8 +119,24 @@ export function Compose() {
   // open. The full Contact row is still fetched by the detail
   // panel when the user clicks a contact, so no data is lost —
   // just deferred to the point of use.
-  const [contacts] = createResource(listContactsForRecipient);
-  const [snippets] = createResource(listSnippets);
+  const [contacts, { refetch: refetchContacts }] = createResource(
+    listContactsForRecipient,
+  );
+  const [snippets, { refetch: refetchSnippets }] =
+    createResource(listSnippets);
+
+  /* Refetch accounts/contacts/snippets on every open — these resources
+   * otherwise only fire once at App mount, so an account added in
+   * Settings (or a contact created by a fresh IMAP sync) after boot
+   * never reaches the composer: the dialog keeps showing the
+   * "还没有绑定邮箱账户" empty state and reply prefills resolve the
+   * sender to "" until a full reload. */
+  createEffect(() => {
+    if (!composeOpen()) return;
+    void refetchAccounts();
+    void refetchContacts();
+    void refetchSnippets();
+  });
 
   const defaultAccount = () =>
     (accounts() ?? []).find((a) => a.type === "email");
@@ -93,6 +147,30 @@ export function Compose() {
     const df = a.settings?.defaultFrom;
     return df && df !== a.email ? df : undefined;
   };
+
+  /** True only once the accounts resource has resolved AND there is no
+   *  email account — while loading we don't gate anything. */
+  const noEmailAccount = () =>
+    accounts() !== undefined &&
+    (accounts() ?? []).filter((a) => a.type === "email").length === 0;
+
+  const goToAccountSettings = () => {
+    setSettingsTab("accounts");
+    setView("settings");
+  };
+
+  /* When the accounts resource resolves AFTER the draft was initialised
+   * (first open of the session), the draft's accountId is still "".
+   * Backfill it with the default account so the From row is never an
+   * empty dropdown selection. */
+  createEffect(() => {
+    const list = accounts();
+    if (!list) return;
+    const d = draft();
+    if (d.accountId) return;
+    const first = list.find((a) => a.type === "email");
+    if (first) setDraft({ ...d, accountId: first.id });
+  });
 
   const buildDraft = (): DraftState => {
     const ctx = composeContext();
@@ -133,14 +211,17 @@ export function Compose() {
       // entire comma-joined blob into the Cc field. The recipient
       // then saw an invalid Cc header (one giant address with
       // embedded commas).
+      // `m.cc`/`m.bcc` arrive as string[] (cc_json is parsed by
+      // rowToMessage), `m.to` as a single string — accept both.
       const splitAddrs = (raw: unknown): string[] => {
-        if (typeof raw !== "string" || !raw) return [];
-        return raw
-          .split(/[,;\s]+/)
+        const parts =
+          typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : [];
+        return parts
+          .flatMap((s) => String(s).split(/[,;\s]+/))
           .map((s) => s.trim())
           .filter(Boolean);
       };
-      const others = [...splitAddrs(m.to), ...splitAddrs(m.cc ?? "")]
+      const others = [...splitAddrs(m.to), ...splitAddrs(m.cc)]
         .filter((e) => e !== senderEmail)
         // Deduplicate while preserving order.
         .filter((e, i, arr) => arr.indexOf(e) === i);
@@ -159,6 +240,38 @@ export function Compose() {
       body: quote,
     };
   };
+
+  /* Reply/forward drafts built while the contacts resource was still
+   * stale (App-mount cache from before the contact existed) get an
+   * empty recipient and a "发件人: <>" quote. Once the fresh contact
+   * list lands (see the refetch-on-open effect above), patch only the
+   * broken fields — never a full rebuild, so anything the user typed
+   * in the meantime survives. */
+  createEffect(() => {
+    const list = contacts();
+    if (!list || !composeOpen()) return;
+    const ctx = composeContext();
+    const m = ctx.originalMsg;
+    if (!m || ctx.mode === "new" || ctx.draft) return;
+    const sender = list.find((c) => c.id === m.pid);
+    const senderEmail = sender?.emails[0]?.value ?? "";
+    if (!sender || !senderEmail) return;
+    const d = draft();
+    const fixes: Partial<DraftState> = {};
+    if (
+      (ctx.mode === "reply" || ctx.mode === "replyAll") &&
+      !d.recipient.trim()
+    ) {
+      fixes.recipient = senderEmail;
+    }
+    if (d.body.includes("发件人: <>")) {
+      fixes.body = d.body.replace(
+        "发件人: <>",
+        `发件人: ${sender.name} <${senderEmail}>`,
+      );
+    }
+    if (Object.keys(fixes).length > 0) setDraft({ ...d, ...fixes });
+  });
 
   const blank = (): DraftState => ({
     id: uid("dr"),
@@ -186,6 +299,13 @@ export function Compose() {
     if (!files) return;
     const next = [...draft().attachments];
     for (const file of Array.from(files)) {
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        showToast({
+          message: `「${file.name}」超过 25MB，建议改用文件链接发送`,
+          kind: "warning",
+        });
+        continue;
+      }
       const buf = await file.arrayBuffer();
       const b64 = arrayBufferToBase64(buf);
       next.push({
@@ -270,10 +390,32 @@ export function Compose() {
     });
   });
 
-  const closeCompose = () => {
+  /* Closing the window persists the draft first — the autosave timer
+   * only fires every 4s, so a fast "type last sentence → close" would
+   * otherwise silently drop the final keystrokes. */
+  const closeCompose = async () => {
+    await persistDraft();
     setComposeOpen(false);
     setComposeContext({ mode: "new", to: undefined, subject: undefined });
   };
+
+  /* Esc minimizes (never discards). Pickers layered on top (snippet /
+     schedule / send menu) handle their own Esc via Modal; when one of
+     them is open we step aside so Esc closes only the topmost layer. */
+  onMount(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || !composeOpen()) return;
+      if (showSnippetPicker() || showSchedulePicker()) return;
+      if (sendMenuOpen()) {
+        setSendMenuOpen(false);
+        return;
+      }
+      e.preventDefault();
+      void toggleMinimize();
+    };
+    document.addEventListener("keydown", onKey);
+    onCleanup(() => document.removeEventListener("keydown", onKey));
+  });
 
   /* P1-6: Auto-title becomes a *suggestion*, not a forced overwrite.
    * Previously the effect ran on every body change and overwrote the
@@ -391,18 +533,36 @@ export function Compose() {
   /* Send split-button actions */
   const sendNow = async () => {
     const d = draft();
-    const subject = d.subject || "(no subject)";
+    const subject = d.subject || "(无主题)";
     const recipient = d.recipient.trim();
+    if (noEmailAccount()) {
+      showToast({
+        message: "尚未绑定邮箱账户，无法发送",
+        kind: "warning",
+        action: { label: "去设置", run: goToAccountSettings },
+      });
+      return;
+    }
     const hasRecipient = recipient
       .split(",")
       .map((s) => s.trim())
-      .some((s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
+      .some((s) => EMAIL_RE.test(s));
     if (!hasRecipient) {
       showToast({ message: "请输入收件人地址", kind: "warning" });
       return;
     }
+    const badCc = firstInvalidAddress(d.cc);
+    if (badCc) {
+      showToast({ message: `抄送地址「${badCc}」格式不正确`, kind: "warning" });
+      return;
+    }
+    const badBcc = firstInvalidAddress(d.bcc);
+    if (badBcc) {
+      showToast({ message: `密送地址「${badBcc}」格式不正确`, kind: "warning" });
+      return;
+    }
     setSendMenuOpen(false);
-    showToast({ message: "正在通过 SMTP 发送…", kind: "info", ttlMs: 2000 });
+    showToast({ message: "正在发送…", kind: "info", ttlMs: 2000 });
     try {
       const outgoingAttachments = d.attachments.map((a) => ({
         filename: a.name,
@@ -422,12 +582,13 @@ export function Compose() {
         htmlBody,
       );
       await persistDraft("sent");
-      closeCompose();
+      void closeCompose();
       if (result) {
+        const firstTo = recipient.split(",")[0]?.trim() ?? recipient;
         const createFollowUp = async () => {
           if (!result.local_message_id) {
             showToast({
-              message: "无法创建跟进（无本地消息 ID）",
+              message: "这封邮件没有同步到本地，暂时无法创建跟进",
               kind: "info",
             });
             return;
@@ -443,22 +604,28 @@ export function Compose() {
           showToast({ message: "已设置 3 天后跟进", kind: "success" });
         };
         showToast({
-          message: `已发送 · ${result.message_id.slice(0, 24)}…`,
+          message: `已发送给 ${firstTo}`,
           kind: "success",
           action: {
-            label: "设置跟进 3 天",
+            label: "3 天后跟进",
             run: () => void createFollowUp(),
           },
         });
       } else {
         showToast({
-          message: "已保存为草稿（未配置真实账户）",
+          message: "尚未绑定邮箱账户，无法发送。草稿已保存。",
           kind: "info",
+          action: { label: "去设置", run: goToAccountSettings },
         });
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      showToast({ message: `发送失败：${msg}`, kind: "error", ttlMs: 8000 });
+      showToast({
+        message: "发送失败，请检查网络后重试",
+        kind: "error",
+        ttlMs: 8000,
+        detail: msg,
+      });
       // Keep modal open so user can retry.
       setSendMenuOpen(false);
     }
@@ -468,7 +635,7 @@ export function Compose() {
     await persistDraft("edited");
     setSendMenuOpen(false);
     showToast({ message: "已保存为草稿", kind: "success" });
-    closeCompose();
+    void closeCompose();
   };
 
   const scheduleSend = async (when: Date) => {
@@ -506,9 +673,9 @@ export function Compose() {
     };
     await upsertScheduledSend(sched);
     setSendMenuOpen(false);
-    closeCompose();
+    void closeCompose();
     showToast({
-      message: `已安排在 ${when.toLocaleString()} 发送`,
+      message: `已安排在 ${formatScheduleTime(when)} 发送`,
       kind: "success",
     });
   };
@@ -529,16 +696,44 @@ export function Compose() {
 
   const title = () =>
     composeContext().mode === "replyAll"
-      ? "Reply All"
+      ? "回复全部"
       : composeContext().mode === "reply"
-        ? "Reply"
+        ? "回复"
         : composeContext().mode === "forward"
-          ? "Forward"
+          ? "转发"
           : "新邮件";
+
+  /** Send buttons stay clickable-looking when disabled; the wrapper
+   *  explains WHY (a disabled <button> swallows click events). */
+  const sendBlockReason = () => {
+    if (noEmailAccount()) return "请先在设置中添加邮箱账户";
+    if (!draft().recipient.trim()) return "请先填写收件人";
+    return null;
+  };
+
+  const finePointer =
+    typeof window !== "undefined" &&
+    (window.matchMedia?.("(pointer: fine)").matches ?? true);
 
   return (
     <Show when={composeOpen()}>
       <Portal mount={document.body}>
+        {/* Scrim behind the floating composer. Clicking it minimizes
+            (never discards) — the draft is persisted by minimize. */}
+        <Show when={formFactor() !== "mobile"}>
+          <div
+            data-compose-scrim
+            onClick={() => void toggleMinimize()}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(30,25,20,0.25)",
+              "backdrop-filter": "blur(6px)",
+              "-webkit-backdrop-filter": "blur(6px)",
+              animation: "backdrop-fade-in 0.22s var(--ease-out) both",
+            }}
+          />
+        </Show>
         <div
           role="dialog"
           aria-modal="true"
@@ -570,7 +765,9 @@ export function Compose() {
             transition: "height 0.25s var(--ease-out)",
           }}
         >
-          {/* Header */}
+          {/* Header — mobile gets a grabber + 取消/发送 row; the desktop
+              window controls (minimize / close) only render on precise
+              pointers where a 28px hit target is usable. */}
           <div
             style={{
               display: "flex",
@@ -581,31 +778,88 @@ export function Compose() {
                 ? "none"
                 : "0.5px solid var(--border)",
               background: "var(--paper-mid)",
-              cursor: formFactor() === "mobile" ? "default" : "grab",
+              position: "relative",
             }}
           >
+            <Show when={formFactor() === "mobile" && !composeMinimized()}>
+              <div
+                aria-hidden
+                style={{
+                  position: "absolute",
+                  top: "4px",
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  width: "36px",
+                  height: "4px",
+                  "border-radius": "var(--radius-pill)",
+                  background: "var(--border-strong)",
+                }}
+              />
+            </Show>
+            <Show when={formFactor() === "mobile" && !composeMinimized()}>
+              <button
+                onClick={() => void closeCompose()}
+                style={{
+                  padding: "6px 4px",
+                  color: "var(--text-secondary)",
+                  "font-size": "var(--text-caption)",
+                  "font-weight": "600",
+                  "min-height": "44px",
+                }}
+              >
+                取消
+              </button>
+            </Show>
             <strong
               style={{
                 flex: 1,
+                "text-align":
+                  formFactor() === "mobile" && !composeMinimized()
+                    ? "center"
+                    : "left",
                 "font-size": "var(--text-body-sm)",
                 "font-weight": "700",
               }}
             >
               {title()}
             </strong>
-            <button
-              onClick={toggleMinimize}
-              aria-label={composeMinimized() ? "Expand" : "Minimize"}
-              style={windowBtn}
-            >
-              <Icon
-                name={composeMinimized() ? "ph-corners-out" : "ph-minus"}
-                size={14}
-              />
-            </button>
-            <button onClick={closeCompose} aria-label="Close" style={windowBtn}>
-              <Icon name="ph-x" size={14} />
-            </button>
+            <Show when={formFactor() === "mobile" && !composeMinimized()}>
+              <button
+                onClick={() => void sendNow()}
+                style={{
+                  padding: "6px 14px",
+                  background: "var(--palm)",
+                  color: "white",
+                  "border-radius": "var(--radius-pill)",
+                  "font-size": "var(--text-caption)",
+                  "font-weight": "700",
+                  "min-height": "36px",
+                }}
+              >
+                发送
+              </button>
+            </Show>
+            <Show when={finePointer || composeMinimized()}>
+              <button
+                onClick={toggleMinimize}
+                aria-label={composeMinimized() ? "展开" : "最小化"}
+                title={composeMinimized() ? "展开" : "最小化"}
+                style={windowBtn}
+              >
+                <Icon
+                  name={composeMinimized() ? "ph-corners-out" : "ph-minus"}
+                  size={14}
+                />
+              </button>
+              <button
+                onClick={() => void closeCompose()}
+                aria-label="关闭"
+                title="关闭（草稿会自动保存）"
+                style={windowBtn}
+              >
+                <Icon name="ph-x" size={14} />
+              </button>
+            </Show>
           </div>
 
           {/* Body */}
@@ -617,6 +871,52 @@ export function Compose() {
                 padding: "var(--space-4)",
               }}
             >
+              <Show
+                when={!noEmailAccount()}
+                fallback={
+                  <div
+                    style={{
+                      display: "flex",
+                      "flex-direction": "column",
+                      "align-items": "center",
+                      "justify-content": "center",
+                      gap: "var(--space-3)",
+                      padding: "var(--space-6) var(--space-4)",
+                      "text-align": "center",
+                      height: "100%",
+                    }}
+                  >
+                    <Icon
+                      name="ph-envelope-simple"
+                      size={40}
+                      style={{ color: "var(--text-muted)" }}
+                    />
+                    <p
+                      style={{
+                        margin: 0,
+                        color: "var(--text-secondary)",
+                        "font-size": "var(--text-body-sm)",
+                        "line-height": 1.6,
+                      }}
+                    >
+                      还没有绑定邮箱账户，暂时无法写信。
+                    </p>
+                    <button
+                      onClick={goToAccountSettings}
+                      style={{
+                        padding: "8px 18px",
+                        background: "var(--palm)",
+                        color: "white",
+                        "border-radius": "var(--radius-pill)",
+                        "font-size": "var(--text-caption)",
+                        "font-weight": "700",
+                      }}
+                    >
+                      去设置添加邮箱账户 →
+                    </button>
+                  </div>
+                }
+              >
               <div
                 style={{
                   display: "flex",
@@ -625,7 +925,7 @@ export function Compose() {
                 }}
               >
                 {/* From */}
-                <Field label="From">
+                <Field label="发件人">
                   <select
                     value={`${draft().accountId}:${draft().fromAlias ?? ""}`}
                     onChange={(e) => {
@@ -638,6 +938,7 @@ export function Compose() {
                         fromAlias: alias || undefined,
                       });
                     }}
+                    {...palmFocusHandlers}
                     style={inputStyle}
                   >
                     <For
@@ -664,7 +965,7 @@ export function Compose() {
                 </Field>
 
                 {/* Recipient */}
-                <Field label="To" field="to">
+                <Field label="收件人" field="to">
                   <RecipientInput
                     value={draft().recipient}
                     onChange={(v) => setDraft({ ...draft(), recipient: v })}
@@ -674,7 +975,7 @@ export function Compose() {
                 </Field>
 
                 <Show when={showCc()}>
-                  <Field label="Cc" field="cc">
+                  <Field label="抄送" field="cc">
                     <RecipientInput
                       value={draft().cc}
                       onChange={(v) => setDraft({ ...draft(), cc: v })}
@@ -685,7 +986,7 @@ export function Compose() {
                 </Show>
 
                 <Show when={showBcc()}>
-                  <Field label="Bcc" field="bcc">
+                  <Field label="密送" field="bcc">
                     <RecipientInput
                       value={draft().bcc}
                       onChange={(v) => setDraft({ ...draft(), bcc: v })}
@@ -701,7 +1002,7 @@ export function Compose() {
                       onClick={() => setShowCc(true)}
                       style={toggleBtnStyle}
                     >
-                      Cc
+                      添加抄送
                     </button>
                   </Show>
                   <Show when={!showBcc()}>
@@ -709,13 +1010,13 @@ export function Compose() {
                       onClick={() => setShowBcc(true)}
                       style={toggleBtnStyle}
                     >
-                      Bcc
+                      添加密送
                     </button>
                   </Show>
                 </div>
 
                 {/* Subject + P1-6 auto-title suggestion chip */}
-                <Field label="Subject" field="subject">
+                <Field label="主题" field="subject">
                   <div
                     style={{
                       display: "flex",
@@ -730,6 +1031,7 @@ export function Compose() {
                         setDraft({ ...draft(), subject: e.currentTarget.value })
                       }
                       placeholder={draft().subject ? "" : "主题"}
+                      {...palmFocusHandlers}
                       style={{ ...inputStyle, flex: 1 }}
                     />
                     <Show when={!draft().subject.trim() && autoTitleSuggestion()}>
@@ -755,7 +1057,7 @@ export function Compose() {
                           }}
                           title={`点击使用建议主题：${title()}`}
                         >
-                          Use: {title()}
+                          用此主题：{title()}
                         </button>
                       )}
                     </Show>
@@ -776,6 +1078,7 @@ export function Compose() {
                   }}
                   placeholder="正文…"
                   rows={12}
+                  {...palmFocusHandlers}
                   style={{
                     ...inputStyle,
                     "min-height": "240px",
@@ -842,8 +1145,14 @@ export function Compose() {
                           </div>
                           <button
                             onClick={() => removeAttachment(a.id)}
-                            aria-label="Remove attachment"
-                            style={{ color: "var(--text-muted)" }}
+                            aria-label={`移除附件 ${a.name}`}
+                            title={`移除附件 ${a.name}`}
+                            style={{
+                              color: "var(--text-muted)",
+                              padding: "6px",
+                              "min-width": "28px",
+                              "min-height": "28px",
+                            }}
                           >
                             <Icon name="ph-x" size={14} />
                           </button>
@@ -853,23 +1162,24 @@ export function Compose() {
                   </div>
                 </Show>
 
-                {/* Signature preview */}
+                {/* Signature — a quiet trailing line, not a floating card. */}
                 <Show when={signature()}>
                   <div
                     style={{
                       "margin-top": "var(--space-2)",
-                      padding: "var(--space-3)",
-                      background: "var(--paper-mid)",
-                      "border-radius": "var(--radius-md)",
+                      padding: "var(--space-2) 0 0",
+                      "border-top": "0.5px dashed var(--border)",
                       "font-size": "var(--text-caption)",
-                      color: "var(--text-secondary)",
+                      color: "var(--text-muted)",
                       "white-space": "pre-wrap",
+                      "line-height": 1.5,
                     }}
                   >
                     {signature()}
                   </div>
                 </Show>
               </div>
+              </Show>
             </div>
           </Show>
 
@@ -893,9 +1203,9 @@ export function Compose() {
               <button
                 onClick={() => setShowSnippetPicker(true)}
                 style={toolbarBtnStyle}
-                title="插入 Snippet"
+                title="插入片段"
               >
-                <Icon name="ph-text-aa" size={14} /> Snippet
+                <Icon name="ph-text-aa" size={14} /> 片段
               </button>
               <button
                 onClick={() => fileInputRef?.click()}
@@ -922,25 +1232,35 @@ export function Compose() {
                   e.currentTarget.value = "";
                 }}
               />
-              <div style={{ position: "relative", display: "flex" }}>
+              {/* Wrapper span: disabled <button> swallows clicks, so the
+                  reason toast lives on the wrapper. */}
+              <div
+                style={{ position: "relative", display: "flex" }}
+                onClick={() => {
+                  const reason = sendBlockReason();
+                  if (reason) showToast({ message: reason, kind: "info" });
+                }}
+                title={sendBlockReason() ?? "发送（⌘↵）"}
+              >
                 <button
-                  onClick={sendNow}
-                  disabled={!draft().recipient}
+                  onClick={() => void sendNow()}
+                  disabled={!!sendBlockReason()}
                   style={{
                     display: "flex",
                     "align-items": "center",
                     gap: "var(--space-2)",
                     padding: "8px 14px",
-                    background: draft().recipient
-                      ? "var(--palm)"
-                      : "var(--paper-dark)",
+                    background: sendBlockReason()
+                      ? "var(--paper-dark)"
+                      : "var(--palm)",
                     color: "white",
                     "border-radius":
                       "var(--radius-pill) 0 0 var(--radius-pill)",
                     "font-weight": "700",
                     "font-size": "var(--text-caption)",
-                    opacity: draft().recipient ? 1 : 0.5,
+                    opacity: sendBlockReason() ? 0.6 : 1,
                     border: "none",
+                    cursor: sendBlockReason() ? "not-allowed" : "pointer",
                   }}
                 >
                   <Icon name="ph-paper-plane-tilt" size={14} />
@@ -948,24 +1268,26 @@ export function Compose() {
                 </button>
                 <button
                   onClick={() => setSendMenuOpen(!sendMenuOpen())}
-                  disabled={!draft().recipient}
+                  disabled={!!sendBlockReason()}
                   aria-label="发送选项"
+                  title="发送选项"
                   style={{
                     display: "flex",
                     "align-items": "center",
                     "justify-content": "center",
                     width: "28px",
                     padding: "8px 0",
-                    background: draft().recipient
-                      ? "var(--palm)"
-                      : "var(--paper-dark)",
+                    background: sendBlockReason()
+                      ? "var(--paper-dark)"
+                      : "var(--palm)",
                     color: "white",
                     "border-radius":
                       "0 var(--radius-pill) var(--radius-pill) 0",
                     "font-size": "var(--text-caption)",
-                    opacity: draft().recipient ? 1 : 0.5,
+                    opacity: sendBlockReason() ? 0.6 : 1,
                     border: "none",
-                    "border-left": "1px solid rgba(255,255,255,0.25)",
+                    "border-left": "1px solid rgba(255,255,255,0.35)",
+                    cursor: sendBlockReason() ? "not-allowed" : "pointer",
                   }}
                 >
                   <Icon name="ph-caret-down" size={12} />
@@ -1039,8 +1361,8 @@ function SaveStatus(props: {
   lastSaved: number;
 }) {
   const text = () => {
-    if (props.state === "saving") return "Saving…";
-    if (props.state === "saved") return "Draft saved";
+    if (props.state === "saving") return "保存中…";
+    if (props.state === "saved") return "草稿已保存";
     return "";
   };
   return (
@@ -1063,10 +1385,8 @@ function SendMenu(props: {
         position: "absolute",
         bottom: "calc(100% + 6px)",
         right: 0,
-        background: "var(--paper-light)",
-        border: "0.5px solid var(--border-strong)",
+        ...glassPanelStyle,
         "border-radius": "var(--radius-md)",
-        "box-shadow": "var(--shadow-md)",
         "min-width": "180px",
         "z-index": 1,
       }}
@@ -1076,7 +1396,7 @@ function SendMenu(props: {
         label="立即发送"
         onClick={props.onSendNow}
       />
-      <MenuItem icon="ph-clock" label="安排发送" onClick={props.onSchedule} />
+      <MenuItem icon="ph-clock" label="定时发送" onClick={props.onSchedule} />
       <MenuItem
         icon="ph-floppy-disk"
         label="保存为草稿"
@@ -1104,6 +1424,8 @@ function MenuItem(props: { icon: string; label: string; onClick: () => void }) {
         (e.currentTarget.style.background = "var(--paper-mid)")
       }
       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      onFocus={(e) => (e.currentTarget.style.background = "var(--paper-mid)")}
+      onBlur={(e) => (e.currentTarget.style.background = "transparent")}
     >
       <Icon name={props.icon} size={14} />
       {props.label}
@@ -1123,12 +1445,12 @@ function SnippetPicker(props: {
     ),
   );
   return (
-    <Modal open onClose={props.onClose} title="选择 Snippet" width="420px">
+    <Modal open onClose={props.onClose} title="选择片段" width="420px">
       <input
         autofocus
         value={q()}
         onInput={(e) => setQ(e.currentTarget.value)}
-        placeholder="搜索 snippet…"
+        placeholder="搜索片段…"
         style={{ ...inputStyle, "margin-bottom": "var(--space-3)" }}
       />
       <For
@@ -1140,7 +1462,7 @@ function SnippetPicker(props: {
               "font-size": "var(--text-caption)",
             }}
           >
-            暂无 snippet
+            还没有片段。在 设置 → 片段 里创建常用回复模板。
           </div>
         }
       >
@@ -1163,6 +1485,12 @@ function SnippetPicker(props: {
             onMouseLeave={(e) =>
               (e.currentTarget.style.background = "var(--paper-mid)")
             }
+            onFocus={(e) =>
+              (e.currentTarget.style.background = "var(--paper-dark)")
+            }
+            onBlur={(e) =>
+              (e.currentTarget.style.background = "var(--paper-mid)")
+            }
           >
             <div style={{ "font-weight": "700", "margin-bottom": "2px" }}>
               {s.label}
@@ -1183,45 +1511,73 @@ function SnippetPicker(props: {
   );
 }
 
+/** zh-CN short date+time for schedule confirmations. */
+export function formatScheduleTime(d: Date): string {
+  return d.toLocaleString("zh-CN", {
+    month: "long",
+    day: "numeric",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Schedule picker presets — exported for tests. Times are computed
+ *  relative to `now` so the tests can pin a fixed clock. */
+export function schedulePresets(now: Date): { label: string; at: Date }[] {
+  const later = addHours(now, 4);
+  const tomorrow = addDays(now, 1);
+  tomorrow.setHours(9, 0, 0, 0);
+  const monday = nextWeekday(now, 1);
+  monday.setHours(9, 0, 0, 0);
+  const friday = nextWeekday(now, 5);
+  friday.setHours(9, 0, 0, 0);
+  return [
+    { label: "今天稍后", at: later },
+    { label: "明天 9:00", at: tomorrow },
+    { label: "下周一 9:00", at: monday },
+    { label: "下周五 9:00", at: friday },
+  ];
+}
+
+/** Combine the custom date + time inputs into a Date; null when either
+ *  half is missing or the result is not a valid future time. */
+export function combineCustomSchedule(
+  dateStr: string,
+  timeStr: string,
+  now = new Date(),
+): Date | null {
+  if (!dateStr || !timeStr) return null;
+  const d = new Date(`${dateStr}T${timeStr}`);
+  if (Number.isNaN(d.getTime())) return null;
+  if (d <= now) return null;
+  return d;
+}
+
 function SchedulePicker(props: {
   onPick: (when: Date) => void;
   onClose: () => void;
 }) {
-  const presets = [
-    { label: "Later today", time: () => addHours(new Date(), 4) },
-    {
-      label: "Tomorrow 9 AM",
-      time: () => {
-        const d = addDays(new Date(), 1);
-        d.setHours(9, 0, 0, 0);
-        return d;
-      },
-    },
-    {
-      label: "Monday 9 AM",
-      time: () => {
-        const d = nextWeekday(new Date(), 1);
-        d.setHours(9, 0, 0, 0);
-        return d;
-      },
-    },
-    {
-      label: "Next Friday 9 AM",
-      time: () => {
-        const d = nextWeekday(new Date(), 5);
-        d.setHours(9, 0, 0, 0);
-        return d;
-      },
-    },
-  ];
+  const [customDate, setCustomDate] = createSignal("");
+  const [customTime, setCustomTime] = createSignal("");
+
+  const applyCustom = () => {
+    const d = combineCustomSchedule(customDate(), customTime());
+    if (!d) {
+      showToast({ message: "请选择未来的日期和时间", kind: "warning" });
+      return;
+    }
+    props.onPick(d);
+    props.onClose();
+  };
 
   return (
-    <Modal open onClose={props.onClose} title="安排发送时间" width="420px">
-      <For each={presets}>
+    <Modal open onClose={props.onClose} title="定时发送" width="420px">
+      <For each={schedulePresets(new Date())}>
         {(p) => (
           <button
             onClick={() => {
-              props.onPick(p.time());
+              props.onPick(p.at);
               props.onClose();
             }}
             style={{
@@ -1242,6 +1598,12 @@ function SchedulePicker(props: {
             onMouseLeave={(e) =>
               (e.currentTarget.style.background = "var(--paper-mid)")
             }
+            onFocus={(e) =>
+              (e.currentTarget.style.background = "var(--paper-dark)")
+            }
+            onBlur={(e) =>
+              (e.currentTarget.style.background = "var(--paper-mid)")
+            }
           >
             <Icon name="ph-clock" size={16} />
             <span style={{ flex: 1, "font-weight": "600" }}>{p.label}</span>
@@ -1251,11 +1613,49 @@ function SchedulePicker(props: {
                 color: "var(--text-muted)",
               }}
             >
-              {p.time().toLocaleString()}
+              {formatScheduleTime(p.at)}
             </span>
           </button>
         )}
       </For>
+      <div
+        style={{
+          display: "flex",
+          gap: "var(--space-2)",
+          "align-items": "center",
+          "margin-top": "var(--space-2)",
+        }}
+      >
+        <input
+          type="date"
+          aria-label="发送日期"
+          value={customDate()}
+          onInput={(e) => setCustomDate(e.currentTarget.value)}
+          style={{ ...inputStyle, flex: 1 }}
+        />
+        <input
+          type="time"
+          aria-label="发送时间"
+          value={customTime()}
+          onInput={(e) => setCustomTime(e.currentTarget.value)}
+          style={{ ...inputStyle, width: "110px" }}
+        />
+        <button
+          onClick={applyCustom}
+          disabled={!customDate() || !customTime()}
+          style={{
+            padding: "8px 14px",
+            background: "var(--palm)",
+            color: "white",
+            "border-radius": "var(--radius-pill)",
+            "font-size": "var(--text-caption)",
+            "font-weight": "700",
+            opacity: customDate() && customTime() ? 1 : 0.4,
+          }}
+        >
+          确认
+        </button>
+      </div>
     </Modal>
   );
 }

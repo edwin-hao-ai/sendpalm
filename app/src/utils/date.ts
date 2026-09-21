@@ -4,12 +4,26 @@ export function isoNow(): string {
   return new Date().toISOString();
 }
 
+/** Local calendar-date key "YYYY-MM-DD" in the user's own timezone.
+ *  NEVER derive a day key via `iso.toISOString().slice(0, 10)` — that is
+ *  a UTC date and shifts one day back for UTC+8 mornings (the Calendar
+ *  "today's meetings missing" bug). Use this for day-bucket lookups. */
+export function localDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Chinese relative time, both directions.
+ *  Past:    刚刚 / N 分钟前 / 今天 06:30 / 昨天 06:30 / N 天前 / N 周前 / N 个月前 / N 年前
+ *  Future:  即将 / N 分钟后 / N 小时后 / N 天后 / N 周后 / N 个月后 / N 年后 */
 export function relativeTime(iso: string, now: Date = new Date()): string {
-  const t = new Date(iso).getTime();
+  const d = new Date(iso);
+  const t = d.getTime();
   if (Number.isNaN(t)) return "";
   const diff = now.getTime() - t;
   const abs = Math.abs(diff);
-  const sign = diff >= 0 ? "ago" : "from now";
 
   const sec = 1000;
   const min = 60 * sec;
@@ -19,13 +33,24 @@ export function relativeTime(iso: string, now: Date = new Date()): string {
   const month = 30 * day;
   const year = 365 * day;
 
-  if (abs < min) return `just now`;
-  if (abs < hour) return `${Math.round(abs / min)} min ${sign}`;
-  if (abs < day) return `${Math.round(abs / hour)}h ${sign}`;
-  if (abs < week) return `${Math.round(abs / day)}d ${sign}`;
-  if (abs < month) return `${Math.round(abs / week)}w ${sign}`;
-  if (abs < year) return `${Math.round(abs / month)}mo ${sign}`;
-  return `${Math.round(abs / year)}y ${sign}`;
+  if (diff >= 0) {
+    if (abs < min) return "刚刚";
+    if (abs < hour) return `${Math.round(abs / min)} 分钟前`;
+    const time = formatTime(iso);
+    if (sameDate(d, now)) return `今天 ${time}`;
+    if (sameDate(d, addDays(now, -1))) return `昨天 ${time}`;
+    if (abs < week) return `${Math.round(abs / day)} 天前`;
+    if (abs < month) return `${Math.round(abs / week)} 周前`;
+    if (abs < year) return `${Math.round(abs / month)} 个月前`;
+    return `${Math.round(abs / year)} 年前`;
+  }
+  if (abs < min) return "即将";
+  if (abs < hour) return `${Math.round(abs / min)} 分钟后`;
+  if (abs < day) return `${Math.round(abs / hour)} 小时后`;
+  if (abs < week) return `${Math.round(abs / day)} 天后`;
+  if (abs < month) return `${Math.round(abs / week)} 周后`;
+  if (abs < year) return `${Math.round(abs / month)} 个月后`;
+  return `${Math.round(abs / year)} 年后`;
 }
 
 export function formatDate(iso: string, locale = "zh-CN"): string {

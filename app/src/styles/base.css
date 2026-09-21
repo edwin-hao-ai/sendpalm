@@ -20,6 +20,10 @@ html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  /* Final backstop against page-level horizontal scroll on mobile:
+     any descendant that still manages to be wider than the viewport
+     is clipped here instead of producing a ~15px right overflow. */
+  overflow-x: clip;
 }
 
 body {
@@ -29,6 +33,7 @@ body {
   color: var(--text-primary);
   background: var(--surface);
   overflow: hidden;
+  overflow-x: clip;
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -147,6 +152,9 @@ hr {
     "sidebar  topbar"
     "sidebar  main";
   height: 100dvh;
+  /* Clip at the shell level so a too-wide child (tab bar, topbar)
+     can never push the whole layout past the right screen edge. */
+  overflow-x: clip;
 }
 
 #sidebar {
@@ -216,7 +224,10 @@ hr {
     min-height: calc(var(--topbar-height) + env(safe-area-inset-top));
   }
   #app {
-    grid-template-columns: 1fr;
+    /* minmax(0, 1fr): a bare 1fr has an auto minimum, so a wide child
+       (bottom tab bar, topbar row) would force the grid — and the whole
+       page — past the right viewport edge on iPhone. */
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows:
       calc(var(--topbar-height) + env(safe-area-inset-top))
       1fr
@@ -235,7 +246,10 @@ hr {
   #detail-panel,
   #agent-panel {
     inset: 0;
-    width: 100vw;
+    /* 100vw includes the vertical scrollbar lane and overflows in
+       desktop-narrow windows; inset:0 + width:100% tracks the real
+       containing block. */
+    width: 100%;
     height: 100dvh;
     padding: env(safe-area-inset-top) env(safe-area-inset-right)
       env(safe-area-inset-bottom) env(safe-area-inset-left);
@@ -243,4 +257,18 @@ hr {
   #agent-panel {
     z-index: var(--z-agent);
   }
+}
+
+/* ── Liquid glass utility ──────────────────────────────────────────
+ * Apple-style translucent floating surface. Use `class="glass-panel"`
+ * on overlays (popovers, sheets, floating toolbars) instead of
+ * re-writing the recipe inline. Tokens live in tokens.css; the radius
+ * can be overridden per call site via --glass-radius. */
+.glass-panel {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 0.5px solid var(--glass-border);
+  border-radius: var(--glass-radius);
+  box-shadow: var(--glass-shadow);
 }

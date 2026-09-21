@@ -158,7 +158,7 @@ test.describe("Contact features", () => {
       page.locator("#detail-panel").getByText("Outgoing message"),
     ).toBeVisible();
 
-    await page.getByRole("button", { name: "To them" }).click();
+    await page.getByRole("button", { name: "发给 TA" }).click();
 
     await expect(
       page.locator("#detail-panel").getByText("Outgoing message"),
@@ -229,7 +229,7 @@ test.describe("Contact features", () => {
     await page.getByRole("button", { name: "按公司分组" }).click();
 
     await page
-      .locator(`[data-testid="company-group-header"][aria-label="Open company ${COMPANY_NAME}"]`)
+      .locator(`[data-testid="company-group-header"][aria-label="查看公司 ${COMPANY_NAME}"]`)
       .click();
     await expect(page.locator("#detail-panel")).toBeVisible({ timeout: 5_000 });
 

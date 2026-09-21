@@ -62,7 +62,7 @@ describe("ResourceGate", () => {
         {(data) => <span>rows: {data.length}</span>}
       </ResourceGate>
     ));
-    const skeletons = await findAllByLabelText("Loading");
+    const skeletons = await findAllByLabelText("加载中");
     expect(skeletons.length).toBeGreaterThan(0);
     unmount();
   });
@@ -93,7 +93,7 @@ describe("ResourceGate", () => {
     ));
     // Immediately after mount, main is resolved but secondaryReady is false
     // → skeleton should still be up.
-    const skeletons = await findAllByLabelText("Loading");
+    const skeletons = await findAllByLabelText("加载中");
     expect(skeletons.length).toBeGreaterThan(0);
     setSecondaryReady(true);
     expect(await findByText("rows: 1")).toBeTruthy();

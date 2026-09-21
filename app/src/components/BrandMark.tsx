@@ -15,7 +15,7 @@
 import { JSX } from "solid-js";
 import logoMarkUrl from "/src/assets/logo-mark.svg?url";
 
-export function BrandMark(): JSX.Element {
+export function BrandMark(props: { compact?: boolean }): JSX.Element {
   return (
     <div
       data-testid="brand-mark"
@@ -36,6 +36,7 @@ export function BrandMark(): JSX.Element {
       />
       <span
         style={{
+          display: props.compact ? "none" : undefined,
           "font-family": "var(--font-display)",
           "font-weight": "700",
           "font-size": "18px",

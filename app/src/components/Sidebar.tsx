@@ -1,9 +1,9 @@
-/** Sidebar — left rail with nav icons. Bottom-tab-bar on mobile.
+/** Sidebar — left rail with nav icons + labels. Bottom-tab-bar on mobile.
  *  Mobile collapses the 15 nav entries into 6 primary tabs +
  *  a "More" sheet so tap targets stay >= 44px.
  */
 
-import { For, Show, createResource, createSignal } from "solid-js";
+import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js";
 import { Portal } from "solid-js/web";
 import { Icon } from "./Icon";
 import { SidebarTooltip } from "./SidebarTooltip";
@@ -21,6 +21,47 @@ const MOBILE_PRIMARY_VIEWS = new Set([
   "files",
   "settings",
 ]);
+
+/** User-facing nav labels. HEY brand nouns (Gate / Imbox / Stream /
+ *  Records / Clips) stay English; everything else is Chinese.
+ *  `NAV_SECTIONS[].label` stays untouched for `data-nav` test hooks. */
+const NAV_LABEL_ZH: Record<string, string> = {
+  screener: "Gate",
+  imbox: "Imbox",
+  feed: "Stream",
+  paperTrail: "Records",
+  contacts: "联系人",
+  companies: "公司",
+  calendar: "日历",
+  files: "文件",
+  drafts: "草稿",
+  followUps: "跟进",
+  clips: "Clips",
+  insights: "洞察",
+  trash: "回收站",
+  spam: "垃圾邮件",
+  settings: "设置",
+};
+
+/** Chinese annotation for the brand nouns, shown in tooltips. */
+const NAV_BRAND_NOTE: Record<string, string> = {
+  screener: "筛选台",
+  imbox: "收件箱",
+  feed: "资讯流",
+  paperTrail: "收据账单",
+  clips: "剪藏",
+};
+
+export function navDisplayLabel(viewName: string): string {
+  return NAV_LABEL_ZH[viewName] ?? viewName;
+}
+
+export function navTooltipLabel(section: NavSection): string {
+  const label = navDisplayLabel(section.view);
+  const note = NAV_BRAND_NOTE[section.view];
+  const base = note ? `${label} · ${note}` : label;
+  return section.hint ? `${base} (${section.hint})` : base;
+}
 
 export function Sidebar() {
   const { isMobile } = useViewport();
@@ -52,10 +93,20 @@ export function Sidebar() {
       <nav
         id="sidebar"
         data-testid="sidebar"
+        aria-label="主导航"
         style={{
           display: "flex",
           "flex-direction": isMobile() ? "row" : "column",
-          background: "var(--paper-mid)",
+          // Mobile bottom tab bar: liquid glass per prototype (8295-8298).
+          background: isMobile()
+            ? "var(--glass-bg-strong)"
+            : "var(--paper-mid)",
+          "backdrop-filter": isMobile()
+            ? "blur(20px) saturate(1.8)"
+            : undefined,
+          "-webkit-backdrop-filter": isMobile()
+            ? "blur(20px) saturate(1.8)"
+            : undefined,
           "border-right": isMobile() ? "none" : "0.5px solid var(--border)",
           "border-top": isMobile() ? "0.5px solid var(--border)" : "none",
           padding: isMobile() ? undefined : "14px 0 12px",
@@ -73,8 +124,7 @@ export function Sidebar() {
             <NavItem
               icon={section.icon}
               label={section.label}
-              hint={section.hint}
-              view={section.view}
+              section={section}
               active={view() === section.view}
               onClick={() => navigate(section.view)}
               badgeCount={
@@ -87,7 +137,6 @@ export function Sidebar() {
           <NavItem
             icon="ph-dots-three"
             label="More"
-            view="more"
             active={currentIsOverflow()}
             onClick={() => setMoreOpen(true)}
           />
@@ -108,15 +157,15 @@ export function Sidebar() {
 
 function NavItem(props: {
   icon: string;
+  /** English label from NAV_SECTIONS — used for data-nav test hooks. */
   label: string;
-  hint?: string;
-  view: string;
+  section?: NavSection;
   active: boolean;
   onClick: () => void;
   /** Optional badge count to render in the top-right corner. */
   badgeCount?: () => number;
 }) {
-  const { isMobile } = useViewport();
+  const { isMobile, isTablet } = useViewport();
   let buttonRef: HTMLButtonElement | undefined;
   const [tooltipAnchor, setTooltipAnchor] = createSignal<{
     top: number;
@@ -127,6 +176,11 @@ function NavItem(props: {
     height: number;
   } | null>(null);
   let showTimer: number | undefined;
+
+  const displayLabel = () =>
+    props.section ? navDisplayLabel(props.section.view) : "更多";
+  const tooltipLabel = () =>
+    props.section ? navTooltipLabel(props.section) : "更多功能";
 
   const showTooltip = () => {
     if (!buttonRef) return;
@@ -150,15 +204,10 @@ function NavItem(props: {
       <button
         ref={(el) => (buttonRef = el)}
         onClick={props.onClick}
-        title={props.label}
-        aria-label={
-          props.hint
-            ? `${props.label}, 快捷键 ${props.hint}`
-            : props.label
-        }
+        aria-label={tooltipLabel()}
         aria-current={props.active ? "page" : undefined}
         data-nav={props.label}
-        data-nav-view={props.view}
+        data-nav-view={props.section?.view ?? "more"}
         data-active={props.active}
         onMouseEnter={scheduleShow}
         onMouseLeave={cancelShow}
@@ -235,34 +284,21 @@ function NavItem(props: {
             {props.badgeCount!() > 99 ? "99+" : props.badgeCount!()}
           </span>
         </Show>
-        {/* Mobile: keep the label visible (10px). Desktop: hide it. */}
-        <Show when={isMobile()}>
+        {/* Label under the icon. Hidden on the tablet narrow rail only
+            (prototype: .nav-label { display: none } at 768–1023px). */}
+        <Show when={!isTablet()}>
           <span
             style={{
               "font-size": "10px",
               "font-weight": "600",
               "margin-top": "2px",
               "white-space": "nowrap",
+              "max-width": "64px",
+              overflow: "hidden",
+              "text-overflow": "ellipsis",
             }}
           >
-            {props.label}
-          </span>
-        </Show>
-        {/* ⌘N chip — only on desktop/tablet when present. */}
-        <Show when={props.hint && !isMobile()}>
-          <span
-            aria-hidden="true"
-            style={{
-              position: "absolute",
-              right: "4px",
-              bottom: "2px",
-              "font-size": "9px",
-              "font-weight": "700",
-              color: props.active ? "var(--palm)" : "var(--text-muted)",
-              opacity: 0.7,
-            }}
-          >
-            {props.hint}
+            {displayLabel()}
           </span>
         </Show>
       </button>
@@ -270,8 +306,7 @@ function NavItem(props: {
         <Portal>
           <SidebarTooltip
             anchor={tooltipAnchor() as never}
-            label={props.label}
-            hint={props.hint}
+            label={tooltipLabel()}
           />
         </Portal>
       </Show>
@@ -285,6 +320,37 @@ function MobileMoreSheet(props: {
   onClose: () => void;
   gateCount: () => number;
 }) {
+  // Drag-to-dismiss: track a downward swipe starting anywhere on the sheet
+  // chrome (grabber / title row), translate the sheet 1:1, and dismiss past
+  // a threshold. Content buttons stopPropagation so taps never start a drag.
+  const [dragY, setDragY] = createSignal(0);
+  let dragStartY: number | null = null;
+
+  const onTouchStart = (e: TouchEvent) => {
+    dragStartY = e.touches[0]?.clientY ?? null;
+  };
+  const onTouchMove = (e: TouchEvent) => {
+    if (dragStartY == null) return;
+    const dy = (e.touches[0]?.clientY ?? 0) - dragStartY;
+    setDragY(Math.max(0, dy));
+  };
+  const onTouchEnd = () => {
+    if (dragY() > 64) {
+      props.onClose();
+    }
+    dragStartY = null;
+    setDragY(0);
+  };
+
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      props.onClose();
+    }
+  };
+  onMount(() => document.addEventListener("keydown", onKey));
+  onCleanup(() => document.removeEventListener("keydown", onKey));
+
   return (
     <Portal mount={document.body}>
       <div
@@ -300,29 +366,78 @@ function MobileMoreSheet(props: {
       >
         <div
           data-testid="mobile-more-sheet"
+          role="dialog"
+          aria-label="更多功能"
           onClick={(e) => e.stopPropagation()}
           style={{
             position: "absolute",
             left: 0,
             right: 0,
             bottom: 0,
-            background: "var(--paper-light)",
+            height: "auto",
+            background: "var(--glass-bg-strong)",
+            "backdrop-filter": "var(--glass-blur)",
+            "-webkit-backdrop-filter": "var(--glass-blur)",
             "border-radius": "var(--radius-xl) var(--radius-xl) 0 0",
             padding:
-              "var(--space-4) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom))",
+              "var(--space-2) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom))",
             "box-shadow": "0 -8px 32px rgba(0,0,0,0.16)",
             animation: "sheet-enter 0.28s var(--ease-out) both",
+            transform: dragY() > 0 ? `translateY(${dragY()}px)` : undefined,
+            transition: dragY() > 0 ? "none" : "transform 0.2s var(--ease-out)",
           }}
         >
+          {/* Grabber + title row — the drag handle for swipe-to-dismiss */}
           <div
-            style={{
-              width: "36px",
-              height: "5px",
-              "border-radius": "var(--radius-pill)",
-              background: "var(--border-strong, var(--border))",
-              margin: "0 auto var(--space-4)",
-            }}
-          />
+            onTouchStart={onTouchStart}
+            onTouchMove={onTouchMove}
+            onTouchEnd={onTouchEnd}
+            style={{ "touch-action": "none" }}
+          >
+            <div
+              style={{
+                width: "36px",
+                height: "5px",
+                "border-radius": "var(--radius-pill)",
+                background: "var(--border-strong, var(--border))",
+                margin: "var(--space-1) auto var(--space-2)",
+              }}
+            />
+            <div
+              style={{
+                display: "flex",
+                "align-items": "center",
+                "justify-content": "space-between",
+                "margin-bottom": "var(--space-3)",
+              }}
+            >
+              <span
+                style={{
+                  "font-size": "var(--text-body-sm)",
+                  "font-weight": "700",
+                  color: "var(--text-primary)",
+                }}
+              >
+                更多功能
+              </span>
+              <button
+                onClick={props.onClose}
+                aria-label="关闭"
+                style={{
+                  width: "44px",
+                  height: "44px",
+                  margin: "calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) 0",
+                  display: "flex",
+                  "align-items": "center",
+                  "justify-content": "center",
+                  color: "var(--text-muted)",
+                  "border-radius": "var(--radius-pill)",
+                }}
+              >
+                <Icon name="ph-x" size={16} />
+              </button>
+            </div>
+          </div>
           <div
             style={{
               display: "grid",
@@ -336,6 +451,7 @@ function MobileMoreSheet(props: {
                   onClick={() => props.onNavigate(item.view)}
                   data-nav={item.label}
                   data-nav-view={item.view}
+                  aria-label={navTooltipLabel(item)}
                   style={{
                     position: "relative",
                     display: "flex",
@@ -362,7 +478,7 @@ function MobileMoreSheet(props: {
                       "text-align": "center",
                     }}
                   >
-                    {item.label}
+                    {navDisplayLabel(item.view)}
                   </span>
                   {/* Badge for the screener entry inside the More sheet */}
                   <Show when={item.view === "screener" && (props.gateCount() ?? 0) > 0}>

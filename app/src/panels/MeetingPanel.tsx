@@ -20,15 +20,19 @@ import {
   getEvent,
   listFiles,
   upsertEvent,
+  deleteEvent,
 } from "../stores/data";
 import {
   setDetailOpen,
   setSelectedMeetingId,
-  setSelectedFileId,
   showToast,
 } from "../stores/ui";
 import { contactsList, refetchContacts } from "../stores/contacts";
 import { Icon } from "../components/Icon";
+import { ErrorState } from "../components/Empty";
+import { Skeleton } from "../components/Skeleton";
+import { EventEditModal } from "../views/Calendar";
+import { FilePanel, fileTypeLabel } from "./FilePanel";
 import { uid } from "../utils/id";
 import { generateMeetingBrief, linkedMaterialIds } from "../utils/meeting";
 import { fileIconName } from "../utils/labels";
@@ -60,7 +64,20 @@ export function MeetingPanel(props: { meetingId: string }) {
       .then((p) => p.items)
   );
   const [files, { refetch: refetchFiles }] = createResource(listFiles);
-  const [rsvpBusy, setRsvpBusy] = createSignal(false);
+  // Tracks which RSVP button is in flight (null = idle) so the busy
+  // state can show a spinner on the clicked button specifically.
+  const [rsvpBusy, setRsvpBusy] = createSignal<RsvpResponse | null>(null);
+  // Attachment overlay: opening a meeting material used to swap the
+  // whole detail panel to FilePanel with no way back to the meeting.
+  // Now the file opens in an overlay layer inside this panel.
+  const [overlayFileId, setOverlayFileId] = createSignal<string | null>(
+    null,
+  );
+  const [editingEvent, setEditingEvent] = createSignal(false);
+  // Autosave indicator for agenda / notes / action items.
+  const [saveState, setSaveState] = createSignal<"idle" | "saving" | number>(
+    "idle",
+  );
 
   // P1-8: hard refresh for the event/contacts; soft refresh for
   // messages/files. The full table scan on every sync tick was the
@@ -77,7 +94,7 @@ export function MeetingPanel(props: { meetingId: string }) {
   const sendRsvp = async (response: RsvpResponse) => {
     const ev = event();
     if (!ev) return;
-    setRsvpBusy(true);
+    setRsvpBusy(response);
     try {
       const r = await respondToCalendarInvite(ev.id, response);
       if (r) {
@@ -87,19 +104,23 @@ export function MeetingPanel(props: { meetingId: string }) {
             : response === "DECLINED"
               ? "已拒绝"
               : "已标记为暂定";
-        showToast({ message: `${label} · 已通过 iTip 回信给组织者`, kind: "success" });
+        showToast({ message: `${label} · 已回信给组织者`, kind: "success" });
         await refetchEvent();
       } else {
         showToast({
-          message: "未配置 Tauri 运行时，无法发送回信",
+          message: "当前环境暂不支持回信",
           kind: "info",
         });
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      showToast({ message: `RSVP 发送失败：${msg}`, kind: "error" });
+      showToast({
+        message: "回信发送失败，请检查网络后重试",
+        kind: "error",
+        source: "rsvp",
+        detail: e instanceof Error ? e.message : String(e),
+      });
     } finally {
-      setRsvpBusy(false);
+      setRsvpBusy(null);
     }
   };
 
@@ -134,15 +155,20 @@ export function MeetingPanel(props: { meetingId: string }) {
     // Optimistic local merge: the in-memory event carries the
     // pending patch so the UI updates without waiting for the DB.
     setEvent({ ...e, ...patch });
+    setSaveState("saving");
     if (saveTimer !== undefined) clearTimeout(saveTimer);
     saveTimer = window.setTimeout(async () => {
       try {
         await upsertEvent({ ...event()!, ...patch });
         await refetchEvent();
+        setSaveState(Date.now());
       } catch (err) {
+        setSaveState("idle");
         showToast({
-          message: `保存失败：${String(err)}`,
+          message: "保存失败，请重试",
           kind: "error",
+          source: "meeting-panel",
+          detail: String(err),
         });
       }
     }, 600);
@@ -174,7 +200,25 @@ export function MeetingPanel(props: { meetingId: string }) {
   const removeAgendaItem = (id: string) => {
     const e = event();
     if (!e) return;
+    const idx = e.agenda.findIndex((a) => a.id === id);
+    const removed = e.agenda[idx];
+    if (!removed) return;
     updateAgenda(e.agenda.filter((a) => a.id !== id));
+    showToast({
+      message: "已删除议程项",
+      kind: "info",
+      ttlMs: 5000,
+      action: {
+        label: "撤销",
+        run: () => {
+          const cur = event();
+          if (!cur) return;
+          const next = [...cur.agenda];
+          next.splice(Math.min(idx, next.length), 0, removed);
+          updateAgenda(next);
+        },
+      },
+    });
   };
 
   const newActionItem = () => {
@@ -195,10 +239,28 @@ export function MeetingPanel(props: { meetingId: string }) {
     );
   };
 
+  const saveStateText = () => {
+    const s = saveState();
+    if (s === "saving") return "正在保存…";
+    if (typeof s === "number") {
+      const d = new Date(s);
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      return `已自动保存 ${hh}:${mm}`;
+    }
+    return "";
+  };
+
   return (
     <div
-      style={{ display: "flex", "flex-direction": "column", height: "100%" }}
+      style={{
+        display: "flex",
+        "flex-direction": "column",
+        height: "100%",
+        position: "relative",
+      }}
     >
+      <style>{MEETING_PANEL_CSS}</style>
       <header
         style={{
           padding: "var(--space-3) var(--space-5)",
@@ -206,7 +268,10 @@ export function MeetingPanel(props: { meetingId: string }) {
           display: "flex",
           "align-items": "center",
           gap: "var(--space-3)",
-          background: "var(--surface-elevated)",
+          background:
+            "color-mix(in srgb, var(--surface-elevated) 82%, transparent)",
+          "backdrop-filter": "blur(20px) saturate(1.4)",
+          "-webkit-backdrop-filter": "blur(20px) saturate(1.4)",
         }}
       >
         <button
@@ -214,19 +279,76 @@ export function MeetingPanel(props: { meetingId: string }) {
             setSelectedMeetingId(null);
             setDetailOpen(false);
           }}
-          aria-label="Close"
+          aria-label="关闭"
+          title="关闭 (Esc)"
           style={{ color: "var(--text-muted)" }}
         >
-          <Icon name="ph-arrow-left" size={18} />
+          <Icon name="ph-x" size={18} />
         </button>
         <strong
           style={{ "font-size": "var(--text-body-sm)", "font-weight": "700" }}
         >
-          Meeting
+          会议
         </strong>
+        <span
+          aria-live="polite"
+          style={{
+            "margin-left": "auto",
+            "font-size": "var(--text-micro)",
+            color: "var(--text-muted)",
+          }}
+        >
+          {saveStateText()}
+        </span>
+        <Show when={event()}>
+          <button
+            onClick={() => setEditingEvent(true)}
+            title="编辑会议"
+            style={{
+              display: "inline-flex",
+              "align-items": "center",
+              gap: "4px",
+              padding: "6px 12px",
+              "border-radius": "var(--radius-pill)",
+              background: "var(--paper-mid)",
+              color: "var(--text-secondary)",
+              "font-size": "var(--text-caption)",
+              "font-weight": "600",
+            }}
+          >
+            <Icon name="ph-pencil-simple" size={12} /> 编辑
+          </button>
+        </Show>
       </header>
 
-      <Show when={event()}>
+      <Show
+        when={!event.error}
+        fallback={
+          <ErrorState
+            title="会议加载失败"
+            message="请稍后重试；若反复失败，可到顶栏的错误日志里查看详情。"
+            retry={() => void refetchEvent()}
+          />
+        }
+      >
+        <Show
+          when={event()}
+          fallback={
+            <div style={{ padding: "var(--space-5)" }} aria-busy="true">
+              <Skeleton height="28px" width="60%" />
+              <div style={{ height: "var(--space-3)" }} />
+              <Skeleton height="14px" width="80%" />
+              <div style={{ height: "var(--space-5)" }} />
+              <Skeleton height="16px" />
+              <div style={{ height: "var(--space-2)" }} />
+              <Skeleton height="16px" />
+              <div style={{ height: "var(--space-2)" }} />
+              <Skeleton height="16px" width="70%" />
+              <div style={{ height: "var(--space-5)" }} />
+              <Skeleton height="120px" />
+            </div>
+          }
+        >
         {(getEv) => {
           const ev = () => getEv() as CalendarEvent | undefined;
           return (
@@ -256,7 +378,12 @@ export function MeetingPanel(props: { meetingId: string }) {
                   }}
                 >
                   <Icon name="ph-calendar-blank" size={12} />{" "}
-                  {new Date(ev()!.dt).toLocaleString()} · {ev()!.tm}
+                  {new Date(ev()!.dt).toLocaleString("zh-CN", {
+                    month: "long",
+                    day: "numeric",
+                    weekday: "long",
+                  })}
+                  {ev()!.tm ? ` · ${ev()!.tm}` : ""}
                   <Show when={ev()!.location}>
                     {" · "}
                     <Icon name="ph-map-pin" size={12} /> {ev()!.location}
@@ -272,6 +399,13 @@ export function MeetingPanel(props: { meetingId: string }) {
                       "flex-wrap": "wrap",
                       gap: "var(--space-2)",
                       "align-items": "center",
+                      padding: "var(--space-3)",
+                      "border-radius": "var(--radius-lg)",
+                      background:
+                        "color-mix(in srgb, var(--paper-light) 82%, transparent)",
+                      "backdrop-filter": "blur(20px) saturate(1.4)",
+                      "-webkit-backdrop-filter": "blur(20px) saturate(1.4)",
+                      border: "0.5px solid var(--border)",
                     }}
                   >
                     <span
@@ -280,35 +414,61 @@ export function MeetingPanel(props: { meetingId: string }) {
                         "font-weight": "700",
                         color: "var(--text-muted)",
                         "margin-right": "var(--space-2)",
-                        "text-transform": "uppercase",
                         "letter-spacing": "0.04em",
                       }}
                     >
-                      <Icon name="ph-envelope-simple-open" size={11} /> RSVP
+                      <Icon name="ph-envelope-simple-open" size={11} /> 邀请回复
                     </span>
                     <button
                       data-testid="rsvp-accept"
                       onClick={() => void sendRsvp("ACCEPTED")}
-                      disabled={rsvpBusy()}
+                      disabled={rsvpBusy() !== null}
                       style={rsvpBtn("var(--palm)", true)}
                     >
-                      <Icon name="ph-check" size={12} /> 接受
+                      <Icon
+                        name={
+                          rsvpBusy() === "ACCEPTED"
+                            ? "ph-circle-notch"
+                            : "ph-check"
+                        }
+                        size={12}
+                        class={rsvpBusy() === "ACCEPTED" ? "mp-spin" : ""}
+                      />{" "}
+                      接受
                     </button>
                     <button
                       data-testid="rsvp-tentative"
                       onClick={() => void sendRsvp("TENTATIVE")}
-                      disabled={rsvpBusy()}
+                      disabled={rsvpBusy() !== null}
                       style={rsvpBtn("var(--yellow)", false)}
                     >
-                      <Icon name="ph-question" size={12} /> 暂定
+                      <Icon
+                        name={
+                          rsvpBusy() === "TENTATIVE"
+                            ? "ph-circle-notch"
+                            : "ph-question"
+                        }
+                        size={12}
+                        class={rsvpBusy() === "TENTATIVE" ? "mp-spin" : ""}
+                      />{" "}
+                      暂定
                     </button>
                     <button
                       data-testid="rsvp-decline"
                       onClick={() => void sendRsvp("DECLINED")}
-                      disabled={rsvpBusy()}
+                      disabled={rsvpBusy() !== null}
                       style={rsvpBtn("var(--coral)", false)}
                     >
-                      <Icon name="ph-x" size={12} /> 拒绝
+                      <Icon
+                        name={
+                          rsvpBusy() === "DECLINED"
+                            ? "ph-circle-notch"
+                            : "ph-x"
+                        }
+                        size={12}
+                        class={rsvpBusy() === "DECLINED" ? "mp-spin" : ""}
+                      />{" "}
+                      拒绝
                     </button>
                     <Show when={ev()!.attendeeResponse}>
                       <span
@@ -329,7 +489,7 @@ export function MeetingPanel(props: { meetingId: string }) {
                               ? " 暂定"
                               : ""}
                         {ev()!.attendeeResponseAt
-                          ? ` · ${new Date(ev()!.attendeeResponseAt!).toLocaleString()}`
+                          ? ` · ${new Date(ev()!.attendeeResponseAt!).toLocaleString("zh-CN")}`
                           : ""}
                       </span>
                     </Show>
@@ -354,9 +514,10 @@ export function MeetingPanel(props: { meetingId: string }) {
                             "border-radius": "var(--radius-pill)",
                             "font-size": "var(--text-micro)",
                             "font-weight": "600",
+                            color: c ? undefined : "var(--text-muted)",
                           }}
                         >
-                          {c?.name ?? pid}
+                          {c?.name ?? "未知联系人"}
                         </span>
                       );
                     }}
@@ -372,7 +533,7 @@ export function MeetingPanel(props: { meetingId: string }) {
                 }}
               >
                 {/* Brief */}
-                <SectionHeader icon="ph-sparkle" title="Brief" />
+                <SectionHeader icon="ph-sparkle" title="简报" />
                 <Show
                   when={brief().length > 0}
                   fallback={
@@ -385,7 +546,7 @@ export function MeetingPanel(props: { meetingId: string }) {
                         color: "var(--text-muted)",
                       }}
                     >
-                      No prior context found for these attendees.
+                      没有找到与这些参会人相关的历史邮件和文件。
                     </p>
                   }
                 >
@@ -424,7 +585,7 @@ export function MeetingPanel(props: { meetingId: string }) {
 
                 {/* Materials */}
                 <Show when={materials().length > 0}>
-                  <SectionHeader icon="ph-paperclip" title="Materials" />
+                  <SectionHeader icon="ph-paperclip" title="相关材料" />
                   <div
                     style={{
                       display: "flex",
@@ -435,10 +596,7 @@ export function MeetingPanel(props: { meetingId: string }) {
                     <For each={materials()}>
                       {(f) => (
                         <button
-                          onClick={() => {
-                            setSelectedFileId(f.id);
-                            setDetailOpen(true);
-                          }}
+                          onClick={() => setOverlayFileId(f.id)}
                           style={{
                             display: "flex",
                             "align-items": "center",
@@ -473,7 +631,7 @@ export function MeetingPanel(props: { meetingId: string }) {
                                 color: "var(--text-muted)",
                               }}
                             >
-                              {formatBytes(f.size)} · {f.mime}
+                              {formatBytes(f.size)} · {fileTypeLabel(f.type)}
                             </div>
                           </div>
                         </button>
@@ -483,7 +641,7 @@ export function MeetingPanel(props: { meetingId: string }) {
                 </Show>
 
                 {/* Agenda */}
-                <SectionHeader icon="ph-list-checks" title="Agenda" />
+                <SectionHeader icon="ph-list-checks" title="议程" />
                 <For each={ev()!.agenda}>
                   {(a, i) => (
                     <div
@@ -520,7 +678,7 @@ export function MeetingPanel(props: { meetingId: string }) {
                       />
                       <button
                         onClick={() => removeAgendaItem(a.id)}
-                        aria-label="Remove agenda item"
+                        aria-label="删除议程项"
                         style={{ color: "var(--text-muted)", padding: "4px" }}
                       >
                         <Icon name="ph-x" size={12} />
@@ -543,11 +701,11 @@ export function MeetingPanel(props: { meetingId: string }) {
                     "margin-top": "var(--space-2)",
                   }}
                 >
-                  <Icon name="ph-plus" size={12} /> Add item
+                  <Icon name="ph-plus" size={12} /> 添加一项
                 </button>
 
                 {/* Notes */}
-                <SectionHeader icon="ph-notebook" title="Notes" />
+                <SectionHeader icon="ph-notebook" title="笔记" />
                 <textarea
                   value={ev()!.notes}
                   onChange={(e) => updateNotes(e.currentTarget.value)}
@@ -566,7 +724,7 @@ export function MeetingPanel(props: { meetingId: string }) {
                 />
 
                 {/* Action items */}
-                <SectionHeader icon="ph-check-square" title="Action items" />
+                <SectionHeader icon="ph-check-square" title="待办事项" />
                 <For each={ev()!.actionItems}>
                   {(ai) => (
                     <div
@@ -579,7 +737,7 @@ export function MeetingPanel(props: { meetingId: string }) {
                     >
                       <button
                         onClick={() => toggleActionDone(ai.id)}
-                        aria-label="Toggle done"
+                        aria-label="标记完成"
                         style={{
                           width: "20px",
                           height: "20px",
@@ -624,7 +782,7 @@ export function MeetingPanel(props: { meetingId: string }) {
                             color: "var(--text-muted)",
                           }}
                         >
-                          {contactById(ai.owner!)?.name ?? ai.owner}
+                          {contactById(ai.owner!)?.name ?? "未知联系人"}
                         </span>
                       </Show>
                     </div>
@@ -645,12 +803,58 @@ export function MeetingPanel(props: { meetingId: string }) {
                     "margin-top": "var(--space-2)",
                   }}
                 >
-                  <Icon name="ph-plus" size={12} /> Add action item
+                  <Icon name="ph-plus" size={12} /> 添加待办
                 </button>
               </div>
             </>
           );
         }}
+        </Show>
+      </Show>
+
+      {/* Attachment overlay — opens the file in a layer on top of this
+          panel so "back" returns to the meeting instead of losing it. */}
+      <Show when={overlayFileId()}>
+        {(fid) => (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              "z-index": 10,
+              background: "var(--surface-elevated)",
+              display: "flex",
+              "flex-direction": "column",
+            }}
+          >
+            <FilePanel
+              fileId={fid()}
+              onBack={() => setOverlayFileId(null)}
+            />
+          </div>
+        )}
+      </Show>
+
+      <Show when={editingEvent() && event()}>
+        {(getEv) => (
+          <EventEditModal
+            ev={getEv()}
+            isNew={false}
+            onClose={() => setEditingEvent(false)}
+            onSave={async (next) => {
+              await upsertEvent(next);
+              await refetchEvent();
+              setEditingEvent(false);
+              showToast({ message: "已保存", kind: "success" });
+            }}
+            onDelete={async () => {
+              await deleteEvent(getEv().id);
+              setEditingEvent(false);
+              setSelectedMeetingId(null);
+              setDetailOpen(false);
+              showToast({ message: "已删除", kind: "info" });
+            }}
+          />
+        )}
       </Show>
     </div>
   );
@@ -674,6 +878,11 @@ function SectionHeader(props: { icon: string; title: string }) {
     </h4>
   );
 }
+
+const MEETING_PANEL_CSS = `
+@keyframes mp-spin { to { transform: rotate(360deg); } }
+.mp-spin { animation: mp-spin 0.8s linear infinite; display: inline-flex; }
+`;
 
 const rsvpBtn = (accent: string, primary: boolean): JSX.CSSProperties => ({
   display: "inline-flex",

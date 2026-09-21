@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { dateBucket, bucketLabel } from "../utils/date";
 import type { Item } from "./Imbox-helpers";
-import { groupItemsByDate } from "./Imbox-helpers";
+import { groupItemsByDate, isImboxListMessage } from "./Imbox-helpers";
 
 const today = new Date("2026-08-18T14:00:00Z");
 
@@ -127,6 +127,32 @@ describe("groupItemsByDate", () => {
       bucketLabel(dateBucket(stOf(items[2]!), today)),
       bucketLabel(dateBucket(stOf(items[3]!), today)),
     ]);
+  });
+});
+
+describe("isImboxListMessage", () => {
+  const base = { setAside: false, replyLater: false, bubbleUpAt: null };
+
+  it("keeps a plain message in the list", () => {
+    expect(isImboxListMessage(base)).toBe(true);
+  });
+
+  it("drops reply-later messages", () => {
+    expect(isImboxListMessage({ ...base, replyLater: true })).toBe(false);
+  });
+
+  it("drops set-aside messages", () => {
+    expect(isImboxListMessage({ ...base, setAside: true })).toBe(false);
+  });
+
+  it("drops bubbled-up reminders even when the time is in the future", () => {
+    expect(
+      isImboxListMessage({ ...base, bubbleUpAt: "2030-01-01T09:00:00.000Z" }),
+    ).toBe(false);
+  });
+
+  it("keeps a message whose bubbleUpAt was cleared", () => {
+    expect(isImboxListMessage({ ...base, bubbleUpAt: null })).toBe(true);
   });
 });
 

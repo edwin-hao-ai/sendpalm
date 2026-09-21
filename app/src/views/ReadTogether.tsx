@@ -8,6 +8,13 @@
  * message's full body is fetched lazily via `getMessage(id)` and
  * rendered as a sanitized iframe when `body_html` is present, falling
  * back to the plain-text body otherwise.
+ *
+ * Write path contract: actions on the current card use the SCOPED
+ * updaters (`markMessageUnread` / `setMessagePileFlags` /
+ * `moveMessageToBucket`), never `upsertMessage(current())` — `current()`
+ * falls back to the lightweight list row while `getMessage` is in
+ * flight, and upserting that row would wipe the stored body
+ * (2026-09-22 data-loss bug).
  */
 
 import {
@@ -23,7 +30,8 @@ import {
   listMessagesPaged,
   getMessage,
   listContacts,
-  upsertMessage,
+  markMessageUnread,
+  setMessagePileFlags,
   moveMessageToBucket,
 } from "../stores/data";
 import {
@@ -35,6 +43,7 @@ import {
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { Empty, ErrorState } from "../components/Empty";
+import { SkeletonList } from "../components/Skeleton";
 import { getReadTogetherCandidates } from "../utils/triage";
 import { htmlEmailSrcdoc } from "../utils/html";
 import type { Contact, Message } from "../types";
@@ -44,6 +53,9 @@ const READ_TOGETHER_PAGE = 200;
 export function ReadTogether() {
   const [contacts] = createResource(listContacts);
   // Lightweight list (no body) — fast page load even for a busy mailbox.
+  // The page is re-fetched after every action, so a mailbox with more
+  // than READ_TOGETHER_PAGE unread messages simply keeps feeding new
+  // cards into the flow; there is no silent truncation.
   const [unreadRaw, { refetch: refetchUnread }] = createResource(async () => {
     const page = await listMessagesPaged({
       bucket: "imbox",
@@ -94,35 +106,70 @@ export function ReadTogether() {
     setView("imbox");
   };
 
-  const advance = () => {
+  /** Refetch the unread list after an action, then finish-or-stay.
+   *  Every action removes the handled card from the unread candidates
+   *  (read / reply-later / archived / trashed), so the NEXT card shifts
+   *  into the current index — bumping the index here would skip one
+   *  message per action. When the list drains (or the index runs off
+   *  the end), close with a toast that names the action that just
+   *  happened instead of the misleading bare "all caught up". */
+  const refetchAndAdvance = async (doneMessage?: string) => {
+    await refetchUnread();
     const list = unread();
-    const next = index() + 1;
-    if (next >= list.length) {
+    if (list.length === 0 || index() >= list.length) {
       close();
-      showToast({ message: "All caught up", kind: "success" });
-    } else {
-      setIndex(next);
+      showToast({
+        message: doneMessage ?? "全部读完了",
+        kind: "success",
+      });
     }
+  };
+
+  const undoToast = (message: string, undo: () => Promise<void>) => {
+    showToast({
+      message,
+      kind: "success",
+      action: {
+        label: "撤销",
+        run: async () => {
+          await undo();
+          await refetchUnread();
+        },
+      },
+    });
   };
 
   const markReadAndNext = async () => {
     const m = current();
     if (!m) return;
-    await upsertMessage({ ...m, unread: false });
-    await refetchUnread();
-    advance();
+    await markMessageUnread(m.id, false);
+    await refetchAndAdvance("已标为已读，全部读完了");
   };
 
   const replyLaterAndNext = async () => {
     const m = current();
     if (!m) return;
-    await upsertMessage({ ...m, replyLater: true, unread: false });
-    await refetchUnread();
-    advance();
+    await setMessagePileFlags(m.id, {
+      replyLater: true,
+      setAside: false,
+      bubbleUpAt: null,
+    });
+    await markMessageUnread(m.id, false);
+    undoToast("已加入稍后回复", async () => {
+      await setMessagePileFlags(m.id, {
+        replyLater: false,
+        setAside: false,
+        bubbleUpAt: null,
+      });
+      await markMessageUnread(m.id, true);
+    });
+    await refetchAndAdvance("已加入稍后回复，全部读完了");
   };
 
   const reply = () => {
-    const m = current();
+    // Prefer the fully-loaded row so Compose quotes the real body; the
+    // lightweight list row carries no body while getMessage is flying.
+    const m = currentFull() ?? current();
     if (!m) return;
     setComposeContext({ mode: "reply", originalMsg: m });
     setComposeOpen(true);
@@ -133,16 +180,20 @@ export function ReadTogether() {
     const m = current();
     if (!m) return;
     await moveMessageToBucket(m.id, "paperTrail");
-    await refetchUnread();
-    advance();
+    undoToast("已归档到 Records", async () => {
+      await moveMessageToBucket(m.id, "imbox");
+    });
+    await refetchAndAdvance("已归档到 Records，全部读完了");
   };
 
   const trash = async () => {
     const m = current();
     if (!m) return;
     await moveMessageToBucket(m.id, "trash");
-    await refetchUnread();
-    advance();
+    undoToast("已移到回收站", async () => {
+      await moveMessageToBucket(m.id, "imbox");
+    });
+    await refetchAndAdvance("已移到回收站，全部读完了");
   };
 
   // When the user advances past the current message, prefetch the next
@@ -213,233 +264,315 @@ export function ReadTogether() {
         when={!unreadRaw.error}
         fallback={
           <ErrorState
-            title="加载失败"
-            message={String(unreadRaw.error ?? "")}
+            title="加载失败，请重试"
             retry={() => void refetchUnread()}
           />
         }
       >
-        <></>
-      </Show>
-
-      <Show
-        when={current()}
-        fallback={
-          <Empty
-            icon="ph-tray"
-            title="All caught up"
-            description="没有未读邮件需要一起阅读。"
-            action={{ label: "返回 Inbox", onClick: close }}
-          />
-        }
-      >
-        <div
-          style={{
-            display: "flex",
-            "align-items": "center",
-            "justify-content": "space-between",
-            padding: "var(--space-4) var(--space-5)",
-            "border-bottom": "0.5px solid var(--border)",
-          }}
+        <Show
+          when={!unreadRaw.loading || unread().length > 0}
+          fallback={
+            <div
+              style={{
+                flex: 1,
+                overflow: "auto",
+                padding: "var(--space-5)",
+              }}
+            >
+              <div style={{ "max-width": "680px", margin: "0 auto" }}>
+                <SkeletonList count={1} height={320} />
+              </div>
+            </div>
+          }
         >
-          <div
-            style={{
-              "font-size": "var(--text-caption)",
-              "font-weight": "700",
-              color: "var(--text-muted)",
-            }}
-          >
-            {index() + 1} of {unread().length}
-          </div>
-          <button
-            onClick={close}
-            title="Close Read Together"
-            aria-label="Close Read Together"
-            style={{
-              display: "inline-flex",
-              "align-items": "center",
-              "justify-content": "center",
-              width: "36px",
-              height: "36px",
-              "border-radius": "var(--radius-pill)",
-              background: "var(--paper-mid)",
-              color: "var(--text-secondary)",
-              border: "none",
-              cursor: "pointer",
-            }}
-          >
-            <Icon name="ph-x" size={18} />
-          </button>
-        </div>
-
-        <div
-          style={{
-            flex: 1,
-            overflow: "auto",
-            padding: "var(--space-5)",
-          }}
-        >
-          <div
-            style={{
-              "max-width": "680px",
-              margin: "0 auto",
-              background: "var(--paper-light)",
-              border: "0.5px solid var(--border)",
-              "border-radius": "var(--radius-lg)",
-              padding: "var(--space-5)",
-            }}
+          <Show
+            when={current()}
+            fallback={
+              <Empty
+                icon="ph-check-circle"
+                title="全部读完了 🎉"
+                description="没有未读邮件了。新邮件到了会出现在 Imbox。"
+                action={{ label: "返回 Imbox", onClick: close }}
+              />
+            }
           >
             <div
               style={{
                 display: "flex",
                 "align-items": "center",
+                "justify-content": "space-between",
                 gap: "var(--space-3)",
-                "margin-bottom": "var(--space-4)",
+                padding: "var(--space-4) var(--space-5)",
+                "border-bottom": "0.5px solid var(--border)",
               }}
             >
-              <Avatar
-                name={currentContact()?.name ?? "?"}
-                src={currentContact()?.avatar}
-                size={48}
-              />
-              <div style={{ flex: 1, "min-width": 0 }}>
-                <div
+              <div>
+                <h1
                   style={{
-                    "font-weight": "700",
+                    "font-family": "var(--font-display)",
+                    "font-size": "var(--text-h3)",
+                    "font-weight": "800",
                     color: "var(--text-primary)",
-                    "white-space": "nowrap",
-                    overflow: "hidden",
-                    "text-overflow": "ellipsis",
+                    margin: 0,
                   }}
                 >
-                  {currentContact()?.name ?? "Unknown"}
-                </div>
-                <div
+                  一起读
+                </h1>
+                <p
                   style={{
+                    margin: "2px 0 0",
                     "font-size": "var(--text-caption)",
                     color: "var(--text-muted)",
-                    "white-space": "nowrap",
-                    overflow: "hidden",
-                    "text-overflow": "ellipsis",
                   }}
                 >
-                  {currentContact()?.emails[0]?.value ?? "—"}
-                </div>
+                  第 {index() + 1} / {unread().length} 封
+                </p>
               </div>
-              <span
+              <button
+                onClick={close}
+                title="关闭一起读"
+                aria-label="关闭一起读"
                 style={{
-                  "font-size": "var(--text-caption)",
-                  color: "var(--text-muted)",
+                  display: "inline-flex",
+                  "align-items": "center",
+                  "justify-content": "center",
+                  width: "44px",
+                  height: "44px",
+                  "border-radius": "var(--radius-pill)",
+                  background: "var(--paper-mid)",
+                  color: "var(--text-secondary)",
+                  border: "none",
+                  cursor: "pointer",
                 }}
               >
-                {current()!.tm}
-              </span>
+                <Icon name="ph-x" size={18} />
+              </button>
             </div>
 
-            <h2
+            <div
               style={{
-                "font-family": "var(--font-display)",
-                "font-size": "var(--text-h3)",
-                "font-weight": "800",
-                color: "var(--text-primary)",
-                margin: "0 0 var(--space-4)",
+                flex: 1,
+                overflow: "auto",
+                padding: "var(--space-5)",
               }}
             >
-              {current()!.subj}
-            </h2>
-
-            <Show
-              when={current()!.bodyHtml && current()!.bodyHtml!.trim().length > 0}
-              fallback={
+              <div
+                style={{
+                  "max-width": "680px",
+                  margin: "0 auto",
+                  background: "var(--paper-light)",
+                  border: "0.5px solid var(--border)",
+                  "border-radius": "var(--radius-lg)",
+                  padding: "var(--space-5)",
+                }}
+              >
                 <div
-                  data-render-mode="plain"
                   style={{
-                    color: "var(--text-secondary)",
-                    "font-size": "var(--text-body)",
-                    "line-height": "1.7",
-                    "overflow-wrap": "anywhere",
+                    display: "flex",
+                    "align-items": "center",
+                    gap: "var(--space-3)",
+                    "margin-bottom": "var(--space-4)",
                   }}
                 >
-                  <For each={current()!.body.split(/\n\s*\n/)}>
-                    {(p) =>
-                      p.trim() ? (
-                        <p style={{ margin: "0 0 14px" }}>{p.trim()}</p>
-                      ) : null
-                    }
-                  </For>
-                  <Show when={!current()!.body.trim()}>
-                    <p style={{ color: "var(--text-muted)", "font-style": "italic" }}>
-                      这封邮件没有纯文本正文。
-                    </p>
-                  </Show>
+                  <Avatar
+                    name={currentContact()?.name ?? "?"}
+                    src={currentContact()?.avatar}
+                    size={48}
+                  />
+                  <div style={{ flex: 1, "min-width": 0 }}>
+                    <div
+                      style={{
+                        "font-weight": "700",
+                        color: "var(--text-primary)",
+                        "white-space": "nowrap",
+                        overflow: "hidden",
+                        "text-overflow": "ellipsis",
+                      }}
+                    >
+                      {currentContact()?.name ?? "未知发件人"}
+                    </div>
+                    <div
+                      style={{
+                        "font-size": "var(--text-caption)",
+                        color: "var(--text-muted)",
+                        "white-space": "nowrap",
+                        overflow: "hidden",
+                        "text-overflow": "ellipsis",
+                      }}
+                    >
+                      {currentContact()?.emails[0]?.value ?? "—"}
+                    </div>
+                  </div>
+                  <span
+                    style={{
+                      "font-size": "var(--text-caption)",
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    {current()!.tm}
+                  </span>
                 </div>
-              }
-            >
-              <iframe
-                data-render-mode="html"
-                title={`Message body: ${current()!.subj}`}
-                srcdoc={iframeSrc()}
-                sandbox=""
-                referrerpolicy="no-referrer"
-                loading="lazy"
-                style={{
-                  width: "100%",
-                  border: "none",
-                  "min-height": "240px",
-                  background: "transparent",
-                }}
-                onLoad={(ev) => {
-                  // Auto-size to the iframe body's scrollHeight so
-                  // long emails don't need a scrollbar inside the card.
-                  const el = ev.currentTarget;
-                  try {
-                    const doc = el.contentDocument;
-                    if (doc?.body) {
-                      el.style.height = `${doc.body.scrollHeight + 24}px`;
-                    }
-                  } catch {
-                    // Cross-origin or sandboxed — leave min-height.
-                  }
-                }}
-              />
-            </Show>
-          </div>
-        </div>
 
-        <div
-          style={{
-            display: "flex",
-            "align-items": "center",
-            "justify-content": "center",
-            gap: "var(--space-3)",
-            padding: "var(--space-4) var(--space-5)",
-            "border-top": "0.5px solid var(--border)",
-            background: "var(--paper-light)",
-          }}
-        >
-          <ActionBtn
-            icon="ph-check"
-            label="Next"
-            primary
-            onClick={() => void markReadAndNext()}
-          />
-          <ActionBtn icon="ph-arrow-u-up-left" label="Reply" onClick={reply} />
-          <ActionBtn
-            icon="ph-clock"
-            label="Pending"
-            onClick={() => void replyLaterAndNext()}
-          />
-          <ActionBtn
-            icon="ph-tray"
-            label="Archive"
-            onClick={() => void archive()}
-          />
-          <ActionBtn
-            icon="ph-trash"
-            label="Trash"
-            onClick={() => void trash()}
-          />
-        </div>
+                <h2
+                  style={{
+                    "font-family": "var(--font-display)",
+                    "font-size": "var(--text-h3)",
+                    "font-weight": "800",
+                    color: "var(--text-primary)",
+                    margin: "0 0 var(--space-4)",
+                  }}
+                >
+                  {current()!.subj}
+                </h2>
+
+                <Show
+                  when={
+                    current()!.bodyHtml && current()!.bodyHtml!.trim().length > 0
+                  }
+                  fallback={
+                    <div
+                      data-render-mode="plain"
+                      style={{
+                        color: "var(--text-secondary)",
+                        "font-size": "var(--text-body)",
+                        "line-height": "1.7",
+                        "overflow-wrap": "anywhere",
+                      }}
+                    >
+                      <For each={current()!.body.split(/\n\s*\n/)}>
+                        {(p) =>
+                          p.trim() ? (
+                            <p style={{ margin: "0 0 14px" }}>{p.trim()}</p>
+                          ) : null
+                        }
+                      </For>
+                      <Show when={!current()!.body.trim()}>
+                        <p
+                          style={{
+                            color: "var(--text-muted)",
+                            "font-style": "italic",
+                          }}
+                        >
+                          这封邮件没有纯文本正文。
+                        </p>
+                      </Show>
+                    </div>
+                  }
+                >
+                  {/* While the deferred DOMPurify sanitize is still running
+                      (iframeSrc empty), show the plain-text body so the user
+                      reads the same words within one frame instead of
+                      staring at a blank box (§11.10 pattern). */}
+                  <Show when={iframeSrc()}>
+                    <iframe
+                      data-render-mode="html"
+                      title={`邮件正文：${current()!.subj}`}
+                      srcdoc={iframeSrc()}
+                      sandbox=""
+                      referrerpolicy="no-referrer"
+                      loading="lazy"
+                      style={{
+                        width: "100%",
+                        border: "none",
+                        "min-height": "240px",
+                        background: "transparent",
+                      }}
+                      onLoad={(ev) => {
+                        // Auto-size to the iframe body's scrollHeight so
+                        // long emails don't need a scrollbar inside the card.
+                        const el = ev.currentTarget;
+                        try {
+                          const doc = el.contentDocument;
+                          if (doc?.body) {
+                            el.style.height = `${doc.body.scrollHeight + 24}px`;
+                          }
+                        } catch {
+                          // Cross-origin or sandboxed — leave min-height.
+                        }
+                      }}
+                    />
+                  </Show>
+                  <Show when={!iframeSrc()}>
+                    <div
+                      data-render-mode="plain-pending"
+                      style={{
+                        color: "var(--text-secondary)",
+                        "font-size": "var(--text-body)",
+                        "line-height": "1.7",
+                        "overflow-wrap": "anywhere",
+                      }}
+                    >
+                      <For each={current()!.body.split(/\n\s*\n/)}>
+                        {(p) =>
+                          p.trim() ? (
+                            <p style={{ margin: "0 0 14px" }}>{p.trim()}</p>
+                          ) : null
+                        }
+                      </For>
+                      <Show when={!current()!.body.trim()}>
+                        <p
+                          style={{
+                            color: "var(--text-muted)",
+                            "font-style": "italic",
+                          }}
+                        >
+                          正在加载邮件…
+                        </p>
+                      </Show>
+                    </div>
+                  </Show>
+                </Show>
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                "align-items": "center",
+                "justify-content": "center",
+                "flex-wrap": "wrap",
+                gap: "var(--space-3)",
+                padding: "var(--space-4) var(--space-5)",
+                "border-top": "0.5px solid var(--glass-border)",
+                background: "var(--glass-bg)",
+                "backdrop-filter": "var(--glass-blur)",
+                "-webkit-backdrop-filter": "var(--glass-blur)",
+              }}
+            >
+              <ActionBtn
+                icon="ph-check"
+                label="下一封"
+                primary
+                title="标为已读并看下一封 (n)"
+                onClick={() => void markReadAndNext()}
+              />
+              <ActionBtn
+                icon="ph-arrow-u-up-left"
+                label="回复"
+                title="回复 (r)"
+                onClick={reply}
+              />
+              <ActionBtn
+                icon="ph-clock"
+                label="稍后"
+                title="加入稍后回复 (p)"
+                onClick={() => void replyLaterAndNext()}
+              />
+              <ActionBtn
+                icon="ph-tray"
+                label="归档"
+                title="归档到 Records"
+                onClick={() => void archive()}
+              />
+              <ActionBtn
+                icon="ph-trash"
+                label="删除"
+                title="移到回收站"
+                onClick={() => void trash()}
+              />
+            </div>
+          </Show>
+        </Show>
       </Show>
     </div>
   );
@@ -448,17 +581,21 @@ export function ReadTogether() {
 function ActionBtn(props: {
   icon: string;
   label: string;
+  title: string;
   onClick: () => void;
   primary?: boolean;
 }) {
   return (
     <button
       onClick={props.onClick}
+      title={props.title}
+      aria-label={props.title}
       style={{
         display: "inline-flex",
         "align-items": "center",
         gap: "6px",
-        padding: "10px 18px",
+        padding: "12px 18px",
+        "min-height": "44px",
         "border-radius": "var(--radius-md)",
         border: props.primary ? "none" : "0.5px solid var(--border)",
         background: props.primary ? "var(--palm)" : "var(--paper-mid)",

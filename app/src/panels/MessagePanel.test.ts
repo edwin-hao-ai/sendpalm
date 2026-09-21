@@ -22,6 +22,7 @@
  *  targeted — no SolidJS render, no JSDOM DOM mounting. */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { moreMenuItemDefs } from "./MessagePanel";
 
 describe("MessagePanel iframe ref cleanup", () => {
   it("disconnects the ResizeObserver when the iframe ref fires with null", () => {
@@ -523,5 +524,58 @@ describe("MessageBodyIframe per-message postMessage source filter", () => {
         (c: [string, unknown]) => c[0] === "message" && c[1] === handler,
       ),
     ).toBe(true);
+  });
+});
+
+/** moreMenuItemDefs — the pure item list behind the ⋯ menu. The menu
+ *  was rebuilt to collapse the panel's 10-button action row into
+ *  回复 / 稍后 / 更多⋯; these tests pin the filtering rules. */
+describe("moreMenuItemDefs", () => {
+  it("excludes the current bucket's move target", () => {
+    const defs = moreMenuItemDefs({ bucket: "imbox", setAsideActive: false });
+    const ids = defs.map((d) => d.id);
+    expect(ids).not.toContain("move-imbox");
+    expect(ids).toContain("move-feed");
+    expect(ids).toContain("move-paperTrail");
+  });
+
+  it("keeps the Imbox move target for messages in other buckets", () => {
+    const defs = moreMenuItemDefs({ bucket: "feed", setAsideActive: false });
+    const imbox = defs.find((d) => d.id === "move-imbox");
+    expect(imbox).toBeDefined();
+    expect(imbox!.label).toBe("移到 Imbox");
+  });
+
+  it("moves the separator onto the first surviving move item", () => {
+    // When move-imbox is filtered out, the separator must not vanish
+    // with it — the first remaining move item carries it.
+    const defs = moreMenuItemDefs({ bucket: "imbox", setAsideActive: false });
+    const firstMove = defs.find((d) => d.id.startsWith("move-"));
+    expect(firstMove!.separator).toBe(true);
+  });
+
+  it("labels every item in Chinese (brand nouns stay English)", () => {
+    const defs = moreMenuItemDefs({ bucket: "trash", setAsideActive: false });
+    const byId = new Map(defs.map((d) => [d.id, d.label]));
+    expect(byId.get("reply-all")).toBe("回复全部");
+    expect(byId.get("forward")).toBe("转发");
+    expect(byId.get("trash")).toBe("移到回收站");
+    expect(byId.get("spam")).toBe("移到垃圾邮件");
+    expect(byId.get("move-imbox")).toBe("移到 Imbox");
+    expect(byId.get("move-feed")).toBe("移到 Stream");
+    expect(byId.get("move-paperTrail")).toBe("移到 Records");
+  });
+
+  it("marks trash / spam / block as danger", () => {
+    const defs = moreMenuItemDefs({ bucket: "imbox", setAsideActive: false });
+    const dangerIds = defs.filter((d) => d.danger).map((d) => d.id);
+    expect(dangerIds).toEqual(["trash", "spam", "block"]);
+  });
+
+  it("toggles the set-aside label by state", () => {
+    const off = moreMenuItemDefs({ bucket: "imbox", setAsideActive: false });
+    const on = moreMenuItemDefs({ bucket: "imbox", setAsideActive: true });
+    expect(off.find((d) => d.id === "set-aside")!.label).toBe("搁置");
+    expect(on.find((d) => d.id === "set-aside")!.label).toBe("取消搁置");
   });
 });

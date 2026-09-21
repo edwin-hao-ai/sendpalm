@@ -1,4 +1,5 @@
-/** Settings view — 7 tabs.
+/** Settings view — 8 tabs.
+ * Desktop: 280px left rail + content column. Mobile: drill-in menu.
  * Spec: prototype-v11 §3.19.
  */
 
@@ -6,6 +7,7 @@ import {
   For,
   Show,
   createEffect,
+  createMemo,
   createResource,
   createSignal,
   onCleanup,
@@ -38,11 +40,13 @@ import {
   setSettingsTab,
   showToast,
   setOnboardingStep,
+  type SettingsTab,
 } from "../stores/ui";
 import { Modal } from "../components/Modal";
 import { Icon } from "../components/Icon";
 import { Avatar } from "../components/Avatar";
 import { Empty, ErrorState } from "../components/Empty";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ResourceGate } from "../components/ResourceGate";
 import { SkeletonList } from "../components/Skeleton";
 import { uid } from "../utils/id";
@@ -65,33 +69,176 @@ import {
   syncNow,
 } from "../services/backend";
 import { ensureNotificationPermission } from "../services/notifications";
+import { setLocale, type Locale } from "../i18n";
+import {
+  onboardingResumeStep,
+  setOnboardingResumeStep,
+} from "./Onboarding";
 
 const TABS = [
-  { id: "profile", label: "Profile", icon: "ph-user-circle" },
-  { id: "accounts", label: "Accounts", icon: "ph-plug" },
-  { id: "preferences", label: "Preferences", icon: "ph-sliders" },
+  { id: "profile", label: "个人资料", icon: "ph-user-circle" },
+  { id: "accounts", label: "账户", icon: "ph-plug" },
+  { id: "preferences", label: "偏好", icon: "ph-sliders" },
   { id: "agent", label: "Agent", icon: "ph-sparkle" },
-  { id: "labels", label: "Labels", icon: "ph-tag" },
-  { id: "snippets", label: "Snippets", icon: "ph-text-aa" },
-  { id: "data", label: "Data", icon: "ph-database" },
-  { id: "shortcuts", label: "Shortcuts", icon: "ph-keyboard" },
+  { id: "labels", label: "标签", icon: "ph-tag" },
+  { id: "snippets", label: "片段", icon: "ph-text-aa" },
+  { id: "data", label: "数据", icon: "ph-database" },
+  { id: "shortcuts", label: "快捷键", icon: "ph-keyboard" },
 ] as const;
+
+/** 账户状态 → 用户可读中文。 */
+const ACCOUNT_STATUS_LABELS: Record<Account["status"], string> = {
+  connected: "已连接",
+  syncing: "同步中",
+  error: "同步异常",
+  disconnected: "未连接",
+};
+
+/** 快捷键 action id → 中文名（与快捷键帮助弹窗保持一致）。 */
+const SHORTCUT_ACTION_LABELS: Record<string, string> = {
+  "app:command-palette": "命令面板",
+  "app:search": "搜索",
+  "app:help": "键盘快捷键帮助",
+  "app:compose": "写新邮件",
+  "app:agent": "Agent 面板",
+  "app:notifications": "通知",
+  "nav:screener": "Gate（筛选台）",
+  "nav:imbox": "Imbox（收件箱）",
+  "nav:feed": "Stream（信息流）",
+  "nav:paperTrail": "Records（记录）",
+  "nav:contacts": "联系人",
+  "nav:calendar": "日历",
+  "nav:files": "文件",
+  "nav:insights": "洞察",
+  "nav:settings": "设置",
+  "nav:drafts": "草稿",
+  "list:cursor-down": "下一条",
+  "list:cursor-up": "上一条",
+  "list:select": "选择当前行",
+  "list:open": "打开",
+  "message:reply": "回复",
+  "message:forward": "转发",
+  "message:reply-later": "稍后回复",
+  "message:set-aside": "搁置",
+  "message:bubble-up": "提醒",
+  "message:archive": "归档",
+  "message:trash": "删除",
+  "message:spam": "标记为垃圾邮件",
+  "message:unread": "标为未读",
+  "message:label": "加标签",
+  "message:move": "移动",
+  "bulk:menu": "批量操作",
+  "calendar:day": "日历 · 日视图",
+  "calendar:week": "日历 · 周视图",
+  "calendar:year": "日历 · 年视图",
+  "calendar:today": "日历 · 回到今天",
+  "calendar:prev": "日历 · 上一页",
+  "calendar:next": "日历 · 下一页",
+};
+
+export function shortcutActionLabel(action: string, fallback: string): string {
+  return SHORTCUT_ACTION_LABELS[action] ?? fallback;
+}
+
+/** Build a shortcut combo string from a captured key event, in the same
+ *  glyph format `matches()` in utils/shortcuts.ts parses ("⌘1", "⇧A",
+ *  "j", "←"). Returns null for pure modifier presses and Escape (so Esc
+ *  still closes the edit modal instead of being captured). */
+export function comboFromKeyEvent(e: {
+  key: string;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+}): string | null {
+  if (["Meta", "Control", "Shift", "Alt", "Escape"].includes(e.key)) {
+    return null;
+  }
+  const mods = (e.metaKey || e.ctrlKey ? "⌘" : "") + (e.shiftKey ? "⇧" : "");
+  const named: Record<string, string> = {
+    ArrowLeft: "←",
+    ArrowRight: "→",
+    ArrowUp: "↑",
+    ArrowDown: "↓",
+    Enter: "Enter",
+    " ": "Space",
+  };
+  const k =
+    named[e.key] ??
+    (e.key.length === 1
+      ? e.shiftKey && /[a-z]/i.test(e.key)
+        ? e.key.toUpperCase()
+        : e.key.toLowerCase()
+      : e.key);
+  return mods + k;
+}
+
+const TIMEZONES: { value: string; label: string }[] = [
+  { value: "Asia/Shanghai", label: "上海 (UTC+8)" },
+  { value: "Asia/Singapore", label: "新加坡 (UTC+8)" },
+  { value: "Asia/Tokyo", label: "东京 (UTC+9)" },
+  { value: "Asia/Dubai", label: "迪拜 (UTC+4)" },
+  { value: "Europe/London", label: "伦敦 (UTC+0)" },
+  { value: "Europe/Berlin", label: "柏林 (UTC+1)" },
+  { value: "America/New_York", label: "纽约 (UTC-5)" },
+  { value: "America/Los_Angeles", label: "洛杉矶 (UTC-8)" },
+  { value: "Australia/Sydney", label: "悉尼 (UTC+10)" },
+  { value: "UTC", label: "UTC（协调世界时）" },
+];
+
+const FOLDER_LABELS: Record<string, string> = {
+  INBOX: "收件箱",
+  Sent: "已发送",
+  Drafts: "草稿",
+  Archive: "归档",
+  Trash: "回收站",
+  Spam: "垃圾邮件",
+  Starred: "星标",
+  Important: "重要",
+};
+
+/** Stored as data (SQLite / color input), not a style — mirrors --palm. */
+const DEFAULT_ACCOUNT_COLOR = "#0a8f63";
+/** Mirrors --blurple; color inputs require a hex value. */
+const DEFAULT_LABEL_COLOR = "#5522fa";
 
 export function Settings() {
   const { isMobile } = useViewport();
   const [mobileTab, setMobileTab] = createSignal<string | null>(null);
+  const [saveState, setSaveState] = createSignal<"idle" | "saving" | "saved">(
+    "idle",
+  );
 
   let saveTimeout: ReturnType<typeof setTimeout> | undefined;
+  let savedReset: ReturnType<typeof setTimeout> | undefined;
   createEffect(() => {
     const settings = appSettings;
     clearTimeout(saveTimeout);
     saveTimeout = setTimeout(async () => {
-      const store = await load(STORE_PATH);
-      await store.set("app_settings", settings);
-      await store.save();
+      setSaveState("saving");
+      try {
+        const store = await load(STORE_PATH);
+        await store.set("app_settings", settings);
+        await store.save();
+        setSaveState("saved");
+        clearTimeout(savedReset);
+        savedReset = setTimeout(() => {
+          setSaveState((s) => (s === "saved" ? "idle" : s));
+        }, 2000);
+      } catch (e) {
+        setSaveState("idle");
+        showToast({
+          message: "设置保存失败，请重试",
+          kind: "error",
+          source: "settings",
+          detail: String(e),
+        });
+      }
     }, 400);
   });
-  onCleanup(() => clearTimeout(saveTimeout));
+  onCleanup(() => {
+    clearTimeout(saveTimeout);
+    clearTimeout(savedReset);
+  });
 
   // Collapse back to the menu when the viewport grows to desktop/tablet.
   createEffect(() => {
@@ -99,11 +246,9 @@ export function Settings() {
   });
 
   const activeTab = () => mobileTab() ?? settingsTab();
-  const showMenu = () => !isMobile() || mobileTab() === null;
-  const showContent = () => !isMobile() || mobileTab() !== null;
 
   const navigateToTab = (id: string) => {
-    setSettingsTab(id as (typeof TABS)[number]["id"]);
+    setSettingsTab(id as SettingsTab);
     if (isMobile()) setMobileTab(id);
   };
 
@@ -114,51 +259,141 @@ export function Settings() {
         animation: "view-enter 0.3s var(--ease-out) both",
         display: "flex",
         "flex-direction": "column",
+        height: "100%",
       }}
     >
-      <Show when={showMenu()}>
-        <header style={{ padding: "var(--space-5) var(--space-5) 0" }}>
+      <Show
+        when={!isMobile()}
+        fallback={
+          <>
+            <Show when={mobileTab() === null}>
+              <header
+                style={{
+                  padding: "var(--space-5) var(--space-5) 0",
+                  display: "flex",
+                  "align-items": "baseline",
+                  gap: "var(--space-3)",
+                }}
+              >
+                <h2
+                  style={{
+                    "font-family": "var(--font-display)",
+                    "font-size": "var(--text-h1)",
+                    "font-weight": "800",
+                    margin: 0,
+                  }}
+                >
+                  设置
+                </h2>
+                <SaveIndicator state={saveState()} />
+              </header>
+              <SettingsMenu active={activeTab()} onSelect={navigateToTab} />
+            </Show>
+            <Show when={mobileTab() !== null}>
+              <MobileContentHeader
+                title={
+                  TABS.find((t) => t.id === activeTab())?.label ?? activeTab()
+                }
+                onBack={() => setMobileTab(null)}
+              />
+              <main
+                style={{
+                  flex: 1,
+                  "min-width": 0,
+                  width: "100%",
+                  padding: "0 var(--space-5) var(--space-5)",
+                }}
+              >
+                <SettingsContent activeTab={activeTab()} />
+              </main>
+            </Show>
+          </>
+        }
+      >
+        {/* Desktop / tablet: left rail + content column */}
+        <header
+          style={{
+            padding: "var(--space-5) var(--space-6) 0",
+            display: "flex",
+            "align-items": "baseline",
+            gap: "var(--space-3)",
+          }}
+        >
           <h2
             style={{
               "font-family": "var(--font-display)",
-              "font-size": "var(--text-h3)",
+              "font-size": "var(--text-h1)",
               "font-weight": "800",
               margin: 0,
             }}
           >
-            Settings
+            设置
           </h2>
+          <SaveIndicator state={saveState()} />
         </header>
-        <SettingsMenu onSelect={navigateToTab} />
-      </Show>
-
-      <Show when={showContent()}>
-        <Show when={isMobile() && mobileTab() !== null}>
-          <MobileContentHeader
-            title={TABS.find((t) => t.id === activeTab())?.label ?? activeTab()}
-            onBack={() => setMobileTab(null)}
-          />
-        </Show>
-        <main
+        <div
           style={{
             flex: 1,
-            "min-width": 0,
-            "max-width": isMobile() ? "100%" : "720px",
-            width: "100%",
-            padding:
-              isMobile() && mobileTab() !== null
-                ? "0 var(--space-5) var(--space-5)"
-                : "var(--space-5)",
+            display: "grid",
+            "grid-template-columns": "280px minmax(0, 1fr)",
+            gap: "var(--space-6)",
+            padding: "var(--space-4) var(--space-6) var(--space-6)",
+            "align-items": "start",
+            overflow: "auto",
           }}
         >
-          <SettingsContent activeTab={activeTab()} />
-        </main>
+          <SettingsMenu
+            active={settingsTab()}
+            onSelect={navigateToTab}
+            rail
+          />
+          <main
+            style={{
+              "min-width": 0,
+              "max-width": "640px",
+              width: "100%",
+              "justify-self": "center",
+            }}
+          >
+            <SettingsContent activeTab={settingsTab()} />
+          </main>
+        </div>
       </Show>
     </div>
   );
 }
 
-function SettingsMenu(props: { onSelect: (id: string) => void }) {
+function SaveIndicator(props: { state: "idle" | "saving" | "saved" }) {
+  return (
+    <Show when={props.state !== "idle"}>
+      <span
+        data-testid="settings-save-state"
+        style={{
+          "font-size": "var(--text-caption)",
+          color: props.state === "saved" ? "var(--palm)" : "var(--text-muted)",
+          display: "inline-flex",
+          "align-items": "center",
+          gap: "4px",
+        }}
+      >
+        {props.state === "saving" ? (
+          "保存中…"
+        ) : (
+          <>
+            <Icon name="ph-check" size={12} />
+            已自动保存
+          </>
+        )}
+      </span>
+    </Show>
+  );
+}
+
+function SettingsMenu(props: {
+  active: string;
+  onSelect: (id: string) => void;
+  rail?: boolean;
+}) {
   return (
     <nav
       data-testid="settings-menu"
@@ -166,44 +401,76 @@ function SettingsMenu(props: { onSelect: (id: string) => void }) {
         display: "flex",
         "flex-direction": "column",
         gap: "var(--space-1)",
-        padding: "var(--space-4) var(--space-5) var(--space-5)",
+        padding: props.rail ? "var(--space-2)" : "var(--space-4) var(--space-5) var(--space-5)",
+        ...(props.rail
+          ? {
+              position: "sticky" as const,
+              top: "var(--space-4)",
+              background:
+                "color-mix(in srgb, var(--paper-light) 82%, transparent)",
+              "backdrop-filter": "blur(20px) saturate(1.4)",
+              "border-radius": "var(--radius-lg)",
+              border: "0.5px solid var(--border)",
+              "box-shadow": "0 8px 24px rgba(0,0,0,0.06)",
+            }
+          : {}),
       }}
     >
       <For each={TABS}>
-        {(t) => (
-          <button
-            data-testid={`settings-menu-item-${t.id}`}
-            onClick={() => props.onSelect(t.id)}
-            style={{
-              display: "flex",
-              "align-items": "center",
-              gap: "var(--space-3)",
-              padding: "12px var(--space-3)",
-              "border-radius": "var(--radius-md)",
-              background: "transparent",
-              color: "var(--text-primary)",
-              "font-weight": "500",
-              "text-align": "left",
-              "border-bottom": "0.5px solid var(--border)",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "var(--paper-mid)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "transparent";
-            }}
-          >
-            <Icon name={t.icon} size={20} style={{ color: "var(--palm)" }} />
-            <span style={{ flex: 1, "font-size": "var(--text-body-sm)" }}>
-              {t.label}
-            </span>
-            <Icon
-              name="ph-caret-right"
-              size={16}
-              style={{ color: "var(--text-muted)", "flex-shrink": 0 }}
-            />
-          </button>
-        )}
+        {(t) => {
+          const selected = () => props.rail && props.active === t.id;
+          return (
+            <button
+              data-testid={`settings-menu-item-${t.id}`}
+              onClick={() => props.onSelect(t.id)}
+              style={{
+                display: "flex",
+                "align-items": "center",
+                gap: "var(--space-3)",
+                padding: "12px var(--space-3)",
+                "min-height": "44px",
+                "border-radius": "var(--radius-md)",
+                background: selected() ? "var(--palm-soft)" : "transparent",
+                "box-shadow": selected()
+                  ? "inset 3px 0 0 var(--palm)"
+                  : "none",
+                color: "var(--text-primary)",
+                "font-weight": selected() ? "700" : "500",
+                "text-align": "left",
+                "border-bottom": props.rail
+                  ? "none"
+                  : "0.5px solid var(--border)",
+              }}
+              onMouseEnter={(e) => {
+                if (!selected())
+                  e.currentTarget.style.background = "var(--paper-mid)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = selected()
+                  ? "var(--palm-soft)"
+                  : "transparent";
+              }}
+            >
+              <Icon
+                name={t.icon}
+                size={20}
+                style={{
+                  color: selected() ? "var(--palm)" : "var(--text-muted)",
+                }}
+              />
+              <span style={{ flex: 1, "font-size": "var(--text-body-sm)" }}>
+                {t.label}
+              </span>
+              <Show when={!props.rail}>
+                <Icon
+                  name="ph-caret-right"
+                  size={16}
+                  style={{ color: "var(--text-muted)", "flex-shrink": 0 }}
+                />
+              </Show>
+            </button>
+          );
+        }}
       </For>
     </nav>
   );
@@ -234,11 +501,12 @@ function MobileContentHeader(props: { title: string; onBack: () => void }) {
           color: "var(--palm)",
           "font-weight": "600",
           "font-size": "var(--text-body-sm)",
-          padding: "4px 0",
+          padding: "10px 12px 10px 0",
+          "min-height": "44px",
         }}
       >
         <Icon name="ph-caret-left" size={18} />
-        Settings
+        设置
       </button>
       <span
         style={{
@@ -309,12 +577,14 @@ function ProfileTab() {
     await store.set("onboarding_completed", false);
     await store.save();
     setOnboardingStep(0);
-    showToast({ message: "开始 Onboarding 教程", kind: "info" });
+    showToast({ message: "已开始新手引导", kind: "info" });
   };
+  const timezoneKnown = () =>
+    TIMEZONES.some((tz) => tz.value === s.profile.timezone);
   return (
     <div>
-      <SectionTitle>Profile</SectionTitle>
-      <Field label="Display name">
+      <SectionTitle>个人资料</SectionTitle>
+      <Field label="显示名称">
         <input
           value={s.profile.displayName}
           onInput={(e) =>
@@ -323,7 +593,7 @@ function ProfileTab() {
           style={inputStyle}
         />
       </Field>
-      <Field label="Timezone">
+      <Field label="时区">
         <select
           value={s.profile.timezone}
           onChange={(e) =>
@@ -331,25 +601,29 @@ function ProfileTab() {
           }
           style={inputStyle}
         >
-          <option value="Asia/Shanghai">Asia/Shanghai</option>
-          <option value="America/New_York">America/New_York</option>
-          <option value="Europe/London">Europe/London</option>
-          <option value="UTC">UTC</option>
+          <For each={TIMEZONES}>
+            {(tz) => <option value={tz.value}>{tz.label}</option>}
+          </For>
+          <Show when={!timezoneKnown()}>
+            <option value={s.profile.timezone}>{s.profile.timezone}</option>
+          </Show>
         </select>
       </Field>
-      <Field label="Language">
+      <Field label="语言">
         <select
           value={s.profile.language}
-          onChange={(e) =>
-            setAppSettings("profile", "language", e.currentTarget.value)
-          }
+          onChange={(e) => {
+            const v = e.currentTarget.value as Locale;
+            setAppSettings("profile", "language", v);
+            setLocale(v);
+          }}
           style={inputStyle}
         >
           <option value="zh-CN">中文 (zh-CN)</option>
           <option value="en-US">English (en-US)</option>
         </select>
       </Field>
-      <Field label="Signature">
+      <Field label="签名" hint="写信时自动附加在邮件末尾。">
         <textarea
           value={s.profile.signature}
           onInput={(e) =>
@@ -366,7 +640,7 @@ function ProfileTab() {
       </Field>
       <div style={{ display: "flex", gap: "var(--space-2)" }}>
         <button onClick={replayOnboarding} style={secondaryBtn}>
-          重放 Onboarding
+          重新查看新手引导
         </button>
       </div>
     </div>
@@ -411,10 +685,21 @@ function formatRelative(iso: string): string {
   return `${Math.floor(diff / 86_400_000)} 天前`;
 }
 
+const PROVIDER_WALL = [
+  "飞书",
+  "QQ 邮箱",
+  "网易 163",
+  "网易 126",
+  "iCloud",
+  "Fastmail",
+  "企业邮箱",
+];
+
 function AccountsTab() {
   const [accounts, { refetch }] = createResource(listAccounts);
   const [editing, setEditing] = createSignal<Account | null>(null);
   const [adding, setAdding] = createSignal(false);
+  const [syncingId, setSyncingId] = createSignal<string | null>(null);
 
   const onSave = async (a: Account) => {
     await upsertAccount(a);
@@ -423,8 +708,71 @@ function AccountsTab() {
     showToast({ message: "已保存", kind: "success" });
   };
 
+  const syncAccount = async (a: Account) => {
+    if (syncingId()) return;
+    setSyncingId(a.id);
+    try {
+      const r = await syncNow(a.id, "INBOX");
+      if (r) {
+        showToast({
+          message: `已同步 ${a.label} · 新增 ${r.new_messages} 封`,
+          kind: "success",
+        });
+      } else {
+        showToast({
+          message: `正在收取 ${a.label} 的新邮件…`,
+          kind: "info",
+        });
+      }
+    } finally {
+      setSyncingId(null);
+    }
+  };
+
+  const hasAccounts = () => (accounts() ?? []).length > 0;
+
   return (
     <div>
+      <Show when={onboardingResumeStep() !== null}>
+        <div
+          style={{
+            display: "flex",
+            "align-items": "center",
+            gap: "var(--space-3)",
+            padding: "var(--space-3) var(--space-4)",
+            "margin-bottom": "var(--space-3)",
+            background: "var(--palm-soft)",
+            "border-radius": "var(--radius-md)",
+            border: "0.5px solid var(--palm)",
+            "font-size": "var(--text-caption)",
+            color: "var(--text-primary)",
+          }}
+        >
+          <Icon name="ph-sparkle" size={16} color="var(--palm)" />
+          <span style={{ flex: 1 }}>
+            你正在完成新手引导 — 添加账户后回来继续。
+          </span>
+          <button
+            onClick={() => {
+              const step = onboardingResumeStep();
+              setOnboardingResumeStep(null);
+              setOnboardingStep(step ?? 0);
+            }}
+            style={{
+              padding: "6px 12px",
+              background: "var(--palm)",
+              color: "#fff",
+              "border-radius": "var(--radius-pill)",
+              "font-weight": "700",
+              "font-size": "var(--text-micro)",
+              "white-space": "nowrap",
+            }}
+          >
+            继续新手引导
+          </button>
+        </div>
+      </Show>
+
       <div
         style={{
           display: "flex",
@@ -433,24 +781,29 @@ function AccountsTab() {
           "margin-bottom": "var(--space-3)",
         }}
       >
-        <SectionTitle>Connected accounts</SectionTitle>
+        <SectionTitle>邮箱账户</SectionTitle>
         <div style={{ flex: 1 }} />
-        <button
-          onClick={() => setAdding(true)}
-          style={{
-            display: "flex",
-            "align-items": "center",
-            gap: "4px",
-            padding: "6px 14px",
-            background: "var(--palm)",
-            color: "white",
-            "border-radius": "var(--radius-pill)",
-            "font-weight": "700",
-            "font-size": "var(--text-caption)",
-          }}
-        >
-          <Icon name="ph-plus" size={12} /> Add account
-        </button>
+        {/* The empty state below has its own CTA — don't show two
+            "添加账户" entries when there are no accounts yet. */}
+        <Show when={hasAccounts()}>
+          <button
+            onClick={() => setAdding(true)}
+            style={{
+              display: "flex",
+              "align-items": "center",
+              gap: "4px",
+              padding: "6px 14px",
+              "min-height": "32px",
+              background: "var(--palm)",
+              color: "white",
+              "border-radius": "var(--radius-pill)",
+              "font-weight": "700",
+              "font-size": "var(--text-caption)",
+            }}
+          >
+            <Icon name="ph-plus" size={12} /> 添加账户
+          </button>
+        </Show>
       </div>
       <ResourceGate
         resource={accounts}
@@ -458,17 +811,92 @@ function AccountsTab() {
         errorView={() => (
           <ErrorState
             title="账户加载失败"
-            message={String(accounts.error ?? "")}
+            message="读取账户列表时出错，请重试。"
             retry={() => void refetch()}
           />
         )}
         empty={
-          <Empty
-            icon="ph-plug-charging"
-            title="还没有连接邮箱"
-            description="添加 IMAP/SMTP 账号后，会自动出现在这里。"
-            action={{ label: "添加账号", onClick: () => setAdding(true) }}
-          />
+          <div
+            style={{
+              display: "flex",
+              "flex-direction": "column",
+              "align-items": "center",
+              padding: "var(--space-8) var(--space-5)",
+              "text-align": "center",
+            }}
+          >
+            <div
+              style={{
+                width: "72px",
+                height: "72px",
+                "border-radius": "50%",
+                background: "var(--palm-soft)",
+                color: "var(--palm)",
+                display: "flex",
+                "align-items": "center",
+                "justify-content": "center",
+                "margin-bottom": "var(--space-4)",
+              }}
+            >
+              <Icon name="ph-plug-charging" size={30} />
+            </div>
+            <h3
+              style={{
+                "font-family": "var(--font-display)",
+                "font-size": "var(--text-h4)",
+                "font-weight": "800",
+                color: "var(--text-primary)",
+                margin: 0,
+                "margin-bottom": "var(--space-2)",
+              }}
+            >
+              还没有连接邮箱
+            </h3>
+            <p
+              style={{
+                "max-width": "360px",
+                "font-size": "var(--text-body-sm)",
+                color: "var(--text-secondary)",
+                margin: 0,
+                "line-height": 1.6,
+              }}
+            >
+              连接你的邮箱（Gmail、QQ 邮箱、企业邮箱…），邮件会自动同步到这里。
+            </p>
+            <div
+              style={{
+                display: "flex",
+                "flex-wrap": "wrap",
+                gap: "var(--space-2)",
+                "justify-content": "center",
+                "margin-top": "var(--space-4)",
+              }}
+            >
+              <For each={PROVIDER_WALL}>
+                {(name) => (
+                  <span
+                    style={{
+                      padding: "4px 12px",
+                      background: "var(--paper-light)",
+                      border: "0.5px solid var(--border)",
+                      "border-radius": "var(--radius-pill)",
+                      "font-size": "var(--text-micro)",
+                      color: "var(--text-secondary)",
+                      "font-weight": "600",
+                    }}
+                  >
+                    {name}
+                  </span>
+                )}
+              </For>
+            </div>
+            <button
+              onClick={() => setAdding(true)}
+              style={{ ...primaryBtn, "margin-top": "var(--space-5)" }}
+            >
+              添加账户
+            </button>
+          </div>
         }
       >
         {(list) => (
@@ -496,39 +924,35 @@ function AccountsTab() {
                       color: "var(--text-muted)",
                     }}
                   >
-                    {a.email ?? `${a.type} · ${a.workspace ?? ""}`} · {a.status}
+                    {a.email ?? a.workspace ?? ""} ·{" "}
+                    {ACCOUNT_STATUS_LABELS[a.status] ?? a.status}
                     <SyncStatus accountId={a.id} />
                   </p>
                 </div>
                 <button
-                  onClick={async () => {
-                    const r = await syncNow(a.id, "INBOX");
-                    if (r) {
-                      showToast({
-                        message: `已同步 ${a.label} · 新增 ${r.new_messages} 封`,
-                        kind: "success",
-                      });
-                    } else {
-                      showToast({
-                        message: `同步请求已发送（${a.label}）`,
-                        kind: "info",
-                      });
-                    }
-                  }}
+                  onClick={() => void syncAccount(a)}
+                  disabled={syncingId() === a.id}
                   style={{
                     color: "var(--palm)",
                     "font-size": "var(--text-caption)",
                     "font-weight": "700",
+                    "min-height": "36px",
+                    padding: "6px 8px",
+                    opacity: syncingId() === a.id ? 0.5 : 1,
+                    cursor:
+                      syncingId() === a.id ? "not-allowed" : "pointer",
                   }}
                 >
-                  立即同步
+                  {syncingId() === a.id ? "同步中…" : "立即同步"}
                 </button>
                 <button
                   onClick={() => setEditing(a)}
                   style={{
-                    color: "var(--blurple)",
+                    color: "var(--palm)",
                     "font-size": "var(--text-caption)",
                     "font-weight": "700",
+                    "min-height": "36px",
+                    padding: "6px 8px",
                   }}
                 >
                   设置
@@ -559,53 +983,77 @@ function AccountsTab() {
         )}
       </Show>
       <Show when={adding()}>
-        <AddAccountModal onClose={() => setAdding(false)} />
+        <AddAccountModal
+          onClose={() => setAdding(false)}
+          onAdded={() => void refetch()}
+          existingEmails={(accounts() ?? [])
+            .map((a) => a.email?.toLowerCase())
+            .filter((e): e is string => !!e)}
+        />
       </Show>
     </div>
   );
 }
 
-// Provider is referenced via the createResource generic; declared inline
-// below in the function.
-function AddAccountModal(props: { onClose: () => void }) {
+interface ProviderInfo {
+  id: string;
+  label: string;
+  icon: string;
+  credentials_hint: string;
+  imap_host: string;
+  imap_port: number;
+  smtp_host: string;
+  smtp_port: number;
+  auth_mode: string;
+  smtp_implicit_tls: boolean;
+}
+
+function AddAccountModal(props: {
+  onClose: () => void;
+  onAdded: () => void;
+  existingEmails: string[];
+}) {
   const [providerList] = createResource(fetchProviders);
-  const [selectedProviderId, setSelectedProviderId] = createSignal("gmail");
+  const [selectedProviderId, setSelectedProviderId] = createSignal("");
   const [accountEmail, setAccountEmail] = createSignal("");
   const [accountPassword, setAccountPassword] = createSignal("");
   const [saving, setSaving] = createSignal(false);
 
+  // OAuth providers (Gmail / Outlook) can't be connected yet — offering
+  // them in the picker leads to a dead end, so the select only lists
+  // providers that accept a password / auth code today.
+  const providerOptions = createMemo<ProviderInfo[]>(() => {
+    const raw = (providerList() ?? []) as ProviderInfo[];
+    return raw.filter((p) => p.auth_mode !== "oauth2-required");
+  });
+  createEffect(() => {
+    const opts = providerOptions();
+    if (opts.length > 0 && !opts.some((p) => p.id === selectedProviderId())) {
+      setSelectedProviderId(opts[0]!.id);
+    }
+  });
+
   const onSubmit = async () => {
-    const rawList = providerList();
-    if (!rawList) return;
-    const list = rawList as Array<{
-      id: string;
-      label: string;
-      icon: string;
-      credentials_hint: string;
-      imap_host: string;
-      imap_port: number;
-      smtp_host: string;
-      smtp_port: number;
-      auth_mode: string;
-      smtp_implicit_tls: boolean;
-    }>;
-    const prov = list.find((p) => p.id === selectedProviderId());
+    const prov = providerOptions().find((p) => p.id === selectedProviderId());
     if (!prov) return;
     const e = accountEmail().trim();
     if (!e || !accountPassword()) {
       showToast({ message: "请填入邮箱地址和密码", kind: "warning" });
       return;
     }
+    if (props.existingEmails.includes(e.toLowerCase())) {
+      showToast({
+        message: "这个邮箱已经添加过账户了",
+        kind: "warning",
+      });
+      return;
+    }
     setSaving(true);
     const id = `acct_${e.replace(/[^a-z0-9]/gi, "_")}`;
-    // Build the account. Provider is stored as TEXT in SQL, so we cast
-    // through `unknown` since the TS union doesn't list every provider
-    // string we allow at runtime (the SQL store is provider-agnostic).
-    const providerId: string = prov.id;
     const account = {
       id,
       type: "email" as const,
-      provider: providerId,
+      provider: prov.id,
       email: e,
       label: prov.label,
       displayName: e.split("@")[0] ?? e,
@@ -613,7 +1061,7 @@ function AddAccountModal(props: { onClose: () => void }) {
       synced: 0,
       total: 0,
       privacy: "unified" as const,
-      color: "#0A8F63",
+      color: DEFAULT_ACCOUNT_COLOR,
       avatar: prov.label[0] ?? "M",
       lastSync: "刚刚",
       settings: {
@@ -632,27 +1080,30 @@ function AddAccountModal(props: { onClose: () => void }) {
       },
     } as unknown as Account;
     await upsertAccount(account);
-    // Persist password into OS keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service).
+    // Persist password into the OS keychain.
     try {
       const ok = await vaultSave(id, accountPassword());
       if (ok) {
         showToast({
-          message: `已添加 ${prov.label} 账户 ${e} · 密码已存入 Keychain`,
+          message: `已添加 ${prov.label} 账户 ${e}，密码已安全存入系统钥匙串`,
           kind: "success",
         });
       } else {
         showToast({
-          message: `已添加 ${prov.label} 账户 ${e}（浏览器模式，未存密码到 Keychain）`,
+          message: `已添加账户 ${e}（浏览器预览模式，密码未保存）`,
           kind: "info",
         });
       }
     } catch (vaultErr) {
       showToast({
-        message: `已添加账户 ${e}，但 Keychain 写入失败：${vaultErr}`,
-        kind: "warning",
+        message: `已添加账户 ${e}，但密码存入系统钥匙串失败`,
+        kind: "error",
+        source: "vault",
+        detail: String(vaultErr),
       });
     }
     setSaving(false);
+    props.onAdded();
     props.onClose();
   };
 
@@ -685,6 +1136,7 @@ function AddAccountModal(props: { onClose: () => void }) {
               "font-weight": "700",
               "font-size": "var(--text-caption)",
               opacity: saving() ? 0.5 : 1,
+              cursor: saving() ? "not-allowed" : "pointer",
             }}
           >
             {saving() ? "添加中…" : "添加并连接"}
@@ -693,15 +1145,29 @@ function AddAccountModal(props: { onClose: () => void }) {
       }
     >
       <Field label="邮箱服务商">
-        <select
-          value={selectedProviderId()}
-          onChange={(e) => setSelectedProviderId(e.currentTarget.value)}
-          style={inputStyle}
+        <Show
+          when={providerOptions().length > 0}
+          fallback={
+            <p
+              style={{
+                "font-size": "var(--text-caption)",
+                color: "var(--text-muted)",
+              }}
+            >
+              服务商列表加载失败，请关闭后重试。
+            </p>
+          }
         >
-          <For each={providerList() ?? []}>
-            {(p) => <option value={p.id}>{p.label}</option>}
-          </For>
-        </select>
+          <select
+            value={selectedProviderId()}
+            onChange={(e) => setSelectedProviderId(e.currentTarget.value)}
+            style={inputStyle}
+          >
+            <For each={providerOptions()}>
+              {(p) => <option value={p.id}>{p.label}</option>}
+            </For>
+          </select>
+        </Show>
       </Field>
       <Field label="邮箱地址">
         <input
@@ -712,62 +1178,17 @@ function AddAccountModal(props: { onClose: () => void }) {
         />
       </Field>
       {(() => {
-        // P0-9: branch the credential input on `auth_mode`. The previous
-        // code always showed a single password field regardless of the
-        // provider's auth mode, which made Gmail (oauth2-required) and
-        // QQ/163/126 (password-with-auth-code) impossible to set up
-        // correctly: the user typed a login password, IMAP rejected
-        // it, and the account appeared connected with no usable creds.
-        const prov = providerList()?.find((p) => p.id === selectedProviderId());
+        const prov = providerOptions().find(
+          (p) => p.id === selectedProviderId(),
+        );
         const mode = prov?.auth_mode ?? "app-password";
-        if (mode === "oauth2-required") {
-          return (
-            <>
-              <p
-                style={{
-                  padding: "12px 16px",
-                  background: "var(--paper-mid)",
-                  "border-radius": "var(--radius-md)",
-                  "font-size": "var(--text-caption)",
-                  color: "var(--text-secondary)",
-                  "line-height": 1.5,
-                }}
-              >
-                {prov?.label} 使用 OAuth 授权。点击下方按钮在系统浏览器中完成授权，SendPalm
-                会自动接收返回的 refresh token。
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  showToast({
-                    message: `OAuth 流程开发中：${prov?.label} — 请先用「自定义 IMAP」方式接入`,
-                    kind: "info",
-                    ttlMs: 6000,
-                  });
-                }}
-                style={{
-                  width: "100%",
-                  padding: "12px 18px",
-                  background: "var(--palm)",
-                  color: "#fff",
-                  "border-radius": "var(--radius-pill)",
-                  "font-weight": "700",
-                  "font-size": "var(--text-caption)",
-                  "margin-top": "var(--space-2)",
-                }}
-              >
-                用 {prov?.label} 授权
-              </button>
-            </>
-          );
-        }
         const labelByMode: Record<string, string> = {
-          "app-password": "App Password（推荐）",
-          "password-with-auth-code": "授权码（非登录密码）",
+          "app-password": "应用专用密码（推荐）",
+          "password-with-auth-code": "授权码（不是登录密码）",
         };
         const placeholderByMode: Record<string, string> = {
-          "app-password": "16 位 App Password",
-          "password-with-auth-code": "在 webmail 设置里生成的授权码",
+          "app-password": "在服务商安全设置里生成的专用密码",
+          "password-with-auth-code": "在网页版邮箱设置里生成的授权码",
         };
         return (
           <Field label={labelByMode[mode] ?? "密码"}>
@@ -788,7 +1209,7 @@ function AddAccountModal(props: { onClose: () => void }) {
           "margin-top": "var(--space-2)",
         }}
       >
-        {providerList()?.find((p) => p.id === selectedProviderId())
+        {providerOptions().find((p) => p.id === selectedProviderId())
           ?.credentials_hint ?? ""}
       </p>
     </Modal>
@@ -804,7 +1225,35 @@ function AccountEditModal(props: {
   const [draft, setDraft] = createSignal<Account>(
     JSON.parse(JSON.stringify(props.account)),
   );
+  const [confirmingDelete, setConfirmingDelete] = createSignal(false);
+  const [newPassword, setNewPassword] = createSignal("");
+  const [saving, setSaving] = createSignal(false);
   const d = () => draft();
+
+  const handleSave = async () => {
+    const pwd = newPassword().trim();
+    if (pwd) {
+      try {
+        const ok = await vaultSave(d().id, pwd);
+        if (!ok) {
+          showToast({
+            message: "密码未保存（浏览器预览模式）",
+            kind: "info",
+          });
+        }
+      } catch (e) {
+        showToast({
+          message: "密码保存失败，账户设置未保存",
+          kind: "error",
+          source: "vault",
+          detail: String(e),
+        });
+        return;
+      }
+    }
+    setSaving(true);
+    props.onSave(d());
+  };
 
   return (
     <Modal
@@ -815,19 +1264,11 @@ function AccountEditModal(props: {
       footer={
         <>
           <button
-            onClick={async () => {
-              if (
-                !confirm(
-                  `确定删除账户 ${d().label}？这将同时清除 Keychain 密码。`,
-                )
-              )
-                return;
-              await props.onDelete(d());
-            }}
+            onClick={() => setConfirmingDelete(true)}
             style={{
               padding: "8px 16px",
               "font-size": "var(--text-caption)",
-              color: "var(--danger, #c33)",
+              color: "var(--status-danger)",
               "font-weight": "700",
             }}
           >
@@ -844,25 +1285,331 @@ function AccountEditModal(props: {
           >
             取消
           </button>
-          <button onClick={() => props.onSave(d())} style={primaryBtn}>
+          <button
+            onClick={() => void handleSave()}
+            disabled={saving()}
+            style={primaryBtn}
+          >
             保存
           </button>
         </>
       }
     >
-      <Show when={d().type === "email"}>
-        <Field label="Display name">
-          <input
-            value={d().displayName}
-            onInput={(e) =>
-              setDraft({ ...d(), displayName: e.currentTarget.value })
+      <Field label="显示名称">
+        <input
+          value={d().displayName}
+          onInput={(e) =>
+            setDraft({ ...d(), displayName: e.currentTarget.value })
+          }
+          style={inputStyle}
+        />
+      </Field>
+      <Field label="签名">
+        <textarea
+          value={d().type === "email" ? (d().settings?.signature ?? "") : ""}
+          onInput={(e) =>
+            setDraft({
+              ...d(),
+              settings: {
+                ...(d().type === "email"
+                  ? d().settings!
+                  : defaultEmailSettings()),
+                signature: e.currentTarget.value,
+              },
+            })
+          }
+          rows={4}
+          style={{
+            ...inputStyle,
+            "min-height": "100px",
+            "font-family": "var(--font-body)",
+            resize: "vertical",
+          }}
+        />
+      </Field>
+      <Field
+        label="密码 / 授权码"
+        hint="留空则不修改；填写后保存，下次同步生效。"
+      >
+        <input
+          type="password"
+          value={newPassword()}
+          onInput={(e) => setNewPassword(e.currentTarget.value)}
+          placeholder="留空则不修改"
+          style={inputStyle}
+        />
+      </Field>
+      <Field label="回复地址 (Reply-to)">
+        <input
+          value={d().type === "email" ? (d().settings?.replyTo ?? "") : ""}
+          onInput={(e) =>
+            setDraft({
+              ...d(),
+              settings: {
+                ...(d().type === "email"
+                  ? d().settings!
+                  : defaultEmailSettings()),
+                replyTo: e.currentTarget.value,
+              },
+            })
+          }
+          style={inputStyle}
+        />
+      </Field>
+      <Field label="别名">
+        <div
+          style={{
+            display: "flex",
+            "flex-direction": "column",
+            gap: "var(--space-2)",
+          }}
+        >
+          <For
+            each={d().type === "email" ? (d().settings?.aliases ?? []) : []}
+          >
+            {(alias, idx) => (
+              <div
+                style={{
+                  display: "flex",
+                  gap: "var(--space-2)",
+                  "align-items": "center",
+                }}
+              >
+                <input
+                  value={alias}
+                  onInput={(e) => {
+                    const next = [
+                      ...(d().type === "email" ? d().settings!.aliases : []),
+                    ];
+                    next[idx()] = e.currentTarget.value;
+                    setDraft({
+                      ...d(),
+                      settings: {
+                        ...(d().type === "email"
+                          ? d().settings!
+                          : defaultEmailSettings()),
+                        aliases: next,
+                      },
+                    });
+                  }}
+                  placeholder="alias@example.com"
+                  style={{ ...inputStyle, flex: 1, "margin-top": 0 }}
+                />
+                <button
+                  onClick={() => {
+                    const next = [
+                      ...(d().type === "email" ? d().settings!.aliases : []),
+                    ];
+                    next.splice(idx(), 1);
+                    setDraft({
+                      ...d(),
+                      settings: {
+                        ...(d().type === "email"
+                          ? d().settings!
+                          : defaultEmailSettings()),
+                        aliases: next,
+                      },
+                    });
+                  }}
+                  style={{
+                    color: "var(--status-danger)",
+                    width: "36px",
+                    height: "36px",
+                    display: "flex",
+                    "align-items": "center",
+                    "justify-content": "center",
+                    "flex-shrink": 0,
+                  }}
+                  aria-label="删除别名"
+                  title="删除别名"
+                >
+                  <Icon name="ph-trash" size={16} />
+                </button>
+              </div>
+            )}
+          </For>
+          <button
+            onClick={() =>
+              setDraft({
+                ...d(),
+                settings: {
+                  ...(d().type === "email"
+                    ? d().settings!
+                    : defaultEmailSettings()),
+                  aliases: [
+                    ...(d().type === "email" ? d().settings!.aliases : []),
+                    "",
+                  ],
+                },
+              })
             }
-            style={inputStyle}
+            style={{
+              "margin-top": "var(--space-1)",
+              padding: "8px 12px",
+              "min-height": "36px",
+              background: "var(--paper-mid)",
+              color: "var(--text-secondary)",
+              "border-radius": "var(--radius-pill)",
+              "font-size": "var(--text-caption)",
+              "font-weight": "600",
+              "align-self": "flex-start",
+            }}
+          >
+            <Icon name="ph-plus" size={12} /> 添加别名
+          </button>
+        </div>
+      </Field>
+      <Field label="默认发件地址">
+        <select
+          value={
+            d().type === "email"
+              ? (d().settings?.defaultFrom ?? d().email)
+              : ""
+          }
+          onChange={(e) =>
+            setDraft({
+              ...d(),
+              settings: {
+                ...(d().type === "email"
+                  ? d().settings!
+                  : defaultEmailSettings()),
+                defaultFrom: e.currentTarget.value,
+              },
+            })
+          }
+          style={inputStyle}
+        >
+          <option value={d().email}>{d().email}（主地址）</option>
+          <For
+            each={d().type === "email" ? (d().settings?.aliases ?? []) : []}
+          >
+            {(alias) => <option value={alias}>{alias}</option>}
+          </For>
+        </select>
+      </Field>
+      <Field label="同步频率">
+        <select
+          value={
+            d().type === "email"
+              ? (d().settings?.syncFrequency ?? "15min")
+              : "15min"
+          }
+          onChange={(e) =>
+            setDraft({
+              ...d(),
+              settings: {
+                ...(d().type === "email"
+                  ? d().settings!
+                  : defaultEmailSettings()),
+                syncFrequency: e.currentTarget
+                  .value as AccountSettings["syncFrequency"],
+              },
+            })
+          }
+          style={inputStyle}
+        >
+          <option value="5min">每 5 分钟</option>
+          <option value="15min">每 15 分钟</option>
+          <option value="30min">每 30 分钟</option>
+          <option value="1h">每小时</option>
+          <option value="manual">手动</option>
+        </select>
+      </Field>
+      <Field label="同步文件夹">
+        <div
+          style={{
+            display: "grid",
+            "grid-template-columns": "repeat(2, 1fr)",
+            gap: "var(--space-2)",
+          }}
+        >
+          <For each={FOLDER_OPTIONS}>
+            {(name) => {
+              const folders = () =>
+                d().type === "email" ? (d().settings?.syncFolders ?? []) : [];
+              const enabled = () =>
+                folders().some((f) => f.name === name && f.enabled);
+              return (
+                <label
+                  style={{
+                    display: "flex",
+                    "align-items": "center",
+                    gap: "var(--space-2)",
+                    "font-size": "var(--text-body-sm)",
+                    color: "var(--text-secondary)",
+                    "min-height": "32px",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={enabled()}
+                    style={{ "accent-color": "var(--palm)" }}
+                    onChange={(e) => {
+                      const current = folders();
+                      const next = current.some((f) => f.name === name)
+                        ? current.map((f) =>
+                            f.name === name
+                              ? { ...f, enabled: e.currentTarget.checked }
+                              : f,
+                          )
+                        : [
+                            ...current,
+                            { name, enabled: e.currentTarget.checked },
+                          ];
+                      setDraft({
+                        ...d(),
+                        settings: {
+                          ...(d().type === "email"
+                            ? d().settings!
+                            : defaultEmailSettings()),
+                          syncFolders: next,
+                        },
+                      });
+                    }}
+                  />
+                  {FOLDER_LABELS[name] ?? name}
+                </label>
+              );
+            }}
+          </For>
+        </div>
+      </Field>
+      <Field label="自动密送">
+        <label
+          style={{
+            display: "flex",
+            "align-items": "center",
+            gap: "var(--space-2)",
+            "min-height": "32px",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={
+              d().type === "email" ? (d().settings?.autoBcc ?? false) : false
+            }
+            style={{ "accent-color": "var(--palm)" }}
+            onChange={(e) =>
+              setDraft({
+                ...d(),
+                settings: {
+                  ...(d().type === "email"
+                    ? d().settings!
+                    : defaultEmailSettings()),
+                  autoBcc: e.currentTarget.checked,
+                },
+              })
+            }
           />
-        </Field>
-        <Field label="Signature">
-          <textarea
-            value={d().type === "email" ? (d().settings?.signature ?? "") : ""}
+          <span style={{ "font-size": "var(--text-body-sm)" }}>
+            每封发出的邮件自动密送一份
+          </span>
+        </label>
+        <Show when={d().type === "email" && d().settings?.autoBcc}>
+          <input
+            value={
+              d().type === "email" ? (d().settings?.autoBccAddress ?? "") : ""
+            }
             onInput={(e) =>
               setDraft({
                 ...d(),
@@ -870,406 +1617,135 @@ function AccountEditModal(props: {
                   ...(d().type === "email"
                     ? d().settings!
                     : defaultEmailSettings()),
-                  signature: e.currentTarget.value,
+                  autoBccAddress: e.currentTarget.value,
                 },
               })
             }
-            rows={4}
+            placeholder="bcc@example.com"
+            style={{ ...inputStyle, "margin-top": "var(--space-2)" }}
+          />
+        </Show>
+      </Field>
+      <Field label="假期自动回复">
+        <label
+          style={{
+            display: "flex",
+            "align-items": "center",
+            gap: "var(--space-2)",
+            "min-height": "32px",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={
+              d().type === "email"
+                ? (d().settings?.vacationResponder?.enabled ?? false)
+                : false
+            }
+            style={{ "accent-color": "var(--palm)" }}
+            onChange={(e) =>
+              setDraft({
+                ...d(),
+                settings: {
+                  ...(d().type === "email"
+                    ? d().settings!
+                    : defaultEmailSettings()),
+                  vacationResponder: {
+                    enabled: e.currentTarget.checked,
+                    subject:
+                      d().type === "email"
+                        ? (d().settings?.vacationResponder?.subject ?? "")
+                        : "",
+                    body:
+                      d().type === "email"
+                        ? (d().settings?.vacationResponder?.body ?? "")
+                        : "",
+                  },
+                },
+              })
+            }
+          />
+          <span style={{ "font-size": "var(--text-body-sm)" }}>
+            休假期间自动回复来信
+          </span>
+        </label>
+        <Show
+          when={
+            d().type === "email" && d().settings?.vacationResponder?.enabled
+          }
+        >
+          <input
+            value={
+              d().type === "email"
+                ? (d().settings?.vacationResponder?.subject ?? "")
+                : ""
+            }
+            onInput={(e) =>
+              setDraft({
+                ...d(),
+                settings: {
+                  ...(d().type === "email"
+                    ? d().settings!
+                    : defaultEmailSettings()),
+                  vacationResponder: {
+                    enabled: true,
+                    subject: e.currentTarget.value,
+                    body:
+                      d().type === "email"
+                        ? (d().settings?.vacationResponder?.body ?? "")
+                        : "",
+                  },
+                },
+              })
+            }
+            placeholder="主题"
+            style={{ ...inputStyle, "margin-top": "var(--space-2)" }}
+          />
+          <textarea
+            value={
+              d().type === "email"
+                ? (d().settings?.vacationResponder?.body ?? "")
+                : ""
+            }
+            onInput={(e) =>
+              setDraft({
+                ...d(),
+                settings: {
+                  ...(d().type === "email"
+                    ? d().settings!
+                    : defaultEmailSettings()),
+                  vacationResponder: {
+                    enabled: true,
+                    subject:
+                      d().type === "email"
+                        ? (d().settings?.vacationResponder?.subject ?? "")
+                        : "",
+                    body: e.currentTarget.value,
+                  },
+                },
+              })
+            }
+            placeholder="正文"
+            rows={3}
             style={{
               ...inputStyle,
-              "min-height": "100px",
+              "min-height": "80px",
               "font-family": "var(--font-body)",
+              "margin-top": "var(--space-2)",
               resize: "vertical",
             }}
           />
-        </Field>
-        <Field label="Reply-to">
-          <input
-            value={d().type === "email" ? (d().settings?.replyTo ?? "") : ""}
-            onInput={(e) =>
-              setDraft({
-                ...d(),
-                settings: {
-                  ...(d().type === "email"
-                    ? d().settings!
-                    : defaultEmailSettings()),
-                  replyTo: e.currentTarget.value,
-                },
-              })
-            }
-            style={inputStyle}
-          />
-        </Field>
-        <Field label="Aliases">
-          <div
-            style={{
-              display: "flex",
-              "flex-direction": "column",
-              gap: "var(--space-2)",
-            }}
-          >
-            <For
-              each={d().type === "email" ? (d().settings?.aliases ?? []) : []}
-            >
-              {(alias, idx) => (
-                <div style={{ display: "flex", gap: "var(--space-2)" }}>
-                  <input
-                    value={alias}
-                    onInput={(e) => {
-                      const next = [
-                        ...(d().type === "email" ? d().settings!.aliases : []),
-                      ];
-                      next[idx()] = e.currentTarget.value;
-                      setDraft({
-                        ...d(),
-                        settings: {
-                          ...(d().type === "email"
-                            ? d().settings!
-                            : defaultEmailSettings()),
-                          aliases: next,
-                        },
-                      });
-                    }}
-                    placeholder="alias@example.com"
-                    style={{ ...inputStyle, flex: 1, "margin-top": 0 }}
-                  />
-                  <button
-                    onClick={() => {
-                      const next = [
-                        ...(d().type === "email" ? d().settings!.aliases : []),
-                      ];
-                      next.splice(idx(), 1);
-                      setDraft({
-                        ...d(),
-                        settings: {
-                          ...(d().type === "email"
-                            ? d().settings!
-                            : defaultEmailSettings()),
-                          aliases: next,
-                        },
-                      });
-                    }}
-                    style={{ color: "var(--danger)" }}
-                    aria-label="Remove alias"
-                  >
-                    <Icon name="ph-trash" size={16} />
-                  </button>
-                </div>
-              )}
-            </For>
-            <button
-              onClick={() =>
-                setDraft({
-                  ...d(),
-                  settings: {
-                    ...(d().type === "email"
-                      ? d().settings!
-                      : defaultEmailSettings()),
-                    aliases: [
-                      ...(d().type === "email" ? d().settings!.aliases : []),
-                      "",
-                    ],
-                  },
-                })
-              }
-              style={{
-                "margin-top": "var(--space-1)",
-                padding: "6px 12px",
-                background: "var(--paper-mid)",
-                color: "var(--text-secondary)",
-                "border-radius": "var(--radius-pill)",
-                "font-size": "var(--text-caption)",
-                "font-weight": "600",
-                "align-self": "flex-start",
-              }}
-            >
-              <Icon name="ph-plus" size={12} /> Add alias
-            </button>
-          </div>
-        </Field>
-        <Field label="Default From">
-          <select
-            value={
-              d().type === "email"
-                ? (d().settings?.defaultFrom ?? d().email)
-                : ""
-            }
-            onChange={(e) =>
-              setDraft({
-                ...d(),
-                settings: {
-                  ...(d().type === "email"
-                    ? d().settings!
-                    : defaultEmailSettings()),
-                  defaultFrom: e.currentTarget.value,
-                },
-              })
-            }
-            style={inputStyle}
-          >
-            <option value={d().email}>{d().email} (primary)</option>
-            <For
-              each={d().type === "email" ? (d().settings?.aliases ?? []) : []}
-            >
-              {(alias) => <option value={alias}>{alias}</option>}
-            </For>
-          </select>
-        </Field>
-        <Field label="Sync frequency">
-          <select
-            value={
-              d().type === "email"
-                ? (d().settings?.syncFrequency ?? "15min")
-                : "15min"
-            }
-            onChange={(e) =>
-              setDraft({
-                ...d(),
-                settings: {
-                  ...(d().type === "email"
-                    ? d().settings!
-                    : defaultEmailSettings()),
-                  syncFrequency: e.currentTarget
-                    .value as AccountSettings["syncFrequency"],
-                },
-              })
-            }
-            style={inputStyle}
-          >
-            <option value="5min">每 5 分钟</option>
-            <option value="15min">每 15 分钟</option>
-            <option value="30min">每 30 分钟</option>
-            <option value="1h">每小时</option>
-            <option value="manual">手动</option>
-          </select>
-        </Field>
-        <Field label="Sync folders">
-          <div
-            style={{
-              display: "grid",
-              "grid-template-columns": "repeat(2, 1fr)",
-              gap: "var(--space-2)",
-            }}
-          >
-            <For each={FOLDER_OPTIONS}>
-              {(name) => {
-                const folders = () =>
-                  d().type === "email" ? (d().settings?.syncFolders ?? []) : [];
-                const enabled = () =>
-                  folders().some((f) => f.name === name && f.enabled);
-                return (
-                  <label
-                    style={{
-                      display: "flex",
-                      "align-items": "center",
-                      gap: "var(--space-2)",
-                      "font-size": "var(--text-body-sm)",
-                      color: "var(--text-secondary)",
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={enabled()}
-                      onChange={(e) => {
-                        const current = folders();
-                        const next = current.some((f) => f.name === name)
-                          ? current.map((f) =>
-                              f.name === name
-                                ? { ...f, enabled: e.currentTarget.checked }
-                                : f,
-                            )
-                          : [
-                              ...current,
-                              { name, enabled: e.currentTarget.checked },
-                            ];
-                        setDraft({
-                          ...d(),
-                          settings: {
-                            ...(d().type === "email"
-                              ? d().settings!
-                              : defaultEmailSettings()),
-                            syncFolders: next,
-                          },
-                        });
-                      }}
-                    />
-                    {name}
-                  </label>
-                );
-              }}
-            </For>
-          </div>
-        </Field>
-        <Field label="Auto-BCC">
-          <label
-            style={{
-              display: "flex",
-              "align-items": "center",
-              gap: "var(--space-2)",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={
-                d().type === "email" ? (d().settings?.autoBcc ?? false) : false
-              }
-              onChange={(e) =>
-                setDraft({
-                  ...d(),
-                  settings: {
-                    ...(d().type === "email"
-                      ? d().settings!
-                      : defaultEmailSettings()),
-                    autoBcc: e.currentTarget.checked,
-                  },
-                })
-              }
-            />
-            <span style={{ "font-size": "var(--text-body-sm)" }}>
-              启用 Auto-BCC
-            </span>
-          </label>
-          <Show when={d().type === "email" && d().settings?.autoBcc}>
-            <input
-              value={
-                d().type === "email" ? (d().settings?.autoBccAddress ?? "") : ""
-              }
-              onInput={(e) =>
-                setDraft({
-                  ...d(),
-                  settings: {
-                    ...(d().type === "email"
-                      ? d().settings!
-                      : defaultEmailSettings()),
-                    autoBccAddress: e.currentTarget.value,
-                  },
-                })
-              }
-              placeholder="bcc@example.com"
-              style={{ ...inputStyle, "margin-top": "var(--space-2)" }}
-            />
-          </Show>
-        </Field>
-        <Field label="Vacation responder">
-          <label
-            style={{
-              display: "flex",
-              "align-items": "center",
-              gap: "var(--space-2)",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={
-                d().type === "email"
-                  ? (d().settings?.vacationResponder?.enabled ?? false)
-                  : false
-              }
-              onChange={(e) =>
-                setDraft({
-                  ...d(),
-                  settings: {
-                    ...(d().type === "email"
-                      ? d().settings!
-                      : defaultEmailSettings()),
-                    vacationResponder: {
-                      enabled: e.currentTarget.checked,
-                      subject:
-                        d().type === "email"
-                          ? (d().settings?.vacationResponder?.subject ?? "")
-                          : "",
-                      body:
-                        d().type === "email"
-                          ? (d().settings?.vacationResponder?.body ?? "")
-                          : "",
-                    },
-                  },
-                })
-              }
-            />
-            <span style={{ "font-size": "var(--text-body-sm)" }}>
-              启用 Vacation Responder
-            </span>
-          </label>
-          <Show
-            when={
-              d().type === "email" && d().settings?.vacationResponder?.enabled
-            }
-          >
-            <input
-              value={
-                d().type === "email"
-                  ? (d().settings?.vacationResponder?.subject ?? "")
-                  : ""
-              }
-              onInput={(e) =>
-                setDraft({
-                  ...d(),
-                  settings: {
-                    ...(d().type === "email"
-                      ? d().settings!
-                      : defaultEmailSettings()),
-                    vacationResponder: {
-                      enabled: true,
-                      subject: e.currentTarget.value,
-                      body:
-                        d().type === "email"
-                          ? (d().settings?.vacationResponder?.body ?? "")
-                          : "",
-                    },
-                  },
-                })
-              }
-              placeholder="主题"
-              style={{ ...inputStyle, "margin-top": "var(--space-2)" }}
-            />
-            <textarea
-              value={
-                d().type === "email"
-                  ? (d().settings?.vacationResponder?.body ?? "")
-                  : ""
-              }
-              onInput={(e) =>
-                setDraft({
-                  ...d(),
-                  settings: {
-                    ...(d().type === "email"
-                      ? d().settings!
-                      : defaultEmailSettings()),
-                    vacationResponder: {
-                      enabled: true,
-                      subject:
-                        d().type === "email"
-                          ? (d().settings?.vacationResponder?.subject ?? "")
-                          : "",
-                      body: e.currentTarget.value,
-                    },
-                  },
-                })
-              }
-              placeholder="正文"
-              rows={3}
-              style={{
-                ...inputStyle,
-                "min-height": "80px",
-                "font-family": "var(--font-body)",
-                "margin-top": "var(--space-2)",
-                resize: "vertical",
-              }}
-            />
-          </Show>
-        </Field>
-      </Show>
-      <Show when={d().type !== "email"}>
-        <p
-          style={{
-            color: "var(--text-muted)",
-            "font-size": "var(--text-caption)",
-          }}
-        >
-          {d().type === "im" ? "IM" : "Calendar"} 账户的详细设置（M10 实装）。
-        </p>
-      </Show>
+        </Show>
+      </Field>
+
+      <ConfirmDialog
+        open={confirmingDelete()}
+        title={`删除账户 ${d().label}？`}
+        body="将从本机移除该账户及其已同步的邮件缓存，并清除系统钥匙串中保存的密码。此操作不可撤销。"
+        confirmLabel="删除账户"
+        onConfirm={() => void props.onDelete(d())}
+        onCancel={() => setConfirmingDelete(false)}
+      />
     </Modal>
   );
 }
@@ -1301,9 +1777,8 @@ function defaultEmailSettings(): AccountSettings {
 
 function PreferencesTab() {
   const s = appSettings;
-  // P2: react to theme changes and apply to <html data-theme>. The
-  // dark-mode CSS in tokens.css is gated on [data-theme="dark"], so
-  // this is the single bridge between the toggle and the visual.
+  // Bridge the theme toggle to <html data-theme>; dark-mode CSS in
+  // tokens.css is gated on [data-theme="dark"].
   createEffect(() => {
     const t = s.preferences.theme;
     document.documentElement.setAttribute(
@@ -1313,7 +1788,7 @@ function PreferencesTab() {
   });
   return (
     <div>
-      <SectionTitle>Appearance</SectionTitle>
+      <SectionTitle>外观</SectionTitle>
       <Toggle
         label="深色模式"
         checked={s.preferences.theme === "dark"}
@@ -1322,45 +1797,8 @@ function PreferencesTab() {
         }
       />
 
-      <SectionTitle>Notifications</SectionTitle>
+      <SectionTitle>通知</SectionTitle>
       <PreferencesNotificationsTab />
-
-      <SectionTitle>Security</SectionTitle>
-      <Toggle
-        label="应用锁"
-        checked={s.preferences.security.appLock}
-        onChange={(v) =>
-          setAppSettings("preferences", "security", "appLock", v)
-        }
-      />
-      <Toggle
-        label="允许截图"
-        checked={s.preferences.security.screenshotAllowed}
-        onChange={(v) =>
-          setAppSettings("preferences", "security", "screenshotAllowed", v)
-        }
-      />
-      <Toggle
-        label="剪贴板同步"
-        checked={s.preferences.security.clipboardSync}
-        onChange={(v) =>
-          setAppSettings("preferences", "security", "clipboardSync", v)
-        }
-      />
-
-      <SectionTitle>Sync & Storage</SectionTitle>
-      <Toggle
-        label="自动下载附件"
-        checked={s.preferences.syncAndStorage.autoDownloadAttachments}
-        onChange={(v) =>
-          setAppSettings(
-            "preferences",
-            "syncAndStorage",
-            "autoDownloadAttachments",
-            v,
-          )
-        }
-      />
     </div>
   );
 }
@@ -1370,7 +1808,7 @@ function AgentTab() {
   const llm = () => s.agent.llm;
   return (
     <div>
-      <SectionTitle>Agent behavior</SectionTitle>
+      <SectionTitle>Agent 行为</SectionTitle>
       <Toggle
         label="自动起草回复"
         checked={s.agent.autoDraft}
@@ -1393,12 +1831,12 @@ function AgentTab() {
           color: "var(--text-muted)",
         }}
       >
-        详细 memory 编辑器已在 Agent 面板的记忆 tab 中实装，可直接编辑。
+        在 Agent 面板的「记忆」标签页中可以查看和编辑所有记忆，改动会自动保存。
       </p>
 
-      <SectionTitle>LLM provider (M11 — OpenAI 兼容 API)</SectionTitle>
+      <SectionTitle>模型服务（兼容 OpenAI API）</SectionTitle>
       <Field
-        label="Base URL"
+        label="接口地址"
         hint="留空时使用 https://api.openai.com/v1；本地 Ollama 填 http://localhost:11434/v1"
       >
         <input
@@ -1411,25 +1849,28 @@ function AgentTab() {
           style={inputStyle}
         />
       </Field>
-      <Field label="API key" hint="Bearer token。保存在系统钥匙串（macOS Keychain / Windows Credential Manager / GNOME Keyring），不会写入 prefs 文件。本地模型可留空。">
+      <Field
+        label="API 密钥"
+        hint="保存在系统钥匙串，不会写入本地配置文件。本地模型可留空。"
+      >
         <input
           type="password"
           placeholder="sk-…"
           value={llm().apiKey}
-          onInput={async (e) => {
-            const v = e.currentTarget.value;
-            // Update the in-memory store so the input is responsive.
-            setAppSettings("agent", "llm", "apiKey", v);
-            // SEC-2: persist to OS keychain. We never let the key
-            // touch the prefs file. Fire-and-forget; failures
-            // surface as a toast so the user knows their key
-            // didn't persist.
+          onInput={(e) =>
+            // Update the in-memory store so the input stays responsive;
+            // the keychain write happens on blur (onChange) below.
+            setAppSettings("agent", "llm", "apiKey", e.currentTarget.value)
+          }
+          onChange={async (e) => {
             try {
-              await vaultSetSecret(LLM_API_KEY_VAULT_KEY, v);
+              await vaultSetSecret(LLM_API_KEY_VAULT_KEY, e.currentTarget.value);
             } catch (err) {
               showToast({
-                message: `API key 保存失败：${String(err)}`,
+                message: "API 密钥保存失败，请重试",
                 kind: "error",
+                source: "vault",
+                detail: String(err),
               });
             }
           }}
@@ -1437,7 +1878,7 @@ function AgentTab() {
         />
       </Field>
       <Field
-        label="Model"
+        label="模型"
         hint="例如 gpt-4o-mini / claude-3-5-sonnet / llama3.1:8b"
       >
         <input
@@ -1458,7 +1899,7 @@ function AgentTab() {
           "margin-bottom": "var(--space-3)",
         }}
       >
-        <Field label="Temperature" hint="0.0 严谨，1.0 创意">
+        <Field label="温度" hint="0.0 严谨，1.0 创意">
           <input
             type="number"
             step="0.1"
@@ -1476,7 +1917,7 @@ function AgentTab() {
             style={inputStyle}
           />
         </Field>
-        <Field label="Max tokens" hint="单次回复上限">
+        <Field label="单次回复上限" hint="生成内容的最大长度（tokens）">
           <input
             type="number"
             step="1"
@@ -1496,8 +1937,8 @@ function AgentTab() {
         </Field>
       </div>
       <Field
-        label="System prompt"
-        hint="每次 chat 都会带上这段前缀。留空则不发送 system 角色。"
+        label="系统提示词"
+        hint="每次对话都会带上这段前缀。留空则不发送。"
       >
         <textarea
           rows={4}
@@ -1520,6 +1961,7 @@ function AgentTab() {
 function LabelsTab() {
   const [labels, { refetch }] = createResource(listLabels);
   const [editing, setEditing] = createSignal<Label | null>(null);
+  const [deleting, setDeleting] = createSignal<Label | null>(null);
 
   const save = async (l: Label) => {
     await upsertLabel(l);
@@ -1530,32 +1972,34 @@ function LabelsTab() {
   const remove = async (id: string) => {
     await deleteLabel(id);
     await refetch();
-    showToast({ message: "已删除", kind: "info" });
+    showToast({ message: "已删除标签", kind: "info" });
   };
-  const newLabel = (): Label => ({ id: uid("lb"), name: "", color: "#5522fa" });
+  const newLabel = (): Label => ({
+    id: uid("lb"),
+    name: "",
+    color: DEFAULT_LABEL_COLOR,
+  });
 
   return (
     <div>
-      <SectionTitle>Labels</SectionTitle>
+      <SectionTitle>标签</SectionTitle>
       <ResourceGate
         resource={labels}
         loading={<SkeletonList count={3} height={40} />}
         errorView={() => (
           <ErrorState
             title="标签加载失败"
-            message={String(labels.error ?? "")}
+            message="读取标签列表时出错，请重试。"
             retry={() => void refetch()}
           />
         )}
         empty={
-          <p
-            style={{
-              color: "var(--text-muted)",
-              "font-size": "var(--text-caption)",
-            }}
-          >
-            暂无 label
-          </p>
+          <Empty
+            icon="ph-tag"
+            title="还没有标签"
+            description="标签可以给邮件分类，方便搜索和筛选。"
+            action={{ label: "新建标签", onClick: () => setEditing(newLabel()) }}
+          />
         }
       >
         {(list) => (
@@ -1579,23 +2023,33 @@ function LabelsTab() {
                     height: "16px",
                     "border-radius": "50%",
                     background: l.color,
+                    "flex-shrink": 0,
                   }}
                 />
-                <span style={{ flex: 1, "font-weight": "600" }}>{l.name}</span>
-                <button
-                  onClick={() => setEditing(l)}
+                <span
                   style={{
-                    color: "var(--blurple)",
-                    "font-size": "var(--text-caption)",
-                    "font-weight": "700",
+                    flex: 1,
+                    "min-width": 0,
+                    "font-weight": "600",
                   }}
                 >
-                  Edit
+                  {l.name}
+                </span>
+                <button onClick={() => setEditing(l)} style={outlineBtn}>
+                  编辑
                 </button>
                 <button
-                  onClick={() => remove(l.id)}
-                  style={{ color: "var(--text-muted)" }}
-                  aria-label="Delete"
+                  onClick={() => setDeleting(l)}
+                  style={{
+                    color: "var(--status-danger)",
+                    width: "32px",
+                    height: "32px",
+                    display: "flex",
+                    "align-items": "center",
+                    "justify-content": "center",
+                  }}
+                  aria-label={`删除标签 ${l.name}`}
+                  title="删除标签"
                 >
                   <Icon name="ph-trash" size={14} />
                 </button>
@@ -1604,12 +2058,14 @@ function LabelsTab() {
           </For>
         )}
       </ResourceGate>
-      <button
-        onClick={() => setEditing(newLabel())}
-        style={{ ...primaryBtn, "margin-top": "var(--space-3)" }}
-      >
-        <Icon name="ph-plus" size={12} /> New label
-      </button>
+      <Show when={(labels() ?? []).length > 0}>
+        <button
+          onClick={() => setEditing(newLabel())}
+          style={{ ...primaryBtn, "margin-top": "var(--space-3)" }}
+        >
+          <Icon name="ph-plus" size={12} /> 新建标签
+        </button>
+      </Show>
 
       <Show when={editing()}>
         <LabelEditModal
@@ -1618,6 +2074,17 @@ function LabelsTab() {
           onSave={save}
         />
       </Show>
+      <ConfirmDialog
+        open={deleting() !== null}
+        title={`删除标签「${deleting()?.name ?? ""}」？`}
+        body="邮件上的该标签标记会被移除。"
+        confirmLabel="删除"
+        onConfirm={() => {
+          const l = deleting();
+          if (l) void remove(l.id);
+        }}
+        onCancel={() => setDeleting(null)}
+      />
     </div>
   );
 }
@@ -1632,7 +2099,7 @@ function LabelEditModal(props: {
     <Modal
       open
       onClose={props.onClose}
-      title="Edit label"
+      title={props.label.name ? "编辑标签" : "新建标签"}
       width="380px"
       footer={
         <>
@@ -1652,14 +2119,14 @@ function LabelEditModal(props: {
         </>
       }
     >
-      <Field label="Name">
+      <Field label="名称">
         <input
           value={draft().name}
           onInput={(e) => setDraft({ ...draft(), name: e.currentTarget.value })}
           style={inputStyle}
         />
       </Field>
-      <Field label="Color">
+      <Field label="颜色">
         <input
           type="color"
           value={draft().color}
@@ -1676,6 +2143,7 @@ function LabelEditModal(props: {
 function SnippetsTab() {
   const [snippets, { refetch }] = createResource(listSnippets);
   const [editing, setEditing] = createSignal<Snippet | null>(null);
+  const [deleting, setDeleting] = createSignal<Snippet | null>(null);
 
   const save = async (s: Snippet) => {
     await upsertSnippet(s);
@@ -1686,7 +2154,7 @@ function SnippetsTab() {
   const remove = async (id: string) => {
     await deleteSnippet(id);
     await refetch();
-    showToast({ message: "已删除", kind: "info" });
+    showToast({ message: "已删除片段", kind: "info" });
   };
   const newSnippet = (): Snippet => ({
     id: uid("sn"),
@@ -1697,7 +2165,7 @@ function SnippetsTab() {
 
   return (
     <div>
-      <SectionTitle>Snippets</SectionTitle>
+      <SectionTitle>片段</SectionTitle>
       <p
         style={{
           color: "var(--text-secondary)",
@@ -1706,27 +2174,28 @@ function SnippetsTab() {
           "margin-bottom": "var(--space-3)",
         }}
       >
-        在 Compose 中点击 Snippet 按钮插入常用段落。
+        写信时点击「片段」按钮，即可插入常用段落。
       </p>
       <ResourceGate
         resource={snippets}
         loading={<SkeletonList count={3} height={56} />}
         errorView={() => (
           <ErrorState
-            title="Snippet 加载失败"
-            message={String(snippets.error ?? "")}
+            title="片段加载失败"
+            message="读取片段列表时出错，请重试。"
             retry={() => void refetch()}
           />
         )}
         empty={
-          <p
-            style={{
-              color: "var(--text-muted)",
-              "font-size": "var(--text-caption)",
+          <Empty
+            icon="ph-text-aa"
+            title="还没有片段"
+            description="把问候语、报价说明、常见问题回复存成片段，写信时一键插入。"
+            action={{
+              label: "新建片段",
+              onClick: () => setEditing(newSnippet()),
             }}
-          >
-            暂无 snippet
-          </p>
+          />
         }
       >
         {(list) => (
@@ -1760,20 +2229,21 @@ function SnippetsTab() {
                     {s.body}
                   </div>
                 </div>
-                <button
-                  onClick={() => setEditing(s)}
-                  style={{
-                    color: "var(--blurple)",
-                    "font-size": "var(--text-caption)",
-                    "font-weight": "700",
-                  }}
-                >
-                  Edit
+                <button onClick={() => setEditing(s)} style={outlineBtn}>
+                  编辑
                 </button>
                 <button
-                  onClick={() => remove(s.id)}
-                  style={{ color: "var(--text-muted)" }}
-                  aria-label="Delete"
+                  onClick={() => setDeleting(s)}
+                  style={{
+                    color: "var(--status-danger)",
+                    width: "32px",
+                    height: "32px",
+                    display: "flex",
+                    "align-items": "center",
+                    "justify-content": "center",
+                  }}
+                  aria-label={`删除片段 ${s.label}`}
+                  title="删除片段"
                 >
                   <Icon name="ph-trash" size={14} />
                 </button>
@@ -1782,12 +2252,14 @@ function SnippetsTab() {
           </For>
         )}
       </ResourceGate>
-      <button
-        onClick={() => setEditing(newSnippet())}
-        style={{ ...primaryBtn, "margin-top": "var(--space-3)" }}
-      >
-        <Icon name="ph-plus" size={12} /> New snippet
-      </button>
+      <Show when={(snippets() ?? []).length > 0}>
+        <button
+          onClick={() => setEditing(newSnippet())}
+          style={{ ...primaryBtn, "margin-top": "var(--space-3)" }}
+        >
+          <Icon name="ph-plus" size={12} /> 新建片段
+        </button>
+      </Show>
 
       <Show when={editing()}>
         <SnippetEditModal
@@ -1796,6 +2268,16 @@ function SnippetsTab() {
           onSave={save}
         />
       </Show>
+      <ConfirmDialog
+        open={deleting() !== null}
+        title={`删除片段「${deleting()?.label ?? ""}」？`}
+        confirmLabel="删除"
+        onConfirm={() => {
+          const s = deleting();
+          if (s) void remove(s.id);
+        }}
+        onCancel={() => setDeleting(null)}
+      />
     </div>
   );
 }
@@ -1810,7 +2292,7 @@ function SnippetEditModal(props: {
     <Modal
       open
       onClose={props.onClose}
-      title={props.snippet.label ? "Edit snippet" : "New snippet"}
+      title={props.snippet.label ? "编辑片段" : "新建片段"}
       width="480px"
       footer={
         <>
@@ -1840,7 +2322,7 @@ function SnippetEditModal(props: {
           style={inputStyle}
         />
       </Field>
-      <Field label="快捷输入">
+      <Field label="快捷输入" hint="写信时输入 / 加这个名字即可插入。">
         <input
           value={draft().shortcut ?? ""}
           onInput={(e) =>
@@ -1854,7 +2336,7 @@ function SnippetEditModal(props: {
         <textarea
           value={draft().body}
           onInput={(e) => setDraft({ ...draft(), body: e.currentTarget.value })}
-          placeholder="Hi there, ..."
+          placeholder="你好，…"
           rows={6}
           style={{
             ...inputStyle,
@@ -1886,7 +2368,7 @@ function DataTab() {
       )
       .join("\n");
     download("sendpalm-contacts.csv", csv, "text/csv");
-    showToast({ message: "已导出 CSV", kind: "success" });
+    showToast({ message: "已导出联系人 CSV", kind: "success" });
   };
   const exportTasks = async () => {
     const tasks = await listTasks();
@@ -1895,22 +2377,17 @@ function DataTab() {
       JSON.stringify({ exportedAt: isoNow(), tasks }, null, 2),
       "application/json",
     );
-    showToast({ message: "已导出 Tasks JSON", kind: "success" });
+    showToast({ message: "已导出任务 JSON", kind: "success" });
   };
   const [exportProgress, setExportProgress] = createSignal<string | null>(
     null,
   );
   const backupMailbox = async () => {
-    setExportProgress("正在分页拉取消息…");
+    setExportProgress("正在读取邮件…");
     try {
-      // P1-18: previously this called `listMessages()` which pulls
-      // body / body_html for every row. For a 4,000-row mailbox that
-      // is 300+ MB across IPC, JSON.stringify, and the download
-      // blob, freezing the UI for 5-30 s with no progress feedback.
-      // Now: paginate in chunks of 500 with the lightweight
-      // projection (body / body_html dropped). The export is
-      // slightly lossy on body but full metadata is preserved
-      // and the user can re-sync from IMAP to recover bodies.
+      // Paginate with the lightweight projection (no body_html) — a
+      // full-table pull on a 4,000-row mailbox is the §11.7 OOM pattern.
+      // Bodies can be re-fetched from the mail server on next sync.
       const PAGE = 500;
       const out: unknown[] = [];
       let offset = 0;
@@ -1929,7 +2406,7 @@ function DataTab() {
         out.push(...page.items);
         offset += page.items.length;
         setExportProgress(`已导出 ${out.length} / ${total} 封…`);
-        // Yield to the event loop so the toast can repaint.
+        // Yield to the event loop so the progress pill can repaint.
         await new Promise((r) => setTimeout(r, 0));
       }
       const files = await listFiles();
@@ -1953,9 +2430,14 @@ function DataTab() {
         JSON.stringify(data, null, 2),
         "application/json",
       );
-      showToast({ message: "已导出 Mailbox backup", kind: "success" });
+      showToast({ message: "已导出邮箱备份", kind: "success" });
     } catch (e) {
-      showToast({ message: `导出失败：${String(e)}`, kind: "error" });
+      showToast({
+        message: "导出失败，请重试",
+        kind: "error",
+        source: "settings",
+        detail: String(e),
+      });
     } finally {
       setExportProgress(null);
     }
@@ -1974,38 +2456,52 @@ function DataTab() {
       JSON.stringify(data, null, 2),
       "application/json",
     );
-    showToast({ message: "已导出 JSON", kind: "success" });
+    showToast({ message: "已导出全部数据", kind: "success" });
+  };
+
+  const [confirmEmptyTrash, setConfirmEmptyTrash] = createSignal(false);
+  const [trashCount, setTrashCount] = createSignal<number | null>(null);
+  const openEmptyTrashConfirm = () => {
+    setTrashCount(null);
+    setConfirmEmptyTrash(true);
+    listMessagesPaged({ bucket: "trash", limit: 1, lightweight: true })
+      .then((r) => setTrashCount(r.total))
+      .catch(() => setTrashCount(null));
   };
   const emptyTrashNow = async () => {
     const count = await emptyTrash();
-    showToast({ message: `已清空 Trash（${count} 封）`, kind: "success" });
+    showToast({ message: `已清空回收站（${count} 封）`, kind: "success" });
   };
-  const reset = async () => {
-    const code = prompt("输入 DELETE 以清空所有数据：");
-    if (code !== "DELETE") return;
-    await resetAllData();
-    location.reload();
-  };
+
+  const [resetOpen, setResetOpen] = createSignal(false);
+
   return (
     <div>
-      <SectionTitle>Export</SectionTitle>
-      <button onClick={exportContacts} style={secondaryBtn}>
-        导出 Contacts CSV
-      </button>
-      <button onClick={exportTasks} style={secondaryBtn}>
-        导出 Tasks JSON
-      </button>
-      <button onClick={backupMailbox} style={secondaryBtn}>
-        导出 Mailbox backup
-      </button>
-      <button onClick={exportAll} style={secondaryBtn}>
-        导出全部数据 JSON
-      </button>
-
-      <SectionTitle>危险区</SectionTitle>
-      <button onClick={emptyTrashNow} style={secondaryBtn}>
-        清空 Trash
-      </button>
+      <SectionTitle>数据导出</SectionTitle>
+      <DataActionRow
+        title="导出联系人 (CSV)"
+        description="所有联系人的姓名、邮箱、公司和阶段。"
+        icon="ph-users"
+        onClick={exportContacts}
+      />
+      <DataActionRow
+        title="导出任务 (JSON)"
+        description="任务清单的完整备份。"
+        icon="ph-list-checks"
+        onClick={exportTasks}
+      />
+      <DataActionRow
+        title="导出邮箱备份 (JSON)"
+        description="邮件元数据与附件索引（不含正文，正文可在下次同步时重新拉取）。"
+        icon="ph-tray"
+        onClick={backupMailbox}
+      />
+      <DataActionRow
+        title="导出全部数据 (JSON)"
+        description="联系人、账户、片段、标签和快捷键。"
+        icon="ph-database"
+        onClick={exportAll}
+      />
       <Show when={exportProgress()}>
         {(msg) => (
           <div
@@ -2025,19 +2521,174 @@ function DataTab() {
           </div>
         )}
       </Show>
-      <button
-        onClick={reset}
-        style={{ ...secondaryBtn, color: "var(--coral)" }}
-      >
-        清空所有数据（输入 DELETE 确认）
-      </button>
+
+      <div style={{ "margin-top": "var(--space-6)" }}>
+        <SectionTitle>危险区</SectionTitle>
+        <DataActionRow
+          title="清空回收站"
+          description="永久删除回收站中的所有邮件，不可恢复。"
+          icon="ph-trash"
+          danger
+          onClick={openEmptyTrashConfirm}
+        />
+        <DataActionRow
+          title="清空所有数据"
+          description="删除本机上的全部邮件、联系人、账户和设置。"
+          icon="ph-warning"
+          danger
+          onClick={() => setResetOpen(true)}
+        />
+      </div>
+
+      <ConfirmDialog
+        open={confirmEmptyTrash()}
+        title="清空回收站？"
+        body={
+          trashCount() === null
+            ? "回收站中的邮件将被永久删除，不可恢复。"
+            : `将永久删除回收站中的 ${trashCount()} 封邮件，不可恢复。`
+        }
+        confirmLabel="永久删除"
+        onConfirm={() => void emptyTrashNow()}
+        onCancel={() => setConfirmEmptyTrash(false)}
+      />
+      <Show when={resetOpen()}>
+        <ResetDataModal onClose={() => setResetOpen(false)} />
+      </Show>
     </div>
+  );
+}
+
+function DataActionRow(props: {
+  title: string;
+  description: string;
+  icon: string;
+  danger?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={props.onClick}
+      style={{
+        ...secondaryBtn,
+        display: "flex",
+        "align-items": "center",
+        gap: "var(--space-3)",
+        border: props.danger
+          ? "0.5px solid var(--status-danger)"
+          : secondaryBtn.border,
+      }}
+    >
+      <Icon
+        name={props.icon}
+        size={18}
+        color={props.danger ? "var(--status-danger)" : "var(--text-muted)"}
+      />
+      <span style={{ flex: 1, "min-width": 0 }}>
+        <strong
+          style={{
+            display: "block",
+            "font-size": "var(--text-body-sm)",
+            color: props.danger ? "var(--status-danger)" : "var(--text-primary)",
+          }}
+        >
+          {props.title}
+        </strong>
+        <span
+          style={{
+            "font-size": "var(--text-micro)",
+            color: "var(--text-muted)",
+          }}
+        >
+          {props.description}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function ResetDataModal(props: { onClose: () => void }) {
+  const [code, setCode] = createSignal("");
+  const [busy, setBusy] = createSignal(false);
+  const run = async () => {
+    setBusy(true);
+    try {
+      await resetAllData();
+      location.reload();
+    } catch (e) {
+      setBusy(false);
+      showToast({
+        message: "清空失败，请重试",
+        kind: "error",
+        source: "settings",
+        detail: String(e),
+      });
+    }
+  };
+  return (
+    <Modal
+      open
+      onClose={props.onClose}
+      title="清空所有数据"
+      width="420px"
+      footer={
+        <>
+          <button
+            onClick={props.onClose}
+            style={{
+              padding: "8px 16px",
+              "font-size": "var(--text-caption)",
+              color: "var(--text-secondary)",
+            }}
+          >
+            取消
+          </button>
+          <button
+            onClick={() => void run()}
+            disabled={code() !== "DELETE" || busy()}
+            style={{
+              padding: "8px 16px",
+              "border-radius": "var(--radius-pill)",
+              background: "var(--status-danger)",
+              color: "#fff",
+              "font-size": "var(--text-caption)",
+              "font-weight": "700",
+              opacity: code() === "DELETE" && !busy() ? 1 : 0.4,
+              cursor:
+                code() === "DELETE" && !busy() ? "pointer" : "not-allowed",
+            }}
+          >
+            {busy() ? "清空中…" : "永久清空"}
+          </button>
+        </>
+      }
+    >
+      <p
+        style={{
+          margin: "0 0 var(--space-3)",
+          color: "var(--text-secondary)",
+          "font-size": "var(--text-body-sm)",
+          "line-height": 1.6,
+        }}
+      >
+        此操作会删除本机上的全部邮件、联系人、账户和设置，且不可恢复。输入
+        DELETE 确认。
+      </p>
+      <input
+        value={code()}
+        onInput={(e) => setCode(e.currentTarget.value)}
+        placeholder="DELETE"
+        aria-label="输入 DELETE 确认"
+        style={inputStyle}
+      />
+    </Modal>
   );
 }
 
 function ShortcutsTab() {
   const [shortcuts, { refetch }] = createResource(listShortcuts);
   const [editing, setEditing] = createSignal<Shortcut | null>(null);
+  const [confirmRestore, setConfirmRestore] = createSignal(false);
   const save = async (s: Shortcut) => {
     await upsertShortcut(s);
     await refetch();
@@ -2056,21 +2707,24 @@ function ShortcutsTab() {
           display: "flex",
           "align-items": "center",
           "justify-content": "space-between",
+          gap: "var(--space-2)",
         }}
       >
-        <SectionTitle>Keyboard shortcuts</SectionTitle>
+        <SectionTitle>键盘快捷键</SectionTitle>
         <button
-          onClick={restore}
+          onClick={() => setConfirmRestore(true)}
           style={{
             padding: "6px 12px",
+            "min-height": "32px",
             "font-size": "var(--text-caption)",
             "font-weight": "600",
             color: "var(--text-secondary)",
             background: "var(--paper-mid)",
             "border-radius": "var(--radius-pill)",
+            "white-space": "nowrap",
           }}
         >
-          Restore defaults
+          恢复默认
         </button>
       </div>
       <ResourceGate
@@ -2079,7 +2733,7 @@ function ShortcutsTab() {
         errorView={() => (
           <ErrorState
             title="快捷键加载失败"
-            message={String(shortcuts.error ?? "")}
+            message="读取快捷键列表时出错，请重试。"
             retry={() => void refetch()}
           />
         )}
@@ -2119,27 +2773,18 @@ function ShortcutsTab() {
                 >
                   {s.combo}
                 </kbd>
-                <span style={{ flex: 1, "font-size": "var(--text-body-sm)" }}>
-                  {s.label}
-                </span>
                 <span
                   style={{
-                    "font-size": "var(--text-micro)",
-                    color: "var(--text-muted)",
+                    flex: 1,
+                    "min-width": 0,
+                    "font-size": "var(--text-body-sm)",
                   }}
                 >
-                  {s.action}
+                  {shortcutActionLabel(s.action, s.label)}
                 </span>
                 <Show when={s.editable}>
-                  <button
-                    onClick={() => setEditing(s)}
-                    style={{
-                      color: "var(--blurple)",
-                      "font-size": "var(--text-caption)",
-                      "font-weight": "700",
-                    }}
-                  >
-                    Edit
+                  <button onClick={() => setEditing(s)} style={outlineBtn}>
+                    编辑
                   </button>
                 </Show>
               </div>
@@ -2151,25 +2796,41 @@ function ShortcutsTab() {
       <Show when={editing()}>
         <ShortcutEditModal
           s={editing()!}
+          existingCombos={(shortcuts() ?? [])
+            .filter((x) => x.id !== editing()!.id)
+            .map((x) => x.combo)}
           onClose={() => setEditing(null)}
           onSave={save}
         />
       </Show>
+      <ConfirmDialog
+        open={confirmRestore()}
+        title="恢复默认快捷键？"
+        body="你的全部自定义快捷键都会被重置。"
+        confirmLabel="恢复默认"
+        onConfirm={() => void restore()}
+        onCancel={() => setConfirmRestore(false)}
+      />
     </div>
   );
 }
 
 function ShortcutEditModal(props: {
   s: Shortcut;
+  existingCombos: string[];
   onClose: () => void;
   onSave: (s: Shortcut) => void;
 }) {
   const [combo, setCombo] = createSignal(props.s.combo);
+  const conflict = () =>
+    props.existingCombos.some(
+      (c) => c.trim().toLowerCase() === combo().trim().toLowerCase(),
+    );
   return (
     <Modal
       open
       onClose={props.onClose}
-      title="Edit shortcut"
+      title="编辑快捷键"
       width="380px"
       footer={
         <>
@@ -2185,20 +2846,47 @@ function ShortcutEditModal(props: {
           </button>
           <button
             onClick={() => props.onSave({ ...props.s, combo: combo() })}
-            style={primaryBtn}
+            disabled={conflict() || !combo().trim()}
+            style={{
+              ...primaryBtn,
+              opacity: conflict() || !combo().trim() ? 0.5 : 1,
+              cursor:
+                conflict() || !combo().trim() ? "not-allowed" : "pointer",
+            }}
           >
             保存
           </button>
         </>
       }
     >
-      <Field label="Combo (e.g. ⌘1)">
+      <Field
+        label={shortcutActionLabel(props.s.action, props.s.label)}
+        hint="点击输入框，然后按下新的组合键。"
+      >
         <input
           value={combo()}
-          onInput={(e) => setCombo(e.currentTarget.value)}
-          style={inputStyle}
+          readOnly
+          onKeyDown={(e) => {
+            e.preventDefault();
+            const c = comboFromKeyEvent(e);
+            if (c) setCombo(c);
+          }}
+          placeholder="按下新的快捷键"
+          aria-label="快捷键组合"
+          style={{ ...inputStyle, cursor: "pointer" }}
         />
       </Field>
+      <Show when={conflict()}>
+        <p
+          style={{
+            "font-size": "var(--text-caption)",
+            color: "var(--status-danger)",
+            margin: 0,
+          }}
+        >
+          这个组合已被其他功能占用，请换一个。
+        </p>
+      </Show>
     </Modal>
   );
 }
@@ -2236,28 +2924,68 @@ function Field(props: { label: string; hint?: string; children: unknown }) {
   );
 }
 
+/** Visual switch control — parent wires the click/change handler. */
+function SwitchTrack(props: { checked: boolean }) {
+  return (
+    <span
+      style={{
+        width: "40px",
+        height: "24px",
+        "border-radius": "var(--radius-pill)",
+        background: props.checked ? "var(--palm)" : "var(--paper-dark)",
+        position: "relative",
+        transition: "background 0.2s var(--ease-out)",
+        "flex-shrink": 0,
+        display: "inline-block",
+      }}
+    >
+      <span
+        style={{
+          position: "absolute",
+          top: "2px",
+          left: "2px",
+          width: "20px",
+          height: "20px",
+          "border-radius": "50%",
+          background: "var(--paper-light)",
+          "box-shadow": "0 1px 3px rgba(0,0,0,0.2)",
+          transform: props.checked ? "translateX(16px)" : "translateX(0)",
+          transition: "transform 0.2s var(--ease-out)",
+        }}
+      />
+    </span>
+  );
+}
+
 function Toggle(props: {
   label: string;
   checked: boolean;
   onChange: (v: boolean) => void;
 }) {
   return (
-    <label
+    <button
+      type="button"
+      role="switch"
+      aria-checked={props.checked}
+      aria-label={props.label}
+      onClick={() => props.onChange(!props.checked)}
       style={{
         display: "flex",
         "align-items": "center",
         gap: "var(--space-3)",
         padding: "var(--space-2) 0",
+        "min-height": "40px",
         cursor: "pointer",
+        background: "none",
+        border: "none",
+        width: "100%",
+        "text-align": "left",
+        color: "var(--text-primary)",
       }}
     >
-      <input
-        type="checkbox"
-        checked={props.checked}
-        onChange={(e) => props.onChange(e.currentTarget.checked)}
-      />
+      <SwitchTrack checked={props.checked} />
       <span style={{ "font-size": "var(--text-body-sm)" }}>{props.label}</span>
-    </label>
+    </button>
   );
 }
 
@@ -2292,6 +3020,17 @@ const secondaryBtn = {
   "margin-bottom": "var(--space-2)",
 };
 
+const outlineBtn = {
+  padding: "4px 12px",
+  "min-height": "28px",
+  "font-size": "var(--text-caption)",
+  "font-weight": "700",
+  color: "var(--palm)",
+  border: "0.5px solid var(--palm)",
+  "border-radius": "var(--radius-pill)",
+  background: "transparent",
+};
+
 function download(name: string, content: string, mime: string) {
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -2310,7 +3049,7 @@ function PreferencesNotificationsTab() {
     >
       <ToggleRow
         label="桌面通知"
-        description="收到新邮件时在 macOS 通知中心弹出。"
+        description="收到新邮件时在系统通知中心弹出。"
         checked={prefs().desktop}
         onChange={async (v) => {
           setAppSettings("preferences", "notifications", {
@@ -2363,17 +3102,6 @@ function PreferencesNotificationsTab() {
           </label>
         </div>
       </Show>
-      <ToggleRow
-        label="每日摘要邮件"
-        description="每天发送一封汇总未读邮件的摘要。"
-        checked={prefs().digest}
-        onChange={(v) =>
-          setAppSettings("preferences", "notifications", {
-            ...prefs(),
-            digest: v,
-          })
-        }
-      />
     </div>
   );
 }
@@ -2385,16 +3113,26 @@ function ToggleRow(props: {
   onChange: (v: boolean) => void;
 }) {
   return (
-    <label
+    <button
+      type="button"
+      role="switch"
+      aria-checked={props.checked}
+      aria-label={props.label}
+      onClick={() => props.onChange(!props.checked)}
       style={{
         display: "grid",
         "grid-template-columns": "1fr auto",
         gap: "var(--space-2)",
         "align-items": "center",
         padding: "var(--space-3)",
+        "min-height": "44px",
         "border-radius": "var(--radius-md)",
         background: "var(--surface-elevated)",
         border: "0.5px solid var(--border)",
+        cursor: "pointer",
+        "text-align": "left",
+        color: "var(--text-primary)",
+        width: "100%",
       }}
     >
       <span>
@@ -2408,11 +3146,7 @@ function ToggleRow(props: {
           {props.description}
         </span>
       </span>
-      <input
-        type="checkbox"
-        checked={props.checked}
-        onChange={(e) => props.onChange(e.currentTarget.checked)}
-      />
-    </label>
+      <SwitchTrack checked={props.checked} />
+    </button>
   );
 }

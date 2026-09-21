@@ -10,7 +10,9 @@ import {
   listAgentAudit,
   upsertAgentSession,
   upsertAgentTask,
+  upsertAgentDraft,
   upsertAgentAudit,
+  deleteAgentSession,
 } from "../stores/data";
 import {
   setAgentPanelOpen,
@@ -29,8 +31,104 @@ import type {
   AgentSession,
   AgentSessionKind,
   AgentTask,
+  AgentTaskStatus,
   AgentDraft,
+  AgentAuditEntry,
+  DraftStatus,
 } from "../types";
+
+/* ── Chinese labels for agent domain enums ── */
+
+export const SESSION_KIND_LABELS: Record<AgentSessionKind, string> = {
+  freeform: "自由对话",
+  message: "邮件",
+  contact: "联系人",
+  event: "日程",
+  file: "文件",
+};
+
+export function sessionKindLabel(kind: AgentSessionKind): string {
+  return SESSION_KIND_LABELS[kind] ?? kind;
+}
+
+export const AGENT_TASK_STATUS_LABELS: Record<AgentTaskStatus, string> = {
+  todo: "待处理",
+  doing: "进行中",
+  done: "已完成",
+  error: "失败",
+};
+
+export function taskStatusLabel(status: AgentTaskStatus): string {
+  return AGENT_TASK_STATUS_LABELS[status] ?? status;
+}
+
+export const DRAFT_STATUS_LABELS: Record<DraftStatus, string> = {
+  pending: "待审批",
+  approved: "已批准",
+  sent: "已发送",
+  edited: "编辑中",
+  discarded: "已丢弃",
+};
+
+export function draftStatusLabel(status: DraftStatus): string {
+  return DRAFT_STATUS_LABELS[status] ?? status;
+}
+
+export const AUDIT_KIND_LABELS: Record<string, string> = {
+  user_input: "我",
+  agent_response: "Agent",
+  agent_error: "错误",
+  session_new: "新会话",
+  draft_approved: "草稿审批",
+};
+
+export function auditKindLabel(kind: string): string {
+  return AUDIT_KIND_LABELS[kind] ?? kind;
+}
+
+/** Human-readable confidence — raw percentages ("confidence 0%")
+ *  mean nothing to users; map to 高/中/低 and hide zero. */
+export function confidenceLabel(confidence?: number): string | null {
+  if (!confidence || confidence <= 0) return null;
+  if (confidence >= 80) return "高";
+  if (confidence >= 40) return "中";
+  return "低";
+}
+
+/* ── Chat message assembly ── */
+
+/** How many past turns of the current session are replayed to the
+ *  model so follow-up questions have context. */
+export const CHAT_HISTORY_LIMIT = 12;
+
+export interface ChatMessage {
+  role: string;
+  content: string;
+}
+
+/** Build the messages array for one chat call: optional system prompt,
+ *  the session's prior user/agent turns (oldest → newest, capped), and
+ *  the new user input. `history` must NOT already contain `input`. */
+export function buildChatMessages(
+  systemPrompt: string,
+  history: Pick<AgentAuditEntry, "kind" | "message">[],
+  input: string,
+): ChatMessage[] {
+  const messages: ChatMessage[] = [];
+  const sys = systemPrompt.trim();
+  if (sys) messages.push({ role: "system", content: sys });
+  const turns = history
+    .filter((a) => a.kind === "user_input" || a.kind === "agent_response")
+    .slice(-CHAT_HISTORY_LIMIT);
+  for (const a of turns) {
+    messages.push({
+      role: a.kind === "user_input" ? "user" : "assistant",
+      content: a.message,
+    });
+  }
+  messages.push({ role: "user", content: input });
+  return messages;
+}
 
 export function useAgent() {
   const [sessions, { refetch: refetchSessions }] =
@@ -59,6 +157,9 @@ export function useAgent() {
     null,
   );
   const [chatInput, setChatInput] = createSignal("");
+  /** True while a chat call is in flight — drives the "Agent 正在思考…"
+   *  placeholder bubble in the conversation. */
+  const [thinking, setThinking] = createSignal(false);
 
   const contactById = (id: string) =>
     (contacts() ?? []).find((c) => c.id === id);
@@ -131,11 +232,13 @@ export function useAgent() {
 
   const newSession = async (kind: AgentSessionKind, ref?: string) => {
     const titleMap: Record<AgentSessionKind, string> = {
-      freeform: "Freeform",
-      message: "Message",
-      contact: ref ? `${contactById(ref)?.name ?? "?"} 上下文` : "Contact",
-      event: "Event",
-      file: "File",
+      freeform: "自由对话",
+      message: "邮件",
+      contact: ref
+        ? `${contactById(ref)?.name ?? "联系人"} 的上下文`
+        : "联系人会话",
+      event: "日程",
+      file: "文件",
     };
     const session: AgentSession = {
       id: uid("as"),
@@ -151,37 +254,43 @@ export function useAgent() {
     await refetchSessions();
   };
 
+  const deleteSession = async (id: string) => {
+    await deleteAgentSession(id);
+    if (activeSessionId() === id) setActiveSessionId(null);
+    await refetchSessions();
+    showToast({ message: "会话已删除", kind: "info" });
+  };
+
   const sendChat = async () => {
     const input = chatInput().trim();
-    if (!input || !currentSession()) return;
+    const session = currentSession();
+    if (!input || !session) return;
+    // Capture history BEFORE appending the new input so
+    // buildChatMessages doesn't see the current turn twice.
+    const history = (audit() ?? []).filter(
+      (a) => a.sessionId === session.id,
+    );
     await appendAudit("user_input", input);
     setChatInput("");
 
-    // Build the messages we send to the LLM. We prepend the
-    // user's configured system prompt (if any) and a single
-    // user turn with the current input. M11 — real OpenAI-
-    // compatible backend, configured in Settings → Agent.
     const llm = appSettings.agent.llm;
-    const messages: { role: string; content: string }[] = [];
-    if (llm.systemPrompt.trim()) {
-      messages.push({ role: "system", content: llm.systemPrompt.trim() });
-    }
-    messages.push({ role: "user", content: input });
+    const messages = buildChatMessages(llm.systemPrompt, history, input);
 
-    // Browser-mode fallback: tauri-plugin-store has no
-    // agent_chat command, so the frontend surfaces a clear hint
-    // instead of silently failing. The Tauri shell will replace
-    // this with a real network round-trip.
     if (IS_BROWSER()) {
-      await appendAudit(
-        "agent_response",
-        "（浏览器预览模式）Settings → Agent 里填入 API key + model 后即可走真 LLM。当前返回 mock 响应。",
-      );
+      // Browser preview has no real backend — explain once via toast
+      // instead of writing a fake "mock response" into the permanent
+      // conversation history.
+      showToast({
+        message:
+          "浏览器预览模式：在 设置 → Agent 里配置模型服务后即可真实对话",
+        kind: "info",
+        ttlMs: 6000,
+      });
       const t: AgentTask = {
         id: uid("at"),
-        sessionId: currentSession()!.id,
+        sessionId: session.id,
         title: input,
-        description: "Agent 生成的占位任务",
+        description: "浏览器预览生成的示例任务",
         status: "doing",
         steps: [
           { id: uid("st"), label: "分析请求", done: true },
@@ -194,26 +303,19 @@ export function useAgent() {
       };
       await upsertAgentTask(t);
       await refetchTasks();
-      showToast({ message: "Agent 已开始处理（浏览器预览）", kind: "info" });
       return;
     }
 
-    // Mark the task as "doing" before awaiting the LLM. SolidJS
-    // re-runs `tasks` resource after `refetchTasks()` so the user
-    // sees the spinner without any artificial delay. The previous
-    // `setTimeout(..., 200)` was a fake-streaming hack that the
-    // P2 audit identified: a 200ms wait before the network call
-    // is a perceived-latency tax for no user-visible benefit.
     const t: AgentTask = {
       id: uid("at"),
-      sessionId: currentSession()!.id,
+      sessionId: session.id,
       title: input,
-      description: "调用真实 LLM 中…",
+      description: "Agent 正在思考…",
       status: "doing",
       steps: [
         { id: uid("st"), label: "分析请求", done: true },
-        { id: uid("st"), label: "调用 LLM", done: false },
-        { id: uid("st"), label: "生成结果", done: false },
+        { id: uid("st"), label: "生成回复", done: false },
+        { id: uid("st"), label: "整理结果", done: false },
       ],
       confidence: 0,
       trigger: input,
@@ -221,7 +323,7 @@ export function useAgent() {
     };
     await upsertAgentTask(t);
     await refetchTasks();
-    showToast({ message: "Agent 正在调用 LLM…", kind: "info" });
+    setThinking(true);
 
     try {
       const reply = await agentChat(
@@ -236,30 +338,37 @@ export function useAgent() {
       );
       const text = reply?.content?.trim() || "（模型未返回内容）";
       await appendAudit("agent_response", text);
-      // Mark the second step done and the third done, then save the
-      // reply into the task description so the user can see it.
       t.steps[1]!.done = true;
       t.steps[2]!.done = true;
       t.status = "done";
       t.description = text;
       await upsertAgentTask(t);
       await refetchTasks();
-      showToast({ message: "LLM 已返回", kind: "success" });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await appendAudit("agent_error", `LLM 调用失败：${msg}`);
+      await appendAudit("agent_error", "Agent 调用失败，请检查模型配置");
       t.status = "error";
-      t.description = `失败：${msg}`;
+      t.description = "调用失败，请检查 设置 → Agent 中的模型配置";
       await upsertAgentTask(t);
       await refetchTasks();
-      showToast({ message: `LLM 失败：${msg}`, kind: "error" });
+      showToast({
+        message: "Agent 调用失败，请检查 设置 → Agent 中的模型配置",
+        kind: "error",
+        source: "agent",
+        detail: msg,
+      });
+    } finally {
+      setThinking(false);
     }
   };
 
   const approveDraft = async (d: AgentDraft) => {
-    // Caller is expected to persist draft status if desired.
-    await appendAudit("draft_approved", `草稿已审批 · ${d.subject}`);
-    showToast({ message: "已审批 — 进入发送队列", kind: "success" });
+    if (d.status !== "approved") {
+      await upsertAgentDraft({ ...d, status: "approved" });
+      await refetchDrafts();
+    }
+    await appendAudit("draft_approved", `草稿已批准 · ${d.subject}`);
+    showToast({ message: "草稿已批准，可在草稿箱中发送", kind: "success" });
   };
 
   const editDraft = (d: AgentDraft) => {
@@ -284,7 +393,9 @@ export function useAgent() {
     sessionDrafts,
     chatInput,
     setChatInput,
+    thinking,
     newSession,
+    deleteSession,
     sendChat,
     approveDraft,
     editDraft,

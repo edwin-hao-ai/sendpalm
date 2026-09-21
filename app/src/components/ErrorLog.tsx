@@ -5,86 +5,110 @@
  * back through transient failures that the toast auto-dismissed.
  *
  * Lives in the topbar; clicking opens a panel with timestamp,
- * source tag, message, and optional detail. "Clear" empties the
- * log. The badge shows the count of errors recorded since the
- * panel was last opened (or all-time, if the panel has never
- * been opened).
+ * source tag, message, and optional detail. The badge counts errors
+ * recorded since the panel was last opened. The warning button is
+ * not rendered at all while the log is empty and the panel closed.
  */
 
-import { For, Show, createSignal } from "solid-js";
-import { errorLog, clearErrorLog, setErrorLogOpened } from "../stores/ui";
+import { For, Show, onCleanup, onMount } from "solid-js";
+import {
+  errorLog,
+  clearErrorLog,
+  setErrorLogOpened,
+  errorLogOpenedAt,
+  errorLogOpen,
+  setErrorLogOpen,
+} from "../stores/ui";
 import { Icon } from "./Icon";
 
 function relTime(at: number): string {
   const dSec = Math.floor((Date.now() - at) / 1000);
-  if (dSec < 60) return `${dSec}s ago`;
-  if (dSec < 3600) return `${Math.floor(dSec / 60)}m ago`;
-  if (dSec < 86400) return `${Math.floor(dSec / 3600)}h ago`;
-  return new Date(at).toLocaleString();
+  if (dSec < 5) return "刚刚";
+  if (dSec < 60) return `${dSec} 秒前`;
+  if (dSec < 3600) return `${Math.floor(dSec / 60)} 分钟前`;
+  if (dSec < 86400) return `${Math.floor(dSec / 3600)} 小时前`;
+  return new Date(at).toLocaleString("zh-CN");
 }
 
 export function ErrorLogButton() {
-  const [open, setOpen] = createSignal(false);
-  const count = () => errorLog().length;
+  const open = errorLogOpen;
+  const newCount = () =>
+    errorLog().filter((e) => e.at > errorLogOpenedAt()).length;
 
   return (
     <>
-      <button
-        type="button"
-        aria-label="Error log"
-        title={count() > 0 ? `${count()} error${count() === 1 ? "" : "s"} recorded` : "Error log"}
-        onClick={() => {
-          setOpen((o) => !o);
-          setErrorLogOpened(Date.now());
-        }}
-        style={{
-          position: "relative",
-          "background": "transparent",
-          "border": "none",
-          "padding": "8px",
-          "border-radius": "var(--radius-md)",
-          "color": "var(--text-primary)",
-          "cursor": "pointer",
-          "min-width": "44px",
-          "min-height": "44px",
-          "display": "flex",
-          "align-items": "center",
-          "justify-content": "center",
-        }}
-      >
-        <Icon name={count() > 0 ? "ph-warning-circle" : "ph-warning"} size={20} />
-        <Show when={count() > 0}>
-          <span
-            style={{
-              position: "absolute",
-              top: "4px",
-              right: "4px",
-              "background": "var(--coral, #d94545)",
-              color: "#fff",
-              "border-radius": "999px",
-              "font-size": "10px",
-              "font-weight": "600",
-              "min-width": "16px",
-              "height": "16px",
-              "padding": "0 4px",
-              "display": "flex",
-              "align-items": "center",
-              "justify-content": "center",
-            }}
-          >
-            {count() > 99 ? "99+" : count()}
-          </span>
-        </Show>
-      </button>
+      <Show when={errorLog().length > 0 || open()}>
+        <button
+          type="button"
+          aria-label="错误日志"
+          title={
+            newCount() > 0
+              ? `错误日志 · 自上次打开以来新增 ${newCount()} 条`
+              : "错误日志"
+          }
+          onClick={() => {
+            const next = !open();
+            setErrorLogOpen(next);
+            if (next) setErrorLogOpened(Date.now());
+          }}
+          style={{
+            position: "relative",
+            "background": "transparent",
+            "border": "none",
+            "padding": "8px",
+            "border-radius": "var(--radius-md)",
+            "color": "var(--text-primary)",
+            "cursor": "pointer",
+            "min-width": "44px",
+            "min-height": "44px",
+            "display": "flex",
+            "align-items": "center",
+            "justify-content": "center",
+          }}
+        >
+          <Icon name="ph-warning" size={20} />
+          <Show when={newCount() > 0}>
+            <span
+              style={{
+                position: "absolute",
+                top: "4px",
+                right: "4px",
+                "background": "var(--status-danger)",
+                color: "#fff",
+                "border-radius": "999px",
+                "font-size": "10px",
+                "font-weight": "600",
+                "min-width": "16px",
+                "height": "16px",
+                "padding": "0 4px",
+                "display": "flex",
+                "align-items": "center",
+                "justify-content": "center",
+              }}
+            >
+              {newCount() > 99 ? "99+" : newCount()}
+            </span>
+          </Show>
+        </button>
+      </Show>
 
       <Show when={open()}>
-        <ErrorLogPanel onClose={() => setOpen(false)} />
+        <ErrorLogPanel onClose={() => setErrorLogOpen(false)} />
       </Show>
     </>
   );
 }
 
 function ErrorLogPanel(props: { onClose: () => void }) {
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      props.onClose();
+    }
+  };
+  onMount(() => document.addEventListener("keydown", onKey));
+  onCleanup(() => document.removeEventListener("keydown", onKey));
+
   return (
     <>
       {/* dim backdrop */}
@@ -99,17 +123,19 @@ function ErrorLogPanel(props: { onClose: () => void }) {
       />
       <div
         role="dialog"
-        aria-label="Error log"
+        aria-label="错误日志"
         style={{
           position: "fixed",
           top: "56px",
           right: "12px",
           width: "min(420px, calc(100vw - 24px))",
           "max-height": "calc(100vh - 80px)",
-          "background": "var(--surface-elevated)",
-          "border": "1px solid var(--ink-border-strong)",
+          "background": "var(--glass-bg)",
+          "backdrop-filter": "var(--glass-blur)",
+          "-webkit-backdrop-filter": "var(--glass-blur)",
+          "border": "0.5px solid var(--glass-border)",
           "border-radius": "var(--radius-lg)",
-          "box-shadow": "0 8px 32px rgba(0,0,0,0.18)",
+          "box-shadow": "var(--glass-shadow)",
           "display": "flex",
           "flex-direction": "column",
           "z-index": "calc(var(--z-modal, 80) + 1)",
@@ -127,12 +153,12 @@ function ErrorLogPanel(props: { onClose: () => void }) {
           }}
         >
           <h3 style={{ margin: 0, "font-size": "var(--text-body)", "font-weight": 600 }}>
-            Error log{" "}
+            错误日志{" "}
             <span style={{ color: "var(--text-muted)", "font-weight": 400, "font-size": "var(--text-caption)" }}>
-              ({errorLog().length})
+              (共 {errorLog().length} 条)
             </span>
           </h3>
-          <div style={{ display: "flex", gap: "8px" }}>
+          <div style={{ display: "flex", gap: "8px", "align-items": "center" }}>
             <button
               type="button"
               onClick={() => clearErrorLog()}
@@ -147,23 +173,27 @@ function ErrorLogPanel(props: { onClose: () => void }) {
                 cursor: errorLog().length === 0 ? "not-allowed" : "pointer",
               }}
             >
-              Clear
+              清空
             </button>
             <button
               type="button"
               onClick={props.onClose}
-              aria-label="Close"
+              aria-label="关闭"
+              title="关闭"
               style={{
                 background: "transparent",
                 border: "none",
-                "font-size": "18px",
-                "line-height": 1,
                 color: "var(--text-secondary)",
                 cursor: "pointer",
-                padding: "0 6px",
+                width: "28px",
+                height: "28px",
+                "border-radius": "var(--radius-pill)",
+                display: "flex",
+                "align-items": "center",
+                "justify-content": "center",
               }}
             >
-              ×
+              <Icon name="ph-x" size={14} />
             </button>
           </div>
         </div>
@@ -188,7 +218,7 @@ function ErrorLogPanel(props: { onClose: () => void }) {
               >
                 <Icon name="ph-check-circle" size={32} />
                 <p style={{ "margin-top": "12px" }}>
-                  No errors recorded yet. Anything that goes wrong will show up here.
+                  一切正常。出现问题时，错误会记录在这里。
                 </p>
               </div>
             }
@@ -226,8 +256,6 @@ function ErrorLogPanel(props: { onClose: () => void }) {
                           padding: "1px 6px",
                           "font-size": "11px",
                           "font-weight": 600,
-                          "text-transform": "uppercase",
-                          "letter-spacing": "0.04em",
                         }}
                       >
                         {entry.source}

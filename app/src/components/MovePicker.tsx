@@ -1,6 +1,6 @@
 /** MovePicker — modal to move one or more messages to another bucket. */
 
-import { For, createResource, createMemo } from "solid-js";
+import { For, Show, createResource, createMemo, createSignal } from "solid-js";
 import { Modal } from "./Modal";
 import { Icon } from "./Icon";
 import {
@@ -32,6 +32,7 @@ export function MovePicker(props: {
     () => props.messageIds,
     listMessageBucketSlicesByIds,
   );
+  const [busy, setBusy] = createSignal(false);
 
   const targets = createMemo(() => messages() ?? []);
 
@@ -42,18 +43,39 @@ export function MovePicker(props: {
     targets().length > 0 && targets().every((m) => m.bucket === bucket);
 
   const move = async (bucket: MessageBucket) => {
-    for (const m of targets()) {
-      await moveMessageToBucket(m.id, bucket);
+    if (busy()) return;
+    // Snapshot the pre-move buckets so the toast can offer a real Undo
+    // (Hey's core contract: every destructive action is reversible).
+    const before = targets().map((m) => ({ id: m.id, bucket: m.bucket }));
+    setBusy(true);
+    try {
+      for (const m of targets()) {
+        await moveMessageToBucket(m.id, bucket);
+      }
+      props.onChange?.();
+      showToast({
+        message:
+          count() > 1
+            ? `已移动 ${count()} 封邮件到 ${BUCKET_LABEL[bucket] ?? bucket}`
+            : `已移动到 ${BUCKET_LABEL[bucket] ?? bucket}`,
+        kind: "success",
+        action: {
+          label: "撤销",
+          run: async () => {
+            for (const prev of before) {
+              if (prev.bucket !== bucket) {
+                await moveMessageToBucket(prev.id, prev.bucket);
+              }
+            }
+            props.onChange?.();
+            showToast({ message: "已撤销移动", kind: "success" });
+          },
+        },
+      });
+      props.onClose();
+    } finally {
+      setBusy(false);
     }
-    props.onChange?.();
-    showToast({
-      message:
-        count() > 1
-          ? `已移动 ${count()} 封邮件到 ${BUCKET_LABEL[bucket] ?? bucket}`
-          : `已移动到 ${BUCKET_LABEL[bucket] ?? bucket}`,
-      kind: "success",
-    });
-    props.onClose();
   };
 
   return (
@@ -71,13 +93,24 @@ export function MovePicker(props: {
           gap: "4px",
         }}
       >
+        <Show when={busy()}>
+          <div
+            style={{
+              "font-size": "var(--text-caption)",
+              color: "var(--text-muted)",
+              padding: "0 12px var(--space-2)",
+            }}
+          >
+            正在移动 {count()} 封邮件…
+          </div>
+        </Show>
         <For each={BUCKETS}>
           {(b) => {
             const active = allInBucket(b);
             return (
               <button
                 onClick={() => move(b)}
-                disabled={active}
+                disabled={active || busy()}
                 style={{
                   display: "flex",
                   "align-items": "center",
@@ -89,8 +122,20 @@ export function MovePicker(props: {
                   "text-align": "left",
                   "font-size": "var(--text-body-sm)",
                   "font-weight": active ? "700" : "500",
-                  opacity: active ? 0.7 : 1,
-                  cursor: active ? "default" : "pointer",
+                  opacity: active || busy() ? 0.6 : 1,
+                  cursor: active || busy() ? "default" : "pointer",
+                }}
+                onMouseEnter={(e) => {
+                  if (!active) e.currentTarget.style.background = "var(--paper-mid)";
+                }}
+                onMouseLeave={(e) => {
+                  if (!active) e.currentTarget.style.background = "transparent";
+                }}
+                onFocus={(e) => {
+                  if (!active) e.currentTarget.style.background = "var(--paper-mid)";
+                }}
+                onBlur={(e) => {
+                  if (!active) e.currentTarget.style.background = "transparent";
                 }}
               >
                 <Icon name={BUCKET_ICON[b] ?? "ph-folder"} size={18} />

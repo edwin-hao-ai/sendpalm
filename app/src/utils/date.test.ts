@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dateBucket, bucketLabel } from "./date";
+import { dateBucket, bucketLabel, localDateKey, relativeTime } from "./date";
 
 // Pick a Tuesday so the boundary between this-week and this-month
 // is well-defined across locale-dependent startOfWeek() implementations.
@@ -114,5 +114,64 @@ describe("bucketLabel", () => {
     );
     expect(label).toContain(String(lastYear));
     expect(label).toContain("月");
+  });
+});
+
+describe("relativeTime (Chinese, both directions)", () => {
+  const now = new Date("2026-09-22T15:00:00");
+  const at = (msOffset: number) => new Date(now.getTime() + msOffset).toISOString();
+
+  it("returns empty for invalid input", () => {
+    expect(relativeTime("not-a-date", now)).toBe("");
+    expect(relativeTime("", now)).toBe("");
+  });
+
+  it("past: 刚刚 / 分钟前 / 今天 HH:MM / 昨天 HH:MM", () => {
+    expect(relativeTime(at(-20_000), now)).toBe("刚刚");
+    expect(relativeTime(at(-5 * 60_000), now)).toBe("5 分钟前");
+    // 3 hours ago is still the same local calendar day → time form.
+    expect(relativeTime(at(-3 * 3_600_000), now)).toBe("今天 12:00");
+    // Yesterday 09:30 local.
+    const y = new Date(now);
+    y.setDate(now.getDate() - 1);
+    y.setHours(9, 30, 0, 0);
+    expect(relativeTime(y.toISOString(), now)).toBe("昨天 09:30");
+  });
+
+  it("past: 天前 / 周前 / 个月前 / 年前", () => {
+    expect(relativeTime(at(-2 * 86_400_000), now)).toBe("2 天前");
+    expect(relativeTime(at(-14 * 86_400_000), now)).toBe("2 周前");
+    expect(relativeTime(at(-90 * 86_400_000), now)).toBe("3 个月前");
+    expect(relativeTime(at(-800 * 86_400_000), now)).toBe("2 年前");
+  });
+
+  it("future: 即将 / 分钟后 / 小时后 / 天后 / 周后 / 个月后 / 年后", () => {
+    expect(relativeTime(at(20_000), now)).toBe("即将");
+    expect(relativeTime(at(5 * 60_000), now)).toBe("5 分钟后");
+    expect(relativeTime(at(9 * 3_600_000), now)).toBe("9 小时后");
+    expect(relativeTime(at(2 * 86_400_000), now)).toBe("2 天后");
+    expect(relativeTime(at(14 * 86_400_000), now)).toBe("2 周后");
+    expect(relativeTime(at(90 * 86_400_000), now)).toBe("3 个月后");
+    expect(relativeTime(at(800 * 86_400_000), now)).toBe("2 年后");
+  });
+
+  it("never emits English fragments", () => {
+    for (const off of [-1, -0.01, 0.01, 1, 9, 26, 49, 200, 900]) {
+      const s = relativeTime(at(off * 3_600_000), now);
+      expect(s).not.toMatch(/ago|from now|just now|[0-9](min|mo|h|d|w|y)\b/);
+    }
+  });
+});
+
+describe("localDateKey", () => {
+  it("uses the local calendar date, not UTC", () => {
+    // 2026-09-22 06:30 in UTC+8 is 2026-09-21 22:30 UTC — a UTC slice
+    // would produce the wrong day key; the local key must not.
+    const d = new Date(2026, 8, 22, 6, 30, 0);
+    expect(localDateKey(d)).toBe("2026-09-22");
+  });
+
+  it("zero-pads month and day", () => {
+    expect(localDateKey(new Date(2026, 0, 5, 12, 0, 0))).toBe("2026-01-05");
   });
 });

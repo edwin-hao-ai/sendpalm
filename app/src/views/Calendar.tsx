@@ -9,6 +9,9 @@ import {
   createMemo,
   createResource,
   createSignal,
+  onMount,
+  onCleanup,
+  type JSX,
 } from "solid-js";
 import {
   listEvents,
@@ -17,6 +20,7 @@ import {
   listContacts,
 } from "../stores/data";
 import { Modal } from "../components/Modal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { Avatar } from "../components/Avatar";
@@ -30,6 +34,7 @@ import {
   daysInMonth,
   timeToMinutes,
   formatMinutes,
+  localDateKey,
 } from "../utils/date";
 import { uid } from "../utils/id";
 import {
@@ -73,24 +78,120 @@ const FILTER_OPTIONS: { value: ReturnType<typeof filter>; label: string }[] = [
   { value: "tracking", label: "计时" },
 ];
 const MONTH_NAMES = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
+  "1月",
+  "2月",
+  "3月",
+  "4月",
+  "5月",
+  "6月",
+  "7月",
+  "8月",
+  "9月",
+  "10月",
+  "11月",
+  "12月",
 ];
+
+/** Default color for a freshly-created event. Mirrors `--palm` in
+ *  tokens.css (the token can't be read from IndexedDB-persisted
+ *  event rows, so the literal is duplicated here deliberately). */
+export const DEFAULT_EVENT_COLOR = "#0A8F63";
+
+
+
+/** Chinese duration label: 45 → "45 分钟", 75 → "1 小时 15 分",
+ *  120 → "2 小时". Replaces the old "1h 15m" format. */
+export function formatMinutesCN(minutes: number): string {
+  const m = Math.max(0, Math.round(minutes));
+  if (m < 60) return `${m} 分钟`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  return rem === 0 ? `${h} 小时` : `${h} 小时 ${rem} 分`;
+}
+
+export interface TimelinePlacement<T> {
+  item: T;
+  start: number;
+  end: number;
+  /** Column index inside the overlap cluster (0-based). */
+  col: number;
+  /** Total columns in the cluster — tile width is `1 / cols`. */
+  cols: number;
+}
+
+/** Side-by-side column assignment for overlapping timeline items
+ *  (filmstrip + week grid). Greedy interval partitioning per
+ *  transitively-overlapping cluster: each item gets the first column
+ *  whose previous occupant has ended, so `cols` equals the maximum
+ *  concurrency of the cluster. Input is not mutated. */
+export function layoutTimeline<T>(
+  items: readonly { item: T; start: number; end: number }[],
+): TimelinePlacement<T>[] {
+  const sorted = [...items].sort((a, b) => a.start - b.start || a.end - b.end);
+  const out: TimelinePlacement<T>[] = [];
+  let cluster: { item: T; start: number; end: number }[] = [];
+  let clusterEnd = -Infinity;
+  const flush = () => {
+    if (cluster.length === 0) return;
+    const colEnds: number[] = [];
+    const placed = cluster.map((it) => {
+      let col = colEnds.findIndex((end) => end <= it.start);
+      if (col === -1) {
+        col = colEnds.length;
+        colEnds.push(it.end);
+      } else {
+        colEnds[col] = it.end;
+      }
+      return { item: it.item, start: it.start, end: it.end, col, cols: 0 };
+    });
+    for (const p of placed) out.push({ ...p, cols: colEnds.length });
+    cluster = [];
+    clusterEnd = -Infinity;
+  };
+  for (const it of sorted) {
+    if (it.start >= clusterEnd) {
+      flush();
+      cluster = [it];
+      clusterEnd = it.end;
+    } else {
+      cluster.push(it);
+      clusterEnd = Math.max(clusterEnd, it.end);
+    }
+  }
+  flush();
+  return out;
+}
+
+/** Reactive `window.matchMedia` — same pattern as Imbox.tsx. Used for
+ *  the week-grid responsive collapse and ≥44px touch targets. */
+function useMedia(query: string): () => boolean {
+  const [matches, setMatches] = createSignal(false);
+  onMount(() => {
+    const mq = window.matchMedia(query);
+    setMatches(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setMatches(e.matches);
+    mq.addEventListener("change", handler);
+    onCleanup(() => mq.removeEventListener("change", handler));
+  });
+  return matches;
+}
+
+/** Liquid-glass card surface (Apple-style floating layer). */
+const glassCard = {
+  background: "color-mix(in srgb, var(--paper-light) 82%, transparent)",
+  "backdrop-filter": "blur(20px) saturate(1.4)",
+  "-webkit-backdrop-filter": "blur(20px) saturate(1.4)",
+} as const;
 
 export function Calendar() {
   const [events, { refetch }] = createResource(listEvents);
   const [editing, setEditing] = createSignal<CalendarEvent | null>(null);
-  const [creating, setCreating] = createSignal(false);
+  // Holds an optional time-slot preset when the user clicked a free
+  // block in the day filmstrip ("click empty time to create").
+  const [creating, setCreating] = createSignal<{
+    tm?: string;
+    dur?: number;
+  } | null>(null);
 
   useRefreshEffect(() => {
     void refetch();
@@ -128,13 +229,14 @@ export function Calendar() {
   // by start time so the grids can iterate it directly.
   const occurrenceWindow = createMemo<[string, string]>(() => {
     if (view() === "day") {
-      const d = cursor().toISOString().slice(0, 10);
+      const d = localDateKey(cursor());
       return [d, d];
     }
     if (view() === "week") {
-      const s = startOfWeek(cursor());
-      const e = endOfWeek(cursor());
-      return [s.toISOString().slice(0, 10), e.toISOString().slice(0, 10)];
+      return [
+        localDateKey(startOfWeek(cursor())),
+        localDateKey(endOfWeek(cursor())),
+      ];
     }
     // year view: the whole calendar year centered on the cursor's year.
     const y = cursor().getFullYear();
@@ -147,12 +249,15 @@ export function Calendar() {
     // PERF: pre-filter + early-exit. `expandOccurrences` already
     // caps a single master's occurrences at 500 (and the window
     // is at most 365 days in year view), but each event still
-    // walks its own RRULE math. Filtering by `ev.dt <= wEnd`
-    // first drops past masters entirely — most calendars have
-    // hundreds of completed instances that we never expand.
+    // walks its own RRULE math. Filtering by the master's date
+    // portion (`dt.slice(0, 10)`) first drops past masters entirely
+    // — most calendars have hundreds of completed instances that we
+    // never expand. Compare date-only: a full `dt` timestamp sorts
+    // lexically AFTER the bare `YYYY-MM-DD` window end, which used
+    // to drop every event scheduled on the last day of the window.
     const masters = (events() ?? []).filter(matchesCalendarFilter);
     for (const ev of masters) {
-      if (ev.dt > wEnd) continue;
+      if (ev.dt.slice(0, 10) > wEnd) continue;
       for (const occ of expandOccurrences(ev, wStart, wEnd)) {
         out.push({ ...occ, ev });
       }
@@ -177,7 +282,7 @@ export function Calendar() {
       .filter(matchesCalendarFilter)
       .filter((e) => e.allDay === true);
     for (const ev of masters) {
-      if (ev.dt > wEnd) continue;
+      if (ev.dt.slice(0, 10) > wEnd) continue;
       for (const occ of expandOccurrences(ev, wStart, wEnd)) {
         out.push({ ...occ, ev });
       }
@@ -244,9 +349,10 @@ export function Calendar() {
   // `dt` to a bare "YYYY-MM-DD", week view did `new Date(e.dt)` and
   // placed the event on the wrong day. Use the same YYYY-MM-DD
   // split as the rest of the calendar.
-  const newEvent = (): CalendarEvent => {
+  const newEvent = (preset?: { tm?: string; dur?: number }): CalendarEvent => {
     const d = new Date(cursor());
-    d.setHours(10, 0, 0, 0);
+    const hh = preset?.tm ? parseInt(preset.tm.slice(0, 2), 10) : 10;
+    d.setHours(hh, 0, 0, 0);
     const yyyy = d.getFullYear();
     const mm = String(d.getMonth() + 1).padStart(2, "0");
     const dd = String(d.getDate()).padStart(2, "0");
@@ -254,10 +360,10 @@ export function Calendar() {
       id: uid("ev"),
       title: "",
       dt: `${yyyy}-${mm}-${dd}`,
-      tm: "10:00",
-      dur: 30,
+      tm: preset?.tm ?? "10:00",
+      dur: preset?.dur ?? 30,
       pids: [],
-      color: "#0A8F63",
+      color: DEFAULT_EVENT_COLOR,
       agenda: [],
       notes: "",
       brief: "",
@@ -266,11 +372,21 @@ export function Calendar() {
     };
   };
 
+  const openCreateAtSlot = (startMin: number, durMin: number) => {
+    // Pre-fill the modal with the clicked free slot; cap the duration
+    // at the slot length so the suggestion never overlaps the next
+    // meeting (user can extend it in the modal).
+    setCreating({
+      tm: formatMinutes(startMin),
+      dur: Math.min(durMin, 60),
+    });
+  };
+
   const onSave = async (e: CalendarEvent) => {
     await upsertEvent(e);
     await refetch();
     setEditing(null);
-    setCreating(false);
+    setCreating(null);
     showToast({ message: "已保存", kind: "success" });
   };
 
@@ -295,6 +411,11 @@ export function Calendar() {
     setEditing(e);
   };
 
+  const coarsePointer = useMedia("(pointer: coarse)");
+  // Touch targets: AGENTS §6 requires ≥44px on coarse pointers.
+  const touchBtn = (base: JSX.CSSProperties): JSX.CSSProperties =>
+    coarsePointer() ? { ...base, "min-height": "44px" } : base;
+
   return (
     <div
       style={{
@@ -305,6 +426,7 @@ export function Calendar() {
         animation: "view-enter 0.3s var(--ease-out) both",
       }}
     >
+      <style>{CALENDAR_CSS}</style>
       <header
         style={{
           padding: "var(--space-5)",
@@ -325,57 +447,87 @@ export function Calendar() {
             flex: 1,
           }}
         >
-          Calendar
+          日历
         </h2>
-        <button onClick={() => setCursor(new Date())} style={toolbarBtn}>
-          Today
+        <button
+          onClick={() => setCursor(new Date())}
+          style={touchBtn(toolbarBtn)}
+          title="回到今天"
+        >
+          今天
         </button>
         <button
           onClick={() => setCursor(shiftCursor(cursor(), -1, view()))}
-          style={toolbarBtn}
+          style={touchBtn(toolbarBtn)}
+          aria-label="上一周期"
+          title="上一周期"
         >
           <Icon name="ph-caret-left" size={12} />
         </button>
         <button
           onClick={() => setCursor(shiftCursor(cursor(), 1, view()))}
-          style={toolbarBtn}
+          style={touchBtn(toolbarBtn)}
+          aria-label="下一周期"
+          title="下一周期"
         >
           <Icon name="ph-caret-right" size={12} />
         </button>
-        <div style={{ display: "flex", gap: "4px" }}>
+        {/* Segmented view switcher (日 / 周 / 年) */}
+        <div
+          role="tablist"
+          aria-label="切换日历视图"
+          style={{
+            display: "flex",
+            gap: "2px",
+            padding: "2px",
+            background: "var(--paper-mid)",
+            "border-radius": "var(--radius-pill)",
+          }}
+        >
           <For each={["day", "week", "year"] as const}>
             {(v) => (
               <button
+                role="tab"
+                aria-selected={view() === v}
                 data-cal-view-btn={v}
                 onClick={() => setView(v)}
-                style={{
-                  padding: "4px 12px",
+                style={touchBtn({
+                  padding: "4px 14px",
                   "border-radius": "var(--radius-pill)",
                   background:
-                    view() === v ? "var(--palm-soft)" : "var(--paper-mid)",
+                    view() === v ? "var(--paper-light)" : "transparent",
                   color: view() === v ? "var(--palm)" : "var(--text-secondary)",
                   "font-size": "var(--text-caption)",
                   "font-weight": view() === v ? "700" : "500",
-                }}
+                  "box-shadow": view() === v ? "var(--shadow-sm)" : "none",
+                })}
               >
-                {v === "day" ? "Day" : v === "week" ? "Week" : "Year"}
+                {v === "day" ? "日" : v === "week" ? "周" : "年"}
               </button>
             )}
           </For>
         </div>
 
-        {/* Filter chips */}
+        {/* Filter chips — horizontal scroll on narrow screens instead of
+            wrapping into a second toolbar row. */}
         <div
           data-testid="calendar-filter-chips"
-          style={{ display: "flex", gap: "6px", "flex-wrap": "wrap" }}
+          style={{
+            display: "flex",
+            gap: "6px",
+            "flex-wrap": "nowrap",
+            "overflow-x": "auto",
+            "max-width": "100%",
+          }}
         >
           <For each={FILTER_OPTIONS}>
             {(f) => (
               <button
                 data-testid={`calendar-filter-${f.value}`}
                 onClick={() => setFilter(f.value)}
-                style={{
+                style={touchBtn({
                   padding: "4px 10px",
+                  "flex-shrink": 0,
                   "border-radius": "var(--radius-pill)",
                   background:
                     filter() === f.value
@@ -389,7 +541,7 @@ export function Calendar() {
                   "font-weight": filter() === f.value ? "700" : "500",
                   border: "0.5px solid var(--border)",
                   transition: "all 0.15s var(--ease-out)",
-                }}
+                })}
               >
                 {f.label}
               </button>
@@ -398,8 +550,8 @@ export function Calendar() {
         </div>
 
         <button
-          onClick={() => setCreating(true)}
-          style={{
+          onClick={() => setCreating({})}
+          style={touchBtn({
             padding: "8px 16px",
             background: "var(--palm)",
             color: "white",
@@ -409,9 +561,9 @@ export function Calendar() {
             display: "flex",
             "align-items": "center",
             gap: "4px",
-          }}
+          })}
         >
-          <Icon name="ph-plus" size={12} /> New
+          <Icon name="ph-plus" size={12} /> 新建
         </button>
       </header>
 
@@ -433,16 +585,25 @@ export function Calendar() {
         errorView={() => (
           <ErrorState
             title="日历加载失败"
-            message={String(events.error ?? "")}
+            message="请稍后重试；若反复失败，可到顶栏的错误日志里查看详情。"
             retry={() => void refetch()}
           />
         )}
         empty={
-          <Empty
-            icon="ph-calendar-blank"
-            title="这段时间没有会议"
-            description="点击 New 创建。"
-          />
+          filter() === "all" ? (
+            <Empty
+              icon="ph-calendar-blank"
+              title="这段时间还没有安排"
+              description="点右上角「新建」加一场会议，或点日视图里的空白时段快速创建。"
+            />
+          ) : (
+            <Empty
+              icon="ph-funnel"
+              title="当前筛选下没有事件"
+              description="换一个筛选条件，或清除筛选查看全部日程。"
+              action={{ label: "清除筛选", onClick: () => setFilter("all") }}
+            />
+          )
         }
         isEmpty={() => !visibleHasEvents()}
       >
@@ -460,6 +621,7 @@ export function Calendar() {
                 events={eventsForDate(cursor())}
                 onEventClick={openEvent}
                 onEventEdit={startEditing}
+                onSlotClick={openCreateAtSlot}
               />
             </Show>
             <Show when={view() === "week"}>
@@ -490,13 +652,14 @@ export function Calendar() {
       </ResourceGate>
 
       <Show when={creating()}>
-        <EventEditModal
-          ev={newEvent()}
-          isNew
-          onClose={() => setCreating(false)}
-          onSave={onSave}
-          onDelete={() => onDelete(editing()?.id ?? "")}
-        />
+        {(preset) => (
+          <EventEditModal
+            ev={newEvent(preset())}
+            isNew
+            onClose={() => setCreating(null)}
+            onSave={onSave}
+          />
+        )}
       </Show>
 
       <Show when={editing()}>
@@ -528,40 +691,37 @@ function shiftCursor(
 
 function PeriodHeader(props: { date: Date; view: "day" | "week" | "year" }) {
   const text = () => {
-    if (props.view === "day")
-      return props.date.toLocaleDateString(undefined, {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      });
+    // Day view renders nothing here: the DayHero card directly below
+    // already shows weekday + day-of-month + month/year, and repeating
+    // the same date in 44px type above it was pure duplication.
+    if (props.view === "day") return null;
     if (props.view === "week") {
       const s = startOfWeek(props.date);
       const e = endOfWeek(s);
       const sameMonth = s.getMonth() === e.getMonth();
-      const m1 = MONTH_NAMES[s.getMonth()];
-      const m2 = MONTH_NAMES[e.getMonth()];
       const y = e.getFullYear();
       if (sameMonth) {
-        return `${m1} ${s.getDate()} – ${e.getDate()}, ${y}`;
+        return `${y}年${s.getMonth() + 1}月${s.getDate()}日 – ${e.getDate()}日`;
       }
-      return `${m1} ${s.getDate()} – ${m2} ${e.getDate()}, ${y}`;
+      return `${s.getMonth() + 1}月${s.getDate()}日 – ${e.getMonth() + 1}月${e.getDate()}日 · ${y}年`;
     }
     return `${props.date.getFullYear()} · 全年鸟瞰`;
   };
   return (
-    <div
-      style={{
-        "text-align": "center",
-        padding: "var(--space-3) var(--space-5) var(--space-2)",
-        "font-family": "var(--font-display)",
-        "font-size": "var(--text-h3)",
-        "font-weight": "800",
-        color: "var(--cal-ink)",
-      }}
-    >
-      {text()}
-    </div>
+    <Show when={text()}>
+      <div
+        style={{
+          "text-align": "center",
+          padding: "var(--space-3) var(--space-5) var(--space-2)",
+          "font-family": "var(--font-display)",
+          "font-size": "var(--text-h3)",
+          "font-weight": "800",
+          color: "var(--cal-ink)",
+        }}
+      >
+        {text()}
+      </div>
+    </Show>
   );
 }
 
@@ -572,6 +732,7 @@ function DayView(props: {
   events: CalendarEvent[];
   onEventClick: (e: CalendarEvent) => void;
   onEventEdit: (e: CalendarEvent) => void;
+  onSlotClick: (startMin: number, durMin: number) => void;
 }) {
   return (
     <div
@@ -585,7 +746,12 @@ function DayView(props: {
       }}
     >
       <DayHero date={props.date} events={props.events} />
-      <DayFilmstrip events={props.events} onEventClick={props.onEventClick} />
+      <DayFilmstrip
+        date={props.date}
+        events={props.events}
+        onEventClick={props.onEventClick}
+        onSlotClick={props.onSlotClick}
+      />
       <DayAgenda
         events={props.events}
         onEventClick={props.onEventClick}
@@ -601,6 +767,11 @@ function DayHero(props: { date: Date; events: CalendarEvent[] }) {
   );
   const [editing, setEditing] = createSignal(false);
   const inputRef = createSignal<HTMLInputElement | undefined>(undefined);
+  // Snapshot of the label when editing starts so Escape can restore it
+  // (previously Escape closed the input but the blur handler then saved
+  // the half-typed value anyway).
+  let editSnapshot = "";
+  let editCancelled = false;
 
   const eventTimes = createMemo(() =>
     props.events.map((e) => ({
@@ -629,6 +800,16 @@ function DayHero(props: { date: Date; events: CalendarEvent[] }) {
       localStorage.removeItem(dayLabelKey(props.date));
       setLabel("");
     }
+    setEditing(false);
+  };
+
+  const startEdit = () => {
+    editSnapshot = label();
+    setEditing(true);
+  };
+
+  const cancelEdit = () => {
+    setLabel(editSnapshot);
     setEditing(false);
   };
 
@@ -662,9 +843,10 @@ function DayHero(props: { date: Date; events: CalendarEvent[] }) {
         display: "flex",
         gap: "var(--space-5)",
         padding: "var(--space-5)",
-        background: "var(--cal-surface)",
+        ...glassCard,
         "border-radius": "var(--radius-xl)",
         border: "1px solid var(--cal-border)",
+        "box-shadow": "var(--shadow-sm)",
       }}
     >
       <div
@@ -720,19 +902,29 @@ function DayHero(props: { date: Date; events: CalendarEvent[] }) {
             when={editing()}
             fallback={
               <button
-                onClick={() => setEditing(true)}
+                class="cal-day-label"
+                onClick={startEdit}
+                title="点击为这一天命名"
                 style={{
                   "font-family": "var(--font-display)",
                   "font-size": "var(--text-h4)",
                   "font-weight": "800",
                   background: "transparent",
                   border: "none",
-                  padding: 0,
+                  padding: "2px 6px",
+                  "margin-left": "-6px",
+                  "border-radius": "var(--radius-md)",
                   cursor: "pointer",
                   color: label() ? "var(--cal-ink)" : "var(--text-muted)",
+                  display: "inline-flex",
+                  "align-items": "center",
+                  gap: "var(--space-2)",
                 }}
               >
                 {label() || "为这一天命名…"}
+                <span class="cal-day-label-pencil" style={{ display: "inline-flex" }}>
+                  <Icon name="ph-pencil-simple" size={14} />
+                </span>
               </button>
             }
           >
@@ -746,10 +938,20 @@ function DayHero(props: { date: Date; events: CalendarEvent[] }) {
               }}
               value={label()}
               onInput={(e) => setLabel(e.currentTarget.value)}
-              onBlur={(e) => saveLabel(e.currentTarget.value)}
+              onBlur={(e) => {
+                if (editCancelled) {
+                  editCancelled = false;
+                  return;
+                }
+                saveLabel(e.currentTarget.value);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") saveLabel(label());
-                if (e.key === "Escape") setEditing(false);
+                if (e.key === "Escape") {
+                  editCancelled = true;
+                  cancelEdit();
+                  e.currentTarget.blur();
+                }
               }}
               placeholder="为这一天命名…"
               style={{
@@ -786,7 +988,7 @@ function DayHero(props: { date: Date; events: CalendarEvent[] }) {
                 color: "var(--cal-ink)",
               }}
             >
-              {formatTimeCompact(stats().totalBusy)}
+              {formatMinutesCN(stats().totalBusy)}
             </div>
           </div>
           <div>
@@ -807,7 +1009,7 @@ function DayHero(props: { date: Date; events: CalendarEvent[] }) {
                 color: "var(--palm)",
               }}
             >
-              {formatTimeCompact(stats().freetime)}
+              {formatMinutesCN(stats().freetime)}
             </div>
           </div>
           <div>
@@ -829,7 +1031,7 @@ function DayHero(props: { date: Date; events: CalendarEvent[] }) {
               }}
             >
               {stats().longest.duration >= 60
-                ? formatTimeCompact(stats().longest.duration)
+                ? formatMinutesCN(stats().longest.duration)
                 : "—"}
             </div>
           </div>
@@ -840,36 +1042,59 @@ function DayHero(props: { date: Date; events: CalendarEvent[] }) {
 }
 
 function DayFilmstrip(props: {
+  date: Date;
   events: CalendarEvent[];
   onEventClick: (e: CalendarEvent) => void;
+  onSlotClick: (startMin: number, durMin: number) => void;
 }) {
   const startHour = 0;
   const endHour = 24;
   const totalMinutes = (endHour - startHour) * 60;
 
-  const eventTimes = createMemo(() =>
-    props.events
-      .map((e) => {
+  // Measured pixel width of the strip (min 800 — the inner div's
+  // min-width). Drives the "narrow tile = color bar only" cutoff:
+  // below 48px of width, text wraps one glyph per line and explodes
+  // the tile, so we render just the color bar and keep the full
+  // title + time on the tooltip.
+  const [stripWidth, setStripWidth] = createSignal(800);
+  let stripEl!: HTMLDivElement;
+  onMount(() => {
+    if (!stripEl) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w) setStripWidth(w);
+    });
+    ro.observe(stripEl);
+    setStripWidth(stripEl.clientWidth || 800);
+    onCleanup(() => ro.disconnect());
+  });
+
+  const timedEvents = createMemo(() =>
+    props.events.filter((e) => !e.allDay && e.tm),
+  );
+
+  const placements = createMemo(() =>
+    layoutTimeline(
+      timedEvents().map((e) => {
         const start = timeToMinutes(e.tm);
-        const end = start + (e.dur ?? 30);
-        return { event: e, start, end };
-      })
-      .sort((a, b) => a.start - b.start),
+        return { item: e, start, end: start + (e.dur ?? 30) };
+      }),
+    ),
   );
 
   const freetime = createMemo(() =>
     computeFreetimeSlots(
-      eventTimes().map((e) => ({ start: e.start, end: e.end })),
+      placements().map((p) => ({ start: p.start, end: p.end })),
       startHour,
       endHour,
     ).filter((s) => s.duration >= 60),
   );
 
-  const now = new Date();
-  const showNow = createMemo(
-    () => sameDate(now, new Date(props.events[0]?.dt ?? now)), // placeholder: we don't have date in props, use current
-  );
-  void showNow;
+  const isToday = createMemo(() => sameDate(props.date, new Date()));
+  const nowMinutes = () => {
+    const n = new Date();
+    return n.getHours() * 60 + n.getMinutes();
+  };
 
   return (
     <div
@@ -882,6 +1107,7 @@ function DayFilmstrip(props: {
       }}
     >
       <div
+        ref={(el) => (stripEl = el)}
         style={{
           position: "relative",
           height: "96px",
@@ -915,22 +1141,54 @@ function DayFilmstrip(props: {
                   "font-size": "var(--text-micro)",
                   color: "var(--cal-ink-muted)",
                   "font-family": "var(--font-mono)",
-                  transform: "translateX(-50%)",
+                  transform:
+                    i() === 0 ? "none" : "translateX(-50%)",
+                  "white-space": "nowrap",
                 }}
               >
-                {HOUR_LABELS[i()]}:00
+                {`${HOUR_LABELS[i()]}:00`}
               </div>
             </Show>
           )}
         </For>
+
+        {/* Current-time marker (only when the strip shows today). */}
+        <Show when={isToday()}>
+          <div
+            aria-hidden
+            style={{
+              position: "absolute",
+              left: `${(nowMinutes() / totalMinutes) * 100}%`,
+              top: "10px",
+              bottom: "16px",
+              width: "2px",
+              "background-color": "var(--coral)",
+              "z-index": 3,
+              "pointer-events": "none",
+            }}
+          >
+            <div
+              style={{
+                position: "absolute",
+                top: "-4px",
+                left: "-3px",
+                width: "8px",
+                height: "8px",
+                "border-radius": "50%",
+                "background-color": "var(--coral)",
+              }}
+            />
+          </div>
+        </Show>
 
         <For each={freetime()}>
           {(s) => {
             const left = ((s.start - startHour * 60) / totalMinutes) * 100;
             const width = (s.duration / totalMinutes) * 100;
             return (
-              <div
-                title={`空闲 ${formatTimeCompact(s.duration)}`}
+              <button
+                onClick={() => props.onSlotClick(s.start, s.duration)}
+                title={`空闲 ${formatMinutesCN(s.duration)} · 点击新建事件`}
                 style={{
                   position: "absolute",
                   top: "28px",
@@ -939,9 +1197,12 @@ function DayFilmstrip(props: {
                   width: `${width}%`,
                   "background-color": "var(--palm-soft)",
                   "border-radius": "var(--radius-sm)",
+                  border: "none",
+                  cursor: "pointer",
                   display: "flex",
                   "align-items": "center",
                   "justify-content": "center",
+                  padding: 0,
                 }}
               >
                 <Show when={s.duration >= 180}>
@@ -950,41 +1211,48 @@ function DayFilmstrip(props: {
                       "font-size": "var(--text-micro)",
                       color: "var(--palm)",
                       "font-weight": "700",
+                      "white-space": "nowrap",
+                      overflow: "hidden",
                     }}
                   >
-                    {formatTimeCompact(s.duration)} 空闲
+                    {formatMinutesCN(s.duration)} 空闲
                   </span>
                 </Show>
-              </div>
+              </button>
             );
           }}
         </For>
 
-        <For each={eventTimes()}>
-          {(item) => {
-            const left = ((item.start - startHour * 60) / totalMinutes) * 100;
-            const width = Math.max(
-              ((item.end - item.start) / totalMinutes) * 100,
+        <For each={placements()}>
+          {(p) => {
+            const baseLeft =
+              ((p.start - startHour * 60) / totalMinutes) * 100;
+            const baseWidth = Math.max(
+              ((p.end - p.start) / totalMinutes) * 100,
               1.5,
             );
+            const width = baseWidth / p.cols;
+            const left = baseLeft + width * p.col;
+            const widthPx = (width / 100) * stripWidth();
+            const showText = widthPx >= 48;
             return (
               <button
-                onClick={() => props.onEventClick(item.event)}
-                title={`${item.event.title || "(无标题)"} · ${formatMinutes(
-                  item.start,
-                )} – ${formatMinutes(item.end)}`}
+                onClick={() => props.onEventClick(p.item)}
+                title={`${p.item.title || "(无标题)"} · ${formatMinutes(
+                  p.start,
+                )} – ${formatMinutes(p.end)}`}
                 style={{
                   position: "absolute",
                   top: "18px",
                   bottom: "18px",
                   left: `${left}%`,
                   width: `${width}%`,
-                  "background-color": item.event.color,
-                  color: textColorForBg(item.event.color),
+                  "background-color": p.item.color,
+                  color: textColorForBg(p.item.color),
                   "border-radius": "var(--radius-sm)",
                   border: "none",
                   cursor: "pointer",
-                  padding: "4px 6px",
+                  padding: showText ? "4px 6px" : 0,
                   "text-align": "left",
                   "font-size": "var(--text-micro)",
                   "font-weight": "700",
@@ -993,16 +1261,26 @@ function DayFilmstrip(props: {
                   "z-index": 2,
                 }}
               >
-                <div style={{ opacity: 0.85 }}>{formatMinutes(item.start)}</div>
-                <div
-                  style={{
-                    "white-space": "nowrap",
-                    "text-overflow": "ellipsis",
-                    overflow: "hidden",
-                  }}
-                >
-                  {item.event.title || "(无标题)"}
-                </div>
+                <Show when={showText}>
+                  <div
+                    style={{
+                      opacity: 0.85,
+                      "white-space": "nowrap",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {formatMinutes(p.start)}
+                  </div>
+                  <div
+                    style={{
+                      "white-space": "nowrap",
+                      "text-overflow": "ellipsis",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {p.item.title || "(无标题)"}
+                  </div>
+                </Show>
               </button>
             );
           }}
@@ -1090,8 +1368,10 @@ function DayAgenda(props: {
               const end = start + (e.dur ?? 30);
               return (
                 <button
+                  class="cal-row"
                   onClick={() => props.onEventClick(e)}
                   onDblClick={() => props.onEventEdit(e)}
+                  title="单击查看详情 · 双击编辑"
                   style={{
                     display: "flex",
                     gap: "var(--space-3)",
@@ -1104,11 +1384,13 @@ function DayAgenda(props: {
                     cursor: "pointer",
                     "text-align": "left",
                     width: "100%",
+                    "align-items": "center",
                   }}
                 >
                   <div
                     style={{
                       width: "4px",
+                      "align-self": "stretch",
                       "border-radius": "var(--radius-pill)",
                       "background-color": e.color,
                       "flex-shrink": 0,
@@ -1150,6 +1432,28 @@ function DayAgenda(props: {
                       </div>
                     </Show>
                   </div>
+                  <span
+                    class="cal-row-edit"
+                    role="button"
+                    aria-label={`编辑 ${e.title || "事件"}`}
+                    title="编辑"
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      props.onEventEdit(e);
+                    }}
+                    style={{
+                      display: "inline-flex",
+                      "align-items": "center",
+                      "justify-content": "center",
+                      width: "32px",
+                      height: "32px",
+                      "border-radius": "var(--radius-pill)",
+                      color: "var(--text-muted)",
+                      "flex-shrink": 0,
+                    }}
+                  >
+                    <Icon name="ph-pencil-simple" size={14} />
+                  </span>
                 </button>
               );
             }}
@@ -1206,6 +1510,9 @@ function WeekGrid(props: {
     getMultiDayEvents(props.events, weekStart(), addDays(weekStart(), 6)),
   );
 
+  const isMobile = useMedia("(max-width: 767px)");
+  const isTablet = useMedia("(max-width: 1023px)");
+
   return (
     <div
       data-cal-view="week"
@@ -1223,9 +1530,10 @@ function WeekGrid(props: {
           display: "flex",
           gap: "var(--space-4)",
           padding: "var(--space-4)",
-          background: "var(--cal-surface)",
+          ...glassCard,
           "border-radius": "var(--radius-xl)",
           border: "1px solid var(--cal-border)",
+          "box-shadow": "var(--shadow-sm)",
         }}
       >
         <div>
@@ -1267,7 +1575,7 @@ function WeekGrid(props: {
               color: "var(--palm)",
             }}
           >
-            {formatTimeCompact(weekSummary().totalBusy)}
+            {formatMinutesCN(weekSummary().totalBusy)}
           </div>
         </div>
         <div>
@@ -1364,241 +1672,459 @@ function WeekGrid(props: {
         </div>
       </Show>
 
-      <div
-        style={{
-          display: "grid",
-          "grid-template-columns": "repeat(7, 1fr)",
-          gap: "var(--space-2)",
-        }}
+      <Show
+        when={!isMobile()}
+        fallback={
+          /* Mobile (<768px): a 7-column time grid squeezes each day to
+             ~48px — unusable. Fall back to a 7-day agenda list. */
+          <div
+            style={{
+              display: "flex",
+              "flex-direction": "column",
+              gap: "var(--space-2)",
+            }}
+          >
+            <For each={days()}>
+              {(day) => {
+                const isToday = sameDate(day, new Date());
+                const dayEvents = props.events
+                  .filter((e) => sameDate(new Date(e.dt), day))
+                  .sort(
+                    (a, b) => timeToMinutes(a.tm) - timeToMinutes(b.tm),
+                  );
+                return (
+                  <div
+                    style={{
+                      background: "var(--cal-surface)",
+                      border: `1px solid ${isToday ? "var(--palm)" : "var(--cal-border)"}`,
+                      "border-radius": "var(--radius-lg)",
+                      padding: "var(--space-3)",
+                    }}
+                  >
+                    <button
+                      onClick={() => props.onDayClick(day)}
+                      style={{
+                        display: "flex",
+                        "align-items": "baseline",
+                        gap: "var(--space-2)",
+                        width: "100%",
+                        "text-align": "left",
+                        "min-height": "44px",
+                        color: "var(--cal-ink)",
+                      }}
+                    >
+                      <span
+                        style={{
+                          "font-weight": "800",
+                          "font-size": "var(--text-body-sm)",
+                        }}
+                      >
+                        周{WEEKDAY_NAMES[day.getDay()]}
+                      </span>
+                      <span
+                        style={{
+                          "font-size": "var(--text-caption)",
+                          color: "var(--cal-ink-muted)",
+                        }}
+                      >
+                        {day.getMonth() + 1}月{day.getDate()}日
+                      </span>
+                      <Show when={isToday}>
+                        <span
+                          style={{
+                            "font-size": "var(--text-micro)",
+                            "font-weight": "700",
+                            color: "var(--palm)",
+                          }}
+                        >
+                          今天
+                        </span>
+                      </Show>
+                      <span
+                        style={{
+                          "margin-left": "auto",
+                          "font-size": "var(--text-caption)",
+                          color: "var(--text-muted)",
+                        }}
+                      >
+                        {dayEvents.length > 0 ? `${dayEvents.length} 场` : ""}
+                      </span>
+                    </button>
+                    <Show when={dayEvents.length > 0}>
+                      <div
+                        style={{
+                          display: "flex",
+                          "flex-direction": "column",
+                          gap: "4px",
+                          "margin-top": "var(--space-1)",
+                        }}
+                      >
+                        <For each={dayEvents}>
+                          {(e) => (
+                            <button
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                props.onEventClick(e);
+                              }}
+                              style={{
+                                display: "flex",
+                                "align-items": "center",
+                                gap: "var(--space-2)",
+                                padding: "8px 10px",
+                                "min-height": "44px",
+                                background: "var(--paper-light)",
+                                border: "0.5px solid var(--border)",
+                                "border-radius": "var(--radius-md)",
+                                "text-align": "left",
+                                cursor: "pointer",
+                                "font-size": "var(--text-caption)",
+                              }}
+                            >
+                              <span
+                                style={{
+                                  width: "4px",
+                                  height: "16px",
+                                  "border-radius": "var(--radius-pill)",
+                                  "background-color": e.color,
+                                  "flex-shrink": 0,
+                                }}
+                              />
+                              <span
+                                style={{
+                                  "font-family": "var(--font-mono)",
+                                  color: "var(--cal-ink-muted)",
+                                  "flex-shrink": 0,
+                                }}
+                              >
+                                {e.allDay ? "全天" : e.tm}
+                              </span>
+                              <span
+                                style={{
+                                  "font-weight": "600",
+                                  overflow: "hidden",
+                                  "text-overflow": "ellipsis",
+                                  "white-space": "nowrap",
+                                }}
+                              >
+                                {e.title || "(无标题)"}
+                              </span>
+                            </button>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  </div>
+                );
+              }}
+            </For>
+          </div>
+        }
       >
-        <For each={days()}>
-          {(day) => {
-            const isToday = sameDate(day, new Date());
-            const isSelected = sameDate(day, props.date);
-            const dayEvents = props.events.filter((e) =>
-              sameDate(new Date(e.dt), day),
-            );
-            const dayStats = createMemo(() => {
-              const busy = dayEvents.reduce((s, e) => s + (e.dur ?? 30), 0);
-              const slots = computeFreetimeSlots(
-                dayEvents.map((e) => ({
-                  start: timeToMinutes(e.tm),
-                  end: timeToMinutes(e.tm) + (e.dur ?? 30),
-                })),
-                6,
-                22,
+        <div
+          style={{
+            display: "grid",
+            "grid-template-columns": "repeat(7, 1fr)",
+            gap: "var(--space-2)",
+          }}
+        >
+          <For each={days()}>
+            {(day) => {
+              const isToday = sameDate(day, new Date());
+              const isSelected = sameDate(day, props.date);
+              const dayEvents = props.events.filter((e) =>
+                sameDate(new Date(e.dt), day),
               );
-              const longest = slots.reduce(
-                (a, b) => (b.duration > a.duration ? b : a),
-                slots[0] ?? { start: 0, duration: 0 },
+              const allDayEvents = dayEvents.filter(
+                (e) => e.allDay || !e.tm,
               );
-              return { busy, longest };
-            });
-            return (
-              <div
-                onClick={() => props.onDayClick(day)}
-                style={{
-                  display: "flex",
-                  "flex-direction": "column",
-                  gap: "var(--space-2)",
-                  "background-color": "var(--cal-surface)",
-                  border: `1px solid ${isSelected ? "var(--palm)" : "var(--cal-border)"}`,
-                  "border-radius": "var(--radius-lg)",
-                  padding: "var(--space-3)",
-                  "min-height": "620px",
-                  cursor: "pointer",
-                  "box-shadow": isSelected
-                    ? "0 0 0 3px var(--palm-soft), var(--shadow-sm)"
-                    : "var(--shadow-sm)",
-                }}
-              >
+              const timedPlacements = createMemo(() =>
+                layoutTimeline(
+                  dayEvents
+                    .filter((e) => !e.allDay && e.tm)
+                    .map((e) => {
+                      const start = timeToMinutes(e.tm);
+                      return { item: e, start, end: start + (e.dur ?? 30) };
+                    }),
+                ),
+              );
+              const dayStats = createMemo(() => {
+                const busy = dayEvents.reduce((s, e) => s + (e.dur ?? 30), 0);
+                const slots = computeFreetimeSlots(
+                  timedPlacements().map((p) => ({
+                    start: p.start,
+                    end: p.end,
+                  })),
+                  6,
+                  22,
+                );
+                const longest = slots.reduce(
+                  (a, b) => (b.duration > a.duration ? b : a),
+                  slots[0] ?? { start: 0, duration: 0 },
+                );
+                return { busy, longest };
+              });
+              return (
                 <div
+                  onClick={() => props.onDayClick(day)}
                   style={{
                     display: "flex",
                     "flex-direction": "column",
-                    "align-items": "center",
-                    gap: "2px",
-                    "padding-bottom": "var(--space-2)",
-                    "border-bottom": "1px solid var(--cal-border)",
+                    gap: "var(--space-2)",
+                    "background-color": "var(--cal-surface)",
+                    border: `1px solid ${isSelected ? "var(--palm)" : "var(--cal-border)"}`,
+                    "border-radius": "var(--radius-lg)",
+                    padding: isTablet() ? "var(--space-2)" : "var(--space-3)",
+                    "min-height": isTablet() ? "380px" : "620px",
+                    cursor: "pointer",
+                    "box-shadow": isSelected
+                      ? "0 0 0 3px var(--palm-soft), var(--shadow-sm)"
+                      : "var(--shadow-sm)",
                   }}
                 >
-                  <span
-                    style={{
-                      "font-size": "var(--text-micro)",
-                      "font-weight": "700",
-                      "text-transform": "uppercase",
-                      "letter-spacing": "0.06em",
-                      color: "var(--cal-ink-soft)",
-                    }}
-                  >
-                    {WEEKDAY_NAMES[day.getDay()]}
-                  </span>
-                  <span
-                    style={{
-                      "font-family": "var(--font-serif)",
-                      "font-size": "var(--text-h3)",
-                      "font-weight": "800",
-                      width: "40px",
-                      height: "40px",
-                      display: "flex",
-                      "align-items": "center",
-                      "justify-content": "center",
-                      "border-radius": "var(--radius-md)",
-                      "background-color": isToday
-                        ? "var(--palm)"
-                        : "var(--paper-mid)",
-                      color: isToday ? "white" : "var(--cal-ink)",
-                    }}
-                  >
-                    {day.getDate()}
-                  </span>
                   <div
                     style={{
                       display: "flex",
-                      gap: "6px",
-                      "margin-top": "var(--space-2)",
-                      "font-size": "var(--text-micro)",
-                      color: "var(--cal-ink-muted)",
-                      "font-weight": "600",
+                      "flex-direction": "column",
+                      "align-items": "center",
+                      gap: "2px",
+                      "padding-bottom": "var(--space-2)",
+                      "border-bottom": "1px solid var(--cal-border)",
                     }}
                   >
-                    <span>{dayEvents.length} 会议</span>
-                    <span>·</span>
-                    <span>{formatTimeCompact(dayStats().busy)} 工作</span>
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    position: "relative",
-                    flex: 1,
-                    height: "560px",
-                  }}
-                >
-                  <For each={Array.from({ length: 13 }, (_, i) => i * 2)}>
-                    {(h) => (
+                    <span
+                      style={{
+                        "font-size": "var(--text-micro)",
+                        "font-weight": "700",
+                        "letter-spacing": "0.06em",
+                        color: "var(--cal-ink-soft)",
+                      }}
+                    >
+                      {WEEKDAY_NAMES[day.getDay()]}
+                    </span>
+                    <span
+                      style={{
+                        "font-family": "var(--font-serif)",
+                        "font-size": isTablet()
+                          ? "var(--text-h5)"
+                          : "var(--text-h3)",
+                        "font-weight": "800",
+                        width: "40px",
+                        height: "40px",
+                        display: "flex",
+                        "align-items": "center",
+                        "justify-content": "center",
+                        "border-radius": "var(--radius-md)",
+                        "background-color": isToday
+                          ? "var(--palm)"
+                          : "var(--paper-mid)",
+                        color: isToday ? "white" : "var(--cal-ink)",
+                      }}
+                    >
+                      {day.getDate()}
+                    </span>
+                    <Show when={!isTablet()}>
                       <div
                         style={{
-                          position: "absolute",
-                          left: 0,
-                          right: 0,
-                          top: `${(h / 24) * 100}%`,
-                          height: "1px",
-                          "background-color": "var(--border)",
-                          "z-index": 1,
+                          display: "flex",
+                          gap: "6px",
+                          "margin-top": "var(--space-2)",
+                          "font-size": "var(--text-micro)",
+                          color: "var(--cal-ink-muted)",
+                          "font-weight": "600",
                         }}
-                      />
-                    )}
-                  </For>
+                      >
+                        <span>{dayEvents.length} 会议</span>
+                        <span>·</span>
+                        <span>{formatMinutesCN(dayStats().busy)} 工作</span>
+                      </div>
+                    </Show>
+                  </div>
 
-                  <For each={dayEvents}>
-                    {(e) => {
-                      const start = timeToMinutes(e.tm);
-                      const end = start + (e.dur ?? 30);
-                      const isRecurring = !!e.recurrenceRule;
-                      return (
-                        <button
-                          data-cal-event-tile={
-                            isRecurring ? "recurring" : "single"
-                          }
-                          data-cal-event-id={e.id}
-                          onClick={(ev) => {
-                            ev.stopPropagation();
-                            props.onEventClick(e);
-                          }}
-                          onDblClick={(ev) => {
-                            ev.stopPropagation();
-                            props.onEventEdit(e);
-                          }}
-                          title={`${e.title || "(无标题)"} · ${formatMinutes(start)} – ${formatMinutes(end)}`}
-                          style={{
-                            position: "absolute",
-                            left: "4px",
-                            right: "4px",
-                            top: `${(start / DAY_MINUTES) * 100}%`,
-                            height: `${Math.max(((end - start) / DAY_MINUTES) * 100, 2)}%`,
-                            "min-height": "20px",
-                            "background-color": e.color,
-                            color: textColorForBg(e.color),
-                            "border-radius": "var(--radius-sm)",
-                            border: "none",
-                            padding: "3px 5px",
-                            "text-align": "left",
-                            cursor: "pointer",
-                            "font-size": "var(--text-micro)",
-                            "font-weight": "700",
-                            "z-index": 2,
-                            overflow: "hidden",
-                            "box-shadow": "var(--shadow-sm)",
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: "flex",
-                              "align-items": "center",
-                              gap: "4px",
-                              "font-family": "var(--font-mono)",
-                              opacity: 0.85,
+                  {/* All-day events live in a pinned strip at the top of
+                      the column — they have no time-of-day, so the time
+                      axis below would otherwise draw them as a 20px
+                      sliver at 00:00. */}
+                  <Show when={allDayEvents.length > 0}>
+                    <div
+                      style={{
+                        display: "flex",
+                        "flex-direction": "column",
+                        gap: "2px",
+                      }}
+                    >
+                      <For each={allDayEvents}>
+                        {(e) => (
+                          <button
+                            data-cal-event-tile="all-day"
+                            data-cal-event-id={e.id}
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              props.onEventClick(e);
                             }}
-                          >
-                            <span>{formatMinutes(start)}</span>
-                            {isRecurring && (
-                              <span
-                                aria-label="recurring"
-                                style={{
-                                  display: "inline-flex",
-                                  "align-items": "center",
-                                  "justify-content": "center",
-                                  width: "14px",
-                                  height: "14px",
-                                  "border-radius": "999px",
-                                  background: "rgba(255,255,255,0.25)",
-                                  "font-size": "10px",
-                                  "line-height": 1,
-                                  "font-weight": "800",
-                                }}
-                              >
-                                周
-                              </span>
-                            )}
-                          </div>
-                          <div
+                            title={`${e.title || "(无标题)"} · 全天`}
                             style={{
+                              display: "block",
+                              width: "100%",
+                              padding: "2px 6px",
+                              "background-color": e.color,
+                              color: textColorForBg(e.color),
+                              "border-radius": "var(--radius-sm)",
+                              border: "none",
+                              "font-size": "var(--text-micro)",
+                              "font-weight": "700",
+                              "text-align": "left",
                               "white-space": "nowrap",
-                              "text-overflow": "ellipsis",
                               overflow: "hidden",
+                              "text-overflow": "ellipsis",
+                              cursor: "pointer",
                             }}
                           >
                             {e.title || "(无标题)"}
-                          </div>
-                        </button>
-                      );
-                    }}
-                  </For>
-                </div>
+                          </button>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
 
-                <div
-                  style={{
-                    "font-size": "var(--text-caption)",
-                    "font-weight": "700",
-                    color:
-                      dayStats().longest.duration >= 60
-                        ? "var(--palm)"
-                        : "var(--text-muted)",
-                    padding: "var(--space-2) 0",
-                    "border-top": "1px solid var(--cal-border)",
-                    "text-align": "center",
-                  }}
-                >
-                  {dayStats().longest.duration >= 60
-                    ? `空闲 ${formatTimeCompact(dayStats().longest.duration)}`
-                    : "忙碌"}
+                  <div
+                    style={{
+                      position: "relative",
+                      flex: 1,
+                      height: isTablet() ? "260px" : "560px",
+                    }}
+                  >
+                    <For each={Array.from({ length: 13 }, (_, i) => i * 2)}>
+                      {(h) => (
+                        <div
+                          style={{
+                            position: "absolute",
+                            left: 0,
+                            right: 0,
+                            top: `${(h / 24) * 100}%`,
+                            height: "1px",
+                            "background-color": "var(--border)",
+                            "z-index": 1,
+                          }}
+                        />
+                      )}
+                    </For>
+
+                    <For each={timedPlacements()}>
+                      {(p) => {
+                        const e = p.item;
+                        const isRecurring = !!e.recurrenceRule;
+                        const colWidth = 100 / p.cols;
+                        return (
+                          <button
+                            data-cal-event-tile={
+                              isRecurring ? "recurring" : "single"
+                            }
+                            data-cal-event-id={e.id}
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              props.onEventClick(e);
+                            }}
+                            onDblClick={(ev) => {
+                              ev.stopPropagation();
+                              props.onEventEdit(e);
+                            }}
+                            title={`${e.title || "(无标题)"} · ${formatMinutes(p.start)} – ${formatMinutes(p.end)}${isTablet() ? " · 双击编辑" : ""}`}
+                            style={{
+                              position: "absolute",
+                              left: `calc(4px + ${p.col * colWidth}%)`,
+                              width: `calc(${colWidth}% - 8px)`,
+                              top: `${(p.start / DAY_MINUTES) * 100}%`,
+                              height: `${Math.max(((p.end - p.start) / DAY_MINUTES) * 100, 2)}%`,
+                              "min-height": "20px",
+                              "background-color": e.color,
+                              color: textColorForBg(e.color),
+                              "border-radius": "var(--radius-sm)",
+                              border: "none",
+                              padding: "3px 5px",
+                              "text-align": "left",
+                              cursor: "pointer",
+                              "font-size": "var(--text-micro)",
+                              "font-weight": "700",
+                              "z-index": 2,
+                              overflow: "hidden",
+                              "box-shadow": "var(--shadow-sm)",
+                            }}
+                          >
+                            <Show when={!isTablet()}>
+                              <div
+                                style={{
+                                  display: "flex",
+                                  "align-items": "center",
+                                  gap: "4px",
+                                  "font-family": "var(--font-mono)",
+                                  opacity: 0.85,
+                                  "white-space": "nowrap",
+                                  overflow: "hidden",
+                                }}
+                              >
+                                <span>{formatMinutes(p.start)}</span>
+                                {isRecurring && (
+                                  <span
+                                    aria-label="每周重复"
+                                    title="重复事件"
+                                    style={{
+                                      display: "inline-flex",
+                                      "align-items": "center",
+                                      "justify-content": "center",
+                                      width: "14px",
+                                      height: "14px",
+                                      "border-radius": "999px",
+                                      background: "rgba(255,255,255,0.25)",
+                                      "font-size": "10px",
+                                      "line-height": 1,
+                                      "font-weight": "800",
+                                    }}
+                                  >
+                                    周
+                                  </span>
+                                )}
+                              </div>
+                              <div
+                                style={{
+                                  "white-space": "nowrap",
+                                  "text-overflow": "ellipsis",
+                                  overflow: "hidden",
+                                }}
+                              >
+                                {e.title || "(无标题)"}
+                              </div>
+                            </Show>
+                          </button>
+                        );
+                      }}
+                    </For>
+                  </div>
+
+                  <Show when={!isTablet()}>
+                    <div
+                      style={{
+                        "font-size": "var(--text-caption)",
+                        "font-weight": "700",
+                        color:
+                          dayStats().longest.duration >= 60
+                            ? "var(--palm)"
+                            : "var(--text-muted)",
+                        padding: "var(--space-2) 0",
+                        "border-top": "1px solid var(--cal-border)",
+                        "text-align": "center",
+                      }}
+                    >
+                      {dayStats().longest.duration >= 60
+                        ? `空闲 ${formatMinutesCN(dayStats().longest.duration)}`
+                        : "忙碌"}
+                    </div>
+                  </Show>
                 </div>
-              </div>
-            );
-          }}
-        </For>
-      </div>
+              );
+            }}
+          </For>
+        </div>
+      </Show>
     </div>
   );
 }
@@ -1779,6 +2305,16 @@ function MonthMiniCalendar(props: {
     );
   });
 
+  // The arc strip under the mini calendar shows at most 3 lanes; the
+  // rest collapse into a "+N" line so tall months don't overflow the
+  // card.
+  const visibleArcs = createMemo(() => monthMultiDayEvents().slice(0, 3));
+  const hiddenArcs = createMemo(() =>
+    Math.max(0, monthMultiDayEvents().length - 3),
+  );
+
+  const coarsePointer = useMedia("(pointer: coarse)");
+
   return (
     <div
       style={{
@@ -1829,7 +2365,7 @@ function MonthMiniCalendar(props: {
           gap: "2px",
         }}
       >
-        <For each={["S", "M", "T", "W", "T", "F", "S"]}>
+        <For each={WEEKDAY_NAMES}>
           {(w) => (
             <div
               style={{
@@ -1869,7 +2405,8 @@ function MonthMiniCalendar(props: {
                   "font-size": "var(--text-micro)",
                   "font-weight": today ? "800" : "600",
                   "text-align": "center",
-                  padding: "4px 0",
+                  padding: coarsePointer() ? "10px 0" : "4px 0",
+                  "min-height": coarsePointer() ? "36px" : undefined,
                   "border-radius": "var(--radius-micro)",
                   "background-color": today ? "var(--palm)" : "transparent",
                   color: today ? "white" : "var(--cal-ink)",
@@ -1908,9 +2445,10 @@ function MonthMiniCalendar(props: {
             height: `${Math.min(monthMultiDayEvents().length, 3) * 14 + 6}px`,
             "margin-top": "var(--space-2)",
             padding: "3px 0",
+            overflow: "hidden",
           }}
         >
-          <For each={monthMultiDayEvents()}>
+          <For each={visibleArcs()}>
             {(e, idx) => {
               const monthStart = new Date(props.year, props.month, 1);
               const monthEnd = new Date(props.year, props.month + 1, 0);
@@ -1943,6 +2481,17 @@ function MonthMiniCalendar(props: {
             }}
           </For>
         </div>
+        <Show when={hiddenArcs() > 0}>
+          <div
+            style={{
+              "font-size": "var(--text-micro)",
+              color: "var(--cal-ink-muted)",
+              "text-align": "right",
+            }}
+          >
+            +{hiddenArcs()} 个跨日事件
+          </div>
+        </Show>
       </Show>
     </div>
   );
@@ -1970,13 +2519,6 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const num = parseInt(full, 16);
   if (Number.isNaN(num)) return null;
   return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
-}
-
-function formatTimeCompact(minutes: number): string {
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  if (m === 0) return `${h}h`;
-  return `${h}h ${m}m`;
 }
 
 function computeFreetimeSlots(
@@ -2024,18 +2566,37 @@ function daysBetween(a: Date, b: Date): number {
 
 /* ── Event edit modal ───────────────────────────────────── */
 
-function EventEditModal(props: {
+export function EventEditModal(props: {
   ev: CalendarEvent;
   isNew: boolean;
   onClose: () => void;
-  onSave: (e: CalendarEvent) => void;
-  onDelete: () => void;
+  onSave: (e: CalendarEvent) => void | Promise<void>;
+  onDelete?: () => void | Promise<void>;
 }) {
   const [draft, setDraft] = createSignal<CalendarEvent>(
     JSON.parse(JSON.stringify(props.ev)),
   );
   const [contacts] = createResource(listContacts);
   const [attendeeQ, setAttendeeQ] = createSignal("");
+  const [saving, setSaving] = createSignal(false);
+  const [confirmingDelete, setConfirmingDelete] = createSignal(false);
+
+  const titleOk = () => draft().title.trim().length > 0;
+  const datesOk = () =>
+    !draft().endDt ||
+    draft().endDt!.slice(0, 10) >= draft().dt.slice(0, 10);
+  const durOk = () => (draft().allDay ?? false) || (draft().dur ?? 30) > 0;
+  const canSave = () => titleOk() && datesOk() && durOk() && !saving();
+
+  const save = async () => {
+    if (!canSave()) return;
+    setSaving(true);
+    try {
+      await props.onSave(draft());
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const toggleAttendee = (id: string) => {
     const d = draft();
@@ -2057,258 +2618,347 @@ function EventEditModal(props: {
   });
 
   return (
-    <Modal
-      open
-      onClose={props.onClose}
-      title={props.isNew ? "New event" : "Edit event"}
-      width="560px"
-      footer={
-        <>
-          <Show when={!props.isNew}>
+    <>
+      <Modal
+        open
+        onClose={props.onClose}
+        title={props.isNew ? "新建事件" : "编辑事件"}
+        width="560px"
+        footer={
+          <>
+            <Show when={!props.isNew && props.onDelete}>
+              <button
+                onClick={() => setConfirmingDelete(true)}
+                style={{
+                  padding: "8px 16px",
+                  color: "var(--status-danger)",
+                  border: "0.5px solid var(--status-danger)",
+                  "border-radius": "var(--radius-pill)",
+                  "font-size": "var(--text-caption)",
+                  "margin-right": "auto",
+                }}
+              >
+                删除
+              </button>
+            </Show>
             <button
-              onClick={props.onDelete}
+              onClick={props.onClose}
               style={{
                 padding: "8px 16px",
-                color: "var(--coral)",
+                color: "var(--text-secondary)",
                 "font-size": "var(--text-caption)",
               }}
             >
-              Delete
+              取消
             </button>
+            <button
+              onClick={() => void save()}
+              disabled={!canSave()}
+              title={
+                !titleOk()
+                  ? "请先填写标题"
+                  : !datesOk()
+                    ? "结束日期不能早于开始日期"
+                    : !durOk()
+                      ? "时长需大于 0 分钟"
+                      : undefined
+              }
+              style={{
+                padding: "10px 20px",
+                background: "var(--palm)",
+                color: "white",
+                "border-radius": "var(--radius-pill)",
+                "font-weight": "700",
+                "font-size": "var(--text-caption)",
+                opacity: canSave() ? 1 : 0.5,
+                cursor: canSave() ? "pointer" : "not-allowed",
+              }}
+            >
+              {saving() ? "保存中…" : "保存"}
+            </button>
+          </>
+        }
+      >
+        <Field label="标题">
+          <input
+            value={draft().title}
+            onInput={(e) =>
+              setDraft({ ...draft(), title: e.currentTarget.value })
+            }
+            placeholder="例如：晨会、产品评审…"
+            style={inputStyle}
+          />
+          <Show when={!titleOk()}>
+            <div
+              style={{
+                "font-size": "var(--text-micro)",
+                color: "var(--text-muted)",
+                "margin-top": "2px",
+              }}
+            >
+              标题必填
+            </div>
           </Show>
-          <button
-            onClick={props.onClose}
+        </Field>
+        <Field label="全天">
+          <label
             style={{
-              padding: "8px 16px",
+              display: "flex",
+              "align-items": "center",
+              gap: "var(--space-2)",
+              "font-size": "var(--text-body-sm)",
               color: "var(--text-secondary)",
-              "font-size": "var(--text-caption)",
             }}
           >
-            取消
-          </button>
-          <button
-            onClick={() => props.onSave(draft())}
-            style={{
-              padding: "10px 20px",
-              background: "var(--palm)",
-              color: "white",
-              "border-radius": "var(--radius-pill)",
-              "font-weight": "700",
-              "font-size": "var(--text-caption)",
-            }}
-          >
-            保存
-          </button>
-        </>
-      }
-    >
-      <Field label="Title">
-        <input
-          value={draft().title}
-          onInput={(e) =>
-            setDraft({ ...draft(), title: e.currentTarget.value })
-          }
-          style={inputStyle}
-        />
-      </Field>
-      <Field label="All day">
-        <label
+            <input
+              type="checkbox"
+              checked={draft().allDay ?? false}
+              onChange={(e) =>
+                setDraft({
+                  ...draft(),
+                  allDay: e.currentTarget.checked,
+                  tm: e.currentTarget.checked ? "" : "10:00",
+                  dur: e.currentTarget.checked ? undefined : 30,
+                })
+              }
+              style={{ "accent-color": "var(--palm)" }}
+            />
+            全天事件
+          </label>
+        </Field>
+        <div
           style={{
             display: "flex",
-            "align-items": "center",
-            gap: "var(--space-2)",
-            "font-size": "var(--text-body-sm)",
-            color: "var(--text-secondary)",
+            gap: "var(--space-3)",
+            "flex-wrap": "wrap",
           }}
         >
-          <input
-            type="checkbox"
-            checked={draft().allDay ?? false}
-            onChange={(e) =>
-              setDraft({
-                ...draft(),
-                allDay: e.currentTarget.checked,
-                tm: e.currentTarget.checked ? "" : "10:00",
-                dur: e.currentTarget.checked ? undefined : 30,
-              })
-            }
-          />
-          All-day event
-        </label>
-      </Field>
-      <div style={{ display: "flex", gap: "var(--space-3)" }}>
-        <Field label="Start date">
-          <input
-            type="date"
-            value={draft().dt.slice(0, 10)}
-            onInput={(e) =>
-              setDraft({
-                ...draft(),
-                dt: e.currentTarget.value + draft().dt.slice(10),
-              })
-            }
-            style={inputStyle}
-          />
-        </Field>
-        <Field label="End date">
-          <input
-            type="date"
-            value={draft().endDt?.slice(0, 10) ?? ""}
-            onInput={(e) => {
-              const v = e.currentTarget.value;
-              setDraft({
-                ...draft(),
-                endDt: v ? v + "T00:00:00" : undefined,
-              });
-            }}
-            style={inputStyle}
-          />
-        </Field>
-        <Show when={!draft().allDay}>
-          <Field label="Time">
+          <Field label="开始日期">
             <input
-              type="time"
-              value={draft().tm}
-              onInput={(e) =>
-                setDraft({ ...draft(), tm: e.currentTarget.value })
-              }
-              style={inputStyle}
-            />
-          </Field>
-          <Field label="Duration (min)">
-            <input
-              type="number"
-              value={draft().dur ?? 30}
+              type="date"
+              value={draft().dt.slice(0, 10)}
               onInput={(e) =>
                 setDraft({
                   ...draft(),
-                  dur: parseInt(e.currentTarget.value) || 30,
+                  dt: e.currentTarget.value + draft().dt.slice(10),
                 })
               }
               style={inputStyle}
             />
           </Field>
-        </Show>
-      </div>
-      <Field label="Location">
-        <input
-          value={draft().location ?? ""}
-          onInput={(e) =>
-            setDraft({
-              ...draft(),
-              location: e.currentTarget.value || undefined,
-            })
-          }
-          placeholder="会议室 / 地址"
-          style={inputStyle}
-        />
-      </Field>
-      <Field label="Video link">
-        <input
-          value={draft().videoLink ?? ""}
-          onInput={(e) =>
-            setDraft({
-              ...draft(),
-              videoLink: e.currentTarget.value || undefined,
-            })
-          }
-          placeholder="https://…"
-          style={inputStyle}
-        />
-      </Field>
-      <Field label="Reminder (minutes before)">
-        <input
-          type="number"
-          value={draft().reminder ?? ""}
-          onInput={(e) => {
-            const v = e.currentTarget.value;
-            setDraft({
-              ...draft(),
-              reminder: v ? parseInt(v) : undefined,
-            });
-          }}
-          placeholder="15"
-          style={inputStyle}
-        />
-      </Field>
-      <Field label="Attendees">
-        <input
-          value={attendeeQ()}
-          onInput={(e) => setAttendeeQ(e.currentTarget.value)}
-          placeholder="搜索联系人…"
-          style={{ ...inputStyle, "margin-bottom": "var(--space-2)" }}
-        />
-        <div
-          style={{
-            display: "flex",
-            "flex-wrap": "wrap",
-            gap: "var(--space-2)",
-            "max-height": "160px",
-            "overflow-y": "auto",
-            padding: "var(--space-2)",
-            background: "var(--paper-mid)",
-            "border-radius": "var(--radius-md)",
-          }}
-        >
-          <For each={filteredContacts()}>
-            {(c) => {
-              const selected = () => draft().pids.includes(c.id);
-              return (
-                <button
-                  onClick={() => toggleAttendee(c.id)}
-                  style={{
-                    display: "flex",
-                    "align-items": "center",
-                    gap: "var(--space-1)",
-                    padding: "4px 10px",
-                    background: selected()
-                      ? "var(--palm-soft)"
-                      : "var(--paper-light)",
-                    color: selected() ? "var(--palm)" : "var(--text-secondary)",
-                    "border-radius": "var(--radius-pill)",
-                    border: selected()
-                      ? "1px solid var(--palm)"
-                      : "1px solid transparent",
-                    "font-size": "var(--text-caption)",
-                    cursor: "pointer",
-                  }}
-                >
-                  <Avatar name={c.name} src={c.avatar} size={16} />
-                  <span>{c.name}</span>
-                  {selected() && <Icon name="ph-check" size={12} />}
-                </button>
-              );
-            }}
-          </For>
+          <Field label="结束日期">
+            <input
+              type="date"
+              value={draft().endDt?.slice(0, 10) ?? ""}
+              min={draft().dt.slice(0, 10)}
+              onInput={(e) => {
+                const v = e.currentTarget.value;
+                setDraft({
+                  ...draft(),
+                  endDt: v ? v + "T00:00:00" : undefined,
+                });
+              }}
+              style={{
+                ...inputStyle,
+                border: datesOk()
+                  ? "0.5px solid var(--border)"
+                  : "1px solid var(--status-danger)",
+              }}
+            />
+            <Show when={!datesOk()}>
+              <div
+                style={{
+                  "font-size": "var(--text-micro)",
+                  color: "var(--status-danger)",
+                  "margin-top": "2px",
+                }}
+              >
+                结束日期不能早于开始日期
+              </div>
+            </Show>
+          </Field>
+          <Show when={!draft().allDay}>
+            <Field label="时间">
+              <input
+                type="time"
+                value={draft().tm}
+                onInput={(e) =>
+                  setDraft({ ...draft(), tm: e.currentTarget.value })
+                }
+                style={inputStyle}
+              />
+            </Field>
+            <Field label="时长（分钟）">
+              <input
+                type="number"
+                min="1"
+                step="5"
+                value={draft().dur ?? 30}
+                onInput={(e) =>
+                  setDraft({
+                    ...draft(),
+                    dur: Math.max(0, parseInt(e.currentTarget.value) || 0),
+                  })
+                }
+                style={inputStyle}
+              />
+            </Field>
+          </Show>
         </div>
-      </Field>
-      <Field label="Color">
-        <input
-          type="color"
-          value={draft().color}
-          onInput={(e) =>
-            setDraft({ ...draft(), color: e.currentTarget.value })
-          }
-          style={{ width: "60px", height: "32px", padding: 0, border: "none" }}
-        />
-      </Field>
-      <Field label="Brief">
-        <textarea
-          value={draft().brief}
-          onInput={(e) =>
-            setDraft({ ...draft(), brief: e.currentTarget.value })
-          }
-          rows={3}
-          placeholder="会议简介 / 议程摘要"
-          style={{
-            ...inputStyle,
-            "min-height": "80px",
-            "font-family": "var(--font-body)",
-            resize: "vertical",
-          }}
-        />
-      </Field>
-    </Modal>
+        <Field label="地点">
+          <input
+            value={draft().location ?? ""}
+            onInput={(e) =>
+              setDraft({
+                ...draft(),
+                location: e.currentTarget.value || undefined,
+              })
+            }
+            placeholder="会议室 / 地址"
+            style={inputStyle}
+          />
+        </Field>
+        <Field label="视频链接">
+          <input
+            value={draft().videoLink ?? ""}
+            onInput={(e) =>
+              setDraft({
+                ...draft(),
+                videoLink: e.currentTarget.value || undefined,
+              })
+            }
+            placeholder="https://…"
+            style={inputStyle}
+          />
+        </Field>
+        <Field label="提醒">
+          <select
+            value={draft().reminder === undefined ? "" : String(draft().reminder)}
+            onChange={(e) => {
+              const v = e.currentTarget.value;
+              setDraft({
+                ...draft(),
+                reminder: v === "" ? undefined : parseInt(v, 10),
+              });
+            }}
+            style={inputStyle}
+          >
+            <option value="">不提醒</option>
+            <option value="5">提前 5 分钟</option>
+            <option value="15">提前 15 分钟</option>
+            <option value="30">提前 30 分钟</option>
+            <option value="60">提前 1 小时</option>
+            <option value="1440">提前 1 天</option>
+          </select>
+          <div
+            style={{
+              "font-size": "var(--text-micro)",
+              color: "var(--text-muted)",
+              "margin-top": "2px",
+            }}
+          >
+            到点会在通知中心提醒
+          </div>
+        </Field>
+        <Field label="参会人">
+          <input
+            value={attendeeQ()}
+            onInput={(e) => setAttendeeQ(e.currentTarget.value)}
+            placeholder="搜索联系人…"
+            style={{ ...inputStyle, "margin-bottom": "var(--space-2)" }}
+          />
+          <div
+            style={{
+              display: "flex",
+              "flex-wrap": "wrap",
+              gap: "var(--space-2)",
+              "max-height": "160px",
+              "overflow-y": "auto",
+              padding: "var(--space-2)",
+              background: "var(--paper-mid)",
+              "border-radius": "var(--radius-md)",
+            }}
+          >
+            <For each={filteredContacts()}>
+              {(c) => {
+                const selected = () => draft().pids.includes(c.id);
+                return (
+                  <button
+                    onClick={() => toggleAttendee(c.id)}
+                    style={{
+                      display: "flex",
+                      "align-items": "center",
+                      gap: "var(--space-1)",
+                      padding: "4px 10px",
+                      background: selected()
+                        ? "var(--palm-soft)"
+                        : "var(--paper-light)",
+                      color: selected()
+                        ? "var(--palm)"
+                        : "var(--text-secondary)",
+                      "border-radius": "var(--radius-pill)",
+                      border: selected()
+                        ? "1px solid var(--palm)"
+                        : "1px solid transparent",
+                      "font-size": "var(--text-caption)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Avatar name={c.name} src={c.avatar} size={16} />
+                    <span>{c.name}</span>
+                    {selected() && <Icon name="ph-check" size={12} />}
+                  </button>
+                );
+              }}
+            </For>
+          </div>
+        </Field>
+        <Field label="颜色">
+          <input
+            type="color"
+            value={draft().color}
+            onInput={(e) =>
+              setDraft({ ...draft(), color: e.currentTarget.value })
+            }
+            style={{
+              width: "60px",
+              height: "32px",
+              padding: 0,
+              border: "none",
+            }}
+          />
+        </Field>
+        <Field label="简介">
+          <textarea
+            value={draft().brief}
+            onInput={(e) =>
+              setDraft({ ...draft(), brief: e.currentTarget.value })
+            }
+            rows={3}
+            placeholder="会议简介 / 议程摘要"
+            style={{
+              ...inputStyle,
+              "min-height": "80px",
+              "font-family": "var(--font-body)",
+              resize: "vertical",
+            }}
+          />
+        </Field>
+      </Modal>
+
+      <ConfirmDialog
+        open={confirmingDelete()}
+        title={`删除「${props.ev.title || "无标题"}」？`}
+        body={
+          props.ev.recurrenceRule
+            ? "这是一个重复事件，将删除整个系列。此操作无法撤销。"
+            : "此操作无法撤销。"
+        }
+        confirmLabel="删除"
+        onConfirm={() => void props.onDelete?.()}
+        onCancel={() => setConfirmingDelete(false)}
+      />
+    </>
   );
 }
 
@@ -2351,3 +3001,16 @@ const toolbarBtn = {
   "align-items": "center",
   gap: "4px",
 };
+
+/** Colocated CSS for hover/keyboard states that inline styles can't
+ *  express. Kept in the view (not base.css) because every selector is
+ *  `cal-`-scoped to this file. */
+const CALENDAR_CSS = `
+.cal-day-label .cal-day-label-pencil { opacity: 0; transition: opacity 0.15s var(--ease-out); color: var(--text-muted); }
+.cal-day-label:hover .cal-day-label-pencil, .cal-day-label:focus-visible .cal-day-label-pencil { opacity: 1; }
+.cal-day-label:hover { background: var(--paper-mid); }
+.cal-row-edit { opacity: 0; transition: opacity 0.15s var(--ease-out), background 0.15s var(--ease-out); }
+.cal-row:hover .cal-row-edit, .cal-row:focus-within .cal-row-edit { opacity: 1; }
+.cal-row-edit:hover { background: var(--paper-mid); color: var(--palm); }
+@media (pointer: coarse) { .cal-row-edit { opacity: 1; } }
+`;

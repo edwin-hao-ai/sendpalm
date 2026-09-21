@@ -524,6 +524,15 @@ test.describe("perf-2-pass: full surface scan", () => {
       const w = window as unknown as { __perf: { longTasks: unknown[] } };
       w.__perf.longTasks = [];
     });
+    // The MessagePanel section above leaves the detail panel open, and
+    // its click-to-close scrim covers the whole viewport — navigating
+    // with the panel open would just close the panel. Press Escape
+    // first so the nav click reaches the sidebar.
+    await page.keyboard.press("Escape");
+    await page
+      .locator("#detail-panel")
+      .waitFor({ state: "detached", timeout: 5_000 })
+      .catch(() => {});
     await clickView(page, "calendar");
     await page.waitForTimeout(300);
     // Switch to year view.

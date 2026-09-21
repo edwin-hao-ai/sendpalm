@@ -1,4 +1,10 @@
-/** LabelPicker — modal to assign labels to one or more messages. */
+/** LabelPicker — modal to assign labels to one or more messages.
+ *
+ *  Multi-select semantics are tri-state: a label on every target is
+ *  "all", on none is "none", and on some is "some" (indeterminate).
+ *  Saving never touches "some" labels on messages that didn't already
+ *  have them — the earlier union-write silently copied one message's
+ *  labels onto every selected message. */
 
 import {
   For,
@@ -18,6 +24,7 @@ import {
 } from "../stores/data";
 import { showToast } from "../stores/ui";
 import { uid } from "../utils/id";
+import type { ID } from "../types";
 
 const PRESET_COLORS = [
   "#0A8F63",
@@ -29,6 +36,39 @@ const PRESET_COLORS = [
   "#5856d6",
   "#ff2d55",
 ];
+
+export type LabelMark = "all" | "some" | "none";
+
+/** Per-label natural mark across the target messages. */
+export function naturalLabelMarks(
+  targets: { labels: ID[] }[],
+  labelIds: ID[],
+): Map<ID, LabelMark> {
+  const marks = new Map<ID, LabelMark>();
+  for (const id of labelIds) {
+    const have = targets.filter((m) => (m.labels ?? []).includes(id)).length;
+    if (targets.length > 0 && have === targets.length) marks.set(id, "all");
+    else if (have === 0) marks.set(id, "none");
+    else marks.set(id, "some");
+  }
+  return marks;
+}
+
+/** Labels a message should end up with, given the effective marks.
+ *  - "all"  → present on the result
+ *  - "none" → removed
+ *  - "some" → unchanged (kept only if the message already had it)
+ *  Label ids the label table no longer knows about are preserved. */
+export function labelsForMessage(
+  own: ID[],
+  marks: Map<ID, LabelMark>,
+): ID[] {
+  const kept = own.filter((id) => marks.get(id) !== "none");
+  for (const [id, mark] of marks) {
+    if (mark === "all" && !kept.includes(id)) kept.push(id);
+  }
+  return kept;
+}
 
 export function LabelPicker(props: {
   open: boolean;
@@ -44,53 +84,69 @@ export function LabelPicker(props: {
     () => props.messageIds,
     listMessageBucketSlicesByIds,
   );
-  const [selected, setSelected] = createSignal<Set<string>>(new Set());
+  // User toggles on top of the natural marks: id → forced "all"/"none".
+  const [overrides, setOverrides] = createSignal<Record<ID, LabelMark>>({});
   const [newName, setNewName] = createSignal("");
   const [newColor, setNewColor] = createSignal<string>(PRESET_COLORS[0]!);
   const [showNew, setShowNew] = createSignal(false);
+  const [busy, setBusy] = createSignal(false);
 
   const targets = createMemo(() => messages() ?? []);
 
   const count = () => targets().length;
 
-  // Reset selected labels to the union of target message labels whenever
-  // the picker opens or the underlying message list changes.
-  createEffect(() => {
-    if (!props.open) return;
-    const msgs = messages();
-    if (!msgs) return;
-    const next = new Set<string>();
-    for (const m of msgs) {
-      if (props.messageIds.includes(m.id)) {
-        for (const l of m.labels ?? []) next.add(l);
-      }
+  const marks = createMemo<Map<ID, LabelMark>>(() => {
+    if (!props.open) return new Map();
+    const base = naturalLabelMarks(
+      targets(),
+      (labels() ?? []).map((l) => l.id),
+    );
+    for (const [id, mark] of Object.entries(overrides())) {
+      base.set(id, mark);
     }
-    setSelected(next);
+    return base;
+  });
+
+  // Reset user toggles whenever the picker (re)opens or the underlying
+  // message list changes, so stale overrides never leak between
+  // selections.
+  createEffect(() => {
+    if (props.open) {
+      void targets();
+      setOverrides({});
+    }
   });
 
   const toggle = (id: string) => {
-    const next = new Set(selected());
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelected(next);
+    const current = marks().get(id) ?? "none";
+    setOverrides((prev) => ({
+      ...prev,
+      [id]: current === "all" ? "none" : "all",
+    }));
   };
 
   const save = async () => {
-    const finalLabels = Array.from(selected());
-    // Update only the labels column. The full Message row was never
-    // loaded by this modal (we use the bucket-slice projection), so
-    // we can't call `upsertMessage` here — that would NULLOUT
-    // every other column. setMessageLabels is a focused UPDATE that
-    // preserves body / subj / prev / body_html / etc.
-    for (const m of targets()) {
-      await setMessageLabels(m.id, finalLabels);
+    if (busy()) return;
+    setBusy(true);
+    try {
+      // Update only the labels column. The full Message row was never
+      // loaded by this modal (we use the bucket-slice projection), so
+      // we can't call `upsertMessage` here — that would NULLOUT
+      // every other column. setMessageLabels is a focused UPDATE that
+      // preserves body / subj / prev / body_html / etc.
+      const m = marks();
+      for (const t of targets()) {
+        await setMessageLabels(t.id, labelsForMessage(t.labels ?? [], m));
+      }
+      props.onChange?.();
+      showToast({
+        message: count() > 1 ? `已更新 ${count()} 封邮件的标签` : "标签已更新",
+        kind: "success",
+      });
+      props.onClose();
+    } finally {
+      setBusy(false);
     }
-    props.onChange?.();
-    showToast({
-      message: count() > 1 ? `已更新 ${count()} 封邮件标签` : "标签已更新",
-      kind: "success",
-    });
-    props.onClose();
   };
 
   const createLabel = async () => {
@@ -143,6 +199,7 @@ export function LabelPicker(props: {
           </button>
           <button
             onClick={save}
+            disabled={busy()}
             style={{
               padding: "8px 14px",
               background: "var(--palm)",
@@ -150,9 +207,10 @@ export function LabelPicker(props: {
               "border-radius": "var(--radius-pill)",
               "font-size": "var(--text-caption)",
               "font-weight": "700",
+              opacity: busy() ? 0.6 : 1,
             }}
           >
-            保存
+            {busy() ? "保存中…" : "保存"}
           </button>
         </div>
       }
@@ -167,7 +225,7 @@ export function LabelPicker(props: {
                 "font-size": "var(--text-caption)",
               }}
             >
-              还没有标签。在 Settings → Labels 管理，或点击下方创建。
+              还没有标签。在 设置 → 标签 中管理，或点击下方创建。
             </p>
           }
         >
@@ -180,41 +238,57 @@ export function LabelPicker(props: {
             }}
           >
             <For each={labels()}>
-              {(l) => (
-                <button
-                  onClick={() => toggle(l.id)}
-                  style={{
-                    display: "flex",
-                    "align-items": "center",
-                    gap: "var(--space-2)",
-                    padding: "8px 10px",
-                    "border-radius": "var(--radius-md)",
-                    background: selected().has(l.id)
-                      ? "var(--palm-soft)"
-                      : "transparent",
-                    color: selected().has(l.id)
-                      ? "var(--palm)"
-                      : "var(--text-primary)",
-                    "text-align": "left",
-                    "font-size": "var(--text-body-sm)",
-                    "font-weight": selected().has(l.id) ? "700" : "500",
-                  }}
-                >
-                  <span
+              {(l) => {
+                const mark = () => marks().get(l.id) ?? "none";
+                return (
+                  <button
+                    onClick={() => toggle(l.id)}
+                    aria-pressed={mark() === "all"}
+                    title={
+                      mark() === "some"
+                        ? `${l.name} · 仅部分邮件已使用`
+                        : l.name
+                    }
                     style={{
-                      width: "10px",
-                      height: "10px",
-                      "border-radius": "50%",
-                      "background-color": l.color,
-                      "flex-shrink": 0,
+                      display: "flex",
+                      "align-items": "center",
+                      gap: "var(--space-2)",
+                      padding: "8px 10px",
+                      "border-radius": "var(--radius-md)",
+                      background:
+                        mark() === "all"
+                          ? "var(--palm-soft)"
+                          : mark() === "some"
+                            ? "var(--paper-mid)"
+                            : "transparent",
+                      color:
+                        mark() === "none"
+                          ? "var(--text-primary)"
+                          : "var(--palm)",
+                      "text-align": "left",
+                      "font-size": "var(--text-body-sm)",
+                      "font-weight": mark() === "all" ? "700" : "500",
                     }}
-                  />
-                  <span style={{ flex: 1 }}>{l.name}</span>
-                  <Show when={selected().has(l.id)}>
-                    <Icon name="ph-check" size={14} />
-                  </Show>
-                </button>
-              )}
+                  >
+                    <span
+                      style={{
+                        width: "10px",
+                        height: "10px",
+                        "border-radius": "50%",
+                        "background-color": l.color,
+                        "flex-shrink": 0,
+                      }}
+                    />
+                    <span style={{ flex: 1 }}>{l.name}</span>
+                    <Show when={mark() === "all"}>
+                      <Icon name="ph-check" size={14} />
+                    </Show>
+                    <Show when={mark() === "some"}>
+                      <Icon name="ph-minus" size={14} />
+                    </Show>
+                  </button>
+                );
+              }}
             </For>
           </div>
         </Show>
@@ -251,7 +325,14 @@ export function LabelPicker(props: {
             <input
               value={newName()}
               onInput={(e) => setNewName(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void createLabel();
+                }
+              }}
               placeholder="标签名称"
+              aria-label="标签名称"
               style={{
                 padding: "6px 10px",
                 "border-radius": "var(--radius-md)",
@@ -259,23 +340,34 @@ export function LabelPicker(props: {
                 "font-size": "var(--text-body-sm)",
               }}
             />
-            <div style={{ display: "flex", gap: "6px" }}>
+            <div style={{ display: "flex", gap: "2px", "flex-wrap": "wrap" }}>
               <For each={PRESET_COLORS}>
                 {(c) => (
                   <button
                     onClick={() => setNewColor(c)}
                     style={{
-                      width: "22px",
-                      height: "22px",
-                      "border-radius": "50%",
-                      "background-color": c,
-                      border:
-                        newColor() === c
-                          ? "2px solid var(--text-primary)"
-                          : "2px solid transparent",
+                      width: "32px",
+                      height: "32px",
+                      display: "inline-flex",
+                      "align-items": "center",
+                      "justify-content": "center",
+                      background: "transparent",
                     }}
                     aria-label={`选择颜色 ${c}`}
-                  />
+                  >
+                    <span
+                      style={{
+                        width: "22px",
+                        height: "22px",
+                        "border-radius": "50%",
+                        "background-color": c,
+                        border:
+                          newColor() === c
+                            ? "2px solid var(--text-primary)"
+                            : "2px solid transparent",
+                      }}
+                    />
+                  </button>
                 )}
               </For>
             </div>

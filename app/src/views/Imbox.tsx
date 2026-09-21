@@ -29,10 +29,11 @@ import {
   listContacts,
   listPileMessages,
   moveMessageToBucket,
-  upsertMessage,
   upsertContact,
+  markMessageUnread,
+  setMessagePileFlags,
 } from "../stores/data";
-import { getMessage, type PileMessage } from "../stores/data";
+import { type PileMessage } from "../stores/data";
 import { usePaginatedMessages } from "../utils/paginated-messages";
 import type { Contact, Message, MessageBucket } from "../types";
 import { startDrag, endDrag, type DragTarget } from "../utils/drag";
@@ -48,17 +49,25 @@ import {
   softRefreshTick,
   setView,
   getSortMode,
+  commandPaletteOpen,
+  searchOpen,
+  notificationsOpen,
+  composeOpen,
+  helpOpen,
+  detailOpen,
+  agentPanelOpen,
   type ViewName,
 } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { SkeletonList } from "../components/Skeleton";
+import { Empty, ErrorState } from "../components/Empty";
 import { SwipeActions } from "../components/SwipeActions";
 import { priorityScore } from "../utils/priority";
 import { SORT_LABELS, type SortMode } from "../utils/sort-imbox";
 import { registerPrepend } from "../services/sync-events";
 import { FilterPanel } from "../components/FilterPanel";
-import { groupItemsByDate } from "./Imbox-helpers";
+import { groupItemsByDate, isImboxListMessage } from "./Imbox-helpers";
 
 interface Bundle {
   contactId: string;
@@ -74,14 +83,8 @@ interface Pile {
   icon: string;
   title: string;
   messages: PileMessage[];
-  /** View name to navigate to from the drawer's "Open board" button.
-   *  "focusReply" for Pending (it's the de facto Pending board), dedicated
-   *  pile board views for Saved / Remind. */
+  /** View name to navigate to from the drawer's "查看全部" button. */
   openBoardView: ViewName;
-  /** True when the pile's destination view is the Focus & Reply flow
-   *  (i.e. Pending) — we surface a "Focus & Reply" action button next
-   *  to the title in addition to the regular "Open board" link. */
-  hasFocusAction: boolean;
 }
 
 const BUNDLE_THRESHOLD = 3;
@@ -199,9 +202,7 @@ export function Imbox() {
   // First-time senders = contacts where screened=0 OR firstSeen=1.
   // For these we show the row with an inline approve pill so the user
   // never has to leave Imbox for a single-message decision.
-  const _isFirstTime = (c: Contact | undefined) =>
-    !c || !!c.firstSeen || !c.screened;
-  void _isFirstTime;
+  // (Predicate lives in `isFirstTimeContact` below, next to MessageCard.)
 
   // Per-message priority score (matches prototype §priorityScore).
   const scoreFor = (m: Message) => {
@@ -222,7 +223,7 @@ export function Imbox() {
   // changes. WKWebView (real Tauri) is 2-3x more sensitive to this than
   // Chrome and the dominant cost during the "tab switch → scroll" window.
   const renderList = createMemo<ItemList>(() => {
-    const list = items().filter((m) => !m.setAside && !m.replyLater);
+    const list = items().filter(isImboxListMessage);
     const map = contactMap();
 
     const bySender = new Map<string, Message[]>();
@@ -316,40 +317,36 @@ export function Imbox() {
       {
         id: "pending",
         icon: "ph-clock",
-        title: "Pending",
+        title: "稍后回复",
         messages: all.filter((m) => m.replyLater),
-        // P1-1: route to the dedicated Focus & Reply view (the HEY-style
-        // focused reply flow). Previously this routed to the regular
-        // "replyLater" PileBoard, which was just a list with no focus
-        // action. The Main.tsx router already mounts <FocusReply /> at
-        // view="focusReply" — the dev comment from 2026-08-15 said
-        // the routing didn't work; the actual blocker was the
-        // <PileCard> buttons all calling setView(openBoardView)
-        // unconditionally, so the user always landed on the plain
-        // board. Now Pending's Open board → replyLater, Focus & Reply
-        // button → focusReply.
+        // The pile board for Pending is the plain list; the focused
+        // reply flow lives on the standalone 专注回复 button next to
+        // the piles row (see the render below).
         openBoardView: "replyLater",
-        hasFocusAction: true,
       },
       {
         id: "saved",
         icon: "ph-push-pin",
-        title: "Saved",
+        title: "已搁置",
         messages: all.filter((m) => m.setAside),
         openBoardView: "setAside",
-        hasFocusAction: false,
       },
       {
         id: "remind",
         icon: "ph-arrow-fat-line-up",
-        title: "Remind",
+        title: "提醒",
         messages: all.filter((m) => m.bubbleUpAt),
         openBoardView: "bubbleUp",
-        hasFocusAction: false,
       },
     ];
     return all_piles.filter((p) => p.messages.length > 0);
   });
+
+  // Count for the standalone 专注回复 button (shown when the Pending
+  // pile is non-empty).
+  const pendingCount = createMemo(
+    () => (pileMessages() ?? []).filter((m) => m.replyLater).length,
+  );
 
   const remindedCount = createMemo(
     () => (pileMessages() ?? []).filter((m) => m.bubbleUpAt).length,
@@ -402,7 +399,77 @@ export function Imbox() {
     setSelectedIds(new Set<string>());
     setLastSelectedId(null);
   };
-  void clearSelection; // exposed for downstream bulk-action surfaces
+
+  /* ── Bulk actions (mouse-discoverable bar when selection exists) ── */
+
+  const bulkMove = async (
+    bucket: "paperTrail" | "trash",
+    doneMsg: string,
+  ) => {
+    const ids = [...selectedIds()];
+    if (ids.length === 0) return;
+    clearSelection();
+    for (const id of ids) removeFromBoth(id);
+    try {
+      for (const id of ids) await moveMessageToBucket(id, bucket);
+      await refreshAll();
+      showToast({
+        message: `${doneMsg}（${ids.length} 封）`,
+        kind: "success",
+        action: {
+          label: "撤销",
+          run: async () => {
+            for (const id of ids) await moveMessageToBucket(id, "imbox");
+            await refreshAll();
+            showToast({ message: "已撤销", kind: "success" });
+          },
+        },
+      });
+    } catch (err) {
+      console.error("[imbox] bulk move failed:", err);
+      await refreshAll();
+      showToast({ message: "操作失败，请重试", kind: "error" });
+    }
+  };
+
+  const bulkPending = async () => {
+    const ids = [...selectedIds()];
+    if (ids.length === 0) return;
+    clearSelection();
+    for (const id of ids) removeFromBoth(id);
+    try {
+      for (const id of ids) {
+        await setMessagePileFlags(id, {
+          replyLater: true,
+          setAside: false,
+          bubbleUpAt: null,
+        });
+      }
+      await refreshAll();
+      showToast({
+        message: `已加入稍后回复（${ids.length} 封）`,
+        kind: "success",
+        action: {
+          label: "撤销",
+          run: async () => {
+            for (const id of ids) {
+              await setMessagePileFlags(id, {
+                replyLater: false,
+                setAside: false,
+                bubbleUpAt: null,
+              });
+            }
+            await refreshAll();
+            showToast({ message: "已撤销", kind: "success" });
+          },
+        },
+      });
+    } catch (err) {
+      console.error("[imbox] bulk pending failed:", err);
+      await refreshAll();
+      showToast({ message: "操作失败，请重试", kind: "error" });
+    }
+  };
 
   const bundleSelectedState = (b: Bundle): "none" | "partial" | "all" => {
     const ids = b.messages.map((m) => m.id);
@@ -442,7 +509,14 @@ export function Imbox() {
     const item = activeList()[next];
     if (item) {
       const id = "messages" in item ? item.messages[0]?.id : item.id;
-      if (id) setSelectedMessageId(id);
+      if (id) {
+        setSelectedMessageId(id);
+        // Keep the cursor row visible — without this, j/k walks the
+        // highlight off-screen and the user loses track of position.
+        document
+          .querySelector(`[data-message-id="${CSS.escape(id)}"]`)
+          ?.scrollIntoView({ block: "nearest" });
+      }
     }
   };
 
@@ -473,49 +547,110 @@ export function Imbox() {
   const replyLater = async (m: Message) => {
     removeFromBoth(m.id);
     try {
-      await upsertMessage({ ...m, replyLater: true });
+      // Scoped flag update — `m` is a lightweight list row (no body);
+      // upserting it would wipe the stored body (§11.7 projection).
+      // Setting one pile flag clears the others (prototype
+      // clearWorkflowFlags semantics).
+      await setMessagePileFlags(m.id, {
+        replyLater: true,
+        setAside: false,
+        bubbleUpAt: null,
+      });
       await refetchPiles();
       showToast({
-        message: "已 Reply Later",
+        message: "已加入稍后回复",
         kind: "success",
         action: {
           label: "撤销",
           run: async () => {
-            const full = (await getMessage(m.id)) ?? m;
-            await upsertMessage({ ...full, replyLater: false });
+            await setMessagePileFlags(m.id, {
+              replyLater: false,
+              setAside: false,
+              bubbleUpAt: null,
+            });
             await refreshAll();
             showToast({ message: "已撤销", kind: "success" });
           },
         },
       });
     } catch (err) {
+      console.error("[imbox] replyLater failed:", err);
       await refreshAll();
-      showToast({ message: `Reply Later 失败：${String(err)}`, kind: "error" });
+      showToast({ message: "操作失败，请重试", kind: "error" });
     }
   };
 
   const setAside = async (m: Message) => {
     removeFromBoth(m.id);
     try {
-      await upsertMessage({ ...m, setAside: true });
+      await setMessagePileFlags(m.id, {
+        replyLater: false,
+        setAside: true,
+        bubbleUpAt: null,
+      });
       await refetchPiles();
       showToast({
-        message: "已 Set Aside",
+        message: "已搁置",
         kind: "success",
         action: {
           label: "撤销",
           run: async () => {
-            const full = (await getMessage(m.id)) ?? m;
-            await upsertMessage({ ...full, setAside: false });
+            await setMessagePileFlags(m.id, {
+              replyLater: false,
+              setAside: false,
+              bubbleUpAt: null,
+            });
             await refreshAll();
             showToast({ message: "已撤销", kind: "success" });
           },
         },
       });
     } catch (err) {
+      console.error("[imbox] setAside failed:", err);
       await refreshAll();
-      showToast({ message: `Set Aside 失败：${String(err)}`, kind: "error" });
+      showToast({ message: "操作失败，请重试", kind: "error" });
     }
+  };
+
+  /** Park a message in the Remind pile. Default time = tomorrow 9:00
+   *  local, matching the `message:bubble-up` shortcut. */
+  const remind = async (m: Message, whenIso: string, label: string) => {
+    removeFromBoth(m.id);
+    try {
+      await setMessagePileFlags(m.id, {
+        replyLater: false,
+        setAside: false,
+        bubbleUpAt: whenIso,
+      });
+      await refetchPiles();
+      showToast({
+        message: `已设为${label}提醒`,
+        kind: "success",
+        action: {
+          label: "撤销",
+          run: async () => {
+            await setMessagePileFlags(m.id, {
+              replyLater: false,
+              setAside: false,
+              bubbleUpAt: null,
+            });
+            await refreshAll();
+            showToast({ message: "已撤销", kind: "success" });
+          },
+        },
+      });
+    } catch (err) {
+      console.error("[imbox] remind failed:", err);
+      await refreshAll();
+      showToast({ message: "操作失败，请重试", kind: "error" });
+    }
+  };
+
+  const remindTomorrow = (m: Message) => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+    return remind(m, tomorrow.toISOString(), "明天 9:00");
   };
 
   const archive = async (m: Message) => {
@@ -523,10 +658,22 @@ export function Imbox() {
     try {
       await moveMessageToBucket(m.id, "paperTrail");
       await refetchPiles();
-      showToast({ message: "已归档", kind: "success" });
+      showToast({
+        message: "已归档到 Records",
+        kind: "success",
+        action: {
+          label: "撤销",
+          run: async () => {
+            await moveMessageToBucket(m.id, "imbox");
+            await refreshAll();
+            showToast({ message: "已撤销", kind: "success" });
+          },
+        },
+      });
     } catch (err) {
+      console.error("[imbox] archive failed:", err);
       await refreshAll();
-      showToast({ message: `归档失败：${String(err)}`, kind: "error" });
+      showToast({ message: "操作失败，请重试", kind: "error" });
     }
   };
 
@@ -535,10 +682,22 @@ export function Imbox() {
     try {
       await moveMessageToBucket(m.id, "trash");
       await refetchPiles();
-      showToast({ message: "已移到 Trash", kind: "info" });
+      showToast({
+        message: "已移到回收站",
+        kind: "info",
+        action: {
+          label: "撤销",
+          run: async () => {
+            await moveMessageToBucket(m.id, "imbox");
+            await refreshAll();
+            showToast({ message: "已撤销", kind: "success" });
+          },
+        },
+      });
     } catch (err) {
+      console.error("[imbox] trash failed:", err);
       await refreshAll();
-      showToast({ message: `移到 Trash 失败：${String(err)}`, kind: "error" });
+      showToast({ message: "操作失败，请重试", kind: "error" });
     }
   };
 
@@ -547,16 +706,30 @@ export function Imbox() {
     try {
       await moveMessageToBucket(m.id, "spam");
       await refetchPiles();
-      showToast({ message: "已标为垃圾", kind: "info" });
+      showToast({
+        message: "已移到垃圾邮件",
+        kind: "info",
+        action: {
+          label: "撤销",
+          run: async () => {
+            await moveMessageToBucket(m.id, "imbox");
+            await refreshAll();
+            showToast({ message: "已撤销", kind: "success" });
+          },
+        },
+      });
     } catch (err) {
+      console.error("[imbox] spam failed:", err);
       await refreshAll();
-      showToast({ message: `标垃圾失败：${String(err)}`, kind: "error" });
+      showToast({ message: "操作失败，请重试", kind: "error" });
     }
   };
 
   const toggleUnread = async (m: Message) => {
     try {
-      await upsertMessage({ ...m, unread: !m.unread });
+      // Scoped single-column update — `m` is a lightweight list row and
+      // must never be round-tripped through upsertMessage.
+      await markMessageUnread(m.id, !m.unread);
       // If the message just became unread, push it to the new tab; if it
       // just became read, push it to the seen tab. The opposite tab also
       // gets a remove to keep totals consistent.
@@ -569,8 +742,9 @@ export function Imbox() {
       }
       await refetchPiles();
     } catch (err) {
+      console.error("[imbox] toggleUnread failed:", err);
       await refreshAll();
-      showToast({ message: `标记失败：${String(err)}`, kind: "error" });
+      showToast({ message: "操作失败，请重试", kind: "error" });
     }
   };
 
@@ -590,12 +764,13 @@ export function Imbox() {
       await moveMessageToBucket(m.id, bucket);
       await refreshAll();
       showToast({
-        message: `已批准 → ${bucket === "imbox" ? "Imbox" : bucket === "feed" ? "Stream" : "Records"}`,
+        message: `已批准到 ${bucket === "imbox" ? "Imbox" : bucket === "feed" ? "Stream" : "Records"}`,
         kind: "success",
       });
     } catch (err) {
+      console.error("[imbox] approve failed:", err);
       await refreshAll();
-      showToast({ message: `批准失败：${String(err)}`, kind: "error" });
+      showToast({ message: "操作失败，请重试", kind: "error" });
     }
   };
 
@@ -612,10 +787,30 @@ export function Imbox() {
       }
       await moveMessageToBucket(m.id, "spam");
       await refreshAll();
-      showToast({ message: `已阻止 ${c?.name ?? m.pid}`, kind: "info" });
+      showToast({
+        message: `已阻止 ${c?.name ?? m.pid}`,
+        kind: "info",
+        action: {
+          label: "撤销",
+          run: async () => {
+            if (c) {
+              await upsertContact({
+                ...c,
+                firstSeen: true,
+                screened: false,
+                blocked: false,
+              });
+            }
+            await moveMessageToBucket(m.id, "imbox");
+            await refreshAll();
+            showToast({ message: "已撤销", kind: "success" });
+          },
+        },
+      });
     } catch (err) {
+      console.error("[imbox] block failed:", err);
       await refreshAll();
-      showToast({ message: `阻止失败：${String(err)}`, kind: "error" });
+      showToast({ message: "操作失败，请重试", kind: "error" });
     }
   };
 
@@ -631,11 +826,10 @@ export function Imbox() {
       newPaged.removeByIds([m.id]);
       try {
         await seenPaged.prependByIds([m.id]);
-        // `m` here is the lightweight list row (no body / bodyHtml —
-        // see rowToMessageLight). Re-fetch the full row so we don't
-        // overwrite the body fields with empty strings in the DB.
-        const full = (await getMessage(m.id)) ?? m;
-        await upsertMessage({ ...full, unread: false });
+        // Scoped single-column update — the list row is lightweight
+        // (no body / bodyHtml), so a full upsertMessage here would
+        // wipe the body in the DB.
+        await markMessageUnread(m.id, false);
       } catch {
         // Restore on failure — re-prepend to newPaged and refetch
         // seenPaged so we don't keep a phantom.
@@ -674,29 +868,11 @@ export function Imbox() {
         case "saved":
           await setAside(m);
           break;
-        case "remind": {
+        case "remind":
           // Default remind time = tomorrow 9am local, matching the
-          // existing `message:bubble-up` shortcut behavior.
-          const tomorrow = new Date();
-          tomorrow.setDate(tomorrow.getDate() + 1);
-          tomorrow.setHours(9, 0, 0, 0);
-          removeFromBoth(m.id);
-          try {
-            await upsertMessage({ ...m, bubbleUpAt: tomorrow.toISOString() });
-            await refetchPiles();
-            showToast({
-              message: `已 Bubble Up 到 ${tomorrow.toLocaleString()}`,
-              kind: "success",
-            });
-          } catch (err) {
-            await refreshAll();
-            showToast({
-              message: `Bubble Up 失败：${String(err)}`,
-              kind: "error",
-            });
-          }
+          // `message:bubble-up` shortcut behavior.
+          await remindTomorrow(m);
           break;
-        }
         case "paperTrail":
           await archive(m);
           break;
@@ -712,14 +888,12 @@ export function Imbox() {
           try {
             await moveMessageToBucket(m.id, target);
             await refetchPiles();
-            const label = target === "imbox" ? "Inbox" : "Stream";
+            const label = target === "imbox" ? "Imbox" : "Stream";
             showToast({ message: `已移到 ${label}`, kind: "info" });
           } catch (err) {
+            console.error("[imbox] drag move failed:", err);
             await refreshAll();
-            showToast({
-              message: `移动失败：${String(err)}`,
-              kind: "error",
-            });
+            showToast({ message: "操作失败，请重试", kind: "error" });
           }
           break;
         }
@@ -734,19 +908,30 @@ export function Imbox() {
     endDrag();
   };
 
-  /* ── Keyboard shortcuts (j/k/x/Enter/l/s/a/r/t/b/!/u) ────────────── */
+  /* ── Keyboard shortcuts (j/k/x/Enter/l/a/e/t/z/!/u) ──────────────
+   * Key bindings mirror DEFAULT_SHORTCUTS (utils/shortcut-defaults.ts):
+   *   l = 稍后回复 · a = 搁置 · e = 归档 · t = 删除 · ! = 垃圾邮件
+   *   z = 提醒（明天 9:00）· u = 已读/未读
+   * The global router (utils/shortcuts.ts) gates these six actions on
+   * `view() !== "imbox"` so a keypress never double-writes the DB. */
+
+  const isOverlayOpen = () =>
+    commandPaletteOpen() ||
+    searchOpen() ||
+    notificationsOpen() ||
+    composeOpen() ||
+    helpOpen() ||
+    detailOpen() ||
+    agentPanelOpen();
 
   const handleKey = (e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
     if (tag === "input" || tag === "textarea") return;
-    // P1-3: preventDefault on every branch so the global handler in
-    // utils/shortcuts.ts doesn't ALSO fire. Previously the global
-    // handler ran first → it called e.preventDefault() → but because
-    // the local handler didn't, two DB writes (one local via
-    // moveMessageToBucket, one global via upsertMessage) raced on
-    // the same key press, and `moveMessageToBucket` set deleted_at
-    // while `upsertMessage` did not. Net effect: bucket changes from
-    // l/s/e/t/b/! flipped back and forth.
+    // Same overlay gate as the global handler: while Compose / the
+    // command palette / a detail panel is open, list keys must not
+    // move messages in the background.
+    if (isOverlayOpen()) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === "j") {
       e.preventDefault();
       moveCursor(1);
@@ -779,7 +964,7 @@ export function Imbox() {
       const cur = cursorIndex();
       const item = renderList()[cur];
       if (item && !("messages" in item)) void replyLater(item);
-    } else if (e.key === "s") {
+    } else if (e.key === "a") {
       e.preventDefault();
       const cur = cursorIndex();
       const item = renderList()[cur];
@@ -789,35 +974,19 @@ export function Imbox() {
       const cur = cursorIndex();
       const item = renderList()[cur];
       if (item && !("messages" in item)) void archive(item);
-    } else if (e.key === "t" || e.key === "#") {
+    } else if (e.key === "t") {
       e.preventDefault();
       const cur = cursorIndex();
       const item = renderList()[cur];
       if (item && !("messages" in item)) void trash(item);
-    } else if (e.key === "b") {
+    } else if (e.key === "z") {
       e.preventDefault();
-      // P0-10: align with prototype-v11 (`b` = bubble-up / Remind,
-      // per renderContextMenuForMessage). The previous code mapped `b`
-      // to spam(), which was destructive and silently set `deleted_at`
-      // (then 30-day expiry). `!` is the spam shortcut (per
-      // DEFAULT_SHORTCUTS sc-message-spam "!").
+      // Remind = tomorrow 9:00 local (prototype `b` / bubble-up).
       const cur = cursorIndex();
       const item = renderList()[cur];
-      if (item && !("messages" in item)) {
-        const m = item as Message;
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        tomorrow.setHours(9, 0, 0, 0);
-        void upsertMessage({ ...m, bubbleUpAt: tomorrow.toISOString() });
-        showToast({
-          message: `已 Remind 到 ${tomorrow.toLocaleString()}`,
-          kind: "success",
-        });
-      }
+      if (item && !("messages" in item)) void remindTomorrow(item);
     } else if (e.key === "!") {
       e.preventDefault();
-      // P0-10: explicit shortcut for Spam. The previous code put spam
-      // on `b` which was both wrong and unrecoverable.
       const cur = cursorIndex();
       const item = renderList()[cur];
       if (item && !("messages" in item)) void spam(item as Message);
@@ -869,17 +1038,44 @@ export function Imbox() {
       piles().length > 0,
   );
 
+  // Sync-in-progress flag for the header button (spinner + disabled so
+  // double-clicking doesn't fire duplicate refreshes).
+  const [syncing, setSyncing] = createSignal(false);
+  const syncNow = async () => {
+    if (syncing()) return;
+    setSyncing(true);
+    try {
+      await newPaged.refresh();
+      await seenPaged.refresh();
+      showToast({ message: "已刷新", kind: "info", ttlMs: 1500 });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // Mobile layout (≤767px): the pile row becomes a compact fixed bar
+  // above the bottom tab bar instead of three full-width cards sitting
+  // mid-list. MessageCard has its own (wider, ≤1023px) query for
+  // SwipeActions — this one is only for the piles/layout chrome.
+  const [isMobileLayout, setIsMobileLayout] = createSignal(false);
+  onMount(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    setIsMobileLayout(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobileLayout(e.matches);
+    mq.addEventListener("change", handler);
+    onCleanup(() => mq.removeEventListener("change", handler));
+  });
+
+  const showBulkBar = createMemo(() => selectedIds().size > 0);
+
   return (
     <div class="imbox-view">
       <ImboxHeader
         total={newPaged.total() + seenPaged.total()}
         newCount={newPaged.total()}
         previouslySeenCount={seenPaged.total()}
-        onSync={async () => {
-          await newPaged.refresh();
-          await seenPaged.refresh();
-          showToast({ message: "已刷新", kind: "info", ttlMs: 1500 });
-        }}
+        syncing={syncing()}
+        onSync={syncNow}
         onOpenFilters={() => setFilterOpen(true)}
         activeSort={getSortMode("imbox")}
       />
@@ -901,116 +1097,325 @@ export function Imbox() {
         <div
           class="bubble-up-banner"
           role="button"
-          onClick={() => {
-            /* navigate to first remind — same UX as prototype */
-            const first = (pileMessages() ?? []).find((m) => m.bubbleUpAt);
-            if (first) open(first.id);
+          tabIndex={0}
+          aria-label="查看待提醒邮件"
+          onClick={() => setView("bubbleUp")}
+          onKeyDown={(ev) => {
+            if (ev.key === "Enter" || ev.key === " ") {
+              ev.preventDefault();
+              setView("bubbleUp");
+            }
           }}
         >
           <Icon name="ph-arrow-fat-line-up" size={20} />
           <div class="bubble-up-body">
-            <div class="bubble-up-title">{remindedCount()} reminded</div>
-            <div class="bubble-up-subtitle">
-              Back at the top of your Inbox
-            </div>
+            <div class="bubble-up-title">{remindedCount()} 封待提醒</div>
+            <div class="bubble-up-subtitle">已回到列表顶部 · 点击查看</div>
           </div>
         </div>
       </Show>
 
       <Show
-        when={hasAny()}
+        when={!paged().resource.error}
         fallback={
-          // No data anywhere: show the empty-state copy unless we
-          // are mid-loadMore. (Loading-more on a previously-empty
-          // list shouldn't happen, but be defensive — show the
-          // skeleton instead of an empty state with a spinning dot.)
-          <Show
-            when={paged().loadingMore()}
-            fallback={<EmptyState />}
-          >
-            <SkeletonBlock />
-          </Show>
+          <ErrorState
+            title="加载失败，请重试"
+            retry={() => void paged().refresh()}
+          />
         }
       >
-        <div class="feed-list" data-feed-list>
-          {/* "New for you" tab gets the unread SectionHeader + 一起读
-              action; "Previously seen" doesn't. Each tab renders its own
-              list below; date group anchors let the user jump by recency
-              even when there are hundreds of unread messages. */}
-          <Show when={activeTab() === "new" && activeList().length > 0}>
-            <SectionHeader
-              title="New for you"
-              variant="new"
-              action={{ label: "一起读", onClick: () => setView("readTogether") }}
-            />
-          </Show>
+        <Show
+          when={!(paged().resource.loading && paged().items().length === 0)}
+          fallback={<SkeletonBlock />}
+        >
+          <Show when={hasAny()} fallback={<EmptyState />}>
+            <div
+              class="feed-list"
+              data-feed-list
+              style={
+                isMobileLayout() && (piles().length > 0 || showBulkBar())
+                  ? { "padding-bottom": "120px" }
+                  : undefined
+              }
+            >
+              {/* 一起读 action for the unread tab; the tab bar already
+                  names the section, so no duplicate section title. */}
+              <Show when={activeTab() === "new" && activeList().length > 0}>
+                <div
+                  style={{
+                    display: "flex",
+                    "justify-content": "flex-end",
+                    padding: "var(--space-1) 0 var(--space-2)",
+                  }}
+                >
+                  <button
+                    class="feed-section-action"
+                    data-read-together
+                    onClick={() => setView("readTogether")}
+                  >
+                    一起读
+                  </button>
+                </div>
+              </Show>
 
-          <Show
-            when={paged().total() > 0 && (paged().hasMore() || paged().loadingMore())}
-          >
-            <LoadedProgressBar
-              loaded={paged().items().length}
-              total={paged().total()}
-              loading={paged().loadingMore()}
-            />
-          </Show>
-
-          <DateGroupedList items={activeList()}>
-            {(item, i) => (
-              <ItemRow
-                item={item}
-                index={i}
-                isCursor={(idx) => cursorIndex() === idx}
-                selectedIds={selectedIds()}
-                lastSelectedId={lastSelectedId()}
-                contactMap={contactMap}
-                scoreFor={scoreFor}
-                bundleOpen={(id) => openBundles().has(id)}
-                onToggleBundle={(id) => toggleBundle(id)}
-                onOpen={openAndMarkRead}
-                onToggleSelect={(id) => toggleSelect(id)}
-                onSelectRange={selectRange}
-                onReplyLater={(m) => void replyLater(m)}
-                onSetAside={(m) => void setAside(m)}
-                onArchive={(m) => void archive(m)}
-                onTrash={(m) => void trash(m)}
-                onSpam={(m) => void spam(m)}
-                onToggleUnread={(m) => void toggleUnread(m)}
-                onApproveFirstTime={(m, b) => void approveFirstTime(m, b)}
-                onBlockFirstTime={(m) => void blockFirstTime(m)}
-                onBundleSelect={(b) => toggleBundleSelection(b)}
-                onDragStart={onDragStart}
-                onDragEnd={onDragEnd}
-                itemKey={itemKey}
-              />
-            )}
-          </DateGroupedList>
-
-          <div ref={(el) => (sentinel = el)} data-load-more-sentinel />
-          <Show when={paged().hasMore()}>
-            <ShowMoreButton loading={paged().loadingMore()} />
-          </Show>
-        </div>
-
-        <Show when={piles().length > 0}>
-          <div
-            class="imbox-piles"
-            data-imbox-piles
-            data-testid="piles"
-          >
-            <For each={piles()}>
-              {(p) => (
-                <PileCard
-                  pile={p}
-                  contacts={contacts() ?? []}
-                  onOpen={(id) => open(id)}
+              <Show
+                when={
+                  paged().total() > 0 &&
+                  (paged().hasMore() || paged().loadingMore())
+                }
+              >
+                <LoadedProgressBar
+                  loaded={paged().items().length}
+                  total={paged().total()}
+                  loading={paged().loadingMore()}
                 />
-              )}
-            </For>
-          </div>
+              </Show>
+
+              <Show
+                when={activeList().length > 0}
+                fallback={
+                  <TabEmpty
+                    tab={activeTab()}
+                    otherCount={
+                      activeTab() === "new"
+                        ? seenPaged.total()
+                        : newPaged.total()
+                    }
+                    onSwitch={() =>
+                      setActiveTab(activeTab() === "new" ? "seen" : "new")
+                    }
+                  />
+                }
+              >
+                <DateGroupedList items={activeList()}>
+                  {(item, i) => (
+                    <ItemRow
+                      item={item}
+                      index={i}
+                      isCursor={(idx) => cursorIndex() === idx}
+                      selectedIds={selectedIds()}
+                      lastSelectedId={lastSelectedId()}
+                      contactMap={contactMap}
+                      scoreFor={scoreFor}
+                      bundleOpen={(id) => openBundles().has(id)}
+                      onToggleBundle={(id) => toggleBundle(id)}
+                      onOpen={openAndMarkRead}
+                      onToggleSelect={(id) => toggleSelect(id)}
+                      onSelectRange={selectRange}
+                      onReplyLater={(m) => void replyLater(m)}
+                      onSetAside={(m) => void setAside(m)}
+                      onArchive={(m) => void archive(m)}
+                      onTrash={(m) => void trash(m)}
+                      onSpam={(m) => void spam(m)}
+                      onToggleUnread={(m) => void toggleUnread(m)}
+                      onApproveFirstTime={(m, b) => void approveFirstTime(m, b)}
+                      onBlockFirstTime={(m) => void blockFirstTime(m)}
+                      onBundleSelect={(b) => toggleBundleSelection(b)}
+                      onDragStart={onDragStart}
+                      onDragEnd={onDragEnd}
+                      itemKey={itemKey}
+                    />
+                  )}
+                </DateGroupedList>
+              </Show>
+
+              <div ref={(el) => (sentinel = el)} data-load-more-sentinel />
+              <Show when={paged().hasMore()}>
+                <ShowMoreButton
+                  loading={paged().loadingMore()}
+                  onClick={() => void paged().loadMore()}
+                />
+              </Show>
+            </div>
+
+            <Show when={piles().length > 0}>
+              <div
+                class="imbox-piles"
+                data-imbox-piles
+                data-testid="piles"
+                style={
+                  isMobileLayout()
+                    ? {
+                        position: "fixed",
+                        left: "8px",
+                        right: "8px",
+                        bottom:
+                          "calc(64px + env(safe-area-inset-bottom, 0px))",
+                        width: "auto",
+                        "max-width": "none",
+                        margin: "0",
+                        padding: "6px",
+                        gap: "6px",
+                        "flex-direction": "row",
+                        background: "var(--glass-bg)",
+                        "backdrop-filter": "var(--glass-blur)",
+                        "-webkit-backdrop-filter": "var(--glass-blur)",
+                        border: "0.5px solid var(--glass-border)",
+                        "border-radius": "var(--radius-xl)",
+                        "box-shadow": "var(--glass-shadow)",
+                      }
+                    : undefined
+                }
+              >
+                <For each={piles()}>
+                  {(p) => (
+                    <PileCard
+                      pile={p}
+                      contacts={contacts() ?? []}
+                      compact={isMobileLayout()}
+                      onOpen={(id) => open(id)}
+                    />
+                  )}
+                </For>
+                {/* Standalone 专注回复 main button — pulled out of the
+                    Pending pile card so the focused reply flow is one
+                    tap away and reads as a primary action. */}
+                <Show when={pendingCount() > 0}>
+                  <button
+                    type="button"
+                    data-focus-reply-entry
+                    title="专注回复：逐封处理待回复邮件"
+                    onClick={() => setView("focusReply")}
+                    style={{
+                      display: "inline-flex",
+                      "flex-direction": isMobileLayout()
+                        ? "row"
+                        : "column",
+                      "align-items": "center",
+                      "justify-content": "center",
+                      gap: "4px",
+                      padding: isMobileLayout() ? "0 12px" : "10px 16px",
+                      "min-height": "44px",
+                      background: "var(--palm)",
+                      color: "white",
+                      border: "none",
+                      "border-radius": "var(--radius-lg)",
+                      "font-size": "var(--text-caption)",
+                      "font-weight": "700",
+                      cursor: "pointer",
+                      "white-space": "nowrap",
+                      "box-shadow": "var(--shadow-md)",
+                    }}
+                  >
+                    <Icon name="ph-target" size={14} color="white" />
+                    <span>专注回复</span>
+                  </button>
+                </Show>
+              </div>
+            </Show>
+
+            {/* Bulk action bar — floats in when the user has selected
+                cards (x key or checkbox), making multi-select
+                discoverable for mouse users. */}
+            <Show when={showBulkBar()}>
+              <div
+                data-bulk-bar
+                role="toolbar"
+                aria-label="批量操作"
+                style={{
+                  position: "fixed",
+                  bottom: isMobileLayout()
+                    ? "calc(64px + env(safe-area-inset-bottom, 0px))"
+                    : "var(--space-5)",
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  display: "flex",
+                  "align-items": "center",
+                  gap: "var(--space-2)",
+                  padding: "8px 12px",
+                  background: "var(--glass-bg)",
+                  "backdrop-filter": "var(--glass-blur)",
+                  "-webkit-backdrop-filter": "var(--glass-blur)",
+                  border: "0.5px solid var(--glass-border)",
+                  "border-radius": "var(--radius-pill)",
+                  "box-shadow": "var(--glass-shadow)",
+                  "z-index": "var(--z-detail)",
+                  animation: "toast-enter 0.2s var(--ease-out) both",
+                }}
+              >
+                <span
+                  style={{
+                    "font-size": "var(--text-caption)",
+                    "font-weight": "700",
+                    color: "var(--text-secondary)",
+                    "white-space": "nowrap",
+                  }}
+                >
+                  已选 {selectedIds().size} 封
+                </span>
+                <BulkBarButton
+                  label="稍后回复"
+                  onClick={() => void bulkPending()}
+                />
+                <BulkBarButton
+                  label="归档"
+                  onClick={() => void bulkMove("paperTrail", "已归档到 Records")}
+                />
+                <BulkBarButton
+                  label="删除"
+                  danger
+                  onClick={() => void bulkMove("trash", "已移到回收站")}
+                />
+                <BulkBarButton label="取消选择" onClick={clearSelection} />
+              </div>
+            </Show>
+          </Show>
         </Show>
       </Show>
     </div>
+  );
+}
+
+function BulkBarButton(props: {
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={props.onClick}
+      style={{
+        padding: "6px 12px",
+        "min-height": "32px",
+        "border-radius": "var(--radius-pill)",
+        border: props.danger ? "0.5px solid var(--status-danger)" : "none",
+        background: props.danger ? "transparent" : "var(--paper-mid)",
+        color: props.danger ? "var(--status-danger)" : "var(--text-secondary)",
+        "font-size": "var(--text-caption)",
+        "font-weight": "600",
+        cursor: "pointer",
+        "white-space": "nowrap",
+      }}
+    >
+      {props.label}
+    </button>
+  );
+}
+
+function TabEmpty(props: {
+  tab: ImboxTabId;
+  otherCount: number;
+  onSwitch: () => void;
+}) {
+  return (
+    <Empty
+      icon={props.tab === "new" ? "ph-check-circle" : "ph-envelope-open"}
+      title={props.tab === "new" ? "没有新邮件 🎉" : "还没有已读邮件"}
+      description={
+        props.tab === "new"
+          ? "新邮件到了会出现在这里。"
+          : "读过的邮件会收在这里。"
+      }
+      action={
+        props.otherCount > 0
+          ? {
+              label: props.tab === "new" ? "查看已读" : "查看新邮件",
+              onClick: props.onSwitch,
+            }
+          : undefined
+      }
+    />
   );
 }
 
@@ -1020,6 +1425,7 @@ function ImboxHeader(props: {
   total: number;
   newCount: number;
   previouslySeenCount: number;
+  syncing: boolean;
   onSync: () => void | Promise<void>;
   onOpenFilters: () => void;
   activeSort: SortMode;
@@ -1030,6 +1436,9 @@ function ImboxHeader(props: {
         padding: "var(--space-5) var(--space-5) var(--space-3)",
       }}
     >
+      {/* Scoped keyframes — animations.css is owned by the styles group;
+          keep the sync spinner self-contained here. */}
+      <style>{`@keyframes imbox-spin { to { transform: rotate(360deg); } }`}</style>
       <h1
         style={{
           "font-family": "var(--font-display)",
@@ -1046,6 +1455,7 @@ function ImboxHeader(props: {
         style={{
           display: "flex",
           "align-items": "center",
+          "flex-wrap": "wrap",
           gap: "var(--space-2)",
           "margin-top": "var(--space-2)",
         }}
@@ -1054,6 +1464,7 @@ function ImboxHeader(props: {
           style={{
             "font-size": "var(--text-caption)",
             color: "var(--text-muted)",
+            "min-width": "0",
           }}
         >
           {props.newCount} 待读 · {props.previouslySeenCount} 已读 · {props.total} 总数
@@ -1066,6 +1477,8 @@ function ImboxHeader(props: {
             background: "var(--paper-mid)",
             "border-radius": "var(--radius-pill)",
             "font-weight": "700",
+            "white-space": "nowrap",
+            "flex-shrink": 0,
           }}
           data-active-sort
         >
@@ -1075,8 +1488,8 @@ function ImboxHeader(props: {
         <button
           onClick={() => props.onOpenFilters()}
           data-open-filters
-          title="More filters"
-          aria-label="More filters"
+          title="更多筛选"
+          aria-label="更多筛选"
           style={{
             display: "inline-flex",
             "align-items": "center",
@@ -1089,13 +1502,18 @@ function ImboxHeader(props: {
             "font-weight": "700",
             border: "0.5px solid var(--border)",
             cursor: "pointer",
+            "white-space": "nowrap",
+            "flex-shrink": 0,
           }}
         >
           <Icon name="ph-sliders-horizontal" size={12} /> 筛选
         </button>
         <button
           onClick={() => void props.onSync()}
+          disabled={props.syncing}
           data-sync-now
+          title="立即同步"
+          aria-label="立即同步"
           style={{
             display: "inline-flex",
             "align-items": "center",
@@ -1107,38 +1525,26 @@ function ImboxHeader(props: {
             "font-size": "var(--text-micro)",
             "font-weight": "700",
             border: "0",
-            cursor: "pointer",
+            cursor: props.syncing ? "default" : "pointer",
+            "white-space": "nowrap",
+            "flex-shrink": 0,
+            opacity: props.syncing ? 0.7 : 1,
           }}
         >
-          <Icon name="arrows-clockwise" size={12} /> 同步
+          <span
+            style={{
+              display: "inline-flex",
+              animation: props.syncing
+                ? "imbox-spin 1s linear infinite"
+                : undefined,
+            }}
+          >
+            <Icon name="ph-arrows-clockwise" size={12} />
+          </span>
+          {props.syncing ? "同步中…" : "同步"}
         </button>
       </div>
     </header>
-  );
-}
-
-function SectionHeader(props: {
-  title: string;
-  variant: "new" | "seen";
-  action?: { label: string; onClick: () => void };
-}) {
-  return (
-    <div
-      class={
-        "feed-section-header" +
-        (props.variant === "new" ? " feed-section-new" : " feed-section-seen")
-      }
-      data-feed-section={props.variant}
-    >
-      <span class="feed-section-title">{props.title}</span>
-      <Show when={props.action}>
-        {(a) => (
-          <button class="feed-section-action" onClick={a().onClick}>
-            {a().label}
-          </button>
-        )}
-      </Show>
-    </div>
   );
 }
 
@@ -1146,11 +1552,11 @@ function EmptyState() {
   return (
     <div class="imbox-empty">
       <Icon name="ph-tray" size={48} />
-      <h2>Inbox 是给你的重要邮件</h2>
+      <h2>Imbox 是给你的重要邮件</h2>
       <p>
         重要的、需要你来处理的对话会出现在这里。
         <br />
-        还没有？等你的下一次签到。
+        新邮件到了会自动出现在这里。
       </p>
     </div>
   );
@@ -1170,17 +1576,32 @@ function SkeletonBlock() {
   );
 }
 
-function ShowMoreButton(props: { loading: boolean }) {
+function ShowMoreButton(props: { loading: boolean; onClick: () => void }) {
   return (
     <div
       style={{
         padding: "var(--space-5)",
         "text-align": "center",
-        color: "var(--text-muted)",
-        "font-size": "var(--text-caption)",
       }}
     >
-      {props.loading ? "加载中…" : "继续滚动加载更多"}
+      <button
+        onClick={() => props.onClick()}
+        disabled={props.loading}
+        data-load-more
+        style={{
+          padding: "8px 20px",
+          "min-height": "36px",
+          background: "var(--paper-mid)",
+          color: "var(--text-secondary)",
+          "border-radius": "var(--radius-pill)",
+          "font-size": "var(--text-caption)",
+          "font-weight": "700",
+          border: "0.5px solid var(--border)",
+          cursor: props.loading ? "default" : "pointer",
+        }}
+      >
+        {props.loading ? "加载中…" : "加载更多"}
+      </button>
     </div>
   );
 }
@@ -1436,11 +1857,11 @@ function MessageCard(props: MessageCardProps) {
     return true;
   };
 
-  // P1-13: wrap the card in SwipeActions on mobile so the user can
-  // trash / reply-later without opening the detail panel. The
+  // P1-13: wrap the card in SwipeActions on touch layouts so the user
+  // can trash / reply-later without opening the detail panel. The
   // SwipeActions component (used in Gate + Records) already has full
-  // touch + mouse handling; we just need to gate it on `isMobile()`
-  // and pass the right callbacks.
+  // touch + mouse handling; we just need to gate it on the layout
+  // breakpoint and pass the right callbacks.
   const card = (
     <article
       class={
@@ -1475,22 +1896,30 @@ function MessageCard(props: MessageCardProps) {
         props.onOpen(props.m);
       }}
     >
-      <Show when={props.firstTimeSender}>
-        <input
-          type="checkbox"
-          class="select-checkbox"
-          checked={isSelected()}
-          onClick={(ev) => {
-            ev.stopPropagation();
-            const id = props.m.id;
-            if (ev.shiftKey && props.lastSelectedId) {
-              props.onSelectRange(props.lastSelectedId, id);
-            } else {
-              props.onToggleSelect(id);
-            }
-          }}
-        />
-      </Show>
+      {/* Checkbox is always mounted so the avatar column doesn't shift
+          when selection/hover state changes; it's only visible for
+          first-time senders, selected cards, or on hover. */}
+      <input
+        type="checkbox"
+        class="select-checkbox"
+        checked={isSelected()}
+        aria-label="选择这封邮件"
+        style={{
+          visibility:
+            props.firstTimeSender || isSelected() || hovered()
+              ? "visible"
+              : "hidden",
+        }}
+        onClick={(ev) => {
+          ev.stopPropagation();
+          const id = props.m.id;
+          if (ev.shiftKey && props.lastSelectedId) {
+            props.onSelectRange(props.lastSelectedId, id);
+          } else {
+            props.onToggleSelect(id);
+          }
+        }}
+      />
 
       <Avatar
         name={props.contact?.name ?? "Newsletter"}
@@ -1518,7 +1947,14 @@ function MessageCard(props: MessageCardProps) {
             </span>
           </Show>
           <span class="feed-spacer" />
-          <span class="feed-time">{props.m.tm}</span>
+          {/* Time hides on hover so it doesn't collide with the action
+              toolbar that slides in from the right. */}
+          <span
+            class="feed-time"
+            style={{ visibility: hovered() ? "hidden" : "visible" }}
+          >
+            {props.m.tm}
+          </span>
         </div>
 
         <div class="feed-bottom-row">
@@ -1575,8 +2011,8 @@ function MessageCard(props: MessageCardProps) {
           <button
             class="feed-card-action-btn"
             data-action="reply-later"
-            title="Pending (l)"
-            aria-label="Reply later"
+            title="稍后回复 (l)"
+            aria-label="稍后回复 (l)"
             type="button"
           >
             <Icon name="ph-clock" size={14} />
@@ -1584,8 +2020,8 @@ function MessageCard(props: MessageCardProps) {
           <button
             class="feed-card-action-btn"
             data-action="set-aside"
-            title="Saved (s)"
-            aria-label="Set aside"
+            title="搁置 (a)"
+            aria-label="搁置 (a)"
             type="button"
           >
             <Icon name="ph-push-pin" size={14} />
@@ -1593,8 +2029,8 @@ function MessageCard(props: MessageCardProps) {
           <button
             class="feed-card-action-btn"
             data-action="archive"
-            title="Archive (e)"
-            aria-label="Archive"
+            title="归档 (e)"
+            aria-label="归档 (e)"
             type="button"
           >
             <Icon name="ph-archive" size={14} />
@@ -1602,8 +2038,8 @@ function MessageCard(props: MessageCardProps) {
           <button
             class="feed-card-action-btn"
             data-action="trash"
-            title="Trash (#)"
-            aria-label="Trash"
+            title="删除 (t)"
+            aria-label="删除 (t)"
             type="button"
           >
             <Icon name="ph-trash" size={14} />
@@ -1611,8 +2047,8 @@ function MessageCard(props: MessageCardProps) {
           <button
             class="feed-card-action-btn"
             data-action="toggle-unread"
-            title={props.m.unread ? "Mark as Read" : "Mark as Unread"}
-            aria-label={props.m.unread ? "Mark as Read" : "Mark as Unread"}
+            title={props.m.unread ? "标为已读 (u)" : "标为未读 (u)"}
+            aria-label={props.m.unread ? "标为已读 (u)" : "标为未读 (u)"}
             type="button"
           >
             <Icon name={props.m.unread ? "ph-eye" : "ph-eye-slash"} size={14} />
@@ -1622,28 +2058,29 @@ function MessageCard(props: MessageCardProps) {
     </article>
   );
 
-  // P1-13: only wrap on mobile. On desktop the user has the hover
-  // toolbar + keyboard shortcuts; mobile users previously had no
-  // way to act on a message without opening the detail panel (3 taps).
-  const [isMobile, setIsMobile] = createSignal(false);
+  // P1-13: only wrap on touch layouts (mobile + tablet, ≤1023px). On
+  // desktop the user has the hover toolbar + keyboard shortcuts; touch
+  // users previously had no way to act on a message without opening
+  // the detail panel (3 taps).
+  const [isTouchLayout, setIsTouchLayout] = createSignal(false);
   onMount(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
-    setIsMobile(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    const mq = window.matchMedia("(max-width: 1023px)");
+    setIsTouchLayout(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsTouchLayout(e.matches);
     mq.addEventListener("change", handler);
     onCleanup(() => mq.removeEventListener("change", handler));
   });
   return (
     <SwipeActions
-      disabled={!isMobile() || props.m.bucket !== "imbox"}
+      disabled={!isTouchLayout() || props.m.bucket !== "imbox"}
       leftAction={{
-        label: "Trash",
+        label: "删除",
         icon: "ph-trash",
         color: "red",
         onClick: () => props.onTrash(props.m),
       }}
       rightAction={{
-        label: "Reply Later",
+        label: "稍后回复",
         icon: "ph-clock",
         color: "yellow",
         onClick: () => props.onReplyLater(props.m),
@@ -1730,6 +2167,20 @@ function BundleCard(props: BundleCardProps) {
           </div>
         </div>
         <span class="feed-card-bundle-count">{props.bundle.messages.length}</span>
+        {/* Expand affordance — without a visible chevron the bundle
+            drawer was only discoverable by accident. */}
+        <span
+          data-bundle-chevron
+          aria-hidden="true"
+          style={{
+            display: "inline-flex",
+            color: "var(--text-muted)",
+            transform: expanded() ? "rotate(180deg)" : "rotate(0deg)",
+            transition: "transform 0.2s var(--ease-out)",
+          }}
+        >
+          <Icon name="ph-caret-down" size={14} />
+        </span>
       </div>
       <div class="bundle-drawer">
         <For each={props.bundle.messages}>
@@ -1759,6 +2210,9 @@ function BundleCard(props: BundleCardProps) {
 function PileCard(props: {
   pile: Pile;
   contacts: Contact[];
+  /** Compact mode (mobile): the pile row is a fixed bottom strip, so
+      the header must stay within one 44px-tall tap target. */
+  compact: boolean;
   onOpen: (id: string) => void;
 }) {
   // Default collapsed — matches prototype §renderImboxPile (line 2993:
@@ -1787,25 +2241,23 @@ function PileCard(props: {
       data-expanded={expanded() ? "true" : "false"}
       onClick={toggle}
     >
-      <div class="imbox-pile-header">
+      <div
+        class="imbox-pile-header"
+        style={
+          props.compact
+            ? {
+                padding: "4px 10px",
+                "min-height": "44px",
+                display: "flex",
+                "align-items": "center",
+                gap: "6px",
+              }
+            : undefined
+        }
+      >
         <Icon name={props.pile.icon} size={12} />
         <span class="imbox-pile-title">{props.pile.title}</span>
         <span class="imbox-pile-count">{props.pile.messages.length}</span>
-        <Show when={props.pile.hasFocusAction}>
-          <button
-            type="button"
-            class="imbox-pile-focus-btn"
-            data-pile-focus-btn
-            title="Focus & Reply (o)"
-            onClick={(ev) => {
-              ev.stopPropagation();
-              setView(props.pile.openBoardView);
-            }}
-          >
-            <Icon name="ph-target" size={12} />
-            <span>Focus & Reply</span>
-          </button>
-        </Show>
       </div>
 
       <Show when={expanded()}>
@@ -1844,28 +2296,10 @@ function PileCard(props: {
               class="pile-drawer-more"
               data-pile-drawer-more
             >
-              + {props.pile.messages.length - 5} more
+              还有 {props.pile.messages.length - 5} 封
             </div>
           </Show>
           <div class="pile-drawer-actions">
-            <Show when={props.pile.hasFocusAction}>
-              <button
-                type="button"
-                class="pile-drawer-action pile-focus-btn"
-                data-pile-focus-drawer
-                onClick={(ev) => {
-                  ev.stopPropagation();
-                  // P1-1: route to the dedicated Focus & Reply view, not
-                  // the plain board. The user explicitly wants the
-                  // focused-reply flow; landing on the plain board
-                  // was the bug from 2026-08-15.
-                  setView("focusReply");
-                }}
-              >
-                <Icon name="ph-target" size={12} />
-                <span>Focus & Reply</span>
-              </button>
-            </Show>
             <button
               type="button"
               class="pile-drawer-action pile-board-btn"
@@ -1875,7 +2309,7 @@ function PileCard(props: {
                 setView(props.pile.openBoardView);
               }}
             >
-              Open {props.pile.title} board
+              查看全部
             </button>
           </div>
         </div>
@@ -1909,7 +2343,7 @@ function ImboxTabs(props: {
       }}
     >
       <ImboxTabButton
-        label="New for you"
+        label="新邮件"
         icon="ph-envelope-simple-open"
         active={props.active === "new"}
         count={props.newCount}
@@ -1918,7 +2352,7 @@ function ImboxTabs(props: {
         dataTab="new"
       />
       <ImboxTabButton
-        label="Previously seen"
+        label="已读"
         icon="ph-envelope-open"
         active={props.active === "seen"}
         count={props.seenCount}
@@ -1951,43 +2385,60 @@ function ImboxTabButton(props: {
         padding: "12px 16px",
         background: "transparent",
         border: "0",
-        "border-bottom": props.active
-          ? "2px solid var(--palm)"
-          : "2px solid transparent",
         "margin-bottom": "-0.5px",
         cursor: "pointer",
         display: "flex",
         "align-items": "center",
         "justify-content": "center",
-        gap: "var(--space-2)",
         color: props.active ? "var(--text-primary)" : "var(--text-muted)",
         "font-weight": props.active ? "700" : "600",
         "font-size": "var(--text-body-sm)",
         transition: "color 0.15s var(--ease-out)",
       }}
     >
-      <Icon name={props.icon} size={14} />
-      <span>{props.label}</span>
-      <Show when={props.count > 0}>
-        <span
-          style={{
-            display: "inline-flex",
-            "align-items": "center",
-            "justify-content": "center",
-            "min-width": "20px",
-            height: "20px",
-            padding: "0 6px",
-            "border-radius": "var(--radius-pill)",
-            background: props.highlight && !props.active ? "var(--palm)" : "var(--paper-mid)",
-            color: props.highlight && !props.active ? "white" : "var(--text-secondary)",
-            "font-size": "var(--text-micro)",
-            "font-weight": "700",
-            "line-height": "1",
-          }}
-        >
-          {props.count > 999 ? "999+" : props.count}
-        </span>
-      </Show>
+      {/* Inner span carries the active underline so the rule is exactly as
+          wide as the content, not the full-width flex button. */}
+      <span
+        style={{
+          display: "inline-flex",
+          "align-items": "center",
+          gap: "var(--space-2)",
+          "padding-bottom": "10px",
+          "margin-bottom": "-10px",
+          "border-bottom": props.active
+            ? "2px solid var(--palm)"
+            : "2px solid transparent",
+        }}
+      >
+        <Icon name={props.icon} size={14} />
+        <span>{props.label}</span>
+        <Show when={props.count > 0}>
+          <span
+            style={{
+              display: "inline-flex",
+              "align-items": "center",
+              "justify-content": "center",
+              "min-width": "20px",
+              height: "20px",
+              padding: "0 6px",
+              "border-radius": "var(--radius-pill)",
+              background:
+                props.highlight && !props.active
+                  ? "var(--palm)"
+                  : "var(--paper-mid)",
+              color:
+                props.highlight && !props.active
+                  ? "white"
+                  : "var(--text-secondary)",
+              "font-size": "var(--text-micro)",
+              "font-weight": "700",
+              "line-height": "1",
+            }}
+          >
+            {props.count > 999 ? "999+" : props.count}
+          </span>
+        </Show>
+      </span>
     </button>
   );
 }

@@ -33,6 +33,9 @@ import {
   listMessagesForInsights,
   listMessagesForReminder,
   listFollowUpsDue,
+  markMessageUnread,
+  setMessagePileFlags,
+  listFocusReplyMessages,
   upsertSticky,
 } from "./data";
 import { resetMockDb } from "../services/mock-db";
@@ -705,6 +708,127 @@ describe("listFollowUpsDue", () => {
       surfacedAt: null,
     });
     expect(await listFollowUpsDue("2026-12-01T00:00:00Z")).toEqual([]);
+  });
+});
+
+describe("markMessageUnread", () => {
+  beforeEach(() => {
+    resetMockDb();
+  });
+
+  it("flips only the unread flag and leaves the body intact", async () => {
+    // Regression guard for the 2026-09-22 ReadTogether data-loss bug:
+    // flag toggles must NEVER round-trip a lightweight list row through
+    // upsertMessage (which would overwrite body/body_html with "").
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(
+      makeMessage("m1", "c1", { unread: true, body: "the real body" }),
+    );
+
+    await markMessageUnread("m1", false);
+
+    const rows = await listContactMessages("c1");
+    expect(rows[0]!.unread).toBe(false);
+    expect(rows[0]!.body).toBe("the real body");
+
+    await markMessageUnread("m1", true);
+    const again = await listContactMessages("c1");
+    expect(again[0]!.unread).toBe(true);
+    expect(again[0]!.body).toBe("the real body");
+  });
+});
+
+describe("setMessagePileFlags", () => {
+  beforeEach(() => {
+    resetMockDb();
+  });
+
+  it("sets one pile flag and clears the others (prototype clearWorkflowFlags)", async () => {
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(
+      makeMessage("m1", "c1", {
+        replyLater: true,
+        bubbleUpAt: "2026-01-01T00:00:00Z",
+        body: "keep me",
+      }),
+    );
+
+    await setMessagePileFlags("m1", {
+      replyLater: false,
+      setAside: true,
+      bubbleUpAt: null,
+    });
+
+    const rows = await listContactMessages("c1");
+    expect(rows[0]!.replyLater).toBe(false);
+    expect(rows[0]!.setAside).toBe(true);
+    expect(rows[0]!.bubbleUpAt).toBeNull();
+    // The scoped UPDATE must not touch the body columns.
+    expect(rows[0]!.body).toBe("keep me");
+  });
+
+  it("can park a message in the Remind pile with a timestamp", async () => {
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(makeMessage("m1", "c1"));
+
+    await setMessagePileFlags("m1", {
+      replyLater: false,
+      setAside: false,
+      bubbleUpAt: "2026-09-23T01:00:00.000Z",
+    });
+
+    const rows = await listContactMessages("c1");
+    expect(rows[0]!.bubbleUpAt).toBe("2026-09-23T01:00:00.000Z");
+    expect(rows[0]!.replyLater).toBe(false);
+  });
+});
+
+describe("listFocusReplyMessages", () => {
+  beforeEach(() => {
+    resetMockDb();
+  });
+
+  it("returns reply-later messages with body but without body_html", async () => {
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(
+      makeMessage("m-pending", "c1", {
+        replyLater: true,
+        body: "needs a reply",
+        bodyHtml: "<div>big html</div>",
+      }),
+    );
+    await upsertMessage(makeMessage("m-normal", "c1", { replyLater: false }));
+
+    const rows = await listFocusReplyMessages();
+    expect(rows.map((m) => m.id)).toEqual(["m-pending"]);
+    // The view renders the plain-text body above the reply textarea.
+    expect(rows[0]!.body).toBe("needs a reply");
+    // body_html (~80 KB/row on real mailboxes) must NOT cross the bridge.
+    expect(rows[0]!.bodyHtml).toBeNull();
+  });
+
+  it("excludes trashed and spammed messages even when flagged reply-later", async () => {
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(
+      makeMessage("m-trash", "c1", { replyLater: true, bucket: "trash" }),
+    );
+    await upsertMessage(
+      makeMessage("m-spam", "c1", { replyLater: true, bucket: "spam" }),
+    );
+    await upsertMessage(
+      makeMessage("m-ok", "c1", { replyLater: true, bucket: "feed" }),
+    );
+
+    const rows = await listFocusReplyMessages();
+    expect(rows.map((m) => m.id)).toEqual(["m-ok"]);
+  });
+
+  it("respects the limit", async () => {
+    await upsertContact(makeContact("c1"));
+    for (let i = 0; i < 10; i++) {
+      await upsertMessage(makeMessage(`m${i}`, "c1", { replyLater: true }));
+    }
+    expect(await listFocusReplyMessages(3)).toHaveLength(3);
   });
 });
 

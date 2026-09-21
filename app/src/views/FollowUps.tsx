@@ -1,4 +1,4 @@
-/** Follow-ups view — Overdue / Today / This week / Later groups.
+/** Follow-ups view — 已逾期 / 今天 / 本周 / 以后 groups.
  * Spec: prototype-v11 §3.10 + P4.
  *
  * Loads only the messages + contacts referenced by the visible pending
@@ -8,7 +8,7 @@
  * the few contacts that sent them".
  */
 
-import { For, Show, createMemo, createResource, createEffect } from "solid-js";
+import { For, Show, createMemo, createResource, createEffect, createSignal } from "solid-js";
 import {
   listFollowUps,
   listMessagesByIdsLight,
@@ -16,9 +16,15 @@ import {
   upsertFollowUp,
   deleteFollowUp,
 } from "../stores/data";
-import { setSelectedMessageId, setDetailOpen, showToast } from "../stores/ui";
+import {
+  setSelectedMessageId,
+  setDetailOpen,
+  setView,
+  showToast,
+} from "../stores/ui";
 import { Empty, ErrorState } from "../components/Empty";
 import { Avatar } from "../components/Avatar";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Icon } from "../components/Icon";
 import { ResourceGate } from "../components/ResourceGate";
 import { SkeletonList } from "../components/Skeleton";
@@ -29,6 +35,7 @@ import type { FollowUp } from "../types";
 export function FollowUps() {
   const [followUps, { refetch: refetchFollowUps }] =
     createResource(listFollowUps);
+  const [removeId, setRemoveId] = createSignal<string | null>(null);
 
   useRefreshEffect(() => {
     void refetchFollowUps();
@@ -92,6 +99,13 @@ export function FollowUps() {
   const contactById = (id: string) =>
     (contacts() ?? []).find((c) => c.id === id);
 
+  /** Resolve the contact for a follow-up without crashing when the
+   *  referenced message row is missing (deleted message, partial sync). */
+  const contactFor = (f: FollowUp) => {
+    const msg = f.msgId ? msgById(f.msgId) : undefined;
+    return msg && msg.pid ? contactById(msg.pid) : undefined;
+  };
+
   const open = (msgId: string) => {
     setSelectedMessageId(msgId);
     setDetailOpen(true);
@@ -123,8 +137,8 @@ export function FollowUps() {
     >
       <header
         style={{
-          padding: "var(--space-5)",
-          "border-bottom": "0.5px solid var(--border)",
+          padding: "var(--space-6) var(--space-5) var(--space-3)",
+          "text-align": "center",
         }}
       >
         <h2
@@ -135,7 +149,7 @@ export function FollowUps() {
             margin: 0,
           }}
         >
-          Follow-ups
+          跟进提醒
         </h2>
         <p
           style={{
@@ -144,9 +158,21 @@ export function FollowUps() {
             margin: "var(--space-1) 0 0",
           }}
         >
-          {total()} 项待处理 · 在消息面板里点 "Follow-up" 添加
+          {total()} 项待处理 · 打开任意邮件，在底部点「更多 → 跟进提醒」即可添加
         </p>
       </header>
+
+      <ConfirmDialog
+        open={removeId() !== null}
+        title="删除这条跟进提醒？"
+        body="邮件本身不会被删除。"
+        confirmLabel="删除"
+        onConfirm={() => {
+          const id = removeId();
+          if (id) void remove(id);
+        }}
+        onCancel={() => setRemoveId(null)}
+      />
 
       <ResourceGate
         resource={followUps}
@@ -167,15 +193,16 @@ export function FollowUps() {
         errorView={() => (
           <ErrorState
             title="跟进加载失败"
-            message={String(followUps.error ?? "")}
+            message="请稍后重试；若持续失败，请检查本地数据库状态。"
             retry={() => void refetchFollowUps()}
           />
         )}
         empty={
           <Empty
             icon="ph-bell-ringing"
-            title="没有跟进"
-            description="还没设置跟进提醒。"
+            title="没有跟进提醒"
+            description="打开任意邮件，在底部点「更多 → 跟进提醒」，这里会列出所有需要回头处理的消息。"
+            action={{ label: "去 Imbox", onClick: () => setView("imbox") }}
           />
         }
         isEmpty={() => total() === 0}
@@ -189,18 +216,16 @@ export function FollowUps() {
             }}
           >
             <Show when={grouped().overdue.length > 0}>
-              <Group title="Overdue" icon="ph-warning-circle" tone="danger">
+              <Group title="已逾期" icon="ph-warning-circle" tone="danger">
                 <For each={grouped().overdue}>
                   {(f) => (
                     <Row
                       f={f}
                       msg={msgById(f.msgId)}
-                      contact={
-                        f.msgId ? contactById(msgById(f.msgId)!.pid) : undefined
-                      }
+                      contact={contactFor(f)}
                       onOpen={open}
                       onDone={markDone}
-                      onRemove={remove}
+                      onRemove={(id) => setRemoveId(id)}
                     />
                   )}
                 </For>
@@ -208,18 +233,16 @@ export function FollowUps() {
             </Show>
 
             <Show when={grouped().today.length > 0}>
-              <Group title="Today" icon="ph-calendar-blank">
+              <Group title="今天" icon="ph-calendar-blank">
                 <For each={grouped().today}>
                   {(f) => (
                     <Row
                       f={f}
                       msg={msgById(f.msgId)}
-                      contact={
-                        f.msgId ? contactById(msgById(f.msgId)!.pid) : undefined
-                      }
+                      contact={contactFor(f)}
                       onOpen={open}
                       onDone={markDone}
-                      onRemove={remove}
+                      onRemove={(id) => setRemoveId(id)}
                     />
                   )}
                 </For>
@@ -227,18 +250,16 @@ export function FollowUps() {
             </Show>
 
             <Show when={grouped().thisWeek.length > 0}>
-              <Group title="This week" icon="ph-calendar">
+              <Group title="本周" icon="ph-calendar">
                 <For each={grouped().thisWeek}>
                   {(f) => (
                     <Row
                       f={f}
                       msg={msgById(f.msgId)}
-                      contact={
-                        f.msgId ? contactById(msgById(f.msgId)!.pid) : undefined
-                      }
+                      contact={contactFor(f)}
                       onOpen={open}
                       onDone={markDone}
-                      onRemove={remove}
+                      onRemove={(id) => setRemoveId(id)}
                     />
                   )}
                 </For>
@@ -246,18 +267,16 @@ export function FollowUps() {
             </Show>
 
             <Show when={grouped().later.length > 0}>
-              <Group title="Later" icon="ph-clock">
+              <Group title="以后" icon="ph-clock">
                 <For each={grouped().later}>
                   {(f) => (
                     <Row
                       f={f}
                       msg={msgById(f.msgId)}
-                      contact={
-                        f.msgId ? contactById(msgById(f.msgId)!.pid) : undefined
-                      }
+                      contact={contactFor(f)}
                       onOpen={open}
                       onDone={markDone}
-                      onRemove={remove}
+                      onRemove={(id) => setRemoveId(id)}
                     />
                   )}
                 </For>
@@ -331,7 +350,7 @@ function Row(props: {
         onClick={() => props.msg && props.onOpen(props.msg.id)}
       >
         <strong style={{ "font-size": "var(--text-body-sm)" }}>
-          {props.contact?.name ?? "Unknown"}
+          {props.contact?.name ?? "未知联系人"}
         </strong>
         <p
           style={{
@@ -352,7 +371,8 @@ function Row(props: {
             color: "var(--text-muted)",
           }}
         >
-          {relativeTime(props.f.dueAt)} · {props.f.note ?? "no note"}
+          {relativeTime(props.f.dueAt)}
+          {props.f.note ? ` · ${props.f.note}` : ""}
         </p>
       </div>
       <button
@@ -366,12 +386,12 @@ function Row(props: {
           "font-weight": "700",
         }}
       >
-        Done
+        完成
       </button>
       <button
         onClick={() => props.onRemove(props.f.id)}
-        aria-label="Remove"
-        title="Remove"
+        aria-label="删除"
+        title="删除"
         style={{ color: "var(--text-muted)", padding: "6px" }}
       >
         <Icon name="ph-x" size={14} />

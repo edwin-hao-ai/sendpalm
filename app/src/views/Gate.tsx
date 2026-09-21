@@ -22,10 +22,15 @@ import { showToast, setView } from "../stores/ui";
 import { useRefreshEffect, useSoftRefreshEffect, useViewport } from "../utils/gestures";
 import { SwipeActions } from "../components/SwipeActions";
 
-const BUCKETS: { id: MessageBucket; label: string; icon: string }[] = [
-  { id: "imbox", label: "Imbox", icon: "ph-tray" },
-  { id: "feed", label: "Stream", icon: "ph-newspaper" },
-  { id: "paperTrail", label: "Records", icon: "ph-receipt" },
+const BUCKETS: {
+  id: MessageBucket;
+  label: string;
+  icon: string;
+  hint: string;
+}[] = [
+  { id: "imbox", label: "Imbox", icon: "ph-tray", hint: "重要邮件" },
+  { id: "feed", label: "Stream", icon: "ph-newspaper", hint: "资讯与 newsletter" },
+  { id: "paperTrail", label: "Records", icon: "ph-receipt", hint: "收据与账单" },
 ];
 
 export function Gate() {
@@ -64,42 +69,82 @@ export function Gate() {
   );
 
   const [cursor, setCursor] = createSignal(0);
+  const [busy, setBusy] = createSignal(false);
   const current = (): { contact: Contact; message: Message } | undefined =>
     queue()[cursor()];
 
   const approve = async (bucket: MessageBucket) => {
     const cur = current();
-    if (!cur) return;
-    const updatedContact: Contact = {
-      ...cur.contact,
-      firstSeen: false,
-      screened: true,
-      defaultBucket: bucket,
-    };
-    await upsertContact(updatedContact);
-    await updateMessagesBucketByContact(cur.contact.id, bucket);
-    showToast({
-      message: `已批准 → ${bucket === "imbox" ? "Imbox" : bucket === "feed" ? "Stream" : "Records"}`,
-      kind: "success",
-    });
-    await refetchQueue();
-    setCursor(0);
+    if (!cur || busy()) return;
+    setBusy(true);
+    try {
+      const updatedContact: Contact = {
+        ...cur.contact,
+        firstSeen: false,
+        screened: true,
+        defaultBucket: bucket,
+      };
+      await upsertContact(updatedContact);
+      await updateMessagesBucketByContact(cur.contact.id, bucket);
+      showToast({
+        message: `已批准 → ${bucket === "imbox" ? "Imbox" : bucket === "feed" ? "Stream" : "Records"}`,
+        kind: "success",
+      });
+      await refetchQueue();
+      setCursor(0);
+    } catch (err) {
+      showToast({
+        message: "操作失败，请重试",
+        kind: "error",
+        source: "gate",
+        detail: String(err),
+      });
+    } finally {
+      setBusy(false);
+    }
   };
 
   const block = async () => {
     const cur = current();
-    if (!cur) return;
-    const updatedContact: Contact = {
-      ...cur.contact,
-      firstSeen: false,
-      screened: true,
-      blocked: true,
-    };
-    await upsertContact(updatedContact);
-    await updateMessagesBucketByContact(cur.contact.id, "spam");
-    showToast({ message: `已阻止 ${cur.contact.name}`, kind: "info" });
-    await refetchQueue();
-    setCursor(0);
+    if (!cur || busy()) return;
+    setBusy(true);
+    try {
+      const updatedContact: Contact = {
+        ...cur.contact,
+        firstSeen: false,
+        screened: true,
+        blocked: true,
+      };
+      await upsertContact(updatedContact);
+      await updateMessagesBucketByContact(cur.contact.id, "spam");
+      showToast({
+        message: `已屏蔽 ${cur.contact.name}`,
+        kind: "info",
+        action: {
+          label: "撤销",
+          run: async () => {
+            await upsertContact({
+              ...cur.contact,
+              firstSeen: true,
+              screened: false,
+              blocked: false,
+            });
+            await refetchQueue();
+          },
+        },
+      });
+      await refetchQueue();
+      setCursor(0);
+    } catch (err) {
+      showToast({
+        message: "操作失败，请重试",
+        kind: "error",
+        source: "gate",
+        detail: String(err),
+      });
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -111,16 +156,16 @@ export function Gate() {
         animation: "view-enter 0.3s var(--ease-out) both",
       }}
     >
-      <Show
-        when={!queueItems.error}
-        fallback={
-          <ErrorState
-            title="Gate 加载失败"
-            message={String(queueItems.error ?? "")}
-            retry={() => void refetchQueue()}
-          />
-        }
-      >
+        <Show
+          when={!queueItems.error}
+          fallback={
+            <ErrorState
+              title="筛选台加载失败"
+              message="请检查网络后重试。"
+              retry={() => void refetchQueue()}
+            />
+          }
+        >
       <header
         style={{ "margin-bottom": "var(--space-5)", "text-align": "center" }}
       >
@@ -138,7 +183,7 @@ export function Gate() {
           }}
         >
           <Icon name="ph-shield-check" size={14} />
-          Screener — {queue().length} 待审
+          筛选台 Gate · {queue().length} 位待审
         </div>
         <h2
           style={{
@@ -157,7 +202,7 @@ export function Gate() {
             margin: 0,
           }}
         >
-          {t("gate.empty.body", "第一次发件人需要你点头。批准后归入对应分类；拒绝后永久屏蔽。")}
+          {t("gate.empty.body", "第一次给你写信的人会先停在这里。批准后按你选择的分类投递，屏蔽后不再出现。")}
         </p>
         <button
           onClick={() => setView("screenerHistory")}
@@ -180,30 +225,28 @@ export function Gate() {
         </button>
       </header>
 
-      <Show when={current()} fallback={<DoneState count={queue().length} />}>
+      <Show when={current()} fallback={<DoneState />}>
         {(pair) => {
           const c = () => pair().contact;
           const m = () => pair().message;
           return (
+            <>
             <SwipeActions
               style={{ "border-radius": "var(--radius-xl)" }}
               leftAction={{
-                label: "Block",
+                label: "屏蔽",
                 icon: "ph-prohibit",
                 color: "red",
                 onClick: () => void block(),
-              }}
-              rightAction={{
-                label: "Inbox",
-                icon: "ph-check",
-                color: "blue",
-                onClick: () => void approve("imbox"),
               }}
               disabled={!isMobile()}
             >
               <div
                 style={{
-                  background: "var(--paper-light)",
+                  background:
+                    "color-mix(in srgb, var(--paper-light) 82%, transparent)",
+                  "backdrop-filter": "blur(20px) saturate(1.4)",
+                  "-webkit-backdrop-filter": "blur(20px) saturate(1.4)",
                   border: "0.5px solid var(--border)",
                   "border-radius": "var(--radius-xl)",
                   padding: "var(--space-6)",
@@ -228,7 +271,7 @@ export function Gate() {
                         margin: 0,
                       }}
                     >
-                      {c().name || "(unknown)"}
+                      {c().name || "未知发件人"}
                     </h3>
                     <p
                       style={{
@@ -237,7 +280,7 @@ export function Gate() {
                         color: "var(--text-secondary)",
                       }}
                     >
-                      {c().emails[0]?.value ?? "(no email)"}
+                      {c().emails[0]?.value ?? "（还没有邮箱地址）"}
                     </p>
                     <Show when={c().company || c().title}>
                       <p
@@ -257,7 +300,8 @@ export function Gate() {
                 <div
                   style={{
                     padding: "var(--space-4)",
-                    background: "var(--paper-mid)",
+                    background: "var(--paper-light)",
+                    border: "0.5px solid var(--border)",
                     "border-radius": "var(--radius-md)",
                     "margin-bottom": "var(--space-4)",
                   }}
@@ -297,6 +341,7 @@ export function Gate() {
                     {(b) => (
                       <button
                         onClick={() => approve(b.id)}
+                        disabled={busy()}
                         data-testid={`gate-approve-${b.id}`}
                         style={{
                           flex: 1,
@@ -311,7 +356,8 @@ export function Gate() {
                           "font-size": "var(--text-caption)",
                           "font-weight": "600",
                           color: "var(--text-primary)",
-                          cursor: "pointer",
+                          cursor: busy() ? "default" : "pointer",
+                          opacity: busy() ? 0.5 : 1,
                         }}
                         onMouseEnter={(e) =>
                           (e.currentTarget.style.background = "var(--mint)")
@@ -323,6 +369,15 @@ export function Gate() {
                       >
                         <Icon name={b.icon} size={20} />
                         {b.label}
+                        <span
+                          style={{
+                            "font-size": "var(--text-micro)",
+                            "font-weight": "500",
+                            color: "var(--text-muted)",
+                          }}
+                        >
+                          {b.hint}
+                        </span>
                       </button>
                     )}
                   </For>
@@ -330,19 +385,22 @@ export function Gate() {
 
                 <button
                   onClick={block}
+                  disabled={busy()}
                   style={{
                     width: "100%",
                     padding: "var(--space-3)",
                     background: "transparent",
                     "border-radius": "var(--radius-md)",
-                    border: "1px solid var(--coral)",
-                    color: "var(--coral)",
+                    border: "1.5px solid var(--status-danger)",
+                    color: "var(--status-danger)",
                     "font-weight": "700",
                     "font-size": "var(--text-caption)",
                     display: "flex",
                     "align-items": "center",
                     "justify-content": "center",
                     gap: "var(--space-2)",
+                    cursor: busy() ? "default" : "pointer",
+                    opacity: busy() ? 0.5 : 1,
                   }}
                 >
                   <Icon name="ph-prohibit" size={16} />
@@ -350,6 +408,17 @@ export function Gate() {
                 </button>
               </div>
             </SwipeActions>
+            <p
+              style={{
+                "text-align": "center",
+                "margin-top": "var(--space-3)",
+                "font-size": "var(--text-micro)",
+                color: "var(--text-muted)",
+              }}
+            >
+              第 {cursor() + 1} / {queue().length} 位待审
+            </p>
+            </>
           );
         }}
       </Show>
@@ -358,18 +427,15 @@ export function Gate() {
   );
 }
 
-function DoneState(props: { count: number }) {
+function DoneState() {
   return (
     <Empty
       icon="ph-check-circle"
-      title={props.count === 0
-        ? t("gate.empty.title", "Inbox 清爽")
-        : "全部审完"}
-      description={
-        props.count === 0
-          ? t("gate.empty.body", "现在没有第一次发件人需要审。")
-          : "Screener 已清空。"
-      }
+      title="都审完了，Imbox 见"
+      description={t(
+        "gate.empty.body",
+        "现在没有第一次发件人需要你审。新的陌生发件人会先停在这里。",
+      )}
       action={{ label: "回到 Imbox", onClick: () => setView("imbox") }}
     />
   );
@@ -418,8 +484,8 @@ export function ScreenerHistory() {
         when={!contacts.error}
         fallback={
           <ErrorState
-            title="ScreenerHistory 加载失败"
-            message={String(contacts.error ?? "")}
+            title="筛选历史加载失败"
+            message="请检查网络后重试。"
             retry={() => void refetch()}
           />
         }
@@ -441,7 +507,8 @@ export function ScreenerHistory() {
             cursor: "pointer",
             padding: "4px",
           }}
-          aria-label="Back"
+          aria-label="返回筛选台"
+          title="返回筛选台"
         >
           <Icon name="ph-arrow-left" size={20} />
         </button>
@@ -461,7 +528,7 @@ export function ScreenerHistory() {
       <div
         style={{
           display: "grid",
-          "grid-template-columns": "1fr 1fr",
+          "grid-template-columns": "repeat(auto-fit, minmax(280px, 1fr))",
           gap: "var(--space-4)",
         }}
       >
@@ -571,7 +638,7 @@ function HistoryColumn(props: {
                         "text-overflow": "ellipsis",
                       }}
                     >
-                      {c.name || "(unknown)"}
+                      {c.name || "未知发件人"}
                     </div>
                     <div
                       style={{
@@ -582,13 +649,14 @@ function HistoryColumn(props: {
                         "text-overflow": "ellipsis",
                       }}
                     >
-                      {c.emails[0]?.value ?? "(no email)"}
+                      {c.emails[0]?.value ?? "（还没有邮箱地址）"}
                     </div>
                   </div>
                   <button
                     onClick={() => props.onAction(c)}
                     style={{
-                      padding: "4px 10px",
+                      padding: "8px 12px",
+                      "min-height": "36px",
                       background: "transparent",
                       border: `1px solid ${props.color}`,
                       color: props.color,
@@ -609,7 +677,7 @@ function HistoryColumn(props: {
                   leftAction={
                     isBlockAction
                       ? {
-                          label: "Block",
+                          label: "屏蔽",
                           icon: "ph-prohibit",
                           color: "red",
                           onClick: () => props.onAction(c),
@@ -619,7 +687,7 @@ function HistoryColumn(props: {
                   rightAction={
                     !isBlockAction
                       ? {
-                          label: "Allow",
+                          label: "允许",
                           icon: "ph-check",
                           color: "blue",
                           onClick: () => props.onAction(c),

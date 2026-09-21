@@ -35,8 +35,8 @@ export const BUCKET_LABEL: Record<string, string> = {
   imbox: "Imbox",
   feed: "Stream",
   paperTrail: "Records",
-  trash: "Trash",
-  spam: "Spam",
+  trash: "回收站",
+  spam: "垃圾邮件",
 };
 
 export const BUCKET_ICON: Record<string, string> = {

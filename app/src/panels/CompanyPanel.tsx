@@ -20,16 +20,19 @@ import { Avatar } from "../components/Avatar";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { SkeletonList } from "../components/Skeleton";
-import { relativeTime, formatDate } from "../utils/date";
+import { relativeTime, formatDate, formatBytes } from "../utils/date";
+import { fileIconName } from "../utils/labels";
 import type { Contact, Message, FileItem, CalendarEvent } from "../types";
 
 const TABS = [
-  "People",
-  "Communications",
-  "Files",
-  "Meetings",
-  "Insights",
+  { id: "People", label: "成员" },
+  { id: "Communications", label: "沟通" },
+  { id: "Files", label: "文件" },
+  { id: "Meetings", label: "会议" },
+  { id: "Insights", label: "洞察" },
 ] as const;
+
+type CompanyTabId = (typeof TABS)[number]["id"];
 
 export function CompanyPanel(props: { companyName: string }) {
   const [contacts, { refetch: refetchContacts }] = createResource(
@@ -53,7 +56,7 @@ export function CompanyPanel(props: { companyName: string }) {
     listCompanyEvents,
   );
 
-  const [tab, setTab] = createSignal<(typeof TABS)[number]>("People");
+  const [tab, setTab] = createSignal<CompanyTabId>("People");
 
   const msgs = createMemo(() => messages() ?? []);
   const evts = createMemo(() => events() ?? []);
@@ -101,7 +104,10 @@ export function CompanyPanel(props: { companyName: string }) {
           display: "flex",
           "align-items": "center",
           gap: "var(--space-3)",
-          background: "var(--surface-elevated)",
+          background:
+            "color-mix(in srgb, var(--paper-light) 82%, transparent)",
+          "backdrop-filter": "blur(20px) saturate(1.4)",
+          "-webkit-backdrop-filter": "blur(20px) saturate(1.4)",
           position: "sticky",
           top: 0,
           "z-index": 2,
@@ -112,15 +118,16 @@ export function CompanyPanel(props: { companyName: string }) {
             setSelectedCompanyName(null);
             setDetailOpen(false);
           }}
-          aria-label="Close"
-          style={{ color: "var(--text-muted)" }}
+          aria-label="返回"
+          title="返回"
+          style={{ color: "var(--text-muted)", cursor: "pointer" }}
         >
           <Icon name="ph-arrow-left" size={18} />
         </button>
         <strong
           style={{ "font-size": "var(--text-body-sm)", "font-weight": "700" }}
         >
-          Company
+          公司
         </strong>
       </div>
 
@@ -194,20 +201,21 @@ export function CompanyPanel(props: { companyName: string }) {
         <For each={TABS}>
           {(t) => (
             <button
-              onClick={() => setTab(t)}
+              onClick={() => setTab(t.id)}
               style={{
-                padding: "6px 12px",
+                padding: "8px 12px",
+                "min-height": "36px",
                 "border-radius": "var(--radius-pill)",
                 "font-size": "var(--text-caption)",
                 "font-weight": "700",
                 border: "none",
-                background: tab() === t ? "var(--palm)" : "transparent",
-                color: tab() === t ? "white" : "var(--text-secondary)",
+                background: tab() === t.id ? "var(--palm)" : "transparent",
+                color: tab() === t.id ? "white" : "var(--text-secondary)",
                 cursor: "pointer",
                 "white-space": "nowrap",
               }}
             >
-              {t}
+              {t.label}
             </button>
           )}
         </For>
@@ -425,7 +433,7 @@ function CommunicationsTab(props: {
                     "letter-spacing": "0.02em",
                   }}
                 >
-                  {m.direction === "out" ? "To" : "From"}
+                  {m.direction === "out" ? "发给 TA" : "来自 TA"}
                 </span>
                 <span>{nameOf(m.pid)}</span>
               </div>
@@ -438,12 +446,6 @@ function CommunicationsTab(props: {
 }
 
 function FilesTab(props: { files: FileItem[]; onOpen: (id: string) => void }) {
-  const iconForType = (type: string) => {
-    if (type === "pdf") return "ph-file-pdf";
-    if (type === "image") return "ph-file-image";
-    return "ph-file-text";
-  };
-
   return (
     <Show
       when={props.files.length > 0}
@@ -482,7 +484,7 @@ function FilesTab(props: { files: FileItem[]; onOpen: (id: string) => void }) {
                 (e.currentTarget.style.background = "var(--paper-mid)")
               }
             >
-              <Icon name={iconForType(f.type)} size={40} />
+              <Icon name={fileIconName(f.type)} size={40} />
               <div style={{ width: "100%", "min-width": 0 }}>
                 <div
                   style={{
@@ -501,7 +503,7 @@ function FilesTab(props: { files: FileItem[]; onOpen: (id: string) => void }) {
                     "margin-top": "var(--space-1)",
                   }}
                 >
-                  {(f.size / 1024).toFixed(0)} KB · {f.type}
+                  {formatBytes(f.size)} · {f.type}
                 </div>
               </div>
             </button>

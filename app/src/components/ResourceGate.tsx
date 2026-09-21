@@ -91,14 +91,42 @@ export function ResourceGate<T>(props: ResourceGateProps<T>): JSX.Element {
         (props.resource as unknown as { refetch: () => void }).refetch();
       });
     }
+    // Users get a friendly message; the raw IPC/DB error is technical
+    // noise, so it goes into a collapsed details block (and the error
+    // log via the caller's toast path) instead of the headline.
+    const detail = err instanceof Error ? err.message : String(err);
     return (
-      <ErrorState
-        title="加载失败"
-        message={err instanceof Error ? err.message : String(err)}
-        retry={() => {
-          (props.resource as unknown as { refetch: () => void }).refetch();
-        }}
-      />
+      <div>
+        <ErrorState
+          title="加载失败"
+          message="请稍后重试。若反复出现，请查看顶栏的错误日志。"
+          retry={() => {
+            (props.resource as unknown as { refetch: () => void }).refetch();
+          }}
+        />
+        <details
+          style={{
+            "margin-top": "var(--space-2)",
+            "font-size": "var(--text-micro)",
+            color: "var(--text-muted)",
+            "text-align": "center",
+          }}
+        >
+          <summary style={{ cursor: "pointer" }}>技术细节</summary>
+          <pre
+            style={{
+              "white-space": "pre-wrap",
+              "word-break": "break-word",
+              "text-align": "left",
+              "font-family": "var(--font-mono)",
+              "font-size": "11px",
+              padding: "var(--space-2)",
+            }}
+          >
+            {detail}
+          </pre>
+        </details>
+      </div>
     );
   };
 

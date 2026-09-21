@@ -9,14 +9,32 @@ interface AvatarProps {
   color?: string;
 }
 
-function initials(name: string): string {
+// Hiragana/Katakana + CJK ext-A + CJK unified + compat ideographs.
+const CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
+
+/** Display initials for a name.
+ *  Latin: first letters of first/last word ("Edwin Hao" → "EH"), or the
+ *  first two letters of a single word ("Lisa" → "LI").
+ *  CJK: a name is one unspaced token — taking the FIRST two characters
+ *  reads wrong ("李小明" → "李小"). Take the surname for 1-2 char names
+ *  and the given name (last 2 chars) for 3+ char names, which is what
+ *  people actually go by. */
+export function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  if (parts.length === 1) {
+    const token = parts[0]!;
+    if (CJK_RE.test(token)) {
+      const chars = Array.from(token);
+      if (chars.length <= 2) return chars.join("");
+      return chars.slice(-2).join("");
+    }
+    return token.slice(0, 2).toUpperCase();
+  }
   return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
 }
 
-function hashHue(s: string): number {
+export function hashHue(s: string): number {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
   return Math.abs(h) % 360;

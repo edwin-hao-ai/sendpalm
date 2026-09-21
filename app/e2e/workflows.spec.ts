@@ -6,7 +6,7 @@
 
 import { test, expect, type Page } from "@playwright/test";
 import { join } from "node:path";
-import type { Contact, Message } from "../src/types";
+import type { Account, Contact, Message } from "../src/types";
 
 const CONTACT_ID = "ct-e2e-sender";
 const SHOTS = "/tmp/sendpalm-screenshots/e2e";
@@ -67,6 +67,38 @@ function makeContact(overrides?: Partial<Contact>): Contact {
   };
 }
 
+/** Every compose-adjacent workflow needs an email account — without one
+ *  the composer renders the "还没有绑定邮箱账户" empty state instead of
+ *  the form fields. Seeded alongside the contact/message fixtures. */
+function makeAccount(): Account {
+  return {
+    id: ACCOUNT_ID,
+    type: "email",
+    provider: "gmail",
+    email: "me@example.com",
+    label: "E2E 测试邮箱",
+    displayName: "E2E Me",
+    status: "connected",
+    synced: 0,
+    total: 0,
+    privacy: "unified",
+    color: "#2f6f4f",
+    avatar: "",
+    lastSync: todayIso(),
+    settings: {
+      aliases: [],
+      signature: "",
+      replyTo: "",
+      defaultFrom: "",
+      syncFolders: [],
+      syncFrequency: "manual",
+      autoBcc: false,
+      autoBccAddress: "",
+      vacationResponder: { enabled: false, subject: "", body: "" },
+    },
+  };
+}
+
 function makeMessage(overrides?: Partial<Message>): Message {
   return {
     id: MESSAGE_ID,
@@ -122,6 +154,7 @@ async function resetAndSeed(
   });
 
   const seed = JSON.stringify({
+    accounts: [makeAccount()],
     contacts: [contact],
     messages: [message],
     files: extras?.files ?? [],
@@ -145,7 +178,11 @@ async function seedThread(
     await window.__sendpalmE2E?.resetData();
   });
 
-  const seed = JSON.stringify({ contacts: [contact], messages });
+  const seed = JSON.stringify({
+    accounts: [makeAccount()],
+    contacts: [contact],
+    messages,
+  });
   await page.addInitScript((s: string) => {
     sessionStorage.setItem("__sendpalm_e2e_seed", s);
   }, seed);
@@ -161,7 +198,7 @@ async function navigateTo(page: Page, view: string): Promise<void> {
 
 async function openFirstMessage(page: Page): Promise<void> {
   await page.locator(`[data-message-id="${MESSAGE_ID}"]`).first().click();
-  await expect(page.locator('#detail-panel [aria-label="Reply"]')).toBeVisible({
+  await expect(page.locator('#detail-panel [aria-label="回复"]')).toBeVisible({
     timeout: 5_000,
   });
 }
@@ -193,15 +230,15 @@ test.describe("Email workflows", () => {
     );
     await openFirstMessage(page);
 
-    await page.locator('#detail-panel [aria-label="Reply"]').click();
-    await expect(page.getByRole("dialog", { name: "Reply" })).toBeVisible({
+    await page.locator('#detail-panel [aria-label="回复"]').click();
+    await expect(page.getByRole("dialog", { name: "回复" })).toBeVisible({
       timeout: 5_000,
     });
 
     // RecipientInput renders the email as a pill, not as the raw <input> value.
     await expect(
       page.locator(
-        '[data-field="to"] [aria-label="Remove sender@example.com"]',
+        '[data-field="to"] [aria-label="移除 sender@example.com"]',
       ),
     ).toBeVisible();
 
@@ -219,10 +256,14 @@ test.describe("Email workflows", () => {
     );
     await openFirstMessage(page);
 
-    // Forward is a direct action in the message-detail bottom bar.
-    await page.locator('#detail-panel [aria-label="Forward"]').click();
+    // Forward lives in the ⋯ More menu of the message-detail bottom bar.
+    await page.getByTestId("message-more-menu").click();
+    await page
+      .locator("#detail-panel")
+      .getByRole("button", { name: "转发" })
+      .click();
 
-    await expect(page.getByRole("dialog", { name: "Forward" })).toBeVisible({
+    await expect(page.getByRole("dialog", { name: "转发" })).toBeVisible({
       timeout: 5_000,
     });
 
@@ -301,6 +342,12 @@ test.describe("Email workflows", () => {
       timeout: 5_000,
     });
 
+    // Close the detail panel first — its click-to-close scrim would
+    // otherwise swallow the sidebar nav click.
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#detail-panel")).toHaveCount(0, {
+      timeout: 5_000,
+    });
     await navigateTo(page, "calendar");
     await expect(
       page.locator("#main").getByText("E2E Calendar Meeting").first(),
@@ -399,15 +446,11 @@ test.describe("Email workflows", () => {
       makeMessage(),
     );
 
-    // The card's hover-actions overlay only shows on :hover, so
-    // dispatch the click event directly rather than relying on
-    // pointer-driven visibility checks. This is the only difference
-    // from a real user hover-click.
-    await page
-      .locator('#main [aria-label="Reply later"]')
-      .first()
-      .dispatchEvent("click");
-    await expect(page.getByText("已 Reply Later")).toBeVisible({
+    // The card's hover toolbar only mounts while the card is hovered
+    // (SolidJS <Show> gate, not CSS visibility), so hover the card first.
+    await page.locator(`[data-message-id="${MESSAGE_ID}"]`).first().hover();
+    await page.locator('#main [aria-label="稍后回复 (l)"]').first().click();
+    await expect(page.getByText("已加入稍后回复")).toBeVisible({
       timeout: 5_000,
     });
 
@@ -439,11 +482,13 @@ test.describe("Email workflows", () => {
       makeMessage(),
     );
 
-    await page
-      .locator('#main [aria-label="Set aside"]')
-      .first()
-      .dispatchEvent("click");
-    await expect(page.getByText("已 Set Aside")).toBeVisible({
+    // Same hover-gated toolbar as the Reply Later test above.
+    await page.locator(`[data-message-id="${MESSAGE_ID}"]`).first().hover();
+    await page.locator('#main [aria-label="搁置 (a)"]').first().click();
+    // Scope to the toast: the pile card title is also "已搁置".
+    await expect(
+      page.getByTestId("toast-success").getByText("已搁置"),
+    ).toBeVisible({
       timeout: 5_000,
     });
 
@@ -489,7 +534,7 @@ test.describe("Email workflows", () => {
     // Open the current message in the detail panel.
     await page.locator('[data-message-id="msg-e2e-current"]').first().click();
     await expect(
-      page.locator('#detail-panel [aria-label="Reply"]'),
+      page.locator('#detail-panel [aria-label="回复"]'),
     ).toBeVisible({
       timeout: 5_000,
     });
@@ -528,7 +573,7 @@ test.describe("Email workflows", () => {
 
     const toast = page.getByTestId("toast-success");
     await expect(toast).toBeVisible({ timeout: 5_000 });
-    await expect(toast).toContainText("已移到 Trash");
+    await expect(toast).toContainText("已移到回收站");
     await expect(page.getByTestId("toast-action")).toContainText("撤销");
 
     await page.getByTestId("toast-action").click();
@@ -578,6 +623,11 @@ test.describe("Email workflows", () => {
       timeout: 5_000,
     });
 
+    // Close the detail panel first — its scrim swallows nav clicks.
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#detail-panel")).toHaveCount(0, {
+      timeout: 5_000,
+    });
     await navigateTo(page, "drafts");
     await expect(
       page.locator("#main").getByText("E2E test subject").first(),
@@ -588,12 +638,17 @@ test.describe("Email workflows", () => {
     page,
   }) => {
     await page.goto("/");
+    await page.locator("body.app-ready").waitFor({ timeout: 10_000 });
     await page.evaluate(async () => {
       await window.__sendpalmE2E!.resetData();
+      // Local bare date — see the calendar filter chips test for why a
+      // full ISO datetime falls out of the occurrence window.
+      const d = new Date();
+      const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       await window.__sendpalmE2E!.seedEvent({
         id: "ev-e2e-search",
         title: "Q3 Planning Offsite",
-        dt: new Date().toISOString(),
+        dt: today,
         tm: "10:00",
         dur: 60,
         pids: [],
@@ -607,13 +662,13 @@ test.describe("Email workflows", () => {
       });
     });
 
-    await page.getByPlaceholder(/Search contacts/).fill("Offsite");
+    await page.getByPlaceholder(/搜索邮件、联系人/).fill("Offsite");
     const dropdown = page.getByTestId("live-search-dropdown");
     await expect(dropdown.getByText("Events")).toBeVisible({ timeout: 5_000 });
     await expect(dropdown.getByText("Q3 Planning Offsite")).toBeVisible();
 
     await dropdown.getByText("Q3 Planning Offsite").click();
-    await expect(page.locator('#topbar:has-text("Calendar")')).toBeVisible();
+    await expect(page.locator('#topbar:has-text("日历")')).toBeVisible();
     await expect(
       page
         .locator("#main")
@@ -668,9 +723,15 @@ test.describe("Email workflows", () => {
 
   test("Calendar filter chips filter events by kind", async ({ page }) => {
     await page.goto("/");
+    await page.locator("body.app-ready").waitFor({ timeout: 10_000 });
     await page.evaluate(async () => {
       await window.__sendpalmE2E!.resetData();
-      const today = new Date().toISOString();
+      // The Calendar occurrence window is keyed on the LOCAL bare date
+      // (YYYY-MM-DD). A full `new Date().toISOString()` lands on the
+      // previous UTC day for half the world's timezones and the event
+      // falls out of the day/week window entirely.
+      const d = new Date();
+      const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       await window.__sendpalmE2E!.seedEvent({
         id: "ev-e2e-meeting",
         title: "Team Standup",
@@ -803,6 +864,7 @@ test.describe("Email workflows", () => {
     page,
   }) => {
     await page.goto("/");
+    await page.locator("body.app-ready").waitFor({ timeout: 10_000 });
     await page.evaluate(async () => {
       await window.__sendpalmE2E!.resetData();
       const today = new Date().toISOString();
@@ -933,14 +995,19 @@ test.describe("Email workflows", () => {
     );
     await openFirstMessage(page);
 
-    await page.locator('#detail-panel [aria-label="Reply All"]').click();
-    await expect(page.getByRole("dialog", { name: "Reply All" })).toBeVisible({
+    // Reply All lives in the ⋯ More menu of the message-detail bottom bar.
+    await page.getByTestId("message-more-menu").click();
+    await page
+      .locator("#detail-panel")
+      .getByRole("button", { name: "回复全部" })
+      .click();
+    await expect(page.getByRole("dialog", { name: "回复全部" })).toBeVisible({
       timeout: 5_000,
     });
 
     await expect(
       page.locator(
-        '[data-field="to"] [aria-label="Remove sender@example.com"]',
+        '[data-field="to"] [aria-label="移除 sender@example.com"]',
       ),
     ).toBeVisible();
 
@@ -1023,28 +1090,33 @@ test.describe("Email workflows", () => {
   }) => {
     await page.goto("/");
     await page.locator("body.app-ready").waitFor({ timeout: 10_000 });
-    await page.evaluate(async () => {
+    await page.evaluate(async (account: Account) => {
       await window.__sendpalmE2E?.resetData();
-    });
+      // Without an email account the composer renders the
+      // "还没有绑定邮箱账户" empty state and no form fields.
+      await window.__sendpalmE2E?.seedAccount(account);
+    }, makeAccount());
 
     // Open compose with the global shortcut (there is no topbar compose button).
     await page.locator("body").click();
     const isMac = process.platform === "darwin";
     await page.keyboard.press(isMac ? "Meta+n" : "Control+n");
-    await expect(page.getByText("新邮件")).toBeVisible({ timeout: 5_000 });
+    // Dialog-scoped: the Imbox "新邮件" tab trips strict mode on getByText.
+    const dialog = page.getByRole("dialog", { name: "新邮件" });
+    await expect(dialog).toBeVisible({ timeout: 5_000 });
 
-    await page
+    await dialog
       .locator('[data-field="to"] input[placeholder="recipient@example.com"]')
       .fill("recipient@example.com");
-    await page
+    await dialog
       .locator('[data-field="to"] input[placeholder="recipient@example.com"]')
       .press("Enter");
     await expect(
-      page.locator('[data-field="to"]').getByText("recipient@example.com"),
+      dialog.locator('[data-field="to"]').getByText("recipient@example.com"),
     ).toBeVisible();
 
-    await page.locator('input[placeholder="主题"]').fill("With attachment");
-    await page.locator('textarea[placeholder="正文…"]').fill("See attached.");
+    await dialog.locator('input[placeholder="主题"]').fill("With attachment");
+    await dialog.locator('textarea[placeholder="正文…"]').fill("See attached.");
 
     const fileInput = page.locator('[data-testid="compose-file-input"]');
     await fileInput.setInputFiles({
@@ -1052,11 +1124,14 @@ test.describe("Email workflows", () => {
       mimeType: "text/plain",
       buffer: Buffer.from("hello attachment"),
     });
-    await expect(page.getByText("hello.txt")).toBeVisible({ timeout: 5_000 });
+    await expect(dialog.getByText("hello.txt")).toBeVisible({ timeout: 5_000 });
 
-    // Send falls back to "saved as draft" in browser mode (no real backend).
-    await page.getByRole("button", { name: "发送" }).first().click();
-    await expect(page.getByText("已保存为草稿（未配置真实账户）")).toBeVisible({
+    // In browser mode send_email_via_backend returns null, so the app
+    // falls back to saving the draft and shows the fallback toast.
+    await dialog.getByRole("button", { name: "发送", exact: true }).click();
+    await expect(
+      page.getByText(/已发送给|草稿已保存|已保存为草稿/),
+    ).toBeVisible({
       timeout: 5_000,
     });
 
@@ -1134,11 +1209,16 @@ test.describe("Mobile workflows with data", () => {
         ],
       },
     );
-    await page.evaluate(async (seedToday: string) => {
+    await page.evaluate(async () => {
+      // Local bare date — the Calendar occurrence window is keyed on the
+      // local YYYY-MM-DD; a full ISO datetime can fall on the previous
+      // UTC day and never render.
+      const d = new Date();
+      const local = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       await window.__sendpalmE2E!.seedEvent({
         id: "ev-mobile-rich",
         title: "Mobile Test Meeting",
-        dt: seedToday,
+        dt: local,
         tm: "10:00",
         dur: 30,
         pids: ["ct-mobile-rich"],
@@ -1150,7 +1230,7 @@ test.describe("Mobile workflows with data", () => {
         actionItems: [],
         materials: [],
       });
-    }, today);
+    });
   }
 
   test("Imbox, MessagePanel, ContactPanel, Calendar and Files render on iPhone", async ({
@@ -1171,7 +1251,7 @@ test.describe("Mobile workflows with data", () => {
 
     // Open the message and verify the detail panel is full-screen.
     await page.locator(`[data-message-id="${MOBILE_MESSAGE_ID}"]`).first().click();
-    await expect(page.locator('#detail-panel [aria-label="Reply"]')).toBeVisible(
+    await expect(page.locator('#detail-panel [aria-label="回复"]')).toBeVisible(
       { timeout: 5_000 },
     );
     await expect(page.locator("[data-attachments]")).toBeVisible({ timeout: 5_000 });
@@ -1217,7 +1297,8 @@ test.describe("Mobile workflows with data", () => {
     });
 
     // Close the full-screen detail panel before using the bottom tab bar.
-    await page.locator('#detail-panel [aria-label="Close"]').first().click();
+    // Mobile renders a shell-level back button (aria-label "返回").
+    await page.locator('#detail-panel [aria-label="返回"]').first().click();
     await expect(page.locator("#detail-panel")).toHaveCount(0, { timeout: 5_000 });
 
     // Calendar view.
@@ -1244,13 +1325,13 @@ test.describe("Mobile workflows with data", () => {
   test("Mobile reply flow opens Compose full-screen", async ({ page }) => {
     await seedMobileFixture(page);
     await page.locator(`[data-message-id="${MOBILE_MESSAGE_ID}"]`).first().click();
-    await page.locator('#detail-panel [aria-label="Reply"]').click();
-    await expect(page.getByRole("dialog", { name: "Reply" })).toBeVisible({
+    await page.locator('#detail-panel [aria-label="回复"]').click();
+    await expect(page.getByRole("dialog", { name: "回复" })).toBeVisible({
       timeout: 5_000,
     });
     await expect(
       page.locator(
-        '[data-field="to"] [aria-label="Remove mobile@example.com"]',
+        '[data-field="to"] [aria-label="移除 mobile@example.com"]',
       ),
     ).toBeVisible();
     const subjectInput = page.locator('[data-field="subject"] input');

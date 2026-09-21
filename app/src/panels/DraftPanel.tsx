@@ -16,20 +16,29 @@ import {
 import {
   setDetailOpen,
   setSelectedDraftId,
+  setSettingsTab,
+  setView,
   showToast,
   setComposeOpen,
   setComposeContext,
 } from "../stores/ui";
 import { sendEmailViaBackend, getAttachmentContent } from "../services/backend";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Icon } from "../components/Icon";
+import { Skeleton } from "../components/Skeleton";
 import type { Draft } from "../types";
 import { relativeTime, formatBytes, addDays } from "../utils/date";
+import { draftStatusLabel } from "../utils/draft-status";
 import { uid } from "../utils/id";
 import { useRefreshEffect } from "../utils/gestures";
+import { firstInvalidAddress } from "../compose/Compose";
 
 export function DraftPanel(props: { draftId: string }) {
   const [draft, { refetch }] = createResource(() => props.draftId, getDraft);
   const [edit, setEdit] = createSignal<Draft | null>(null);
+  const [sending, setSending] = createSignal(false);
+  const [confirmDelete, setConfirmDelete] = createSignal(false);
+  const [confirmDiscard, setConfirmDiscard] = createSignal(false);
 
   useRefreshEffect(() => {
     void refetch();
@@ -54,69 +63,125 @@ export function DraftPanel(props: { draftId: string }) {
 
   const send = async () => {
     const e = edit();
-    if (!e) return;
-    const attachments = (e.attachments ?? []).map((a) => ({
-      filename: a.name,
-      mime: a.mime,
-      dataBase64: a.dataBase64,
-    }));
-    const cc = (e.cc ?? []).join(", ");
-    const bcc = (e.bcc ?? []).join(", ");
-    const result = await sendEmailViaBackend(
-      e.recipient,
-      e.subject || "(no subject)",
-      e.body,
-      e.accountId,
-      attachments,
-      cc,
-      bcc,
-      e.fromAlias,
-    );
-    if (!result) {
+    if (!e || sending()) return;
+    const badTo = firstInvalidAddress(e.recipient);
+    if (!e.recipient.trim() || badTo) {
       showToast({
-        message: "未配置真实账户，草稿已保存",
-        kind: "info",
+        message: badTo
+          ? `收件人地址格式不正确：${badTo}`
+          : "请先填写收件人",
+        kind: "error",
       });
       return;
     }
-    await upsertDraft({
-      ...e,
-      lastEdited: new Date().toISOString(),
-      status: "sent",
-    });
-    await refetch();
-    const createFollowUp = async () => {
-      if (!result.local_message_id) {
-        showToast({ message: "无法创建跟进（无本地消息 ID）", kind: "info" });
+    for (const [label, list] of [
+      ["抄送", e.cc ?? []],
+      ["密送", e.bcc ?? []],
+    ] as const) {
+      const bad = firstInvalidAddress(list.join(", "));
+      if (bad) {
+        showToast({ message: `${label}地址格式不正确：${bad}`, kind: "error" });
         return;
       }
-      const due = addDays(new Date(), 3);
-      await upsertFollowUp({
-        id: uid("fu"),
-        msgId: result.local_message_id,
-        dueAt: due.toISOString(),
-        status: "pending",
-        note: "发送后 3 天跟进",
+    }
+    setSending(true);
+    try {
+      const attachments = (e.attachments ?? []).map((a) => ({
+        filename: a.name,
+        mime: a.mime,
+        dataBase64: a.dataBase64,
+      }));
+      const cc = (e.cc ?? []).join(", ");
+      const bcc = (e.bcc ?? []).join(", ");
+      const result = await sendEmailViaBackend(
+        e.recipient,
+        e.subject || "(no subject)",
+        e.body,
+        e.accountId,
+        attachments,
+        cc,
+        bcc,
+        e.fromAlias,
+      );
+      if (!result) {
+        showToast({
+          message: "尚未绑定邮箱账户，无法发送。草稿已保存。",
+          kind: "info",
+          action: {
+            label: "去设置",
+            run: () => {
+              setSettingsTab("accounts");
+              setView("settings");
+            },
+          },
+        });
+        return;
+      }
+      await upsertDraft({
+        ...e,
+        lastEdited: new Date().toISOString(),
+        status: "sent",
       });
-      showToast({ message: "已设置 3 天后跟进", kind: "success" });
-    };
-    showToast({
-      message: `已发送 · ${result.message_id.slice(0, 24)}…`,
-      kind: "success",
-      action: {
-        label: "设置跟进 3 天",
-        run: () => void createFollowUp(),
-      },
-    });
+      await refetch();
+      const createFollowUp = async () => {
+        if (!result.local_message_id) {
+          showToast({ message: "无法创建跟进（无本地消息 ID）", kind: "info" });
+          return;
+        }
+        const due = addDays(new Date(), 3);
+        await upsertFollowUp({
+          id: uid("fu"),
+          msgId: result.local_message_id,
+          dueAt: due.toISOString(),
+          status: "pending",
+          note: "发送后 3 天跟进",
+        });
+        showToast({ message: "已设置 3 天后跟进", kind: "success" });
+      };
+      showToast({
+        message: `已发送给 ${e.recipient}`,
+        kind: "success",
+        action: {
+          label: "设置 3 天后跟进",
+          run: () => void createFollowUp(),
+        },
+      });
+      setSelectedDraftId(null);
+      setDetailOpen(false);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const remove = async () => {
+    await deleteDraft(props.draftId);
     setSelectedDraftId(null);
     setDetailOpen(false);
   };
 
-  const remove = async () => {
-    if (!confirm("删除此草稿？")) return;
-    await deleteDraft(props.draftId);
+  const close = () => {
     setSelectedDraftId(null);
     setDetailOpen(false);
+  };
+
+  /** True when the user has unsaved edits — compares the working copy
+   *  against the persisted draft on the fields the panel exposes. */
+  const isDirty = () => {
+    const e = edit();
+    const d = draft();
+    if (!e || !d) return false;
+    return (
+      e.recipient !== d.recipient ||
+      e.subject !== d.subject ||
+      e.body !== d.body ||
+      (e.cc ?? []).join(",") !== (d.cc ?? []).join(",") ||
+      (e.bcc ?? []).join(",") !== (d.bcc ?? []).join(",")
+    );
+  };
+
+  const requestClose = () => {
+    if (isDirty()) setConfirmDiscard(true);
+    else close();
   };
 
   const openInCompose = () => {
@@ -154,6 +219,22 @@ export function DraftPanel(props: { draftId: string }) {
     a.click();
   };
 
+  const fieldLabelStyle = {
+    "font-size": "var(--text-micro)",
+    color: "var(--text-muted)",
+    display: "block",
+    "margin-bottom": "var(--space-1)",
+  } as const;
+
+  const fieldInputStyle = {
+    width: "100%",
+    padding: "var(--space-2) 0",
+    border: "none",
+    "border-bottom": "0.5px solid var(--border)",
+    background: "transparent",
+    "font-size": "var(--text-body-sm)",
+  } as const;
+
   return (
     <div
       style={{ display: "flex", "flex-direction": "column", height: "100%" }}
@@ -169,11 +250,9 @@ export function DraftPanel(props: { draftId: string }) {
         }}
       >
         <button
-          onClick={() => {
-            setSelectedDraftId(null);
-            setDetailOpen(false);
-          }}
-          aria-label="Close"
+          onClick={requestClose}
+          aria-label="返回"
+          title="返回"
           style={{ color: "var(--text-muted)" }}
         >
           <Icon name="ph-arrow-left" size={18} />
@@ -181,7 +260,7 @@ export function DraftPanel(props: { draftId: string }) {
         <strong
           style={{ "font-size": "var(--text-body-sm)", "font-weight": "700" }}
         >
-          Draft
+          草稿
         </strong>
         <div
           style={{
@@ -192,15 +271,16 @@ export function DraftPanel(props: { draftId: string }) {
         >
           <button
             onClick={openInCompose}
-            aria-label="Open in compose"
+            aria-label="在写信窗口中打开"
             style={{ color: "var(--text-muted)", padding: "4px" }}
-            title="Open in Compose"
+            title="在写信窗口中打开"
           >
             <Icon name="ph-pencil-line" size={14} />
           </button>
           <button
-            onClick={remove}
-            aria-label="Delete"
+            onClick={() => setConfirmDelete(true)}
+            aria-label="删除草稿"
+            title="删除草稿"
             style={{ color: "var(--text-muted)", padding: "4px" }}
           >
             <Icon name="ph-trash" size={14} />
@@ -208,7 +288,40 @@ export function DraftPanel(props: { draftId: string }) {
         </div>
       </header>
 
-      <Show when={edit()}>
+      <ConfirmDialog
+        open={confirmDelete()}
+        title="删除此草稿？"
+        body="删除后无法恢复。"
+        confirmLabel="删除"
+        onConfirm={() => void remove()}
+        onCancel={() => setConfirmDelete(false)}
+      />
+      <ConfirmDialog
+        open={confirmDiscard()}
+        title="放弃未保存的修改？"
+        body="当前修改尚未保存，返回后将丢失。"
+        confirmLabel="放弃修改"
+        onConfirm={close}
+        onCancel={() => setConfirmDiscard(false)}
+      />
+
+      <Show
+        when={edit()}
+        fallback={
+          <div
+            style={{
+              padding: "var(--space-5)",
+              display: "flex",
+              "flex-direction": "column",
+              gap: "var(--space-4)",
+            }}
+          >
+            <Skeleton height={18} width="60%" />
+            <Skeleton height={28} />
+            <Skeleton height={200} />
+          </div>
+        }
+      >
         {(d) => {
           const e = d();
           return (
@@ -219,85 +332,51 @@ export function DraftPanel(props: { draftId: string }) {
                 "overflow-y": "auto",
               }}
             >
-              <label
-                style={{
-                  "font-size": "var(--text-micro)",
-                  color: "var(--text-muted)",
-                  display: "block",
-                  "margin-bottom": "var(--space-1)",
-                }}
-              >
-                To
-              </label>
+              <label style={fieldLabelStyle}>收件人</label>
               <input
                 value={e.recipient}
                 onInput={(ev) =>
                   updateField("recipient", ev.currentTarget.value)
                 }
-                style={{
-                  width: "100%",
-                  padding: "var(--space-2) 0",
-                  border: "none",
-                  "border-bottom": "0.5px solid var(--border)",
-                  background: "transparent",
-                  "font-size": "var(--text-body-sm)",
-                }}
+                placeholder="多个地址用逗号分隔"
+                style={fieldInputStyle}
               />
 
               <label
                 style={{
-                  "font-size": "var(--text-micro)",
-                  color: "var(--text-muted)",
-                  display: "block",
+                  ...fieldLabelStyle,
                   "margin-top": "var(--space-3)",
-                  "margin-bottom": "var(--space-1)",
                 }}
               >
-                Cc
+                抄送
               </label>
               <input
                 value={(e.cc ?? []).join(", ")}
                 onInput={(ev) => updateAddrList("cc", ev.currentTarget.value)}
-                placeholder="comma separated"
-                style={{
-                  width: "100%",
-                  padding: "var(--space-2) 0",
-                  border: "none",
-                  "border-bottom": "0.5px solid var(--border)",
-                  background: "transparent",
-                  "font-size": "var(--text-body-sm)",
-                }}
+                placeholder="多个地址用逗号分隔"
+                style={fieldInputStyle}
               />
 
               <label
                 style={{
-                  "font-size": "var(--text-micro)",
-                  color: "var(--text-muted)",
-                  display: "block",
+                  ...fieldLabelStyle,
                   "margin-top": "var(--space-3)",
-                  "margin-bottom": "var(--space-1)",
                 }}
               >
-                Bcc
+                密送
               </label>
               <input
                 value={(e.bcc ?? []).join(", ")}
                 onInput={(ev) => updateAddrList("bcc", ev.currentTarget.value)}
-                placeholder="comma separated"
-                style={{
-                  width: "100%",
-                  padding: "var(--space-2) 0",
-                  border: "none",
-                  "border-bottom": "0.5px solid var(--border)",
-                  background: "transparent",
-                  "font-size": "var(--text-body-sm)",
-                }}
+                placeholder="多个地址用逗号分隔"
+                style={fieldInputStyle}
               />
 
               <input
                 value={e.subject}
                 onInput={(ev) => updateField("subject", ev.currentTarget.value)}
                 placeholder="(无主题)"
+                aria-label="主题"
                 style={{
                   width: "100%",
                   padding: "var(--space-3) 0",
@@ -316,6 +395,7 @@ export function DraftPanel(props: { draftId: string }) {
                 value={e.body}
                 onInput={(ev) => updateField("body", ev.currentTarget.value)}
                 rows={12}
+                aria-label="正文"
                 style={{
                   width: "100%",
                   padding: "var(--space-3) 0",
@@ -343,7 +423,7 @@ export function DraftPanel(props: { draftId: string }) {
                       "margin-bottom": "var(--space-2)",
                     }}
                   >
-                    Attachments · {(e.attachments ?? []).length}
+                    附件 · {(e.attachments ?? []).length}
                   </p>
                   <For each={e.attachments ?? []}>
                     {(att) => (
@@ -397,7 +477,8 @@ export function DraftPanel(props: { draftId: string }) {
                   "margin-top": "var(--space-3)",
                 }}
               >
-                上次编辑 {relativeTime(e.lastEdited)} · 状态：{e.status}
+                上次编辑 {relativeTime(e.lastEdited)} · 状态：
+                {draftStatusLabel(e.status)}
               </p>
               <div
                 style={{
@@ -419,19 +500,24 @@ export function DraftPanel(props: { draftId: string }) {
                 >
                   保存草稿
                 </button>
-                <button
-                  onClick={send}
-                  style={{
-                    padding: "10px 20px",
-                    background: "var(--palm)",
-                    color: "white",
-                    "border-radius": "var(--radius-pill)",
-                    "font-weight": "700",
-                    "font-size": "var(--text-caption)",
-                  }}
-                >
-                  发送
-                </button>
+                <Show when={e.status !== "sent"}>
+                  <button
+                    onClick={() => void send()}
+                    disabled={sending()}
+                    style={{
+                      padding: "10px 20px",
+                      background: "var(--palm)",
+                      color: "var(--paper-light)",
+                      "border-radius": "var(--radius-pill)",
+                      "font-weight": "700",
+                      "font-size": "var(--text-caption)",
+                      opacity: sending() ? 0.6 : 1,
+                      cursor: sending() ? "wait" : "pointer",
+                    }}
+                  >
+                    {sending() ? "发送中…" : "发送"}
+                  </button>
+                </Show>
               </div>
             </div>
           );

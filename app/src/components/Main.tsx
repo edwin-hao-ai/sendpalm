@@ -12,7 +12,7 @@
  *
  * Each lazy import returns a component wrapped in <Suspense>. While the
  * chunk is in flight we render the FeedSkeleton — same shape as the
- * real Imbox rows (avatar + 2 text lines, 100 rows tall) so there's no
+ * real Imbox rows (avatar + 3 text lines, 12 rows) so there's no
  * layout shift when the chunk resolves.
  */
 
@@ -294,10 +294,10 @@ export function Main() {
   );
 }
 
-/** Skeleton that matches the real Imbox row shape (avatar + 2 text
- *  lines per card). 100 rows ≈ one screenful. Filling the whole
- *  viewport up front avoids the layout shift that happens when the
- *  skeleton ends and the real list begins. */
+/** Skeleton that matches the real Imbox row shape (avatar + 3 text
+ *  lines per card). 12 rows ≈ one screenful. Filling the viewport up
+ *  front avoids the layout shift that happens when the skeleton ends
+ *  and the real list begins. */
 function FeedSkeleton() {
   return (
     <div

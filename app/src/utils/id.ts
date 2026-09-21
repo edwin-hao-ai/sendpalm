@@ -11,7 +11,9 @@ export function uid(prefix = ""): string {
 export function safeParse<T>(s: string | null | undefined, fallback: T): T {
   if (!s) return fallback;
   try {
-    return JSON.parse(s) as T;
+    // `JSON.parse("null")` is valid JSON — treat it as "no value" too, so
+    // callers always get the fallback shape instead of a bare null.
+    return (JSON.parse(s) as T) ?? fallback;
   } catch {
     return fallback;
   }

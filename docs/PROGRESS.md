@@ -2901,3 +2901,69 @@ sha256 `d58775c4087e61ac988e8b132d8dd8c67c4aeb91211dbdbb3813e27a5139290f`.
   - Contacts (⌘5): bundle-loaded panel renders without console
     errors when navigating between two seeded contacts
     (`e2e/contact-bundle.spec.ts`).
+
+---
+
+## 2026-09-22 — Full-app UX audit + fix series ("Hey-grade polish")
+
+A three-pass audit (static code audit × 10 surfaces, Playwright
+screenshot capture × 41 shots at 3 viewports, visual audit × 5 groups)
+followed by 7 parallel fix packs + coordination sweep. ~200 issues
+processed across every view, panel, compose flow, and the app shell.
+
+### P0 fixes (data safety / broken interactions)
+
+- **ReadTogether data loss**: lightweight rows (`body=""`) were being
+  upserted whole-row on mark-read, wiping bodies. All pile actions now
+  use scoped writes (`markMessageUnread`, `setMessagePileFlags` in
+  `stores/data.ts`).
+- **FocusReply OOM pattern**: full-table `listMessages()` replaced with
+  scoped `listFocusReplyMessages()` (§11.7 rule).
+- **Shortcut double-fire**: 6 message handlers in `shortcuts.ts` lacked
+  the `view()==="imbox"` gate — same keypress wrote DB twice with
+  divergent bucket semantics. Gated + regression tests.
+- **DropBar fake drag**: 8 drop targets had only `onClick` (unreachable
+  mid-drag). Real `dragover`/`drop` handlers, hover highlight,
+  `try/finally endDrag`.
+- **iPhone horizontal overflow**: `overflow-x: clip` on html/body/#app,
+  mobile grid `1fr → minmax(0,1fr)`, `100vw → 100%` on overlay panels.
+- **Destructive confirms**: new `ConfirmDialog` component;清空回收站 /
+  永久删除 / 删除草稿·联系人·事件·会话 all go through it.
+- **Calendar**: UTC-slice date bug (UTC+8 mornings showed empty day),
+  narrow event pills no longer render crushed vertical text (<48px →
+  color bar + tooltip).
+- **Compose**: no-account state blocks sending with a CTA instead of an
+  empty From dropdown; Reply All no longer drops array-form cc; account
+  resources refetch on open.
+- **Trash 31-day contradiction**: countdown clamped, boundary tests.
+- **Dev-trace removal**: M10/M11/「实装」/`app:*` command IDs purged
+  from Settings; Stream subtitle dev-speak removed.
+
+### UX / copy
+
+- Full Chinese pass across all views (tabs, piles, banners, empty
+  states, toasts, aria labels); Hey brand nouns (Imbox/Stream/Records/
+  Gate/Clip) kept as proper nouns with Chinese glosses; "Inbox" typo
+  unified to Imbox.
+- Undo toasts for archive/trash/spam (prototype parity); error toasts
+  are now sticky (manual dismiss) and recorded in 错误日志.
+- `relativeTime` fully localized (刚刚 / N 分钟前 / 今天 06:30 / N 天后…).
+- Desktop sidebar regained text labels (prototype parity); ⌘N corner
+  badges removed from touch layouts; ShortcutHelp now derives from
+  DEFAULT_SHORTCUTS (no more drift) and is reachable from the avatar
+  menu + command palette.
+
+### Liquid glass
+
+- `--glass-*` token set + `.glass-panel` utility; applied to topbar,
+  detail panel, mobile tab bar, More sheet, command palette, sync
+  popover, pickers, Gate cards, Settings rail, Insights cards.
+
+### Verification
+
+- `pnpm typecheck` ✓ · `pnpm lint --max-warnings=0` ✓
+- `pnpm test` → 58 files / **492 passed** (+~130 new cases)
+- `pnpm exec playwright test` → **88 passed** / 1 skipped
+  (network-gated Rust integration)
+- 41-shot audit re-captured at `qa-tmp/ui-audit-2026-09-22/`; desktop /
+  iPad / iPhone spot-checked visually.

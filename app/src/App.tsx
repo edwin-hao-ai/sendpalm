@@ -126,8 +126,39 @@ export default function App() {
           }}
         >
           <div style={{ "max-width": "520px", "text-align": "center" }}>
-            <h2 style={{ "margin-bottom": "16px" }}>SendPalm 启动失败</h2>
-            <p style={{ color: "var(--text-secondary)" }}>{initError()}</p>
+            <h2 style={{ "margin-bottom": "16px" }}>
+              SendPalm 没能正常启动
+            </h2>
+            <p style={{ color: "var(--text-secondary)" }}>
+              本地数据初始化时出了问题。你可以尝试重启应用；如果反复出现，
+              请把下面的技术详情发给支持。
+            </p>
+            <details
+              style={{
+                "margin-top": "16px",
+                "text-align": "left",
+                "font-size": "var(--text-caption)",
+                color: "var(--text-muted)",
+              }}
+            >
+              <summary style={{ cursor: "pointer", "text-align": "center" }}>
+                技术详情
+              </summary>
+              <pre
+                style={{
+                  "margin-top": "8px",
+                  padding: "12px",
+                  background: "var(--paper-mid)",
+                  "border-radius": "var(--radius-md)",
+                  "white-space": "pre-wrap",
+                  "word-break": "break-all",
+                  "max-height": "160px",
+                  overflow: "auto",
+                }}
+              >
+                {initError()}
+              </pre>
+            </details>
             <button
               onClick={() => location.reload()}
               style={{

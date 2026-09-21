@@ -3,6 +3,7 @@
 import { Show, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { Icon } from "./Icon";
+import { useViewport } from "../utils/gestures";
 
 interface ModalProps {
   open: boolean;
@@ -15,15 +16,26 @@ interface ModalProps {
 }
 
 export function Modal(props: ModalProps) {
+  const { isMobile } = useViewport();
+  // Capture phase + stopPropagation: the global shortcut handler
+  // (utils/shortcuts.ts) listens on document in the bubble phase and would
+  // otherwise ALSO close the underlying detail panel on the same Esc press
+  // (audit agent-3 #2 — one Esc closing two layers). When the event target
+  // is a text field we don't intercept, so Esc-to-clear inside inputs keeps
+  // working.
   const handleKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape" && props.open) {
-      e.preventDefault();
-      props.onClose();
-    }
+    if (e.key !== "Escape" || !props.open) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest?.("input, textarea, select, [contenteditable]")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    props.onClose();
   };
 
-  onMount(() => document.addEventListener("keydown", handleKey));
-  onCleanup(() => document.removeEventListener("keydown", handleKey));
+  onMount(() => document.addEventListener("keydown", handleKey, true));
+  onCleanup(() => document.removeEventListener("keydown", handleKey, true));
+
+  const fullScreen = () => props.fullScreenOnMobile && isMobile();
 
   return (
     <Show when={props.open}>
@@ -42,7 +54,7 @@ export function Modal(props: ModalProps) {
             "justify-content": "center",
             "z-index": "var(--z-modal)",
             animation: "backdrop-fade-in 0.22s var(--ease-out) both",
-            padding: "var(--space-5)",
+            padding: fullScreen() ? "0" : "var(--space-5)",
           }}
           onClick={(e) => {
             if (e.target === e.currentTarget) props.onClose();
@@ -50,16 +62,27 @@ export function Modal(props: ModalProps) {
         >
           <div
             style={{
-              width: props.width ?? "560px",
-              "max-width": "94vw",
-              "max-height": props.fullScreenOnMobile ? "100dvh" : "85vh",
+              width: fullScreen() ? "100%" : (props.width ?? "560px"),
+              "max-width": fullScreen() ? "100%" : "94vw",
+              height: fullScreen() ? "100dvh" : undefined,
+              "max-height": fullScreen()
+                ? "100dvh"
+                : props.fullScreenOnMobile
+                  ? "100dvh"
+                  : "85vh",
               background: "var(--paper-light)",
-              "border-radius": "var(--radius-xl)",
+              "border-radius": fullScreen() ? "0" : "var(--radius-xl)",
               "box-shadow": "var(--shadow-xl)",
               animation: "modal-enter 0.3s var(--spring) both",
               display: "flex",
               "flex-direction": "column",
               overflow: "hidden",
+              "padding-top": fullScreen()
+                ? "env(safe-area-inset-top)"
+                : undefined,
+              "padding-bottom": fullScreen()
+                ? "env(safe-area-inset-bottom)"
+                : undefined,
             }}
           >
             <header
@@ -82,7 +105,8 @@ export function Modal(props: ModalProps) {
               </strong>
               <button
                 onClick={props.onClose}
-                aria-label="Close"
+                aria-label="关闭"
+                title="关闭"
                 style={{
                   color: "var(--text-muted)",
                   width: "28px",

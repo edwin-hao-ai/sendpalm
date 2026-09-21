@@ -53,3 +53,14 @@ export function groupItemsByDate(
   }
   return out;
 }
+
+/** Membership predicate for the Imbox list — mirrors the prototype's
+ *  `isImboxMsg` (prototype-v11.js:3121): a message parked in a workflow
+ *  pile (set aside / reply later / bubbled-up reminder) leaves the list
+ *  until the flag clears. Without the `bubbleUpAt` check, pressing `z`
+ *  or dragging to Remind looked like a no-op because the row stayed. */
+export function isImboxListMessage(
+  m: Pick<Message, "setAside" | "replyLater" | "bubbleUpAt">,
+): boolean {
+  return !m.setAside && !m.replyLater && !m.bubbleUpAt;
+}
