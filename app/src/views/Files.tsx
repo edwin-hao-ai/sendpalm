@@ -643,8 +643,11 @@ const FILES_CSS = `
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  /* Break at natural boundaries (hyphens/dots) first so the extension
+     stays intact ("…-0913.pdf" rather than "…0913.p / df"); fall back
+     to breaking anywhere only when a segment is too long. */
   overflow-wrap: anywhere;
-  word-break: break-all;
+  word-break: normal;
 }
 .file-card-actions {
   position: absolute;

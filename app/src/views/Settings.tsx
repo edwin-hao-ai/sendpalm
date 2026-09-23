@@ -6,11 +6,13 @@
 import {
   For,
   Show,
+  createContext,
   createEffect,
   createMemo,
   createResource,
   createSignal,
   onCleanup,
+  useContext,
 } from "solid-js";
 import { useViewport } from "../utils/gestures";
 import {
@@ -304,7 +306,16 @@ export function Settings() {
                   padding: "0 var(--space-5) var(--space-5)",
                 }}
               >
-                <SettingsContent activeTab={activeTab()} />
+                <SettingsDetailContext.Provider
+                  value={{
+                    mobile: true,
+                    label:
+                      TABS.find((t) => t.id === activeTab())?.label ??
+                      activeTab(),
+                  }}
+                >
+                  <SettingsContent activeTab={activeTab()} />
+                </SettingsDetailContext.Provider>
               </main>
             </Show>
           </>
@@ -562,11 +573,30 @@ function SectionTitle(props: { children: string }) {
         "font-family": "var(--font-display)",
         "font-size": "var(--text-h4)",
         "font-weight": "800",
-        margin: "0 0 var(--space-3)",
+        "margin": "0 0 var(--space-3)",
       }}
     >
       {props.children}
     </h3>
+  );
+}
+
+/** On mobile the sticky content header already shows the active tab's
+ *  label, so a leading SectionTitle with the same text reads as a
+ *  duplicate. `PageTitle` renders a SectionTitle on desktop and on
+ *  mobile only when its text differs from the tab label (e.g. the
+ *  "外观" subsection under the 偏好 tab stays). */
+const SettingsDetailContext = createContext<{
+  mobile: boolean;
+  label: string;
+}>({ mobile: false, label: "" });
+
+function PageTitle(props: { children: string }) {
+  const ctx = useContext(SettingsDetailContext);
+  return (
+    <Show when={!(ctx.mobile && ctx.label === props.children)}>
+      <SectionTitle>{props.children}</SectionTitle>
+    </Show>
   );
 }
 
@@ -583,7 +613,7 @@ function ProfileTab() {
     TIMEZONES.some((tz) => tz.value === s.profile.timezone);
   return (
     <div>
-      <SectionTitle>个人资料</SectionTitle>
+      <PageTitle>个人资料</PageTitle>
       <Field label="显示名称">
         <input
           value={s.profile.displayName}
@@ -639,7 +669,24 @@ function ProfileTab() {
         />
       </Field>
       <div style={{ display: "flex", gap: "var(--space-2)" }}>
-        <button onClick={replayOnboarding} style={secondaryBtn}>
+        <button
+          onClick={replayOnboarding}
+          style={{
+            display: "inline-flex",
+            "align-items": "center",
+            gap: "6px",
+            padding: "10px 16px",
+            "min-height": "44px",
+            background: "var(--palm-soft)",
+            color: "var(--palm)",
+            border: "0.5px solid var(--palm)",
+            "border-radius": "var(--radius-pill)",
+            "font-size": "var(--text-caption)",
+            "font-weight": "700",
+            cursor: "pointer",
+          }}
+        >
+          <Icon name="ph-arrow-counter-clockwise" size={14} />
           重新查看新手引导
         </button>
       </div>
@@ -1787,10 +1834,11 @@ function PreferencesTab() {
     );
   });
   return (
-    <div>
+    <div style={{ "max-width": "520px" }}>
       <SectionTitle>外观</SectionTitle>
-      <Toggle
+      <ToggleRow
         label="深色模式"
+        description="切换到低光配色，选择会在重启后保留。"
         checked={s.preferences.theme === "dark"}
         onChange={(v) =>
           setAppSettings("preferences", "theme", v ? "dark" : "light")
@@ -1982,7 +2030,7 @@ function LabelsTab() {
 
   return (
     <div>
-      <SectionTitle>标签</SectionTitle>
+      <PageTitle>标签</PageTitle>
       <ResourceGate
         resource={labels}
         loading={<SkeletonList count={3} height={40} />}
@@ -2165,7 +2213,7 @@ function SnippetsTab() {
 
   return (
     <div>
-      <SectionTitle>片段</SectionTitle>
+      <PageTitle>片段</PageTitle>
       <p
         style={{
           color: "var(--text-secondary)",
@@ -2577,6 +2625,7 @@ function DataActionRow(props: {
         border: props.danger
           ? "0.5px solid var(--status-danger)"
           : secondaryBtn.border,
+        cursor: "pointer",
       }}
     >
       <Icon
@@ -2603,6 +2652,7 @@ function DataActionRow(props: {
           {props.description}
         </span>
       </span>
+      <Icon name="ph-caret-right" size={14} color="var(--text-muted)" />
     </button>
   );
 }
@@ -2701,7 +2751,7 @@ function ShortcutsTab() {
     showToast({ message: "已恢复默认快捷键", kind: "success" });
   };
   return (
-    <div>
+    <div style={{ "padding-bottom": "var(--space-8)" }}>
       <div
         style={{
           display: "flex",

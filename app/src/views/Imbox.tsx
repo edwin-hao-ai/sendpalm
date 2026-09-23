@@ -1992,7 +1992,7 @@ function MessageCard(props: MessageCardProps) {
               Records
             </button>
             <button
-              class="first-time-btn"
+              class="first-time-btn danger"
               onClick={() => props.onBlockFirstTime?.(props.m)}
               data-block-sender
             >
@@ -2234,27 +2234,18 @@ function PileCard(props: {
 
   return (
     <div
-      class={"imbox-pile" + (expanded() ? " expanded" : "")}
+      class={
+        "imbox-pile" +
+        (expanded() ? " expanded" : "") +
+        (props.compact ? " compact" : "")
+      }
       data-pile={props.pile.id}
       data-pile-id={props.pile.id}
       data-testid={`pile-${props.pile.openBoardView}`}
       data-expanded={expanded() ? "true" : "false"}
       onClick={toggle}
     >
-      <div
-        class="imbox-pile-header"
-        style={
-          props.compact
-            ? {
-                padding: "4px 10px",
-                "min-height": "44px",
-                display: "flex",
-                "align-items": "center",
-                gap: "6px",
-              }
-            : undefined
-        }
-      >
+      <div class="imbox-pile-header">
         <Icon name={props.pile.icon} size={12} />
         <span class="imbox-pile-title">{props.pile.title}</span>
         <span class="imbox-pile-count">{props.pile.messages.length}</span>

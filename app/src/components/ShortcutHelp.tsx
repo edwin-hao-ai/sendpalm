@@ -114,6 +114,7 @@ export function ShortcutHelp() {
           "overflow-y": "auto",
           display: "grid",
           gap: "var(--space-4)",
+          "padding-bottom": "var(--space-6)",
         }}
       >
         <For each={groups()}>
@@ -145,10 +146,11 @@ export function ShortcutHelp() {
                       <kbd
                         style={{
                           padding: "3px 10px",
+                          "min-width": "32px",
                           background: "var(--paper-mid)",
                           "border-radius": "var(--radius-sm)",
                           "font-family": "var(--font-mono)",
-                          "font-size": "11px",
+                          "font-size": "13px",
                           "font-weight": "700",
                           color: "var(--text-primary)",
                           "text-align": "center",

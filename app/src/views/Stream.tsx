@@ -182,7 +182,7 @@ export function Stream() {
                 "max-width": "720px",
                 width: "100%",
                 margin: "0 auto",
-                padding: "0 var(--space-5) var(--space-7)",
+                padding: "0 var(--space-5) var(--space-6)",
                 flex: 1,
                 "min-height": 0,
               }}

@@ -48,10 +48,10 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--palm);
   margin-right: 10px;
   vertical-align: middle;
-  box-shadow: 0 0 0 4px var(--accent-soft);
+  box-shadow: 0 0 0 4px var(--palm-soft);
 }
 
 .feed-section-seen .feed-section-title {
@@ -71,7 +71,7 @@
 .feed-section-action {
   font-size: 13px;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--palm);
   background: transparent;
   border: none;
   cursor: pointer;
@@ -86,7 +86,7 @@
   gap: 12px;
   padding: 14px 18px;
   margin: 16px 20px 0;
-  background: linear-gradient(135deg, var(--accent-soft), rgba(88, 86, 214, 0.06));
+  background: linear-gradient(135deg, var(--palm-soft), rgba(88, 86, 214, 0.06));
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   cursor: pointer;
@@ -103,7 +103,7 @@
   box-shadow: var(--shadow-md);
 }
 
-.bubble-up-banner i { font-size: 20px; color: var(--accent); }
+.bubble-up-banner i { font-size: 20px; color: var(--palm); }
 
 .bubble-up-title { font-size: 14px; font-weight: 700; color: var(--text-primary); }
 .bubble-up-subtitle { font-size: 12px; color: var(--text-secondary); }
@@ -132,23 +132,23 @@
 .feed-card:hover { background: rgba(35, 28, 51, 0.03); }
 
 .feed-card.cursor {
-  background: var(--accent-soft);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--palm-soft);
+  box-shadow: inset 2px 0 0 var(--palm);
 }
 
 .feed-card.selected {
-  background: var(--accent-soft);
+  background: var(--palm-soft);
 }
 
 .feed-card.dragging { opacity: 0.4; }
 
-.feed-card.priority-high { box-shadow: inset 4px 0 0 var(--ruby); }
+.feed-card.priority-high { box-shadow: inset 4px 0 0 var(--coral); }
 
 .feed-card.unread .feed-name { font-weight: 700; color: var(--ink); }
 .feed-card.unread .feed-subject { font-weight: 700; color: var(--ink); }
 
 .feed-card.first-time {
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--palm);
   padding-left: 9px;
 }
 
@@ -157,7 +157,7 @@
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: var(--bg-elevated);
+  background: var(--surface-elevated);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -263,8 +263,8 @@
 }
 
 .feed-card-action-btn:hover {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--palm-soft);
+  color: var(--palm);
 }
 
 /* ── Bundle card (3+ from same sender) ─────────────────────────────── */
@@ -317,7 +317,7 @@
 
 .feed-card-bundle-count {
   margin-left: auto;
-  background: var(--accent);
+  background: var(--palm);
   color: white;
   font-size: 12px;
   font-weight: 700;
@@ -331,6 +331,7 @@
 
 .first-time-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
   padding: 8px 12px 4px 52px;
@@ -339,8 +340,8 @@
 .first-time-pill {
   font-size: 11px;
   font-weight: 700;
-  color: var(--accent);
-  background: var(--accent-soft);
+  color: var(--palm);
+  background: var(--palm-soft);
   border-radius: var(--radius-pill);
   padding: 4px 10px;
 }
@@ -357,9 +358,20 @@
   transition: background var(--duration-fast) var(--ease-out);
 }
 
-.first-time-btn.primary { background: var(--accent); color: white; border-color: var(--accent); }
+.first-time-btn.primary { background: var(--palm); color: white; border-color: var(--palm); }
 .first-time-btn:hover { background: var(--paper-mid); }
-.first-time-btn.primary:hover { background: var(--accent-strong, var(--accent)); }
+.first-time-btn.primary:hover { background: var(--palm-bright); }
+/* Destructive "阻止" reads as danger, not as a third classification
+   choice. Without this it looked identical to Stream / Records. */
+.first-time-btn.danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  background: transparent;
+}
+.first-time-btn.danger:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
 
 /* ── Piles ──────────────────────────────────────────────────────────── */
 
@@ -381,7 +393,7 @@
 .imbox-pile {
   flex: 1;
   min-width: 0;
-  background: var(--bg-elevated);
+  background: var(--surface-elevated);
   border: 0.5px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 10px 12px;
@@ -422,7 +434,7 @@
 }
 
 .imbox-pile-count {
-  background: var(--accent);
+  background: var(--palm);
   color: white;
   font-size: 10px;
   font-weight: 700;
@@ -432,14 +444,57 @@
   text-align: center;
 }
 
+/* Compact (mobile) pile card — icon stacked above the label so the
+ * three pile targets stay legible in a ~76px-wide cell. The count
+ * becomes a small corner badge. Without this the title was squeezed
+ * to ~12px and rendered as an empty, unlabeled card. */
+.imbox-pile.compact {
+  position: relative;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 6px;
+  gap: 0;
+}
+
+.imbox-pile.compact .imbox-pile-header {
+  flex-direction: column;
+  gap: 3px;
+  padding: 0;
+  min-height: 0;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.imbox-pile.compact .imbox-pile-title {
+  flex: none;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.imbox-pile.compact .imbox-pile-count {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  min-width: 16px;
+  padding: 0 5px;
+  font-size: 9px;
+  line-height: 16px;
+}
+
 .imbox-pile-focus-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
   background: var(--palm-soft, rgba(35, 121, 96, 0.12));
-  color: var(--palm, var(--accent));
-  border: 0.5px solid var(--palm, var(--accent));
+  color: var(--palm);
+  border: 0.5px solid var(--palm);
   border-radius: var(--radius-pill);
   font-size: 10px;
   font-weight: 700;
@@ -450,7 +505,7 @@
 }
 
 .imbox-pile-focus-btn:hover {
-  background: var(--palm, var(--accent));
+  background: var(--palm);
   color: white;
 }
 
@@ -461,7 +516,7 @@
   left: 0;
   right: 0;
   bottom: calc(100% + 8px);
-  background: var(--bg-elevated);
+  background: var(--surface-elevated);
   border: 0.5px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
@@ -488,7 +543,7 @@
   transition: background 0.12s var(--ease-out);
 }
 
-.pile-drawer-row:hover { background: var(--bg-hover, var(--paper-mid)); }
+.pile-drawer-row:hover { background: var(--paper-mid); }
 
 .pile-drawer-avatar {
   width: 28px;
@@ -497,7 +552,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--accent);
+  background: var(--palm);
   color: white;
   font-size: 11px;
   font-weight: 700;
@@ -570,12 +625,12 @@
 
 .pile-focus-btn {
   background: var(--palm-soft, rgba(35, 121, 96, 0.12));
-  color: var(--palm, var(--accent));
-  border-color: var(--palm, var(--accent));
+  color: var(--palm);
+  border-color: var(--palm);
 }
 
 .pile-focus-btn:hover {
-  background: var(--palm, var(--accent));
+  background: var(--palm);
   color: white;
 }
 
@@ -590,13 +645,13 @@
   flex-shrink: 0;
   margin-top: 11px;
   cursor: pointer;
-  accent-color: var(--accent);
+  accent-color: var(--palm);
   align-self: flex-start;
 }
 
 .feed-card .select-checkbox.indeterminate {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--palm);
+  border-color: var(--palm);
   position: relative;
 }
 

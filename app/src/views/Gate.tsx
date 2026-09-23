@@ -183,7 +183,7 @@ export function Gate() {
           }}
         >
           <Icon name="ph-shield-check" size={14} />
-          筛选台 Gate · {queue().length} 位待审
+          筛选台 · {queue().length} 位待审
         </div>
         <h2
           style={{
@@ -202,7 +202,7 @@ export function Gate() {
             margin: 0,
           }}
         >
-          {t("gate.empty.body", "第一次给你写信的人会先停在这里。批准后按你选择的分类投递，屏蔽后不再出现。")}
+          {t("gate.intro.body", "陌生发件人会先停在这里。批准后按分类投递，屏蔽后不再出现。")}
         </p>
         <button
           onClick={() => setView("screenerHistory")}
@@ -434,7 +434,7 @@ function DoneState() {
       title="都审完了，Imbox 见"
       description={t(
         "gate.empty.body",
-        "现在没有第一次发件人需要你审。新的陌生发件人会先停在这里。",
+        "现在没有陌生发件人需要审核。新的陌生发件人会先停在这里。",
       )}
       action={{ label: "回到 Imbox", onClick: () => setView("imbox") }}
     />

@@ -983,7 +983,7 @@ function DayHero(props: { date: Date; events: CalendarEvent[] }) {
             <div
               style={{
                 "font-family": "var(--font-display)",
-                "font-size": "var(--text-h5)",
+                "font-size": "var(--text-body-lg)",
                 "font-weight": "800",
                 color: "var(--cal-ink)",
               }}
@@ -1004,7 +1004,7 @@ function DayHero(props: { date: Date; events: CalendarEvent[] }) {
             <div
               style={{
                 "font-family": "var(--font-display)",
-                "font-size": "var(--text-h5)",
+                "font-size": "var(--text-body-lg)",
                 "font-weight": "800",
                 color: "var(--palm)",
               }}
@@ -1025,7 +1025,7 @@ function DayHero(props: { date: Date; events: CalendarEvent[] }) {
             <div
               style={{
                 "font-family": "var(--font-display)",
-                "font-size": "var(--text-h5)",
+                "font-size": "var(--text-body-lg)",
                 "font-weight": "800",
                 color: "var(--cal-ink)",
               }}
@@ -1111,7 +1111,7 @@ function DayFilmstrip(props: {
         style={{
           position: "relative",
           height: "96px",
-          "min-width": "800px",
+          "min-width": "0",
         }}
       >
         <For each={HOUR_LABELS}>
@@ -1905,7 +1905,7 @@ function WeekGrid(props: {
                       style={{
                         "font-family": "var(--font-serif)",
                         "font-size": isTablet()
-                          ? "var(--text-h5)"
+                          ? "var(--text-body-lg)"
                           : "var(--text-h3)",
                         "font-weight": "800",
                         width: "40px",

@@ -38,7 +38,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
               padding: "8px 16px",
               "border-radius": "var(--radius-pill)",
               border: "0.5px solid var(--border)",
-              color: "var(--ink-secondary)",
+              color: "var(--text-secondary)",
               "font-size": "var(--text-body-sm)",
             }}
           >
@@ -64,7 +64,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
         <p
           style={{
             margin: 0,
-            color: "var(--ink-secondary)",
+            color: "var(--text-secondary)",
             "font-size": "var(--text-body-sm)",
             "line-height": "1.6",
           }}

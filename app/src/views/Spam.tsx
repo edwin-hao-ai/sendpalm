@@ -190,7 +190,7 @@ export function Spam() {
                 "font-size": "var(--text-caption)",
               }}
             >
-              垃圾邮件。误判可恢复，恢复后该发件人将进入筛选台。
+              误判的邮件可以恢复，恢复后该发件人将重新进入筛选台。
               {paged.hasMore() ? ` · ${items().length}/${paged.total()}` : ""}
             </p>
           </div>

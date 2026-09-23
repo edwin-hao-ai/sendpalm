@@ -199,7 +199,7 @@ export function Insights() {
                   display: "flex",
                   "align-items": "flex-end",
                   gap: "4px",
-                  height: "60px",
+                  height: "96px",
                 }}
               >
                 <For each={weeklyVolume().week}>
@@ -454,7 +454,7 @@ export function Insights() {
                   margin: "var(--space-1) 0",
                 }}
               >
-                待处理跟进
+                封邮件等待跟进
               </p>
             </Card>
 

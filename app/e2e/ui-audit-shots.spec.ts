@@ -112,6 +112,22 @@ const CONTACTS: Contact[] = [
     scC: "#635bff",
   }),
   contact({
+    id: "ct-aws",
+    name: "AWS",
+    company: "Amazon Web Services",
+    title: "Billing",
+    emails: [{ value: "aws-billing@amazon.com", label: "work" }],
+    scC: "#ff9900",
+  }),
+  contact({
+    id: "ct-alipay",
+    name: "支付宝",
+    company: "蚂蚁集团",
+    title: "账单服务",
+    emails: [{ value: "bill@alipay.com", label: "work" }],
+    scC: "#1677ff",
+  }),
+  contact({
     id: "ct-liwang",
     name: "李望",
     company: "设计周刊",
@@ -414,7 +430,7 @@ const MESSAGES: Message[] = [
   }),
   message({
     id: "msg-17",
-    pid: "ct-sarah",
+    pid: "ct-aws",
     subj: "Invoice INV-2026-0913 from AWS",
     prev: "Your September invoice is ready. Total: $312.44…",
     body: "Your September invoice is ready.\n\nTotal: $312.44\nDue: Oct 1, 2026\n\nPDF attached.",
@@ -425,7 +441,7 @@ const MESSAGES: Message[] = [
   }),
   message({
     id: "msg-18",
-    pid: "ct-sarah",
+    pid: "ct-alipay",
     subj: "支付宝 电子账单 2026-09",
     prev: "您 9 月的电子账单已生成,本月共支出 ¥4,821.30…",
     body: "您 9 月的电子账单已生成,本月共支出 ¥4,821.30。\n\n登录支付宝 App 查看明细。",

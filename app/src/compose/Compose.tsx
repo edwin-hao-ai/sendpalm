@@ -825,15 +825,29 @@ export function Compose() {
             </strong>
             <Show when={formFactor() === "mobile" && !composeMinimized()}>
               <button
-                onClick={() => void sendNow()}
+                onClick={() => {
+                  const reason = sendBlockReason();
+                  if (reason) {
+                    showToast({ message: reason, kind: "info" });
+                    return;
+                  }
+                  void sendNow();
+                }}
+                disabled={!!sendBlockReason()}
+                title={sendBlockReason() ?? "发送（⌘↵）"}
                 style={{
                   padding: "6px 14px",
-                  background: "var(--palm)",
+                  background: sendBlockReason()
+                    ? "var(--paper-dark)"
+                    : "var(--palm)",
                   color: "white",
                   "border-radius": "var(--radius-pill)",
                   "font-size": "var(--text-caption)",
                   "font-weight": "700",
                   "min-height": "36px",
+                  opacity: sendBlockReason() ? 0.6 : 1,
+                  cursor: sendBlockReason() ? "not-allowed" : "pointer",
+                  border: "none",
                 }}
               >
                 发送

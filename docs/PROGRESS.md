@@ -2967,3 +2967,76 @@ processed across every view, panel, compose flow, and the app shell.
   (network-gated Rust integration)
 - 41-shot audit re-captured at `qa-tmp/ui-audit-2026-09-22/`; desktop /
   iPad / iPhone spot-checked visually.
+
+---
+
+## 2026-09-23 — Independent re-audit of the Kimi fix series (release-blocker pass)
+
+Ran the app end-to-end (Vite dev server + Playwright), re-captured all
+41 audit screenshots at 3 viewports, and reviewed them against the
+prototype + Hey standards. Found and fixed issues the previous pass
+missed.
+
+### P0 — release blocker
+
+- **11 design tokens were referenced but never defined** (`--accent`,
+  `--accent-soft`, `--accent-strong`, `--ruby`, `--bg-elevated`,
+  `--bg-hover`, `--ink-secondary`, `--space-7`, `--text-h5`, plus the
+  notification tints `--sunset/--ocean/--berry/--slate`). An unresolved
+  `var()` invalidates the whole declaration, so the primary Gate
+  "批准到 Imbox" button rendered **white-on-transparent (invisible)**,
+  pile count badges vanished, and priority accent bars dropped out.
+  Mapped each to the canonical token the prototype intended
+  (`--accent` → `--palm` = `#0A8F63`, per `css/prototype-v11.css:41`).
+  Added `app/src/styles/css-tokens.test.ts` — a regression guard that
+  fails the build if any fallback-less `var(--x)` has no definition.
+
+### P1 — obviously broken
+
+- **Mobile Compose header "发送" was enabled** while the no-account
+  state blocked sending (bottom button was correctly disabled). Header
+  button now consults `sendBlockReason()`.
+- **iPad calendar timeline overflowed** its card and clipped the
+  `21:00` label (fixed `min-width: 800px` inside `overflow:auto`).
+  Strip now fits the card at every breakpoint.
+- **Mobile pile bar cards were unlabeled** — the three ~76px cells
+  squeezed the title to ~12px and the count badge was invisible, so
+  users saw three blank icon cards. Compact layout now stacks
+  icon-above-label with a corner count badge.
+
+### P2 — polish
+
+- Files: long filenames no longer break mid-extension
+  (`word-break: normal` + `overflow-wrap: anywhere`).
+- Imbox: destructive "阻止" is now red-outlined instead of looking like
+  a third classification choice; first-time action row wraps on narrow
+  widths.
+- Gate: badge no longer says "筛选台 Gate" (redundant); intro/empty copy
+  de-awkwarded ("陌生发件人…").
+- Insights: "待处理跟进" sub-label no longer duplicates the card title;
+  weekly chart height 60 → 96px.
+- PileBoard: header now shares the centered 720px column with the list.
+- Spam: subtitle no longer repeats the title.
+- Empty states: wider text column + `text-wrap: pretty`; Clips gained a
+  CTA; Drafts copy shortened to kill a CJK orphan.
+- Settings: dark-mode toggle now uses the same carded `ToggleRow` as the
+  other prefs; shortcuts tab gets bottom padding; "重新查看新手引导"
+  is a proper pill button; data action rows gained a chevron + pointer;
+  mobile sub-page title no longer duplicates the first section heading.
+- ShortcutHelp: kbd glyphs 11 → 13px; scroll area clears the bottom fade.
+- Seed data: Records senders now have distinct contacts so the audit
+  screenshots don't show three identical avatars.
+
+### Known non-issues
+
+- `Companies` renders skeleton placeholders in **browser** mode only:
+  the complex aggregate SQL isn't parsed by the in-browser `MockDb`.
+  The real Tauri/SQLite path executes it correctly.
+
+### Verification
+
+- `pnpm typecheck` ✓ · `pnpm lint --max-warnings=0` ✓
+- `pnpm test` → 59 files / **493 passed** (+1 token guard)
+- `pnpm exec playwright test` → **88 passed** / 1 skipped
+- 41 shots re-captured; independent visual reviewer confirmed every fix
+  renders correctly and found no regressions.

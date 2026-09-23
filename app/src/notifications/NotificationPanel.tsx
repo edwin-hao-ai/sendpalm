@@ -35,13 +35,13 @@ const ICON_BY_TYPE: Record<string, string> = {
 };
 
 const TINT_BY_TYPE: Record<string, string> = {
-  followup: "var(--sunset)",
+  followup: "var(--orange)",
   agent: "var(--lavender)",
-  draft: "var(--slate)",
-  relationship: "var(--ocean)",
+  draft: "var(--ink-muted)",
+  relationship: "var(--cobalt)",
   schedule: "var(--palm)",
-  system: "var(--slate)",
-  surfaced: "var(--berry)",
+  system: "var(--ink-muted)",
+  surfaced: "var(--pink)",
   mail: "var(--palm)",
 };
 

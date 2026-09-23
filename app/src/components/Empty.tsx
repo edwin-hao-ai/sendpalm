@@ -58,11 +58,12 @@ export function Empty(props: EmptyProps) {
       <Show when={props.description}>
         <p
           style={{
-            "max-width": "320px",
+            "max-width": "420px",
             "font-size": "var(--text-body-sm)",
             color: "var(--text-secondary)",
             margin: 0,
             "line-height": "1.5",
+            "text-wrap": "pretty",
           }}
         >
           {props.description}
@@ -71,12 +72,13 @@ export function Empty(props: EmptyProps) {
       <Show when={props.hint}>
         <p
           style={{
-            "max-width": "320px",
+            "max-width": "420px",
             "font-size": "var(--text-caption)",
             color: "var(--text-muted)",
             margin: 0,
             "margin-top": "var(--space-2)",
             "line-height": "1.5",
+            "text-wrap": "pretty",
           }}
         >
           {props.hint}

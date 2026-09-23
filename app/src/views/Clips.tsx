@@ -15,7 +15,7 @@ import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { ResourceGate } from "../components/ResourceGate";
 import { SkeletonList } from "../components/Skeleton";
-import { showToast } from "../stores/ui";
+import { setView, showToast } from "../stores/ui";
 import { isToday, isYesterday, relativeTime } from "../utils/date";
 import { useRefreshEffect } from "../utils/gestures";
 
@@ -150,6 +150,7 @@ export function Clips() {
             icon="ph-bookmarks"
             title="还没有 Clip"
             description="在邮件里选中文字后点「Clip」，金句、地址、代码片段都收在这里，一键复制。"
+            action={{ label: "去 Imbox 选一段", onClick: () => setView("imbox") }}
           />
         }
       >

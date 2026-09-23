@@ -50,7 +50,7 @@ const ACTIONS: {
     id: "trash",
     label: "移到回收站",
     icon: "ph-trash",
-    color: "var(--ruby, var(--status-danger))",
+    color: "var(--coral)",
     shortcut: "t",
     run: () => setBucket("trash"),
   },

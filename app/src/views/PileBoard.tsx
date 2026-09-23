@@ -258,6 +258,8 @@ export function PileBoard(props: { pileId: PileId }) {
           "align-items": "center",
           gap: "var(--space-3)",
           padding: "var(--space-5) 0 var(--space-3)",
+          "max-width": "720px",
+          margin: "0 auto",
         }}
       >
         <button
