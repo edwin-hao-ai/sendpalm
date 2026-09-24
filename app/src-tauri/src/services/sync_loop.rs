@@ -950,9 +950,16 @@ async fn insert_message(
     let _ = index_entity(pool, &mid, "message", &parsed.subject, &search_body).await;
 
     // Persist attachments to disk and link them to the message.
-    let attachment_ids = persist_attachments(data_dir, pool, &contact_id, &mid, &parsed.attachments)
-        .await
-        .map_err(|e| format!("persist attachments uid={uid}: {e}"))?;
+    let attachment_ids = persist_attachments(
+        data_dir,
+        pool,
+        &contact_id,
+        &mid,
+        &parsed.date.to_rfc3339(),
+        &parsed.attachments,
+    )
+    .await
+    .map_err(|e| format!("persist attachments uid={uid}: {e}"))?;
     if !attachment_ids.is_empty() {
         let ids_json = serde_json::to_string(&attachment_ids).unwrap_or_else(|_| "[]".to_string());
         sqlx::query("UPDATE messages SET attachments_json = $1 WHERE id = $2")
@@ -1279,11 +1286,17 @@ pub async fn save_sent_message(
     Ok(mid)
 }
 
+/// Persist parsed attachments to disk and insert their `files` rows.
+///
+/// `st` is the RFC3339 timestamp of the *message* the attachment belongs
+/// to. Files must inherit the mail's date, not the sync time — otherwise
+/// every attachment shows "刚刚" in the Files view after a backfill.
 async fn persist_attachments(
     data_dir: &std::path::Path,
     pool: &SqlitePool,
     contact_id: &str,
     m_id: &str,
+    st: &str,
     attachments: &[crate::services::parser::ParsedAttachment],
 ) -> Result<Vec<String>, String> {
     if attachments.is_empty() {
@@ -1313,7 +1326,6 @@ async fn persist_attachments(
 
         let relative = format!("attachments/{file_id}/{safe_name}");
         let file_type = crate::services::parser::file_type_from_mime(&att.mime);
-        let now = chrono::Utc::now().to_rfc3339();
         sqlx::query(
             "INSERT INTO files (id, pid, name, type, mime, size, url, st, source_message_ids) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
@@ -1329,7 +1341,7 @@ async fn persist_attachments(
         .bind(&att.mime)
         .bind(content.len() as i64)
         .bind(&relative)
-        .bind(&now)
+        .bind(st)
         .bind(format!("[\"{}\"]", m_id))
         .execute(pool)
         .await

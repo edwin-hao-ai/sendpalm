@@ -7,7 +7,7 @@
  *  Output: qa-tmp/ui-audit-2026-09-22/<viewport>-<seq>-<name>.png
  */
 
-import { test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { CalendarEvent, Contact, FileItem, Message } from "../src/types";
@@ -894,6 +894,26 @@ test.describe("UI audit shots — desktop 1440x900", () => {
       .locator('[data-testid="pile-replyLater"] [data-pile-open-board]')
       .click();
     await shoot(page, "desktop", "pileboard-reply-later", 600);
+  });
+
+  test("imbox feed card drags and reveals the drop bar", async ({ page }) => {
+    // Regression: `<article draggable>` (bare shorthand) renders as
+    // `draggable=""`, which is an invalid enumerated value → the card is
+    // NOT draggable and a drag silently becomes a text selection, so the
+    // DropBar never appears. Guard the full path: draggable attribute →
+    // dragstart → DropBar mounts.
+    await bootSeeded(page);
+    await navTo(page, "imbox");
+    const card = page.locator('[data-feed-card="message"]').first();
+    await card.waitFor({ timeout: 8_000 });
+    await expect(card).toHaveAttribute("draggable", "true");
+
+    const box = (await card.boundingBox())!;
+    await page.mouse.move(box.x + 40, box.y + 24);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 120, box.y + 140, { steps: 12 });
+    await expect(page.locator("#drop-bar")).toBeVisible({ timeout: 3_000 });
+    await page.mouse.up();
   });
 });
 

@@ -585,17 +585,50 @@ export function Files() {
 function FileThumb(props: { file: FileItem }) {
   const isImage = () => props.file.type === "image";
   const [failed, setFailed] = createSignal(false);
+  // Only fetch the (base64) content once the card is near the viewport.
+  // Without this, a 2,700-file mailbox fires thousands of IPC reads and
+  // buffers every image in memory at mount.
+  const [visible, setVisible] = createSignal(false);
+  let el: HTMLDivElement | undefined;
+
+  /** A `url` that the webview can load directly. Synced attachments store
+   *  a filesystem-relative path (`attachments/<id>/<name>`) which is NOT a
+   *  web URL — using it as `<img src>` 404s, which is why previews were
+   *  blank. Those are inlined from `get_attachment_content` instead. */
+  const isWebUrl = (u?: string | null) =>
+    !!u && /^(https?:|data:|blob:|asset:|tauri:)/.test(u);
+
+  onMount(() => {
+    if (!isImage() || !el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: "300px" },
+    );
+    io.observe(el);
+    onCleanup(() => io.disconnect());
+  });
+
   const [inlineUrl] = createResource(
     () =>
-      isImage() && !props.file.thumbUrl && !props.file.url
+      isImage() && visible() && !isWebUrl(props.file.thumbUrl) && !isWebUrl(props.file.url)
         ? props.file.id
         : null,
     async (id) => (id ? await getAttachmentContent(id) : null),
   );
-  const src = () => props.file.thumbUrl ?? props.file.url ?? inlineUrl() ?? null;
+  const src = () => {
+    if (isWebUrl(props.file.thumbUrl)) return props.file.thumbUrl;
+    if (isWebUrl(props.file.url)) return props.file.url;
+    return inlineUrl() ?? null;
+  };
 
   return (
     <div
+      ref={(node) => (el = node)}
       style={{
         width: "100%",
         "aspect-ratio": "1",

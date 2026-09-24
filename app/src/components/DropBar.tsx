@@ -90,7 +90,7 @@ export function DropBar() {
           "max-width": "min(92vw, 720px)",
           "box-shadow": "var(--glass-shadow)",
           "z-index": "var(--z-detail)",
-          animation: "toast-enter 0.2s var(--ease-out) both",
+          animation: "dropbar-enter 0.2s var(--ease-out) both",
         }}
       >
         {TARGETS.map((t) => (

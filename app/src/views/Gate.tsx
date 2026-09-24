@@ -17,6 +17,7 @@ import { emailBodyPreview } from "../utils/html";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { Empty, ErrorState } from "../components/Empty";
+import { Skeleton } from "../components/Skeleton";
 import type { Contact, Message, MessageBucket } from "../types";
 import { showToast, setView } from "../stores/ui";
 import { useRefreshEffect, useSoftRefreshEffect, useViewport } from "../utils/gestures";
@@ -225,6 +226,7 @@ export function Gate() {
         </button>
       </header>
 
+      <Show when={queueItems() !== undefined} fallback={<GateSkeleton />}>
       <Show when={current()} fallback={<DoneState />}>
         {(pair) => {
           const c = () => pair().contact;
@@ -423,6 +425,52 @@ export function Gate() {
         }}
       </Show>
       </Show>
+      </Show>
+    </div>
+  );
+}
+
+/** Skeleton shown while the Gate queue loads — mirrors the real card so
+ *  there is no layout jump and the user sees progress instead of a blank
+ *  page (or a premature "都审完了"). */
+function GateSkeleton() {
+  return (
+    <div
+      style={{
+        background: "var(--surface-elevated)",
+        border: "0.5px solid var(--border)",
+        "border-radius": "var(--radius-xl)",
+        padding: "var(--space-6)",
+        "box-shadow": "var(--shadow-md)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          gap: "var(--space-4)",
+          "align-items": "center",
+          "margin-bottom": "var(--space-4)",
+        }}
+      >
+        <Skeleton circle height={56} />
+        <div style={{ flex: 1, "min-width": 0 }}>
+          <Skeleton height={18} width="40%" />
+          <div style={{ height: "var(--space-2)" }} />
+          <Skeleton height={12} width="65%" />
+        </div>
+      </div>
+      <Skeleton height={140} />
+      <div
+        style={{
+          display: "flex",
+          gap: "var(--space-2)",
+          "margin-top": "var(--space-4)",
+        }}
+      >
+        <Skeleton height={64} />
+        <Skeleton height={64} />
+        <Skeleton height={64} />
+      </div>
     </div>
   );
 }

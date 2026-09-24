@@ -58,6 +58,21 @@
   }
 }
 
+/* DropBar is centered with `left: 50%; transform: translateX(-50%)`.
+   Reusing `toast-enter` (whose final keyframe sets `transform`) would
+   override that translate and leave the bar off-center, so it gets its
+   own keyframes that keep the centering translate. */
+@keyframes dropbar-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+}
+
 @keyframes fan-enter {
   from {
     opacity: 0;

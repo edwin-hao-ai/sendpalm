@@ -3040,3 +3040,57 @@ missed.
 - `pnpm exec playwright test` → **88 passed** / 1 skipped
 - 41 shots re-captured; independent visual reviewer confirmed every fix
   renders correctly and found no regressions.
+
+---
+
+## 2026-09-24 — Live-app bug round 2 (real mailbox, real data)
+
+Ran the actual Tauri app against the real Feishu account (~4,000 messages)
+and fixed what only surfaces with real data / real volumes.
+
+### P0 — broken views
+
+- **Companies errored in the real app**: the aggregate query joined
+  `json_each(e.pids)` but the column is `pids_json` → `no such column`
+  → "公司数据加载失败". Fixed (`stores/data.ts`).
+- **Gate ran a `SELECT *` over every message from every unscreened
+  sender.** With 333 first-time senders × ~4,000 messages (≈80 KB
+  `body_html` each) that is hundreds of MB crossing IPC; the main thread
+  froze on `JSON.parse` and the view painted blank. Rewrote the query to
+  a bounded projection (no `body_html`, `body` truncated to 4 KB) and
+  keep only the newest message per sender. Added a card-shaped loading
+  skeleton so it no longer flashes the "都审完了" state mid-load.
+- **Attachment thumbnails never rendered.** Synced files store
+  `url = "attachments/<id>/<name>"` (a filesystem-relative path), which
+  was fed straight into `<img src>` → 404 → fallback icon. Images are now
+  inlined from `get_attachment_content` (data URL), gated by an
+  `IntersectionObserver` so a 3,000-file mailbox only decodes what is
+  near the viewport.
+
+### P1 — wrong data / broken interaction
+
+- **Every attachment showed "刚刚".** The Rust sync bound
+  `chrono::Utc::now()` as `files.st` instead of the message's date. Fixed
+  in `persist_attachments` (now takes the message timestamp) + migration
+  `0023_files_st_backfill.sql` re-derives `st` for existing rows from
+  `source_messages_ids[0]`.
+- **Drag-and-drop did nothing.** The Tauri window left
+  `dragDropEnabled` at its default `true`, which makes the webview's
+  HTML5 drag/drop unreachable (the OS drop handler swallows it) — a drag
+  degrades into a text selection. Set `dragDropEnabled: false`.
+- **The drag "quick workspace" (DropBar) was off-centre.** It re-used the
+  `toast-enter` keyframes, whose final frame sets `transform`, overriding
+  the bar's `transform: translateX(-50%)`. Gave it dedicated
+  `dropbar-enter` keyframes that keep the centring translate.
+- Bundle-drawer rows used the bare `draggable` shorthand, which SolidJS
+  renders as `draggable=""` (invalid for the enumerated attribute → not
+  draggable). Now `draggable={true}`.
+
+### Verification
+
+- `pnpm typecheck` ✓ · `pnpm lint --max-warnings=0` ✓
+- `pnpm test` → 59 files / **494 passed** (+1 DropBar centring guard)
+- `pnpm exec playwright test` → **89 passed** / 1 skipped (+1 end-to-end
+  drag test: draggable attribute → dragstart → DropBar mounts)
+- Live app re-verified: Gate shows the queue, Companies loads, Files
+  previews images with correct dates ("2 周前"), Imbox shows 2026 mail.

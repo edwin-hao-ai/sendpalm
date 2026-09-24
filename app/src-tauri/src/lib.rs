@@ -161,6 +161,12 @@ pub fn run() {
             sql: include_str!("../migrations/0022_messages_pile_indexes.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 23,
+            description: "files.st backfill from source message date",
+            sql: include_str!("../migrations/0023_files_st_backfill.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     eprintln!("[sendpalm] starting tauri builder");

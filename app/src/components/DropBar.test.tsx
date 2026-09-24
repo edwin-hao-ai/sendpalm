@@ -18,6 +18,17 @@ describe("DropBar", () => {
     expect(document.getElementById("drop-bar")).toBeNull();
   });
 
+  it("keeps its horizontal centering while animating in", () => {
+    // Regression: the bar is centered with `transform: translateX(-50%)`.
+    // Reusing the `toast-enter` keyframes (whose final frame sets
+    // `transform`) overrode that translate and left the bar off-centre.
+    render(() => <DropBar />);
+    startDrag({ id: "m1" }, vi.fn());
+    const bar = document.getElementById("drop-bar")!;
+    expect(bar.style.transform).toBe("translateX(-50%)");
+    expect(bar.style.animation).toContain("dropbar-enter");
+  });
+
   it("shows all 8 targets once a drag starts", () => {
     render(() => <DropBar />);
     startDrag({ id: "m1" }, vi.fn());

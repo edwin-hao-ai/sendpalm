@@ -1752,7 +1752,7 @@ function ItemRow(props: RowProps) {
       onBlockFirstTime={props.onBlockFirstTime}
       onDragStart={props.onDragStart}
       onDragEnd={props.onDragEnd}
-      draggable
+      draggable={true}
     />
   );
 }
@@ -2190,7 +2190,7 @@ function BundleCard(props: BundleCardProps) {
               data-bundle-row={m.id}
               data-message-id={m.id}
               data-feed-card="message"
-              draggable
+              draggable="true"
               onDragStart={(ev) => props.onDragStart(m, ev)}
               onDragEnd={(ev) => props.onDragEnd(ev)}
               onClick={() => props.onOpenFirst(m)}

@@ -697,7 +697,7 @@ export async function listCompaniesWithCounts(): Promise<CompanyGroup[]> {
         (SELECT COUNT(*)
            FROM events e
           WHERE EXISTS (
-            SELECT 1 FROM json_each(e.pids) je
+            SELECT 1 FROM json_each(e.pids_json) je
              WHERE je.value IN (
                SELECT id FROM contacts
                 WHERE COALESCE(NULLIF(company, ''), '(未分类)') =
@@ -796,8 +796,21 @@ export async function listGateQueue(): Promise<GateQueueItem[]> {
 
   const contactIds = contactRows.map((r) => r.id as ID);
   const placeholders = contactIds.map((_, i) => `$${i + 1}`).join(",");
+  // Bounded projection: the Gate card only needs the subject + a plain-text
+  // preview. The previous `SELECT *` pulled every message (with ~80 KB
+  // `body_html` each) for every unscreened sender — on a 4,000-message
+  // mailbox that was ~4,000 bodies / hundreds of MB, which froze the main
+  // thread on JSON.parse and left the view blank. We cap the body at 4 KB
+  // and never fetch `body_html`; the JS side keeps only the newest message
+  // per sender.
   const messageRows = await db.select<Record<string, unknown>[]>(
-    `SELECT * FROM messages WHERE pid IN (${placeholders}) ORDER BY st DESC`,
+    `SELECT id, pid, subj, prev, tm, st, ac, bucket, direction, unread,
+            labels_json, attachments_json, trackers_json, thread_id,
+            reply_later, set_aside, bubble_up_at, remind_at, to_addr,
+            cc_json, bcc_json, deleted_at, calendar_json,
+            substr(body, 1, 4000) AS body,
+            NULL AS body_html
+       FROM messages WHERE pid IN (${placeholders}) ORDER BY st DESC`,
     contactIds,
   );
 
