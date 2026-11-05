@@ -5,6 +5,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { navigateToView } from "./navigation";
 import { join } from "node:path";
 import type { Account, Contact, Message } from "../src/types";
 
@@ -192,7 +193,7 @@ async function seedThread(
 }
 
 async function navigateTo(page: Page, view: string): Promise<void> {
-  await page.locator(`[data-nav-view="${view}"]`).first().click();
+  await navigateToView(page, view);
   await page.waitForTimeout(200);
 }
 
@@ -204,13 +205,62 @@ async function openFirstMessage(page: Page): Promise<void> {
 }
 
 test.describe("Email workflows", () => {
-  test("Gate approval moves a first-sender message to Imbox", async ({
+  for (const width of [375, 820, 1440]) {
+    test(`Tasks review, source link and historical manual action at ${width}px`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 900 });
+      await resetAndSeed(page, makeContact({ firstSeen: false, screened: true }), makeMessage({ st: "2020-01-01T00:00:00.000Z" }));
+      await openFirstMessage(page);
+      await page.getByTestId("message-more-menu").click();
+      await page.getByTestId("message-extract-tasks").click();
+      await expect(page.getByText(/浏览器预览不会发送邮件内容/)).toBeVisible();
+      await expect(page.locator("#detail-panel")).toContainText("E2E test subject");
+      // Seed a persisted provider result, not a fake browser model response.
+      await page.evaluate(async ({ messageId }) => {
+        const db = await window.__sendpalmE2E!.__internals.getDb();
+        await db.execute("INSERT INTO task_extraction_runs (source_message_id,state,mode,created_at,updated_at) VALUES ($1,$2,$3,$4,$5)", [messageId, "pending_review", "manual", "2026-11-02", "2026-11-02"]);
+        for (const id of ["confirm-s", "dismiss-s"]) await db.execute("INSERT INTO task_suggestions (id,source_message_id,title,notes,due,priority,direction,status,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)", [id, messageId, id === "confirm-s" ? "Send report" : "Ignore this", "Explicit commitment", null, "normal", "unclear", "pending", "2026-11-02"]);
+      }, { messageId: MESSAGE_ID });
+      await page.evaluate("import('/src/stores/ui.ts').then(ui => ui.setDetailOpen(false))");
+      await navigateTo(page, "tasks");
+      await expect(page.getByRole("heading", { name: "AI 建议 · 待确认" })).toBeVisible();
+      const first = page.locator(".task-suggestion").first();
+      await expect(first.getByRole("button", { name: "确认任务" })).toBeDisabled();
+      await first.getByLabel("建议标题").fill("Edited report");
+      await first.getByLabel("承诺方向").selectOption("mine");
+      await first.getByRole("button", { name: "确认任务" }).click();
+      await expect(page.getByRole("button", { name: /Edited report/ })).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath("tasks-review.png") });
+      await page.getByRole("button", { name: "忽略建议" }).click();
+      await expect(page.locator(".task-suggestion")).toHaveCount(0);
+      await page.getByRole("button", { name: /Edited report/ }).click();
+      await page.locator("#detail-panel").getByRole("button", { name: "来源邮件" }).click();
+      await expect(page.locator("#detail-panel")).toContainText("E2E test subject");
+      await page.evaluate("import('/src/stores/ui.ts').then(ui => ui.setDetailOpen(false))");
+      await navigateTo(page, "followUps");
+      await expect(page.getByRole("heading", { name: "跟进提醒", exact: true })).toBeVisible();
+    });
+  }
+  test("Gate approval moves a first-sender message to Inbox", async ({
     page,
   }) => {
     await resetAndSeed(page, makeContact(), makeMessage({ bucket: "imbox" }));
+    // Fixtures bump only the hard tick; badge counts use the real sync soft tick.
+    await page.evaluate(() => window.__sendpalmE2E?.__seedReady);
+    await page.evaluate(
+      "import('/src/stores/ui.ts').then(ui => ui.bumpSoftRefreshTick())",
+    );
+    await expect(page.locator('[data-nav-badge="Mail"]')).toHaveAttribute(
+      "data-count",
+      "1",
+    );
+    await page.locator('[data-nav-disclosure="mail"]').click();
+    await expect(page.locator('[data-nav-badge="Gate"]')).toHaveAttribute(
+      "data-count",
+      "1",
+    );
     await navigateTo(page, "screener");
 
-    await expect(page.getByText("决定谁可以进入你的 Imbox")).toBeVisible();
+    await expect(page.getByText("决定谁可以进入你的 Inbox")).toBeVisible();
     await page.getByTestId("gate-approve-imbox").click();
 
     await navigateTo(page, "imbox");
@@ -558,7 +608,7 @@ test.describe("Email workflows", () => {
     ).toBeVisible();
   });
 
-  test("Trash action shows undo toast and restores message to Imbox", async ({
+  test("Trash action shows undo toast and restores message to Inbox", async ({
     page,
   }) => {
     await resetAndSeed(
@@ -1233,7 +1283,7 @@ test.describe("Mobile workflows with data", () => {
     });
   }
 
-  test("Imbox, MessagePanel, ContactPanel, Calendar and Files render on iPhone", async ({
+  test("Inbox, MessagePanel, ContactPanel, Calendar and Files render on iPhone", async ({
     page,
   }) => {
     await seedMobileFixture(page);

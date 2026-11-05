@@ -33,6 +33,7 @@
  */
 
 import { test, type Page } from "@playwright/test";
+import { navigateToView } from "./navigation";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -85,7 +86,7 @@ const TARGET_VIEWS: ReadonlyArray<{
   // Baseline: imbox is the heaviest, most-tuned view.
   {
     view: "imbox",
-    label: "Imbox",
+    label: "Inbox",
     rootMarker: "[data-testid='imbox-row'], aside",
   },
   // The suspects (sidebar-navigable views only — search/agent/focusReply
@@ -229,12 +230,7 @@ async function readPerf(page: Page) {
 }
 
 async function clickView(page: Page, view: string, _label: string) {
-  // The Sidebar's NavItem renders a button with `data-nav-view={view}`.
-  // We click it via that attribute — accessible name varies by hint
-  // (e.g. "Imbox, 快捷键 ⌘2") and regex against the label would flake.
-  const btn = page.locator(`[data-nav-view="${view}"]`).first();
-  await btn.waitFor({ timeout: 5_000 });
-  await btn.click({ timeout: 5_000 });
+  await navigateToView(page, view);
 }
 
 async function measureView(page: Page, view: string, _label: string) {
@@ -352,7 +348,7 @@ test.describe("view-switching performance audit (Session 2026-08-21)", () => {
       await clickView(page, t.view, t.label);
       await page.waitForTimeout(150);
     }
-    await clickView(page, "imbox", "Imbox");
+    await clickView(page, "imbox", "Inbox");
     await page.waitForTimeout(300);
 
     const results: Array<Awaited<ReturnType<typeof measureView>>> = [];
@@ -482,7 +478,7 @@ test.describe("scroll performance audit (Session 2026-08-21)", () => {
     await mkdir(SHOTS, { recursive: true });
   });
 
-  test("Imbox: continuous scroll over a 4000-row corpus", async ({ page }) => {
+  test("Inbox: continuous scroll over a 4000-row corpus", async ({ page }) => {
     // 4000 messages, 1500 contacts — same shape as the user's Feishu
     // account. Scrolling the list-view for 2s of continuous wheel
     // events samples 120+ frames at 60fps; a passing run averages
@@ -506,7 +502,7 @@ test.describe("scroll performance audit (Session 2026-08-21)", () => {
     await setupPerfObserver(page);
 
     // Land on Imbox + warmup the lazy chunk + initial pagination.
-    await clickView(page, "imbox", "Imbox");
+    await clickView(page, "imbox", "Inbox");
     await page.waitForTimeout(500);
     // Scroll to the top so the test starts from a known position.
     await page.evaluate(() => window.scrollTo({ top: 0 }));
@@ -529,7 +525,7 @@ test.describe("scroll performance audit (Session 2026-08-21)", () => {
     });
   });
 
-  test("Imbox: scroll at 10000-row corpus (saturation point)", async ({
+  test("Inbox: scroll at 10000-row corpus (saturation point)", async ({
     page,
   }) => {
     // Push past the production size. The Imbox scroll contract is
@@ -554,7 +550,7 @@ test.describe("scroll performance audit (Session 2026-08-21)", () => {
     await page.waitForTimeout(200);
     await setupPerfObserver(page);
 
-    await clickView(page, "imbox", "Imbox");
+    await clickView(page, "imbox", "Inbox");
     await page.waitForTimeout(800);
     await page.evaluate(() => window.scrollTo({ top: 0 }));
     await page.waitForTimeout(200);

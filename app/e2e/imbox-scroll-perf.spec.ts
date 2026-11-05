@@ -306,7 +306,7 @@ test.beforeAll(async () => {
   await mkdir(join(process.cwd(), "qa-tmp"), { recursive: true });
 });
 
-test.describe("Imbox scroll perf — real-world scale (1500 contacts, 4000 msgs)", () => {
+test.describe("Inbox scroll perf — real-world scale (1500 contacts, 4000 msgs)", () => {
   test("measures scroll FPS, long tasks, layout shift, white areas across regions", async ({
     page,
   }) => {
@@ -399,7 +399,7 @@ test.describe("Imbox scroll perf — real-world scale (1500 contacts, 4000 msgs)
     });
 
     // Print the report to stdout for easy grep
-    console.log("\n=== Imbox scroll perf report ===");
+    console.log("\n=== Inbox scroll perf report ===");
     console.log(JSON.stringify(report, null, 2));
     console.log("=== End report ===\n");
 

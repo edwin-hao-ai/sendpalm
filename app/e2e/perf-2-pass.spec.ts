@@ -22,6 +22,7 @@
  */
 
 import { test, type Page } from "@playwright/test";
+import { navigateToView } from "./navigation";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -253,9 +254,7 @@ async function readLongTasks(page: Page) {
 }
 
 async function clickView(page: Page, view: string) {
-  const btn = page.locator(`[data-nav-view="${view}"]`).first();
-  await btn.waitFor({ timeout: 5_000 });
-  await btn.click({ timeout: 5_000 });
+  await navigateToView(page, view);
 }
 
 /** Start a frame sampler on the page; resolves when the sampler finishes.
@@ -335,7 +334,7 @@ async function sampleFrames(
 }
 
 const TARGET_VIEWS: ReadonlyArray<{ view: string; label: string }> = [
-  { view: "imbox", label: "Imbox" },
+  { view: "imbox", label: "Inbox" },
   { view: "drafts", label: "Drafts" },
   { view: "files", label: "Files" },
   { view: "clips", label: "Clips" },

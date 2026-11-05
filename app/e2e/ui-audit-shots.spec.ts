@@ -8,6 +8,7 @@
  */
 
 import { expect, test, type Page } from "@playwright/test";
+import { navigateToView } from "./navigation";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { CalendarEvent, Contact, FileItem, Message } from "../src/types";
@@ -712,20 +713,9 @@ async function bootSeeded(page: Page) {
 }
 
 async function navTo(page: Page, view: string) {
-  const btn = page.locator(`#sidebar [data-nav-view="${view}"]`);
-  if (await btn.isVisible().catch(() => false)) {
-    await btn.click();
-    // Park the cursor over the main area so the sidebar hover tooltip
-    // doesn't linger into the screenshot.
-    const vp = page.viewportSize();
-    await page.mouse.move((vp?.width ?? 1440) * 0.6, 300);
-    return;
-  }
-  // Mobile: hidden behind the "More" sheet.
-  await page.locator('#sidebar [data-nav-view="more"]').click();
-  const sheet = page.locator('[data-testid="mobile-more-sheet"]');
-  await sheet.waitFor({ timeout: 5_000 });
-  await sheet.locator(`[data-nav-view="${view}"]`).click();
+  await navigateToView(page, view);
+  const vp = page.viewportSize();
+  await page.mouse.move((vp?.width ?? 1440) * 0.6, 300);
 }
 
 const isMac = process.platform === "darwin";

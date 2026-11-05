@@ -17,6 +17,7 @@
  *  reconcile both is higher than 50 lines of duplication for now. */
 
 import { expect, test, type Page } from "@playwright/test";
+import { navigateToView } from "./navigation";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
@@ -140,7 +141,7 @@ test.describe("Settings → Data backup / restore", () => {
     await resetAndSeed(page, contact, message);
 
     // Navigate to Settings → Data.
-    await page.locator('[data-nav-view="settings"]').click();
+    await navigateToView(page, "settings");
     await page.locator('[data-testid="settings-menu-item-data"]').click();
     await expect(
       page.getByRole("button", { name: /导出邮箱备份/ }),
@@ -169,7 +170,7 @@ test.describe("Settings → Data backup / restore", () => {
     const contact = makeContact({ firstSeen: false, screened: true });
     await resetAndSeed(page, contact, makeMessage({ bucket: "imbox" }));
 
-    await page.locator('[data-nav-view="settings"]').click();
+    await navigateToView(page, "settings");
     await page.locator('[data-testid="settings-menu-item-data"]').click();
     await expect(
       page.getByRole("button", { name: /导出联系人/ }),
@@ -196,7 +197,7 @@ test.describe("Settings → Data backup / restore", () => {
       makeMessage({ bucket: "imbox" }),
     );
 
-    await page.locator('[data-nav-view="settings"]').click();
+    await navigateToView(page, "settings");
     await page.locator('[data-testid="settings-menu-item-data"]').click();
     await expect(
       page.getByRole("button", { name: /导出任务/ }),

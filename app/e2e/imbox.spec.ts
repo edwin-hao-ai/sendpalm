@@ -185,7 +185,7 @@ async function seedAndOpen(page: Page, contacts: SeedContact[], messages: SeedMe
   await page.evaluate(() => {
     /* no-op; createResource resolves on mount */
   });
-  // Imbox is the default view — but some sessions may have view state from
+  // Inbox is the default view — but some sessions may have view state from
   // a previous test. Click the Imbox rail item to be sure.
   await page.locator('[data-nav-view="imbox"]').first().click();
 }

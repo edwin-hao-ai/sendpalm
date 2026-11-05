@@ -4,6 +4,7 @@
  */
 
 import { test, expect, type Page } from "@playwright/test";
+import { navigateToView } from "./navigation";
 import type { Contact, Message, FileItem } from "../src/types";
 
 const ACCOUNT_ID = "acct-contact-e2e";
@@ -107,7 +108,7 @@ async function resetAndSeed(
 }
 
 async function navigateTo(page: Page, view: string): Promise<void> {
-  await page.locator(`[data-nav-view="${view}"]`).first().click();
+  await navigateToView(page, view);
   await page.waitForTimeout(200);
 }
 

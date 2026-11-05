@@ -13,6 +13,8 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { navigateToView } from "./navigation";
+import { NAV_GROUPS, NAV_SECTIONS } from "../src/utils/labels";
 
 const SHOTS = "/tmp/sendpalm-screenshots/e2e";
 
@@ -21,6 +23,8 @@ test.beforeAll(async () => {
 });
 
 async function shoot(page: Page, name: string) {
+  await page.locator("body.app-ready").waitFor();
+  await expect(page.locator("#splash")).toHaveCSS("opacity", "0");
   // Give animations a beat to settle.
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(SHOTS, `${name}.png`), fullPage: false });
@@ -43,7 +47,7 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     await shoot(page, "01-topbar");
   });
 
-  test("Imbox shows real empty-state copy (NOT 'Inbox zero' mock)", async ({
+  test("Inbox shows real empty-state copy (NOT 'Inbox zero' mock)", async ({
     page,
   }) => {
     await page.goto("/");
@@ -52,7 +56,7 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     // the value proposition explicit ("重要邮件" rather than the
     // generic "空的") and to drop the "Settings → Accounts" pointer
     // (onboarding handles account creation in a dedicated view now).
-    await expect(page.getByText(/Imbox 是给你的重要邮件/)).toBeVisible();
+    await expect(page.getByText(/Inbox 是给你的重要邮件/)).toBeVisible();
     // 'Inbox zero' was the OLD mock-data copy — it must NOT appear.
     await expect(page.getByText("Inbox zero")).toHaveCount(0);
     await shoot(page, "02-imbox-empty");
@@ -60,14 +64,14 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
 
   test("Stream view empty state", async ({ page }) => {
     await page.goto("/");
-    await page.locator('[data-nav-view="feed"]').click();
+    await navigateToView(page, "feed");
     await expect(page.getByText("Stream 是空的")).toBeVisible();
     await shoot(page, "03-stream");
   });
 
   test("Records view empty state", async ({ page }) => {
     await page.goto("/");
-    await page.locator('[data-nav-view="paperTrail"]').click();
+    await navigateToView(page, "paperTrail");
     await expect(page.getByText("Records 是空的")).toBeVisible();
     await shoot(page, "04-records");
   });
@@ -95,21 +99,31 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
 
   test("Drafts view empty state", async ({ page }) => {
     await page.goto("/");
-    await page.locator('[data-nav-view="drafts"]').click();
+    await navigateToView(page, "drafts");
     await expect(page.getByText("还没有草稿")).toBeVisible();
     await shoot(page, "08-drafts");
   });
 
   test("Follow-ups view empty state", async ({ page }) => {
     await page.goto("/");
-    await page.locator('[data-nav-view="followUps"]').click();
+    await navigateToView(page, "followUps");
     await expect(page.getByText("没有跟进")).toBeVisible();
     await shoot(page, "09-followups");
   });
 
+  test("Tasks default workspace keeps formal tasks separate from follow-ups", async ({ page }) => {
+    await page.goto("/");
+    await navigateToView(page, "tasks");
+    await expect(page.getByTestId("tasks-view")).toBeVisible();
+    await expect(page.getByText("还没有任务")).toBeVisible();
+    await expect(page.getByRole("button", { name: "新建任务" })).toBeVisible();
+    await page.getByRole("button", { name: "跟进提醒" }).click();
+    await expect(page.getByText("没有跟进")).toBeVisible();
+  });
+
   test("Clips view empty state", async ({ page }) => {
     await page.goto("/");
-    await page.locator('[data-nav-view="clips"]').click();
+    await navigateToView(page, "clips");
     await expect(page.getByText("还没有 Clip")).toBeVisible();
     await shoot(page, "10-clips");
   });
@@ -125,7 +139,7 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     page,
   }) => {
     await page.goto("/");
-    await page.locator('[data-nav-view="settings"]').click();
+    await navigateToView(page, "settings");
     // Switch to Accounts tab (default is Profile)
     await page.locator('[data-testid="settings-menu-item-accounts"]').click();
     // Wait for Accounts view to mount (no accounts → empty state)
@@ -136,10 +150,7 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     await shoot(page, "12-settings-accounts");
 
     // Click "添加账户" — provider dropdown should appear
-    await page
-      .getByRole("button", { name: "添加账户" })
-      .first()
-      .click();
+    await page.getByRole("button", { name: "添加账户" }).first().click();
     // Scope to the dialog: the topbar sync badge also carries
     // "添加邮箱账户 →" copy and would trip strict mode.
     const dialog = page.getByRole("dialog", { name: "添加邮箱账户" });
@@ -208,40 +219,75 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     // Press ⌘K (use Control on Linux/Chromium, Meta on Mac).
     const isMac = process.platform === "darwin";
     await page.keyboard.press(isMac ? "Meta+k" : "Control+k");
-    await expect(
-      page.locator('input[placeholder*="搜索视图"]'),
-    ).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('input[placeholder*="搜索视图"]')).toBeVisible({
+      timeout: 5_000,
+    });
     await page.waitForTimeout(200);
     await shoot(page, "14-command-palette");
   });
 
-  test("Sidebar exposes 15 stable [data-nav-view] buttons", async ({
+  test("Sidebar exposes six workspaces and all 16 stable routes", async ({
     page,
   }) => {
     await page.goto("/");
-    const buttons = page.locator("#sidebar [data-nav-view]");
-    await expect(buttons).toHaveCount(15);
-    const views = await buttons.evaluateAll((els) =>
-      els.map((e) => e.getAttribute("data-nav-view")),
-    );
-    expect(views).toEqual([
-      "screener",
-      "imbox",
-      "feed",
-      "paperTrail",
-      "contacts",
-      "companies",
-      "calendar",
-      "files",
-      "drafts",
-      "followUps",
-      "clips",
-      "insights",
-      "trash",
-      "spam",
-      "settings",
-    ]);
+    await expect(page.locator("#sidebar [data-nav-group]")).toHaveCount(6);
+    for (const section of NAV_SECTIONS) {
+      await navigateToView(page, section.view);
+      const group = NAV_GROUPS.find((g) =>
+        g.views.some((v) => v === section.view),
+      )!;
+      await expect(
+        page.locator(`[data-nav-group="${group.id}"]`),
+      ).toHaveAttribute("data-active", "true");
+      const titles: Record<string, string> = {
+        screener: "Gate",
+        imbox: "Inbox",
+        feed: "Stream",
+        paperTrail: "Records",
+        contacts: "联系人",
+        companies: "公司",
+        calendar: "日历",
+        files: "文件",
+        drafts: "草稿",
+        followUps: "跟进",
+        tasks: "任务",
+        clips: "Clips",
+        folders: "文件夹",
+        insights: "洞察",
+        trash: "回收站",
+        spam: "垃圾邮件",
+        settings: "设置",
+      };
+      await expect(page.locator("#topbar")).toContainText(titles[section.view]);
+      if (group.views.length > 1) {
+        await page.locator(`[data-nav-disclosure="${group.id}"]`).click();
+        await expect(
+          page.locator(
+            `#workspace-${group.id} [data-nav-view="${section.view}"]`,
+          ),
+        ).toHaveAttribute("aria-current", "page");
+        await page.keyboard.press("Escape");
+      }
+    }
     await shoot(page, "16-sidebar-nav");
+  });
+
+  test("sidebar groups stay inside a 1024x700 viewport", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1024, height: 700 });
+    await page.goto("/");
+    const sidebar = page.locator("#sidebar");
+    const lastDisclosure = page.locator(
+      '#sidebar [data-nav-disclosure="more"]',
+    );
+    const sidebarBox = await sidebar.boundingBox();
+    const lastDisclosureBox = await lastDisclosure.boundingBox();
+    expect(sidebarBox).not.toBeNull();
+    expect(lastDisclosureBox).not.toBeNull();
+    expect(lastDisclosureBox!.y + lastDisclosureBox!.height).toBeLessThanOrEqual(
+      sidebarBox!.y + sidebarBox!.height,
+    );
   });
 
   test("Compose modal can be filled and sends via backend bridge", async ({
@@ -321,6 +367,29 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     await expect(dialog).toHaveCount(0);
     await shoot(page, "17-compose-sent");
   });
+
+  test("workspace defaults do not remap existing keyboard shortcuts", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await navigateToView(page, "feed");
+    await page.locator('[data-nav-group="mail"]').click();
+      await expect(page.locator("#topbar")).toContainText("Inbox");
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    for (const [shortcut, title, group] of [
+      ["1", "Gate", "mail"],
+      // Records moved from Library back into the Mail workspace group.
+      ["4", "Records", "mail"],
+      ["8", "洞察", "more"],
+    ]) {
+      await page.keyboard.press(`${modifier}+${shortcut}`);
+      await expect(page.locator("#topbar")).toContainText(title);
+      await expect(page.locator(`[data-nav-group="${group}"]`)).toHaveAttribute(
+        "data-active",
+        "true",
+      );
+    }
+  });
 });
 
 test.describe("Responsive layout", () => {
@@ -340,22 +409,25 @@ test.describe("Responsive layout", () => {
     expect(flexDir).toBe("row");
 
     const buttons = sidebar.locator("[data-nav-view]");
-    // Mobile collapses 15 entries into 6 primary tabs + a "More" sheet.
-    await expect(buttons).toHaveCount(7);
+    // Five default destinations plus the grouped More sheet.
+    await expect(buttons).toHaveCount(6);
 
-    // Mobile bottom-tab bar shows a label span under each icon (6 primary + "More").
+    // Every workspace tab, including More, retains its label.
     const labels = sidebar.locator("span");
-    await expect(labels).toHaveCount(7);
+    await expect(labels).toHaveCount(6);
     await expect(labels.first()).toBeVisible();
 
     await shoot(page, "18-mobile-bottom-tabs");
 
-    // Open the "More" sheet and verify all remaining views are reachable.
+    // More groups all existing views, including secondary destinations.
     await sidebar.locator('[data-nav-view="more"]').click();
     const sheet = page.locator('[data-testid="mobile-more-sheet"]');
     await expect(sheet).toBeVisible();
     const overflowButtons = sheet.locator("[data-nav-view]");
-    await expect(overflowButtons).toHaveCount(9);
+    await expect(overflowButtons).toHaveCount(NAV_SECTIONS.length);
+    await expect(sheet.getByRole("heading")).toHaveText(
+      NAV_GROUPS.map((g) => g.label),
+    );
     await sheet.locator('[data-nav-view="feed"]').click();
     await expect(sheet).not.toBeVisible();
     await expect(page.locator('#topbar:has-text("Stream")')).toBeVisible();
@@ -363,7 +435,7 @@ test.describe("Responsive layout", () => {
 
   test("Settings page uses iOS-style menu on mobile", async ({ page }) => {
     await page.goto("/");
-    await page.locator('#sidebar [data-nav-view="settings"]').click();
+    await navigateToView(page, "settings");
     await expect(page.locator('#topbar:has-text("设置")')).toBeVisible();
 
     const settingsRoot = page.locator('[data-testid="settings-view"]');
@@ -396,6 +468,46 @@ test.describe("Responsive layout", () => {
 
     await shoot(page, "19-mobile-settings-menu");
   });
+
+  test("all routes remain reachable on mobile and More dismisses by Escape and swipe", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.locator("body.app-ready").waitFor();
+    for (const section of NAV_SECTIONS) {
+      await navigateToView(page, section.view);
+      const group = NAV_GROUPS.find((g) =>
+        g.views.some((v) => v === section.view),
+      )!;
+      await expect(
+        page.locator(`[data-nav-group="${group.id}"]`),
+      ).toHaveAttribute("data-active", "true");
+      await expect(page.getByTestId("mobile-more-sheet")).not.toBeVisible();
+    }
+    const more = page.locator('#sidebar [data-nav-view="more"]');
+    const tabs = page.locator("#sidebar [data-nav-group]");
+    for (const tab of await tabs.all()) {
+      const box = (await tab.boundingBox())!;
+      expect(box.width).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+    await more.click();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("mobile-more-sheet")).not.toBeVisible();
+    await expect(more).toBeFocused();
+    await more.click();
+    const handle = page
+      .getByTestId("mobile-more-sheet")
+      .locator("[style*='touch-action']");
+    await handle.dispatchEvent("touchstart", {
+      touches: [{ identifier: 1, clientX: 100, clientY: 200 }],
+    });
+    await handle.dispatchEvent("touchmove", {
+      touches: [{ identifier: 1, clientX: 100, clientY: 300 }],
+    });
+    await handle.dispatchEvent("touchend", { touches: [] });
+    await expect(page.getByTestId("mobile-more-sheet")).not.toBeVisible();
+  });
 });
 
 test.describe("Responsive layout — iPad portrait", () => {
@@ -414,9 +526,9 @@ test.describe("Responsive layout — iPad portrait", () => {
     );
     expect(flexDir).toBe("column");
 
-    // Sidebar should still expose all 15 nav views.
+    // Six workspace defaults; secondary routes stay in disclosures.
     const buttons = sidebar.locator("[data-nav-view]");
-    await expect(buttons).toHaveCount(15);
+    await expect(buttons).toHaveCount(6);
 
     await shoot(page, "19-ipad-portrait");
   });
@@ -427,11 +539,11 @@ test.describe("Responsive layout — iPad portrait", () => {
     await page.setViewportSize({ width: 820, height: 1180 });
     await page.goto("/");
     await page.locator("body.app-ready").waitFor();
-    const nav = page.locator("[data-nav='Follow-ups']");
+    const nav = page.locator("[data-nav='Tasks']");
     await expect(nav).toBeVisible();
     await nav.hover();
     const tip = page.locator("[data-testid='sidebar-tooltip']");
-    await expect(tip).toContainText("跟进");
+    await expect(tip).toContainText("Tasks");
   });
 });
 
@@ -458,6 +570,50 @@ test.describe("Responsive layout — iPad landscape", () => {
 
     await shoot(page, "21-ipad-landscape");
   });
+});
+
+test.describe("Shared page header — one left-aligned H1 on every view", () => {
+  /** Every navigable top-level view must present its title through the
+   *  shared PageHeader primitive at any width. This is the E2E twin of
+   *  src/views/page-headers.test.ts — the unit audit checks the source,
+   *  these checks verify the rendered result (visible, left-aligned,
+   *  exactly one H1 per view). */
+  const ROUTES = [
+    "screener",
+    "imbox",
+    "feed",
+    "paperTrail",
+    "contacts",
+    "companies",
+    "calendar",
+    "files",
+    "drafts",
+    "tasks",
+    "followUps",
+    "clips",
+    "insights",
+    "trash",
+    "spam",
+    "settings",
+  ] as const;
+
+  for (const width of [1440, 375] as const) {
+    for (const view of ROUTES) {
+      test(`${view} renders .page-header-title (left-aligned, single H1) @ ${width}px`, async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto("/");
+        await navigateToView(page, view);
+        const title = page.locator(".page-header-title");
+        await expect(title.first()).toBeVisible({ timeout: 10_000 });
+        await expect(title.first()).toHaveCSS("text-align", "left");
+        // Exactly one visible page-title H1 per view (Settings renders a
+        // mobile + desktop header, but only one is visible at a time).
+        await expect(page.locator("h1.page-header-title:visible")).toHaveCount(1);
+      });
+    }
+  }
 });
 
 test.describe("Real backend integration — desktop only", () => {
