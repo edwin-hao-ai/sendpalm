@@ -12,6 +12,7 @@ import { usePaginatedMessages } from "../utils/paginated-messages";
 import { Avatar } from "../components/Avatar";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
+import { PageHeader } from "../components/PageHeader";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { SkeletonList } from "../components/Skeleton";
 import { setDetailOpen, setSelectedMessageId, showToast } from "../stores/ui";
@@ -160,62 +161,40 @@ export function Spam() {
           />
         }
       >
-        <header
-          style={{
-            display: "flex",
-            "align-items": "flex-end",
-            gap: "var(--space-4)",
-            "flex-wrap": "wrap",
-            "max-width": "720px",
-            width: "100%",
-            margin: "0 auto var(--space-5)",
-          }}
-        >
-          <div style={{ flex: 1, "min-width": 0 }}>
-            <h1
-              style={{
-                "font-family": "var(--font-display)",
-                "font-size": "var(--text-h1)",
-                "font-weight": "800",
-                margin: 0,
-                "margin-bottom": "var(--space-1)",
-              }}
-            >
-              垃圾邮件
-            </h1>
-            <p
-              style={{
-                color: "var(--text-secondary)",
-                margin: 0,
-                "font-size": "var(--text-caption)",
-              }}
-            >
-              误判的邮件可以恢复，恢复后该发件人将重新进入筛选台。
-              {paged.hasMore() ? ` · ${items().length}/${paged.total()}` : ""}
-            </p>
-          </div>
-          <Show when={items().length > 0}>
-            <button
-              onClick={() => void restoreAll()}
-              disabled={restoringAll()}
-              style={{
-                padding: "8px 16px",
-                "border-radius": "var(--radius-pill)",
-                background: "var(--palm-soft)",
-                color: "var(--palm)",
-                "font-size": "var(--text-caption)",
-                "font-weight": "700",
-                border: "none",
-                cursor: "pointer",
-                opacity: restoringAll() ? 0.5 : 1,
-              }}
-            >
-              {restoringAll()
-                ? "正在恢复…"
-                : `全部恢复（${paged.total()}）`}
-            </button>
-          </Show>
-        </header>
+        <div style={{ "max-width": "720px", width: "100%", margin: "0 auto" }}>
+          <PageHeader
+            title="垃圾邮件"
+            description={
+              <p>
+                误判的邮件可以恢复，恢复后该发件人将重新进入筛选台。
+                {paged.hasMore() ? ` · ${items().length}/${paged.total()}` : ""}
+              </p>
+            }
+            actions={
+              <Show when={items().length > 0}>
+                <button
+                  onClick={() => void restoreAll()}
+                  disabled={restoringAll()}
+                  style={{
+                    padding: "8px 16px",
+                    "border-radius": "var(--radius-pill)",
+                    background: "var(--palm-soft)",
+                    color: "var(--palm)",
+                    "font-size": "var(--text-caption)",
+                    "font-weight": "700",
+                    border: "none",
+                    cursor: "pointer",
+                    opacity: restoringAll() ? 0.5 : 1,
+                  }}
+                >
+                  {restoringAll()
+                    ? "正在恢复…"
+                    : `全部恢复（${paged.total()}）`}
+                </button>
+              </Show>
+            }
+          />
+        </div>
 
         <Show
           when={paged.resource.state !== "pending"}

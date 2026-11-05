@@ -1,33 +1,35 @@
-/** Sidebar — left rail with nav icons + labels. Bottom-tab-bar on mobile.
- *  Mobile collapses the 15 nav entries into 6 primary tabs +
- *  a "More" sheet so tap targets stay >= 44px.
- */
+/** Six workspaces in the existing rail; all original routes stay in disclosures. */
 
-import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js";
+import {
+  For,
+  Show,
+  createEffect,
+  createResource,
+  createSignal,
+  onCleanup,
+  onMount,
+} from "solid-js";
 import { Portal } from "solid-js/web";
 import { Icon } from "./Icon";
 import { SidebarTooltip } from "./SidebarTooltip";
-import { setView, view } from "../stores/ui";
-import { NAV_SECTIONS, type NavSection } from "../utils/labels";
+import { setView, view, type ViewName } from "../stores/ui";
+import {
+  NAV_GROUPS,
+  NAV_SECTIONS,
+  type NavGroup,
+  type NavSection,
+} from "../utils/labels";
 import { useLongPress, useViewport } from "../utils/gestures";
 import { countGateCandidates } from "../stores/data";
 import { useSoftRefreshEffect } from "../utils/gestures";
-
-const MOBILE_PRIMARY_VIEWS = new Set([
-  "imbox",
-  "screener",
-  "contacts",
-  "calendar",
-  "files",
-  "settings",
-]);
+import "./Sidebar.css";
 
 /** User-facing nav labels. HEY brand nouns (Gate / Imbox / Stream /
  *  Records / Clips) stay English; everything else is Chinese.
  *  `NAV_SECTIONS[].label` stays untouched for `data-nav` test hooks. */
 const NAV_LABEL_ZH: Record<string, string> = {
   screener: "Gate",
-  imbox: "Imbox",
+  imbox: "Inbox",
   feed: "Stream",
   paperTrail: "Records",
   contacts: "联系人",
@@ -36,7 +38,9 @@ const NAV_LABEL_ZH: Record<string, string> = {
   files: "文件",
   drafts: "草稿",
   followUps: "跟进",
+  tasks: "任务",
   clips: "Clips",
+  folders: "文件夹",
   insights: "洞察",
   trash: "回收站",
   spam: "垃圾邮件",
@@ -66,25 +70,39 @@ export function navTooltipLabel(section: NavSection): string {
 export function Sidebar() {
   const { isMobile } = useViewport();
   const [moreOpen, setMoreOpen] = createSignal(false);
+  const [disclosure, setDisclosure] = createSignal<{
+    group: NavGroup;
+    trigger: HTMLButtonElement;
+  } | null>(null);
+  let moreTrigger: HTMLButtonElement | undefined;
+  const closeMore = () => {
+    setMoreOpen(false);
+    moreTrigger?.focus();
+  };
+  createEffect(() => {
+    // A resize must not leave a desktop flyout over the mobile sheet (or vice versa).
+    isMobile();
+    setDisclosure(null);
+    setMoreOpen(false);
+  });
+  createEffect(() => {
+    view();
+    setDisclosure(null);
+    setMoreOpen(false);
+  });
 
   // P0-8: badge for the Gate (Screener) sidebar entry. The count is
   // re-pulled on the soft refresh tick so a brand-new first-time sender
   // from the IMAP sync shows up without a full app reload.
-  const [gateCount, { refetch: refetchGateCount }] = createResource(
-    countGateCandidates,
-  );
+  const [gateCount, { refetch: refetchGateCount }] =
+    createResource(countGateCandidates);
   useSoftRefreshEffect(() => {
     void refetchGateCount();
   });
 
-  const primary = () =>
-    NAV_SECTIONS.filter((s) => MOBILE_PRIMARY_VIEWS.has(s.view));
-  const overflow = () =>
-    NAV_SECTIONS.filter((s) => !MOBILE_PRIMARY_VIEWS.has(s.view));
-  const currentIsOverflow = () => overflow().some((s) => s.view === view());
-
-  const navigate = (v: string) => {
-    setView(v as never);
+  const navigate = (v: ViewName) => {
+    setView(v);
+    setDisclosure(null);
     setMoreOpen(false);
   };
 
@@ -119,35 +137,76 @@ export function Sidebar() {
           "z-index": "var(--z-sticky)",
         }}
       >
-        <For each={isMobile() ? primary() : NAV_SECTIONS}>
-          {(section) => (
-            <NavItem
-              icon={section.icon}
-              label={section.label}
-              section={section}
-              active={view() === section.view}
-              onClick={() => navigate(section.view)}
-              badgeCount={
-                section.view === "screener" ? () => gateCount() ?? 0 : undefined
-              }
-            />
+        <For each={NAV_GROUPS}>
+          {(group) => (
+            <div class="sidebar-workspace">
+              <NavItem
+                icon={group.icon}
+                label={group.label}
+                section={NAV_SECTIONS.find((s) => s.view === group.defaultView)}
+                group={group}
+                mobileMore={isMobile() && group.id === "more"}
+                buttonRef={(el) => {
+                  if (group.id === "more") moreTrigger = el;
+                }}
+                expanded={
+                  isMobile() && group.id === "more" ? moreOpen() : undefined
+                }
+                active={group.views.includes(view())}
+                onClick={() =>
+                  isMobile() && group.id === "more"
+                    ? setMoreOpen(true)
+                    : navigate(group.defaultView)
+                }
+                badgeCount={
+                  group.id === "mail" ? () => gateCount() ?? 0 : undefined
+                }
+              />
+              <Show when={!isMobile() && group.views.length > 1}>
+                <button
+                  class="sidebar-disclosure"
+                  aria-label={`${group.label} 导航`}
+                  aria-expanded={disclosure()?.group.id === group.id}
+                  aria-controls={`workspace-${group.id}`}
+                  aria-haspopup="dialog"
+                  data-nav-disclosure={group.id}
+                  onClick={(e) =>
+                    setDisclosure(
+                      disclosure()?.group.id === group.id
+                        ? null
+                        : { group, trigger: e.currentTarget },
+                    )
+                  }
+                >
+                  <Icon name="ph-caret-right" size={12} />
+                </button>
+              </Show>
+            </div>
           )}
         </For>
-        {isMobile() && (
-          <NavItem
-            icon="ph-dots-three"
-            label="More"
-            active={currentIsOverflow()}
-            onClick={() => setMoreOpen(true)}
-          />
-        )}
       </nav>
 
+      <Show when={disclosure()} keyed>
+        {(open) => (
+          <WorkspaceFlyout
+            group={open.group}
+            trigger={open.trigger}
+            onClose={() => setDisclosure(null)}
+            onNavigate={(route) => {
+              navigate(route);
+              open.trigger.focus();
+            }}
+            gateCount={() => gateCount() ?? 0}
+          />
+        )}
+      </Show>
       <Show when={moreOpen()}>
         <MobileMoreSheet
-          items={overflow()}
-          onNavigate={navigate}
-          onClose={() => setMoreOpen(false)}
+          onNavigate={(route) => {
+            navigate(route);
+            moreTrigger?.focus();
+          }}
+          onClose={closeMore}
           gateCount={() => gateCount() ?? 0}
         />
       </Show>
@@ -160,6 +219,10 @@ function NavItem(props: {
   /** English label from NAV_SECTIONS — used for data-nav test hooks. */
   label: string;
   section?: NavSection;
+  group?: NavGroup;
+  mobileMore?: boolean;
+  buttonRef?: (el: HTMLButtonElement) => void;
+  expanded?: boolean;
   active: boolean;
   onClick: () => void;
   /** Optional badge count to render in the top-right corner. */
@@ -178,9 +241,14 @@ function NavItem(props: {
   let showTimer: number | undefined;
 
   const displayLabel = () =>
-    props.section ? navDisplayLabel(props.section.view) : "更多";
-  const tooltipLabel = () =>
-    props.section ? navTooltipLabel(props.section) : "更多功能";
+    props.group?.label ??
+    (props.section ? navDisplayLabel(props.section.view) : "更多");
+  const tooltipLabel = () => {
+    if (props.group && props.section) {
+      return `${props.group.label} · ${navTooltipLabel(props.section)}`;
+    }
+    return props.section ? navTooltipLabel(props.section) : "更多功能";
+  };
 
   const showTooltip = () => {
     if (!buttonRef) return;
@@ -195,6 +263,7 @@ function NavItem(props: {
     if (showTimer) window.clearTimeout(showTimer);
     hideTooltip();
   };
+  onCleanup(cancelShow);
 
   // Touch / long-press support for tablet.
   useLongPress(buttonRef, { delay: 600, onLongPress: showTooltip });
@@ -202,12 +271,21 @@ function NavItem(props: {
   return (
     <>
       <button
-        ref={(el) => (buttonRef = el)}
+        ref={(el) => {
+          buttonRef = el;
+          props.buttonRef?.(el);
+        }}
         onClick={props.onClick}
         aria-label={tooltipLabel()}
         aria-current={props.active ? "page" : undefined}
-        data-nav={props.label}
-        data-nav-view={props.section?.view ?? "more"}
+        aria-expanded={props.expanded}
+        aria-controls={props.mobileMore ? "mobile-workspaces" : undefined}
+        aria-haspopup={props.mobileMore ? "dialog" : undefined}
+        data-nav={props.section?.label ?? props.label}
+        data-nav-group={props.group?.id}
+        data-nav-view={
+          props.mobileMore ? "more" : (props.section?.view ?? "more")
+        }
         data-active={props.active}
         onMouseEnter={scheduleShow}
         onMouseLeave={cancelShow}
@@ -219,7 +297,7 @@ function NavItem(props: {
           "flex-direction": "column",
           "align-items": "center",
           "justify-content": "center",
-          width: isMobile() ? "auto" : "100%",
+          width: "100%",
           "max-width": isMobile() ? undefined : "64px",
           height: isMobile() ? "auto" : "56px",
           "min-width": isMobile() ? "44px" : undefined,
@@ -252,7 +330,9 @@ function NavItem(props: {
           name={props.icon}
           size={isMobile() ? 20 : 22}
           style={
-            props.active && !isMobile() ? { transform: "scale(1.08)" } : undefined
+            props.active && !isMobile()
+              ? { transform: "scale(1.08)" }
+              : undefined
           }
         />
         {/* Badge — top-right corner when count > 0 */}
@@ -314,9 +394,112 @@ function NavItem(props: {
   );
 }
 
+function WorkspaceRoutes(props: {
+  group: NavGroup;
+  onNavigate: (view: ViewName) => void;
+  gateCount: () => number;
+}) {
+  return (
+    <section class="sidebar-route-group" aria-label={props.group.label}>
+      <h2>{props.group.label}</h2>
+      <div class="sidebar-route-list">
+        <For each={props.group.views}>
+          {(route) => {
+            const section = NAV_SECTIONS.find((s) => s.view === route)!;
+            return (
+              <button
+                data-nav={section.label}
+                data-nav-view={section.view}
+                aria-label={navTooltipLabel(section)}
+                aria-current={view() === route ? "page" : undefined}
+                data-active={view() === route}
+                onClick={() => props.onNavigate(route)}
+              >
+                <Icon name={section.icon} size={20} />
+                <span>{navDisplayLabel(route)}</span>
+                <Show when={route === "screener" && props.gateCount() > 0}>
+                  <span
+                    class="sidebar-route-badge"
+                    data-nav-badge={section.label}
+                    data-count={props.gateCount()}
+                  >
+                    {props.gateCount() > 99 ? "99+" : props.gateCount()}
+                  </span>
+                </Show>
+              </button>
+            );
+          }}
+        </For>
+      </div>
+    </section>
+  );
+}
+
+function WorkspaceFlyout(props: {
+  group: NavGroup;
+  trigger: HTMLButtonElement;
+  onClose: () => void;
+  onNavigate: (view: ViewName) => void;
+  gateCount: () => number;
+}) {
+  let flyout: HTMLDivElement | undefined;
+  const anchor = props.trigger.getBoundingClientRect();
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      props.onClose();
+      props.trigger.focus();
+    }
+  };
+  const onOutside = (event: Event) => {
+    if (
+      event.target instanceof Node &&
+      !flyout?.contains(event.target) &&
+      !props.trigger.contains(event.target)
+    )
+      props.onClose();
+  };
+  onMount(() => {
+    if (flyout) {
+      flyout.style.top = `clamp(var(--space-2), ${anchor.top}px, calc(100dvh - ${flyout.offsetHeight}px - var(--space-2)))`;
+    }
+    const activeRoute = flyout?.querySelector<HTMLButtonElement>(
+      '[aria-current="page"]',
+    );
+    (activeRoute ?? flyout?.querySelector<HTMLButtonElement>("button"))?.focus();
+    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("pointerdown", onOutside);
+    document.addEventListener("focusin", onOutside);
+  });
+  onCleanup(() => {
+    document.removeEventListener("keydown", onKey, true);
+    document.removeEventListener("pointerdown", onOutside);
+    document.removeEventListener("focusin", onOutside);
+  });
+  return (
+    <Portal>
+      <div
+        ref={(el) => {
+          flyout = el;
+        }}
+        id={`workspace-${props.group.id}`}
+        role="dialog"
+        aria-label={`${props.group.label} 导航`}
+        class="sidebar-workspace-flyout"
+        style={{ top: `${anchor.top}px` }}
+      >
+        <WorkspaceRoutes
+          group={props.group}
+          onNavigate={props.onNavigate}
+          gateCount={props.gateCount}
+        />
+      </div>
+    </Portal>
+  );
+}
+
 function MobileMoreSheet(props: {
-  items: NavSection[];
-  onNavigate: (view: string) => void;
+  onNavigate: (view: ViewName) => void;
   onClose: () => void;
   gateCount: () => number;
 }) {
@@ -325,6 +508,9 @@ function MobileMoreSheet(props: {
   // a threshold. Content buttons stopPropagation so taps never start a drag.
   const [dragY, setDragY] = createSignal(0);
   let dragStartY: number | null = null;
+  let sheet: HTMLDivElement | undefined;
+  let appRoot: HTMLElement | null = null;
+  let appWasInert = false;
 
   const onTouchStart = (e: TouchEvent) => {
     dragStartY = e.touches[0]?.clientY ?? null;
@@ -345,11 +531,53 @@ function MobileMoreSheet(props: {
   const onKey = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
       e.stopPropagation();
+      e.preventDefault();
       props.onClose();
+      return;
+    }
+    if (e.key === "Tab" && sheet) {
+      const focusable = Array.from(
+        sheet.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (focusable.length === 0) {
+        e.preventDefault();
+        sheet.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) {
+        e.preventDefault();
+        sheet.focus();
+        return;
+      }
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      } else if (!sheet.contains(document.activeElement)) {
+        e.preventDefault();
+        first.focus();
+      }
     }
   };
-  onMount(() => document.addEventListener("keydown", onKey));
-  onCleanup(() => document.removeEventListener("keydown", onKey));
+  onMount(() => {
+    appRoot = document.getElementById("app");
+    appWasInert = appRoot?.hasAttribute("inert") ?? false;
+    appRoot?.setAttribute("inert", "");
+    document.addEventListener("keydown", onKey, true);
+    sheet?.querySelector<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled])',
+    )?.focus();
+  });
+  onCleanup(() => {
+    document.removeEventListener("keydown", onKey, true);
+    if (appRoot && !appWasInert) appRoot.removeAttribute("inert");
+  });
 
   return (
     <Portal mount={document.body}>
@@ -366,8 +594,14 @@ function MobileMoreSheet(props: {
       >
         <div
           data-testid="mobile-more-sheet"
+          id="mobile-workspaces"
           role="dialog"
           aria-label="更多功能"
+          aria-modal="true"
+          tabIndex={-1}
+          ref={(el) => {
+            sheet = el;
+          }}
           onClick={(e) => e.stopPropagation()}
           style={{
             position: "absolute",
@@ -375,6 +609,8 @@ function MobileMoreSheet(props: {
             right: 0,
             bottom: 0,
             height: "auto",
+            "max-height": "85dvh",
+            "overflow-y": "auto",
             background: "var(--glass-bg-strong)",
             "backdrop-filter": "var(--glass-blur)",
             "-webkit-backdrop-filter": "var(--glass-blur)",
@@ -426,7 +662,8 @@ function MobileMoreSheet(props: {
                 style={{
                   width: "44px",
                   height: "44px",
-                  margin: "calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) 0",
+                  margin:
+                    "calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) 0",
                   display: "flex",
                   "align-items": "center",
                   "justify-content": "center",
@@ -438,75 +675,14 @@ function MobileMoreSheet(props: {
               </button>
             </div>
           </div>
-          <div
-            style={{
-              display: "grid",
-              "grid-template-columns": "repeat(3, 1fr)",
-              gap: "var(--space-2)",
-            }}
-          >
-            <For each={props.items}>
-              {(item) => (
-                <button
-                  onClick={() => props.onNavigate(item.view)}
-                  data-nav={item.label}
-                  data-nav-view={item.view}
-                  aria-label={navTooltipLabel(item)}
-                  style={{
-                    position: "relative",
-                    display: "flex",
-                    "flex-direction": "column",
-                    "align-items": "center",
-                    "justify-content": "center",
-                    gap: "var(--space-1)",
-                    padding: "var(--space-3) var(--space-1)",
-                    "border-radius": "var(--radius-lg)",
-                    background:
-                      view() === item.view ? "var(--palm-soft)" : "transparent",
-                    color:
-                      view() === item.view
-                        ? "var(--palm)"
-                        : "var(--text-secondary)",
-                    "min-height": "72px",
-                  }}
-                >
-                  <Icon name={item.icon} size={24} />
-                  <span
-                    style={{
-                      "font-size": "var(--text-caption)",
-                      "font-weight": "600",
-                      "text-align": "center",
-                    }}
-                  >
-                    {navDisplayLabel(item.view)}
-                  </span>
-                  {/* Badge for the screener entry inside the More sheet */}
-                  <Show when={item.view === "screener" && (props.gateCount() ?? 0) > 0}>
-                    <span
-                      data-nav-badge={item.label}
-                      data-count={props.gateCount() ?? 0}
-                      style={{
-                        position: "absolute",
-                        top: "6px",
-                        right: "12px",
-                        "min-width": "16px",
-                        height: "16px",
-                        padding: "0 4px",
-                        "border-radius": "var(--radius-pill)",
-                        background: "var(--palm)",
-                        color: "#fff",
-                        "font-size": "10px",
-                        "font-weight": "700",
-                        "line-height": 1,
-                        display: "flex",
-                        "align-items": "center",
-                        "justify-content": "center",
-                      }}
-                    >
-                      {(props.gateCount() ?? 0) > 99 ? "99+" : props.gateCount() ?? 0}
-                    </span>
-                  </Show>
-                </button>
+          <div class="sidebar-mobile-groups">
+            <For each={NAV_GROUPS}>
+              {(group) => (
+                <WorkspaceRoutes
+                  group={group}
+                  onNavigate={props.onNavigate}
+                  gateCount={props.gateCount}
+                />
               )}
             </For>
           </div>

@@ -14,6 +14,7 @@
  *  Gate for a single message. Bulk Gate approval remains in Gate for
  *  the 200+ queue case.
  */
+import { extractTasksForMessage } from "../services/task-extraction";
 import {
   For,
   Show,
@@ -26,6 +27,8 @@ import {
   type JSX,
 } from "solid-js";
 import {
+  countGatePending,
+  countUnreadNewsletters,
   listContacts,
   listPileMessages,
   moveMessageToBucket,
@@ -56,6 +59,9 @@ import {
   helpOpen,
   detailOpen,
   agentPanelOpen,
+  mailSyncIssue,
+  setSettingsTab,
+  type MailSyncIssue,
   type ViewName,
 } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
@@ -68,6 +74,18 @@ import { SORT_LABELS, type SortMode } from "../utils/sort-imbox";
 import { registerPrepend } from "../services/sync-events";
 import { FilterPanel } from "../components/FilterPanel";
 import { groupItemsByDate, isImboxListMessage } from "./Imbox-helpers";
+import {
+  bundleGroupFor,
+  formatMessageDate,
+  messageTimelineAt,
+} from "../utils/message-dates";
+import { PageHeader } from "../components/PageHeader";
+import { appSettings } from "../stores/ui";
+import { looksLikeHtml, htmlToPlainText } from "../utils/html";
+
+/** Profile timezone used for every mail date label/group in this view.
+ *  Invalid values fall back to the OS zone inside the helpers. */
+const profileTz = () => appSettings.profile.timezone;
 
 interface Bundle {
   contactId: string;
@@ -85,6 +103,22 @@ interface Pile {
   messages: PileMessage[];
   /** View name to navigate to from the drawer's "查看全部" button. */
   openBoardView: ViewName;
+}
+
+/** Sync-issue banner copy per error code — a missing password, a changed
+ *  password, and a dead network are different problems with different
+ *  fixes, and the user should never have to guess which one they have. */
+function bannerCopy(issue: MailSyncIssue): string {
+  switch (issue) {
+    case "missing_credentials":
+      return "邮件同步已暂停——输入邮箱密码后才能收取新邮件，当前只显示已同步的旧数据。";
+    case "auth_failed":
+      return "邮箱密码验证失败——如果你最近修改过邮箱密码或撤销了专用密码，请重新输入。";
+    case "network":
+      return "网络异常，暂时连不上邮箱服务器——恢复后会自动重试。";
+    default:
+      return "邮件同步遇到问题，稍后会自动重试。";
+  }
 }
 
 const BUNDLE_THRESHOLD = 3;
@@ -222,9 +256,31 @@ export function Imbox() {
   // 700+ Map lookups per sort, every time `items()` or `contactMap()`
   // changes. WKWebView (real Tauri) is 2-3x more sensitive to this than
   // Chrome and the dominant cost during the "tab switch → scroll" window.
+  /** 快筛：单选模式（全部 / 订阅 / 新面孔）。两个条件曾是独立开关，
+   *  会叠加成"既是新面孔又是订阅"的迷惑交集——单选让行为可预测：
+   *  点亮的再点一次回到「全部」。 */
+  const [quickFilter, setQuickFilter] = createSignal<
+    "all" | "newsletter" | "pending"
+  >("all");
+  // chip 上直接显示数量——用户点之前就知道里面有多少封（"只看订阅"
+  // "只看待审"这种自造词对普通人没有意义，数量和大白话才是信息）。
+  const [pendingSenderCount] = createResource(countGatePending);
+  const [newsletterCount] = createResource(countUnreadNewsletters);
+
   const renderList = createMemo<ItemList>(() => {
-    const list = items().filter(isImboxListMessage);
     const map = contactMap();
+    const list = items().filter(isImboxListMessage).filter((item: Item) => {
+      if (quickFilter() === "pending") {
+        const pid = "messages" in item ? item.messages[0]?.pid : item.pid;
+        const c = pid ? map.get(pid) : undefined;
+        return c ? !c.screened || c.firstSeen : true;
+      }
+      return true;
+    }).filter((item: Item) => {
+      if (quickFilter() !== "newsletter") return true;
+      const first = "messages" in item ? item.messages[0] : item;
+      return !!first?.isNewsletter;
+    });
 
     const bySender = new Map<string, Message[]>();
     for (const m of list) {
@@ -256,7 +312,7 @@ export function Imbox() {
           let maxTs = 0;
           let maxScore = -Infinity;
           for (const m of msgs) {
-            const ts = Date.parse(m.st) || 0;
+            const ts = Date.parse(messageTimelineAt(m)) || 0;
             const sc = priorityScore(m, c);
             if (ts > maxTs) maxTs = ts;
             if (sc > maxScore) maxScore = sc;
@@ -277,7 +333,7 @@ export function Imbox() {
           kind: "msg",
           item,
           m,
-          _ts: Date.parse(m.st) || 0,
+          _ts: Date.parse(messageTimelineAt(m)) || 0,
           _score: priorityScore(m, map.get(m.pid)),
         });
       }
@@ -762,9 +818,10 @@ export function Imbox() {
         });
       }
       await moveMessageToBucket(m.id, bucket);
+      if (bucket === "imbox") void extractTasksForMessage(m.id, "automatic").catch(() => {});
       await refreshAll();
       showToast({
-        message: `已批准到 ${bucket === "imbox" ? "Imbox" : bucket === "feed" ? "Stream" : "Records"}`,
+        message: `已批准到 ${bucket === "imbox" ? "Inbox" : bucket === "feed" ? "Stream" : "Records"}`,
         kind: "success",
       });
     } catch (err) {
@@ -888,7 +945,7 @@ export function Imbox() {
           try {
             await moveMessageToBucket(m.id, target);
             await refetchPiles();
-            const label = target === "imbox" ? "Imbox" : "Stream";
+            const label = target === "imbox" ? "Inbox" : "Stream";
             showToast({ message: `已移到 ${label}`, kind: "info" });
           } catch (err) {
             console.error("[imbox] drag move failed:", err);
@@ -1080,6 +1137,61 @@ export function Imbox() {
         activeSort={getSortMode("imbox")}
       />
 
+      <Show when={mailSyncIssue()}>
+        <div
+          data-sync-paused-banner
+          role="alert"
+          style={{
+            display: "flex",
+            "align-items": "center",
+            gap: "var(--space-3)",
+            margin: "0 var(--space-5) var(--space-2)",
+            padding: "10px 14px",
+            "border-radius": "var(--radius-md)",
+            background:
+              mailSyncIssue() === "network"
+                ? "color-mix(in srgb, var(--text-muted) 10%, var(--paper-light))"
+                : "color-mix(in srgb, var(--amber, #B7791F) 12%, var(--paper-light))",
+            border: "0.5px solid color-mix(in srgb, var(--amber, #B7791F) 35%, transparent)",
+            color: "var(--text-primary)",
+            "font-size": "var(--text-body-sm)",
+          }}
+        >
+          <Icon
+            name={mailSyncIssue() === "network" ? "ph-wifi-slash" : "ph-warning-circle"}
+            size={18}
+          />
+          <span style={{ flex: 1 }}>{bannerCopy(mailSyncIssue())}</span>
+          <Show
+            when={
+              mailSyncIssue() === "missing_credentials" ||
+              mailSyncIssue() === "auth_failed"
+            }
+          >
+            <button
+              data-open-accounts
+              onClick={() => {
+                setSettingsTab("accounts");
+                setView("settings");
+              }}
+              style={{
+                padding: "6px 14px",
+                "border-radius": "var(--radius-pill)",
+                background: "var(--amber, #B7791F)",
+                color: "#fff",
+                "font-size": "var(--text-caption)",
+                "font-weight": 700,
+                border: "none",
+                cursor: "pointer",
+                "white-space": "nowrap",
+              }}
+            >
+              去输入
+            </button>
+          </Show>
+        </div>
+      </Show>
+
       <ImboxTabs
         active={activeTab()}
         newCount={newPaged.total()}
@@ -1140,17 +1252,72 @@ export function Imbox() {
             >
               {/* 一起读 action for the unread tab; the tab bar already
                   names the section, so no duplicate section title. */}
-              <Show when={activeTab() === "new" && activeList().length > 0}>
+              {/* 筛选控件必须常驻：挂在"列表非空"条件下会让筛空结果把
+                  开关本身也吞掉——用户点"只看订阅"后列表空了、chip 也没了，
+                  不知道怎能退回去（真实用户报告）。空列表时保留 chip 并
+                  由 TabEmpty 提供"清除筛选"出口。 */}
+              <Show when={activeTab() === "new"}>
                 <div
                   style={{
                     display: "flex",
                     "justify-content": "flex-end",
+                    gap: "var(--space-2)",
                     padding: "var(--space-1) 0 var(--space-2)",
                   }}
                 >
                   <button
+                    type="button"
+                    data-newsletter-only
+                    aria-pressed={quickFilter() === "newsletter"}
+                    title="只显示订阅邮件（newsletter、推广）；再点一次回到全部"
+                    onClick={() =>
+                      setQuickFilter(
+                        quickFilter() === "newsletter" ? "all" : "newsletter",
+                      )
+                    }
+                    style={{
+                      padding: "2px 12px",
+                      "border-radius": "var(--radius-pill)",
+                      border: "0.5px solid var(--border)",
+                      background:
+                        quickFilter() === "newsletter" ? "var(--palm-soft)" : "transparent",
+                      color:
+                        quickFilter() === "newsletter" ? "var(--palm)" : "var(--text-secondary)",
+                      "font-size": "var(--text-micro)",
+                      "font-weight": 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    订阅 {newsletterCount() ?? "…"}
+                  </button>
+                  <button
+                    type="button"
+                    data-pending-only
+                    aria-pressed={quickFilter() === "pending"}
+                    title="只显示还没在筛选台决定过的发件人的邮件；再点一次回到全部"
+                    onClick={() =>
+                      setQuickFilter(quickFilter() === "pending" ? "all" : "pending")
+                    }
+                    style={{
+                      padding: "2px 12px",
+                      "border-radius": "var(--radius-pill)",
+                      border: "0.5px solid var(--border)",
+                      background:
+                        quickFilter() === "pending" ? "var(--palm-soft)" : "transparent",
+                      color:
+                        quickFilter() === "pending" ? "var(--palm)" : "var(--text-secondary)",
+                      "font-size": "var(--text-micro)",
+                      "font-weight": 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    新面孔 {pendingSenderCount() ?? "…"}
+                  </button>
+                  <button
                     class="feed-section-action"
                     data-read-together
+                    disabled={activeList().length === 0}
+                    style={activeList().length === 0 ? { opacity: 0.4 } : undefined}
                     onClick={() => setView("readTogether")}
                   >
                     一起读
@@ -1184,6 +1351,8 @@ export function Imbox() {
                     onSwitch={() =>
                       setActiveTab(activeTab() === "new" ? "seen" : "new")
                     }
+                    filterActive={quickFilter() !== "all"}
+                    onClearFilters={() => setQuickFilter("all")}
                   />
                 }
               >
@@ -1397,23 +1566,30 @@ function TabEmpty(props: {
   tab: ImboxTabId;
   otherCount: number;
   onSwitch: () => void;
+  /** True when a quick filter emptied the list — offer a way back. */
+  filterActive?: boolean;
+  onClearFilters?: () => void;
 }) {
   return (
     <Empty
       icon={props.tab === "new" ? "ph-check-circle" : "ph-envelope-open"}
       title={props.tab === "new" ? "没有新邮件 🎉" : "还没有已读邮件"}
       description={
-        props.tab === "new"
-          ? "新邮件到了会出现在这里。"
-          : "读过的邮件会收在这里。"
+        props.filterActive
+          ? "筛选条件下没有邮件。清除筛选即可看到全部。"
+          : props.tab === "new"
+            ? "新邮件到了会出现在这里。"
+            : "读过的邮件会收在这里。"
       }
       action={
-        props.otherCount > 0
-          ? {
-              label: props.tab === "new" ? "查看已读" : "查看新邮件",
-              onClick: props.onSwitch,
-            }
-          : undefined
+        props.filterActive && props.onClearFilters
+          ? { label: "清除筛选", onClick: props.onClearFilters }
+          : props.otherCount > 0
+            ? {
+                label: props.tab === "new" ? "查看已读" : "查看新邮件",
+                onClick: props.onSwitch,
+              }
+            : undefined
       }
     />
   );
@@ -1431,120 +1607,102 @@ function ImboxHeader(props: {
   activeSort: SortMode;
 }) {
   return (
-    <header
-      style={{
-        padding: "var(--space-5) var(--space-5) var(--space-3)",
-      }}
-    >
+    <>
       {/* Scoped keyframes — animations.css is owned by the styles group;
           keep the sync spinner self-contained here. */}
       <style>{`@keyframes imbox-spin { to { transform: rotate(360deg); } }`}</style>
-      <h1
-        style={{
-          "font-family": "var(--font-display)",
-          "font-size": "var(--text-h1)",
-          "font-weight": "800",
-          "letter-spacing": "-0.02em",
-          "line-height": "1.1",
-          margin: 0,
-        }}
-      >
-        Imbox
-      </h1>
-      <div
-        style={{
-          display: "flex",
-          "align-items": "center",
-          "flex-wrap": "wrap",
-          gap: "var(--space-2)",
-          "margin-top": "var(--space-2)",
-        }}
-      >
-        <span
-          style={{
-            "font-size": "var(--text-caption)",
-            color: "var(--text-muted)",
-            "min-width": "0",
-          }}
-        >
-          {props.newCount} 待读 · {props.previouslySeenCount} 已读 · {props.total} 总数
-        </span>
-        <span
-          style={{
-            "font-size": "var(--text-micro)",
-            color: "var(--text-muted)",
-            padding: "2px 8px",
-            background: "var(--paper-mid)",
-            "border-radius": "var(--radius-pill)",
-            "font-weight": "700",
-            "white-space": "nowrap",
-            "flex-shrink": 0,
-          }}
-          data-active-sort
-        >
-          {SORT_LABELS[props.activeSort]}
-        </span>
-        <div style={{ flex: 1 }} />
-        <button
-          onClick={() => props.onOpenFilters()}
-          data-open-filters
-          title="更多筛选"
-          aria-label="更多筛选"
-          style={{
-            display: "inline-flex",
-            "align-items": "center",
-            gap: "4px",
-            padding: "4px 10px",
-            background: "transparent",
-            color: "var(--text-secondary)",
-            "border-radius": "var(--radius-pill)",
-            "font-size": "var(--text-micro)",
-            "font-weight": "700",
-            border: "0.5px solid var(--border)",
-            cursor: "pointer",
-            "white-space": "nowrap",
-            "flex-shrink": 0,
-          }}
-        >
-          <Icon name="ph-sliders-horizontal" size={12} /> 筛选
-        </button>
-        <button
-          onClick={() => void props.onSync()}
-          disabled={props.syncing}
-          data-sync-now
-          title="立即同步"
-          aria-label="立即同步"
-          style={{
-            display: "inline-flex",
-            "align-items": "center",
-            gap: "4px",
-            padding: "4px 10px",
-            background: "var(--palm-soft)",
-            color: "var(--palm)",
-            "border-radius": "var(--radius-pill)",
-            "font-size": "var(--text-micro)",
-            "font-weight": "700",
-            border: "0",
-            cursor: props.syncing ? "default" : "pointer",
-            "white-space": "nowrap",
-            "flex-shrink": 0,
-            opacity: props.syncing ? 0.7 : 1,
-          }}
-        >
+      <PageHeader
+        title="Inbox"
+        description={
           <span
             style={{
               display: "inline-flex",
-              animation: props.syncing
-                ? "imbox-spin 1s linear infinite"
-                : undefined,
+              "align-items": "center",
+              gap: "var(--space-2)",
+              "flex-wrap": "wrap",
             }}
           >
-            <Icon name="ph-arrows-clockwise" size={12} />
+            <span data-imbox-counts>
+              {props.newCount} 待读 · {props.previouslySeenCount} 已读 · {props.total} 总数
+            </span>
+            <span
+              style={{
+                "font-size": "var(--text-micro)",
+                color: "var(--text-muted)",
+                padding: "2px 8px",
+                background: "var(--paper-mid)",
+                "border-radius": "var(--radius-pill)",
+                "font-weight": "700",
+                "white-space": "nowrap",
+              }}
+              data-active-sort
+            >
+              {SORT_LABELS[props.activeSort]}
+            </span>
           </span>
-          {props.syncing ? "同步中…" : "同步"}
-        </button>
-      </div>
-    </header>
+        }
+        actions={
+          <>
+            <button
+              onClick={() => props.onOpenFilters()}
+              data-open-filters
+              title="更多筛选"
+              aria-label="更多筛选"
+              style={{
+                display: "inline-flex",
+                "align-items": "center",
+                gap: "4px",
+                padding: "4px 10px",
+                background: "transparent",
+                color: "var(--text-secondary)",
+                "border-radius": "var(--radius-pill)",
+                "font-size": "var(--text-micro)",
+                "font-weight": "700",
+                border: "0.5px solid var(--border)",
+                cursor: "pointer",
+                "white-space": "nowrap",
+              }}
+            >
+              <Icon name="ph-sliders-horizontal" size={12} /> 筛选
+            </button>
+            <button
+              onClick={() => void props.onSync()}
+              disabled={props.syncing}
+              data-sync-now
+              title="立即同步"
+              aria-label="立即同步"
+              style={{
+                display: "inline-flex",
+                "align-items": "center",
+                gap: "4px",
+                padding: "4px 10px",
+                background: "var(--palm-soft)",
+                color: "var(--palm)",
+                "border-radius": "var(--radius-pill)",
+                "font-size": "var(--text-micro)",
+                "font-weight": "700",
+                border: "0",
+                cursor: props.syncing ? "default" : "pointer",
+                "white-space": "nowrap",
+                opacity: props.syncing ? 0.7 : 1,
+              }}
+            >
+              <span
+                style={{
+                  display: "inline-flex",
+                  animation: props.syncing
+                    ? "imbox-spin 1s linear infinite"
+                    : undefined,
+                }}
+              >
+                <Icon name="ph-arrows-clockwise" size={12} />
+              </span>
+              {props.syncing ? "同步中…" : "同步"}
+            </button>
+          </>
+        }
+      />
+    </>
   );
 }
 
@@ -1552,7 +1710,7 @@ function EmptyState() {
   return (
     <div class="imbox-empty">
       <Icon name="ph-tray" size={48} />
-      <h2>Imbox 是给你的重要邮件</h2>
+      <h2>Inbox 是给你的重要邮件</h2>
       <p>
         重要的、需要你来处理的对话会出现在这里。
         <br />
@@ -1814,8 +1972,12 @@ function MessageCard(props: MessageCardProps) {
 
   const preview = createMemo(() => {
     const raw = props.m.body || props.m.prev || "";
-    if (raw.length <= PREVIEW_CHARS) return raw;
-    return raw.slice(0, PREVIEW_CHARS).trimEnd() + "…";
+    // Senders that stuff markup into the text part (HTML-only mail) would
+    // show `<!DOCTYPE html>` tag soup here — strip to readable text, same
+    // treatment as the Gate card.
+    const text = looksLikeHtml(raw) ? htmlToPlainText(raw) : raw;
+    if (text.length <= PREVIEW_CHARS) return text;
+    return text.slice(0, PREVIEW_CHARS).trimEnd() + "…";
   });
 
   // Action dispatcher. The 5 buttons inside the toolbar carry a
@@ -1953,7 +2115,7 @@ function MessageCard(props: MessageCardProps) {
             class="feed-time"
             style={{ visibility: hovered() ? "hidden" : "visible" }}
           >
-            {props.m.tm}
+            {formatMessageDate(props.m, profileTz(), "list").primary.value}
           </span>
         </div>
 
@@ -1975,7 +2137,7 @@ function MessageCard(props: MessageCardProps) {
               onClick={() => props.onApproveFirstTime?.(props.m, "imbox")}
               data-approve-imbox
             >
-              批准到 Imbox
+              批准到 Inbox
             </button>
             <button
               class="first-time-btn"
@@ -2158,7 +2320,7 @@ function BundleCard(props: BundleCardProps) {
               {props.bundle.contact.name} · {props.bundle.messages.length} 封邮件
             </span>
             <span class="feed-spacer" />
-            <span class="feed-time">{props.bundle.messages[0]?.tm ?? ""}</span>
+            <span class="feed-time">{props.bundle.messages[0] ? formatMessageDate(props.bundle.messages[0], profileTz(), "list").primary.value : ""}</span>
           </div>
           <div class="feed-bottom-row">
             <span class="feed-subject">
@@ -2183,26 +2345,67 @@ function BundleCard(props: BundleCardProps) {
         </span>
       </div>
       <div class="bundle-drawer">
-        <For each={props.bundle.messages}>
-          {(m) => (
-            <div
-              class="bundle-drawer-row"
-              data-bundle-row={m.id}
-              data-message-id={m.id}
-              data-feed-card="message"
-              draggable="true"
-              onDragStart={(ev) => props.onDragStart(m, ev)}
-              onDragEnd={(ev) => props.onDragEnd(ev)}
-              onClick={() => props.onOpenFirst(m)}
-            >
-              <div class="bundle-drawer-line">{m.subj || "(无主题)"}</div>
-              <div class="bundle-drawer-meta">{m.tm}</div>
-            </div>
+        <For each={bundleDrawerGroups(props.bundle.messages)}>
+          {(group) => (
+            <>
+              <div class="bundle-drawer-group-label" data-bundle-group={group.key}>
+                {group.label}
+              </div>
+              <For each={group.messages}>
+                {(m) => (
+                  <div
+                    class="bundle-drawer-row"
+                    data-bundle-row={m.id}
+                    data-message-id={m.id}
+                    data-feed-card="message"
+                    draggable="true"
+                    onDragStart={(ev) => props.onDragStart(m, ev)}
+                    onDragEnd={(ev) => props.onDragEnd(ev)}
+                    onClick={() => props.onOpenFirst(m)}
+                  >
+                    <span
+                      class="bundle-drawer-unread"
+                      data-unread={m.unread ? "true" : "false"}
+                      style={{ visibility: m.unread ? "visible" : "hidden" }}
+                      title={m.unread ? "未读" : "已读"}
+                    />
+                    <div class="bundle-drawer-text">
+                      <div class="bundle-drawer-line">{m.subj || "(无主题)"}</div>
+                      <div class="bundle-drawer-meta">
+                        {formatMessageDate(m, profileTz(), "list").primary.value}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </For>
+            </>
           )}
         </For>
       </div>
     </article>
   );
+}
+
+/** Group a bundle's messages for the expanded drawer: the most recent
+ *  seven local days each get their own section; older messages collapse
+ *  into Monday–Sunday weeks. */
+function bundleDrawerGroups(messages: Message[]): {
+  key: string;
+  label: string;
+  messages: Message[];
+}[] {
+  const tz = profileTz();
+  const out: { key: string; label: string; messages: Message[] }[] = [];
+  let currentKey: string | null = null;
+  for (const m of messages) {
+    const g = bundleGroupFor(messageTimelineAt(m), tz);
+    if (g.key !== currentKey) {
+      out.push({ key: g.key, label: g.label, messages: [] });
+      currentKey = g.key;
+    }
+    out[out.length - 1]!.messages.push(m);
+  }
+  return out;
 }
 
 /* ── Pile card ──────────────────────────────────────────────────────── */
@@ -2277,7 +2480,9 @@ function PileCard(props: {
                       {c?.name ?? m.pid}
                     </div>
                   </div>
-                  <span class="pile-drawer-time">{m.tm}</span>
+                  <span class="pile-drawer-time">
+                    {formatMessageDate(m, profileTz(), "list").primary.value}
+                  </span>
                 </div>
               );
             }}
@@ -2322,7 +2527,7 @@ function ImboxTabs(props: {
       class="imbox-tabs"
       data-imbox-tabs
       role="tablist"
-      aria-label="Imbox sections"
+      aria-label="Inbox sections"
       style={{
         display: "flex",
         gap: "0",
@@ -2453,7 +2658,9 @@ function DateGroupedList(props: {
   items: Item[];
   children: (item: Item, i: number) => JSX.Element;
 }) {
-  const groups = createMemo(() => groupItemsByDate(props.items));
+  const groups = createMemo(() =>
+    groupItemsByDate(props.items, profileTz()),
+  );
 
   return (
     <For each={groups()}>

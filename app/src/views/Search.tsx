@@ -23,6 +23,7 @@ import {
   searchIndex,
 } from "../stores/data";
 import { Avatar } from "../components/Avatar";
+import { PageHeader } from "../components/PageHeader";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { ResourceGate } from "../components/ResourceGate";
@@ -332,20 +333,9 @@ export function Search() {
   return (
     <div style={{ animation: "view-enter 0.3s var(--ease-out) both" }}>
       <style>{SEARCH_CSS}</style>
-      <header
-        style={{ padding: "var(--space-5)", "max-width": "720px", margin: "0 auto" }}
-      >
-        <h1
-          style={{
-            "font-family": "var(--font-display)",
-            "font-size": "var(--text-h1)",
-            "font-weight": "800",
-            margin: 0,
-          }}
-        >
-          搜索
-        </h1>
-      </header>
+      <div style={{ "max-width": "720px", margin: "0 auto" }}>
+        <PageHeader title="搜索" />
+      </div>
 
       <div
         style={{

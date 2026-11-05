@@ -7,7 +7,7 @@
 
 import { load } from "@tauri-apps/plugin-store";
 import { IS_BROWSER } from "./services/tauri-shim";
-import { ensureNotificationPermission } from "./services/notifications";
+import { maybePromptNotificationPermission } from "./services/notifications";
 import { vaultGetSecret, LLM_API_KEY_VAULT_KEY } from "./services/backend";
 import { setLocale, type Locale } from "./i18n";
 import {
@@ -96,9 +96,37 @@ export async function initApp() {
           t === "dark" ? "dark" : "light",
         );
 
-        // Fire-and-forget: request OS permission and push prefs to Rust. Doesn't
-        // block the initial paint.
-        void ensureNotificationPermission();
+        // Tray menu actions (托盘设计稿 docs/design/tray-mockup.html):
+        // 写邮件 / 打开指定邮件 / 跳转设置。Real app only — the events are
+        // emitted from Rust.
+        try {
+          const { listen } = await import("@tauri-apps/api/event");
+          const ui = await import("./stores/ui");
+          void listen("tray:compose", () => ui.setComposeOpen(true));
+          void listen("tray:navigate", (e) => {
+            const view = (e.payload as { view?: string })?.view;
+            const views = [
+              "screener","imbox","feed","paperTrail","trash","spam","contacts",
+              "companies","calendar","files","insights","drafts","followUps",
+              "tasks","clips","settings","agent","focusReply","readTogether",
+              "replyLater","setAside","bubbleUp",
+            ];
+            if (view && views.includes(view)) ui.setView(view as never);
+          });
+          void listen("tray:open-message", (e) => {
+            const id = (e.payload as { id?: string })?.id;
+            if (!id) return;
+            ui.setView("imbox");
+            ui.setSelectedMessageId(id);
+            ui.setDetailOpen(true);
+          });
+        } catch {
+          /* event bridge unavailable (tests/browser) */
+        }
+
+        // First-run notification prompt (one-time, reasoned) — never a
+        // silent OS dialog at boot. Doesn't block the initial paint.
+        maybePromptNotificationPermission();
 
         const memory = await loadAgentMemory(store);
         setAgentMemory(memory);

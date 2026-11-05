@@ -21,6 +21,7 @@
 import { For, Show, createMemo, createResource } from "solid-js";
 import { getInsightsSummary } from "../stores/data";
 import { Icon } from "../components/Icon";
+import { PageHeader } from "../components/PageHeader";
 import { Empty, ErrorState } from "../components/Empty";
 import { ResourceGate } from "../components/ResourceGate";
 import { SkeletonList } from "../components/Skeleton";
@@ -126,16 +127,7 @@ export function Insights() {
       }}
     >
       <style>{INSIGHTS_CSS}</style>
-      <h1
-        style={{
-          "font-family": "var(--font-display)",
-          "font-size": "var(--text-h1)",
-          "font-weight": "800",
-          margin: "0 0 var(--space-5)",
-        }}
-      >
-        洞察
-      </h1>
+      <PageHeader title="洞察" class="insights-header" />
 
       <ResourceGate
         resource={summary}

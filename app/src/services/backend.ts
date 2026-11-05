@@ -20,7 +20,7 @@ type ImageSenderPolicyMap = Record<string, ImageSenderPolicy>;
 // commands; in browser mode the shim above answers known commands and the
 // catch block turns any remaining failures (e.g. unknown commands or a missing
 // runtime) into `null` so the UI can render its empty/fallback state.
-async function safeInvoke<T>(
+export async function safeInvoke<T>(
   cmd: string,
   args?: Record<string, unknown>,
 ): Promise<T | null> {
@@ -35,8 +35,14 @@ export interface SyncStateDto {
   account_id: string;
   uid_validity: number;
   last_uid: number;
+  /** Timestamp of the last SUCCESSFUL sync. May be the Unix epoch when
+   *  `status` is "never_synced" — check `status` before showing it. */
   last_synced_at: string;
   busy: boolean;
+  /** never_synced | syncing | connected | needs_credentials | error */
+  status: string;
+  /** Sanitized machine-readable code (e.g. "missing_credentials"). */
+  error_code: string | null;
 }
 
 export interface EmailProvider {
@@ -58,6 +64,8 @@ export interface OutgoingAttachment {
   dataBase64: string;
 }
 
+export const DEFAULT_LLM_BASE_URL = "https://api.openai.com/v1";
+
 export async function sendEmailViaBackend(
   to: string,
   subject: string,
@@ -68,6 +76,7 @@ export async function sendEmailViaBackend(
   bcc?: string,
   fromOverride?: string,
   htmlBody?: string,
+  inReplyTo?: string,
 ): Promise<{ message_id: string; local_message_id?: string } | null> {
   return safeInvoke<{ message_id: string; local_message_id?: string }>(
     "send_message",
@@ -81,6 +90,7 @@ export async function sendEmailViaBackend(
       cc,
       bcc,
       fromOverride,
+      inReplyTo,
     },
   );
 }
@@ -108,6 +118,8 @@ export async function getSyncState(accountId: string): Promise<SyncStateDto> {
       last_uid: 0,
       last_synced_at: "未配置（无 Tauri runtime）",
       busy: false,
+      status: "never_synced",
+      error_code: null,
     }
   );
 }
@@ -250,4 +262,40 @@ export async function agentChat(
   messages: ChatMessageWire[],
 ): Promise<ChatResponseWire | null> {
   return safeInvoke<ChatResponseWire | null>("agent_chat", { config, messages });
+}
+
+export interface LlmProviderDto {
+  id: string;
+  name: string;
+  kind: "gateway" | "direct" | "local";
+  keyPrefix: string | null;
+  tagline: string;
+  defaultBaseUrl: string;
+  local: boolean;
+}
+
+export interface LlmModelInfo {
+  id: string;
+  displayName: string;
+  contextWindow: number | null;
+  inputPricePerM: number | null;
+}
+
+export function listLlmProviders(): Promise<LlmProviderDto[] | null> {
+  return safeInvoke<LlmProviderDto[]>("list_llm_providers");
+}
+
+export async function listLlmModels(config: {
+  baseUrl: string;
+  apiKey: string;
+}): Promise<LlmModelInfo[] | null> {
+  return safeInvoke<LlmModelInfo[]>("llm_list_models", {
+    config: {
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      model: "",
+      temperature: 0.2,
+      maxTokens: 1,
+    },
+  });
 }

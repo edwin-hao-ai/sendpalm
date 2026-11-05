@@ -1,0 +1,146 @@
+.sidebar-workspace {
+  width: 100%;
+  flex-shrink: 0;
+  position: relative;
+}
+
+/* Workspace disclosure: a small caret pinned to the right edge of the
+   nav row — revealed on row hover (or while its flyout is open) and
+   rotating 90° when expanded. The old full-width ">" strip under every
+   group made the rail look like a stack of breadcrumbs; this keeps the
+   affordance without the noise. */
+.sidebar-disclosure {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--text-muted);
+  border-radius: var(--radius-pill);
+  opacity: 0;
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+  z-index: 1;
+}
+
+.sidebar-disclosure > i,
+.sidebar-disclosure > svg {
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.sidebar-workspace:hover .sidebar-disclosure,
+.sidebar-disclosure:focus-visible,
+.sidebar-disclosure[aria-expanded="true"] {
+  opacity: 1;
+}
+
+.sidebar-disclosure:hover,
+.sidebar-disclosure[aria-expanded="true"] {
+  background: var(--palm-soft);
+  color: var(--palm);
+}
+
+.sidebar-disclosure[aria-expanded="true"] > i,
+.sidebar-disclosure[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+
+/* Touch screens have no hover — keep the caret visible. */
+@media (hover: none) {
+  .sidebar-disclosure {
+    opacity: 1;
+  }
+}
+
+.sidebar-workspace-flyout {
+  position: fixed;
+  left: calc(var(--sidebar-width) + var(--space-2));
+  width: calc(var(--space-16) * 3);
+  max-height: calc(100dvh - var(--space-8));
+  overflow-y: auto;
+  z-index: var(--z-popover);
+  padding: var(--space-3);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.sidebar-route-group h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-caption);
+  color: var(--text-muted);
+}
+
+.sidebar-route-list {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.sidebar-route-list button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 44px;
+  min-height: 44px;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  text-align: left;
+}
+
+.sidebar-route-list button:hover,
+.sidebar-route-list button[data-active="true"] {
+  color: var(--palm);
+  background: var(--palm-soft);
+}
+
+.sidebar-route-badge {
+  margin-left: auto;
+  border-radius: var(--radius-pill);
+  padding: var(--space-1) var(--space-2);
+  background: var(--palm-soft);
+  color: var(--palm);
+  font-size: var(--text-micro);
+}
+
+.sidebar-mobile-groups {
+  display: grid;
+  gap: var(--space-4);
+}
+
+@media (pointer: coarse) {
+  /* Touch keeps the caret visible (no hover) and gives it a real
+     tap target without disturbing the desktop hover-reveal sizing. */
+  .sidebar-disclosure {
+    opacity: 1;
+    width: 32px;
+    height: 32px;
+    right: 0;
+  }
+}
+
+@media (max-width: 767px) {
+  .sidebar-workspace {
+    flex: 1;
+    width: auto;
+    min-width: 44px;
+  }
+  .sidebar-mobile-groups .sidebar-route-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .sidebar-mobile-groups .sidebar-route-list button {
+    flex-direction: column;
+    text-align: center;
+  }
+  .sidebar-mobile-groups .sidebar-route-badge {
+    margin-left: 0;
+  }
+}

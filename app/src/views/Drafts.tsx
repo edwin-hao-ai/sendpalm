@@ -17,6 +17,7 @@ import {
   showToast,
 } from "../stores/ui";
 import { Icon } from "../components/Icon";
+import { PageHeader } from "../components/PageHeader";
 import { Empty, ErrorState } from "../components/Empty";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ResourceGate } from "../components/ResourceGate";
@@ -106,32 +107,10 @@ export function Drafts() {
         animation: "view-enter 0.3s var(--ease-out) both",
       }}
     >
-      <header
-        style={{
-          padding: "var(--space-6) var(--space-5) var(--space-3)",
-          "text-align": "center",
-        }}
-      >
-        <h2
-          style={{
-            "font-family": "var(--font-display)",
-            "font-size": "var(--text-h3)",
-            "font-weight": "800",
-            margin: 0,
-          }}
-        >
-          草稿
-        </h2>
-        <p
-          style={{
-            color: "var(--text-secondary)",
-            "font-size": "var(--text-caption)",
-            margin: "var(--space-1) 0 0",
-          }}
-        >
-          草稿、定时发送、待审批 — 集中管理所有未发出的内容。
-        </p>
-      </header>
+      <PageHeader
+        title="草稿"
+        description={<p>草稿、定时发送、待审批 — 集中管理所有未发出的内容。</p>}
+      />
 
       <Show when={selected().size > 0}>
         <div
@@ -223,7 +202,7 @@ export function Drafts() {
           <Empty
             icon="ph-pencil-line"
             title="还没有草稿"
-            description="按 ⌘N 写一封新邮件，或直接在 Imbox 里回复。"
+            description="按 ⌘N 写一封新邮件，或直接在 Inbox 里回复。"
             action={{ label: "新邮件", onClick: () => setComposeOpen(true) }}
           />
         }

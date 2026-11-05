@@ -44,7 +44,9 @@ import {
   setComposeContext,
   openCompanyDetail,
   type ContactTab,
+  appSettings,
 } from "../stores/ui";
+import { formatMessageDate } from "../utils/message-dates";
 import { contactsList } from "../stores/contacts";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
@@ -88,13 +90,13 @@ const TABS: { id: ContactTab; label: string }[] = [
 ];
 
 const BUCKET_OPTIONS: { id: Contact["defaultBucket"]; label: string }[] = [
-  { id: "imbox", label: "Imbox（重要邮件）" },
+  { id: "imbox", label: "Inbox（重要邮件）" },
   { id: "feed", label: "Stream（资讯与 newsletter）" },
   { id: "paperTrail", label: "Records（收据与账单）" },
 ];
 
 function bucketLabel(b: Contact["defaultBucket"]): string {
-  return b === "imbox" ? "Imbox" : b === "feed" ? "Stream" : "Records";
+  return b === "imbox" ? "Inbox" : b === "feed" ? "Stream" : "Records";
 }
 
 /** Comma-joined names for a contact's autofile label ids. */
@@ -1148,7 +1150,7 @@ function TimelineRow(props: {
             display: "block",
           }}
         >
-          {props.message.tm}
+          {formatMessageDate(props.message, appSettings.profile.timezone, "list").primary.value}
         </span>
       </div>
       <button

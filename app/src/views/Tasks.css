@@ -1,0 +1,12 @@
+.tasks-view { padding: var(--space-5); max-width: 960px; margin: 0 auto; width: 100%; }
+.tasks-heading, .task-suggestion-fields { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
+.tasks-heading h1 { font-size: var(--text-h1); margin-right: auto; }
+.tasks-view h2 { font-size: var(--text-h3); margin: var(--space-5) 0 var(--space-3); }
+.tasks-hint { color: var(--text-muted); font-size: var(--text-caption); }
+.tasks-button { min-height: 44px; padding: var(--space-2) var(--space-4); background: var(--paper-mid); border-radius: var(--radius-pill); }
+.tasks-button:disabled { opacity: 0.5; cursor: not-allowed; }
+.tasks-row { display: flex; width: 100%; min-height: 44px; justify-content: space-between; gap: var(--space-3); text-align: left; padding: var(--space-3); border-bottom: 1px solid var(--border); }
+.task-suggestion { display: grid; gap: var(--space-3); margin-top: var(--space-3); padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-elevated); }
+.task-suggestion label { display: grid; gap: var(--space-1); font-size: var(--text-caption); min-width: 0; }
+.task-suggestion input, .task-suggestion select, .task-suggestion textarea { width: 100%; min-height: 44px; padding: var(--space-2); background: var(--paper-mid); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--radius-md); }
+@media (max-width: 767px) { .tasks-view { padding: var(--space-3); } .task-suggestion-fields > label { flex: 1 1 100%; } .tasks-row { flex-direction: column; } }

@@ -133,7 +133,18 @@ export function usePaginatedMessages(
       }
     }
     if (fresh.length === 0) return;
-    setPages([...fresh, ...pages()]);
+    // Re-sort the merged window by the real receipt timeline (newest
+    // first). The sync loop reports new ids in UID (=oldest-first) order
+    // during a backfill walk, and a naive prepend would leave the oldest
+    // new message at the top of the list — users saw "first row jumped to
+    // May" after clicking mail. Sorting the ≤300-item window is cheap and
+    // makes the UI order immune to arrival order.
+    const merged = [...fresh, ...pages()].sort((a, b) => {
+      const ta = Date.parse(a.receivedAt ?? a.st) || 0;
+      const tb = Date.parse(b.receivedAt ?? b.st) || 0;
+      return tb - ta;
+    });
+    setPages(merged);
     setTotal(total() + fresh.length);
   };
 

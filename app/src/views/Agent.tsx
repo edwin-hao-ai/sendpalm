@@ -20,6 +20,7 @@ import {
   auditKindLabel,
 } from "../agent/useAgent";
 import { Avatar } from "../components/Avatar";
+import { PageHeader } from "../components/PageHeader";
 import { Icon } from "../components/Icon";
 import { Empty, ErrorState } from "../components/Empty";
 import { ResourceGate } from "../components/ResourceGate";
@@ -132,23 +133,17 @@ export function Agent() {
     >
       {/* Header — prototype renders no inline mini-title; the page title
           is a real block-level H1 and the controls live on a second row. */}
-      <div style={{ padding: "var(--space-5) var(--space-5) 0" }}>
-        <h1
-          style={{
-            "font-family": "var(--font-display)",
-            "font-size": "var(--text-h1)",
-            "font-weight": "800",
-            color: "var(--text-primary)",
-            margin: 0,
-            display: "flex",
-            "align-items": "center",
-            gap: "var(--space-2)",
-          }}
-        >
-          <Icon name="ph-sparkle" size={24} color="var(--agent)" />
-          Agent
-        </h1>
-      </div>
+      <PageHeader
+        title="Agent"
+        description={
+          <span
+            style={{ display: "inline-flex", "align-items": "center", gap: "var(--space-1)" }}
+          >
+            <Icon name="ph-sparkle" size={14} color="var(--agent)" />
+            你的 AI 工作台
+          </span>
+        }
+      />
       <div
         style={{
           display: "flex",

@@ -249,6 +249,32 @@ export function plainTextToHtml(text: string): string {
   );
 }
 
+/** True when a plain-text field actually contains raw HTML (some senders
+ *  put markup in the text/plain part, and our Gate projection deliberately
+ *  does not fetch `body_html`). */
+export function looksLikeHtml(text: string): boolean {
+  const head = text.slice(0, 2000).toLowerCase();
+  return (
+    head.includes("<!doctype html") ||
+    head.includes("<html") ||
+    (head.includes("<div") && head.includes("</")) ||
+    (head.includes("<table") && head.includes("</")) ||
+    head.includes("<body")
+  );
+}
+
+/** Gate-card preview: the bounded query never fetches `body_html`, so a
+ *  body that is secretly markup gets stripped to text instead of showing
+ *  raw tags. */
+export function gateBodyPreview(body: string): string {
+  const trimmed = body.trim();
+  if (!trimmed) return "";
+  if (looksLikeHtml(trimmed)) {
+    return plainTextToHtml(htmlToPlainText(trimmed));
+  }
+  return plainTextToHtml(trimmed);
+}
+
 /** Render a message body for short-form previews (Gate card, list rows, etc.).
  *  Prefers the sanitized HTML body; falls back to escaped, linkified plain text.
  */
@@ -286,6 +312,15 @@ blockquote { border-left: 3px solid #0A8F63; margin: 0; padding: 0 0 0 12px; col
 .sp-img-hidden[data-shown="true"] { display: inline !important; }
 </style>
 <script>
+// Report text selections up to the host so "save as Clip" can read what
+// the user highlighted inside this sandboxed frame (the parent cannot
+// reach in — no allow-same-origin — but postMessage is allowed).
+document.addEventListener('mouseup', function() {
+  var sel = window.getSelection();
+  if (sel && sel.toString().trim()) {
+    try { parent.postMessage({ type: 'sendpalm:selection', text: sel.toString() }, '*'); } catch (_) {}
+  }
+});
 document.addEventListener('click', function(e) {
   var a = e.target && e.target.closest && e.target.closest('a[href]');
   if (!a) return;

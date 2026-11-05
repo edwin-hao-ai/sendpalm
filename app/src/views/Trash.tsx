@@ -12,6 +12,7 @@ import { usePaginatedMessages } from "../utils/paginated-messages";
 import { Avatar } from "../components/Avatar";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
+import { PageHeader } from "../components/PageHeader";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { SkeletonList } from "../components/Skeleton";
 import { setDetailOpen, setSelectedMessageId, showToast } from "../stores/ui";
@@ -68,7 +69,7 @@ export function Trash() {
     try {
       await moveMessageToBucket(id, "imbox");
       showToast({
-        message: "已恢复到 Imbox",
+        message: "已恢复到 Inbox",
         kind: "success",
         action: {
           label: "撤销",
@@ -155,61 +156,38 @@ export function Trash() {
           />
         }
       >
-        <header
-          style={{
-            display: "flex",
-            "align-items": "flex-end",
-            gap: "var(--space-4)",
-            "flex-wrap": "wrap",
-            "margin-bottom": "var(--space-5)",
-            "max-width": "720px",
-            width: "100%",
-            margin: "0 auto var(--space-5)",
-          }}
-        >
-          <div style={{ flex: 1, "min-width": 0 }}>
-            <h1
-              style={{
-                "font-family": "var(--font-display)",
-                "font-size": "var(--text-h1)",
-                "font-weight": "800",
-                margin: 0,
-                "margin-bottom": "var(--space-1)",
-              }}
-            >
-              回收站
-            </h1>
-            <p
-              style={{
-                color: "var(--text-secondary)",
-                margin: 0,
-                "font-size": "var(--text-caption)",
-              }}
-            >
-              删除的邮件会保留 30 天，过期后自动清理。
-              {paged.hasMore() ? ` · ${items().length}/${paged.total()}` : ""}
-            </p>
-          </div>
-          <Show when={items().length > 0}>
-            <button
-              onClick={() => setConfirmEmpty(true)}
-              disabled={emptying()}
-              style={{
-                padding: "8px 16px",
-                "border-radius": "var(--radius-pill)",
-                background: "transparent",
-                border: "1px solid var(--status-danger)",
-                color: "var(--status-danger)",
-                "font-size": "var(--text-caption)",
-                "font-weight": "700",
-                cursor: "pointer",
-                opacity: emptying() ? 0.5 : 1,
-              }}
-            >
-              {emptying() ? "正在清空…" : "清空回收站"}
-            </button>
-          </Show>
-        </header>
+        <div style={{ "max-width": "720px", width: "100%", margin: "0 auto" }}>
+          <PageHeader
+            title="回收站"
+            description={
+              <p>
+                删除的邮件会保留 30 天，过期后自动清理。
+                {paged.hasMore() ? ` · ${items().length}/${paged.total()}` : ""}
+              </p>
+            }
+            actions={
+              <Show when={items().length > 0}>
+                <button
+                  onClick={() => setConfirmEmpty(true)}
+                  disabled={emptying()}
+                  style={{
+                    padding: "8px 16px",
+                    "border-radius": "var(--radius-pill)",
+                    background: "transparent",
+                    border: "1px solid var(--status-danger)",
+                    color: "var(--status-danger)",
+                    "font-size": "var(--text-caption)",
+                    "font-weight": "700",
+                    cursor: "pointer",
+                    opacity: emptying() ? 0.5 : 1,
+                  }}
+                >
+                  {emptying() ? "正在清空…" : "清空回收站"}
+                </button>
+              </Show>
+            }
+          />
+        </div>
 
         <Show
           when={paged.resource.state !== "pending"}

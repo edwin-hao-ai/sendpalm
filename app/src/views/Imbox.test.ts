@@ -48,7 +48,7 @@ describe("groupItemsByDate", () => {
       msgItem("b", 1),
       msgItem("c", 5),
     ];
-    const groups = groupItemsByDate(items, today);
+    const groups = groupItemsByDate(items, undefined, today);
 
     // The original item references must be preserved — each item must
     // appear in exactly one group, with the same object identity it had
@@ -76,7 +76,7 @@ describe("groupItemsByDate", () => {
       msgItem("c", 5),
       msgItem("d", 30),
     ];
-    const groups = groupItemsByDate(items, today);
+    const groups = groupItemsByDate(items, undefined, today);
 
     // First group's startIdx must be 0.
     expect(groups[0]!.startIdx).toBe(0);
@@ -99,7 +99,7 @@ describe("groupItemsByDate", () => {
       msgItem("d", 30),
       msgItem("e", 30),
     ];
-    const groups = groupItemsByDate(items, today);
+    const groups = groupItemsByDate(items, undefined, today);
     const seen = new Set<number>();
     for (const g of groups) {
       g.items.forEach((_it, localIdx) => {
@@ -120,7 +120,7 @@ describe("groupItemsByDate", () => {
       msgItem("c", 5),
       msgItem("d", 90),
     ];
-    const groups = groupItemsByDate(items, today);
+    const groups = groupItemsByDate(items, undefined, today);
     expect(groups.map((g) => g.label)).toEqual([
       bucketLabel(dateBucket(stOf(items[0]!), today)),
       bucketLabel(dateBucket(stOf(items[1]!), today)),
@@ -130,8 +130,46 @@ describe("groupItemsByDate", () => {
   });
 });
 
-describe("isImboxListMessage", () => {
-  const base = { setAside: false, replyLater: false, bubbleUpAt: null };
+describe("groupItemsByDate — mail date integrity", () => {
+  it("groups by server receipt time, not the sender-declared date", () => {
+    // Sent a week ago but only arrived today — belongs in 今天.
+    const item = {
+      ...msgItem("late", 7),
+      receivedAt: iso(0),
+    };
+    const groups = groupItemsByDate([item], undefined, today);
+    expect(groups[0]?.label).toBe("今天");
+    expect(groups[0]?.items[0]).toBe(item);
+  });
+
+  it("groups a bundle by its newest message's receipt time", () => {
+    const older = { ...msgItem("b1", 9), receivedAt: iso(9) };
+    const newer = { ...msgItem("b2", 0), receivedAt: iso(0) };
+    const bundle: Item = {
+      contactId: "p1",
+      contact: {} as never,
+      messages: [newer, older],
+    };
+    const groups = groupItemsByDate([bundle], undefined, today);
+    expect(groups[0]?.label).toBe("今天");
+  });
+
+  it("draws day boundaries in the profile timezone", () => {
+    // 2026-08-17T22:00:00Z = 2026-08-18T06:00 Shanghai — "today" in
+    // Shanghai at 14:00 UTC, already "yesterday" in UTC.
+    const item = {
+      ...msgItem("tz", 0),
+      st: "2026-08-17T22:00:00Z",
+      receivedAt: "2026-08-17T22:00:00Z",
+    };
+    const shanghai = groupItemsByDate([item], "Asia/Shanghai", today);
+    expect(shanghai[0]?.label).toBe("今天");
+    const utc = groupItemsByDate([item], "UTC", today);
+    expect(utc[0]?.label).toBe("昨天");
+  });
+});
+
+describe("isImboxListMessage", () => {  const base = { setAside: false, replyLater: false, bubbleUpAt: null };
 
   it("keeps a plain message in the list", () => {
     expect(isImboxListMessage(base)).toBe(true);

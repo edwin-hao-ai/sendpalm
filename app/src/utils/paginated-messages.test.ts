@@ -113,3 +113,56 @@ describe("usePaginatedMessages patches a single row in memory", () => {
     expect(handle.items()[0]!.unread).toBe(true);
   });
 });
+
+describe("prependByIds ordering", () => {
+  it("merges prepended ids sorted by receipt timeline, not arrival order", async () => {
+    // Sync delivers new ids oldest-first during a backfill walk; the
+    // merged window must still read newest-first, or the first row
+    // visibly "jumps to May" (regression: month-scrambled Inbox).
+    const oct1 = {
+      ...makeMessage("new-oct-1"),
+      st: "2026-10-24T02:06:03Z",
+      receivedAt: "2026-10-24T02:06:03Z",
+    };
+    const oct2 = {
+      ...makeMessage("new-oct-2"),
+      st: "2026-10-30T00:01:48Z",
+      receivedAt: "2026-10-30T00:01:48Z",
+    };
+    const may = {
+      ...makeMessage("old-page"),
+      st: "2026-05-20T20:08:37Z",
+      receivedAt: "2026-05-20T20:08:37Z",
+    };
+    vi.mocked(listMessagesPaged).mockResolvedValue({
+      items: [may],
+      total: 3,
+      limit: 100,
+      offset: 0,
+    });
+    vi.mocked(getMessage).mockImplementation((id: string) =>
+      Promise.resolve(
+        id === "new-oct-1" ? oct1 : id === "new-oct-2" ? oct2 : null,
+      ),
+    );
+
+    let handle!: PaginatedMessagesHandle;
+    const root = createRoot((dispose) => {
+      handle = usePaginatedMessages({ bucket: "imbox", unreadOnly: true });
+      return dispose;
+    });
+    try {
+      await handle.resource.latest;
+      expect(handle.items().map((m) => m.id)).toEqual(["old-page"]);
+      // Arrival order is oldest-first (uid order), like the sync walk.
+      await handle.prependByIds(["new-oct-1", "new-oct-2"]);
+      expect(handle.items().map((m) => m.id)).toEqual([
+        "new-oct-2",
+        "new-oct-1",
+        "old-page",
+      ]);
+    } finally {
+      root();
+    }
+  });
+});

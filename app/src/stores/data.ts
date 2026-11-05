@@ -43,6 +43,8 @@ import type {
   Snippet,
   Sticky,
   Task,
+  TaskExtractionRun,
+  TaskSuggestion,
 } from "../types";
 import { safeParse, safeStringify } from "../utils/id";
 import { DEFAULT_SHORTCUTS } from "../utils/shortcut-defaults";
@@ -155,6 +157,8 @@ function rowToMessage(r: Record<string, unknown>): Message {
     bodyHtml: (r.body_html as string | null) ?? null,
     tm: r.tm as string,
     st: r.st as string,
+    sentAt: (r.sent_at as string | null) ?? null,
+    receivedAt: (r.received_at as string | null) ?? null,
     ac: r.ac as string,
     bucket: r.bucket as Message["bucket"],
     direction: (r.direction as Message["direction"]) ?? "in",
@@ -174,6 +178,8 @@ function rowToMessage(r: Record<string, unknown>): Message {
     calendarInvite: r.calendar_json
       ? safeParse<Message["calendarInvite"]>(r.calendar_json as string, null)
       : null,
+    isNewsletter: !!r.is_newsletter,
+    rfcMessageId: (r.rfc_message_id as string | undefined) ?? undefined,
   };
 }
 
@@ -357,6 +363,8 @@ function rowToTask(r: Record<string, unknown>): Task {
     priority: r.priority as Task["priority"],
     relatedContactId: (r.related_contact_id as string | undefined) ?? undefined,
     relatedEventId: (r.related_event_id as string | undefined) ?? undefined,
+    relatedMessageId: (r.related_message_id as string | undefined) ?? undefined,
+    direction: (r.direction as Task["direction"]) ?? undefined,
     notes: r.notes as string,
     createdAt: r.created_at as string,
   };
@@ -804,13 +812,15 @@ export async function listGateQueue(): Promise<GateQueueItem[]> {
   // and never fetch `body_html`; the JS side keeps only the newest message
   // per sender.
   const messageRows = await db.select<Record<string, unknown>[]>(
-    `SELECT id, pid, subj, prev, tm, st, ac, bucket, direction, unread,
+    `SELECT id, pid, subj, prev, tm, st, sent_at, received_at, ac, bucket, direction, unread,
+            is_newsletter,
             labels_json, attachments_json, trackers_json, thread_id,
             reply_later, set_aside, bubble_up_at, remind_at, to_addr,
             cc_json, bcc_json, deleted_at, calendar_json,
+            is_newsletter,
             substr(body, 1, 4000) AS body,
             NULL AS body_html
-       FROM messages WHERE pid IN (${placeholders}) ORDER BY st DESC`,
+       FROM messages WHERE pid IN (${placeholders}) ORDER BY timeline_at DESC`,
     contactIds,
   );
 
@@ -831,13 +841,20 @@ export async function listGateQueue(): Promise<GateQueueItem[]> {
   }
 
   const result: GateQueueItem[] = [];
+  const seenEmails = new Set<string>();
   for (const cRow of contactRows) {
     const rows = messagesByContact.get(cRow.id as ID);
     if (!rows || rows.length === 0) continue;
-    result.push({
-      contact: rowToContact(cRow),
-      message: rowToMessage(rows[0]!),
-    });
+    const contact = rowToContact(cRow);
+    // Duplicate contact rows for the same address (merged imports, sync
+    // re-creations) must not produce duplicate Gate cards. Key by the
+    // lowercase first email, falling back to the contact id.
+    const emailKey = (contact.emails[0]?.value ?? contact.id)
+      .trim()
+      .toLowerCase();
+    if (seenEmails.has(emailKey)) continue;
+    seenEmails.add(emailKey);
+    result.push({ contact, message: rowToMessage(rows[0]!) });
   }
   return result;
 }
@@ -973,7 +990,7 @@ export interface ListMessagesPage {
 export async function listMessages(): Promise<Message[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM messages ORDER BY st DESC",
+    "SELECT * FROM messages ORDER BY timeline_at DESC",
   );
   return rows.map(rowToMessage);
 }
@@ -1033,7 +1050,7 @@ export async function listMessagesForReminder(
 export async function listContactMessages(contactId: ID): Promise<Message[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    "SELECT * FROM messages WHERE pid = $1 ORDER BY st DESC",
+    "SELECT * FROM messages WHERE pid = $1 ORDER BY timeline_at DESC",
     [contactId],
   );
   return rows.map(rowToMessage);
@@ -1046,7 +1063,7 @@ export async function listCompanyMessages(
   const db = await getDb();
   const placeholders = contactIds.map((_, i) => `$${i + 1}`).join(",");
   const rows = await db.select<Record<string, unknown>[]>(
-    `SELECT * FROM messages WHERE pid IN (${placeholders}) ORDER BY st DESC`,
+    `SELECT * FROM messages WHERE pid IN (${placeholders}) ORDER BY timeline_at DESC`,
     contactIds,
   );
   const idSet = new Set(contactIds);
@@ -1093,13 +1110,14 @@ export async function listMessagesPaged(
   const total = totalRow[0]?.total ?? 0;
   const rows = await db.select<Record<string, unknown>[]>(
     options.lightweight
-      ? `SELECT id, pid, subj, prev, tm, st, ac, bucket, direction, unread,
+      ? `SELECT id, pid, subj, prev, tm, st, sent_at, received_at, ac, bucket, direction, unread,
+                is_newsletter,
                 labels_json, attachments_json, trackers_json,
                 reply_later, set_aside, bubble_up_at, remind_at, deleted_at,
                 to_addr, cc_json, bcc_json, thread_id, calendar_json
            FROM messages ${whereClause}
-           ORDER BY st DESC LIMIT ? OFFSET ?`
-      : `SELECT * FROM messages ${whereClause} ORDER BY st DESC LIMIT ? OFFSET ?`,
+           ORDER BY timeline_at DESC LIMIT ? OFFSET ?`
+      : `SELECT * FROM messages ${whereClause} ORDER BY timeline_at DESC LIMIT ? OFFSET ?`,
     [...params, limit, offset],
   );
   return {
@@ -1142,7 +1160,7 @@ export async function listPileMessages(): Promise<PileMessage[]> {
     `SELECT id, pid, subj, tm, st, reply_later, set_aside, bubble_up_at
      FROM messages
      WHERE reply_later = 1 OR set_aside = 1 OR bubble_up_at IS NOT NULL
-     ORDER BY st DESC`,
+     ORDER BY timeline_at DESC`,
   );
   return rows.map((r) => ({
     id: r.id,
@@ -1202,7 +1220,7 @@ export async function listThreadMessages(
   const db = await getDb();
   const { messageId, threadId, pid, lightweight } = options;
   const cols = lightweight
-    ? "id, pid, subj, prev, tm, st, ac, bucket, direction, unread, " +
+    ? "id, pid, subj, prev, tm, st, sent_at, received_at, ac, bucket, direction, unread, " +
       "labels_json, attachments_json, trackers_json, " +
       "reply_later, set_aside, bubble_up_at, remind_at, deleted_at, " +
       "to_addr, cc_json, bcc_json, thread_id, calendar_json"
@@ -1213,10 +1231,10 @@ export async function listThreadMessages(
   let sql: string;
   let args: unknown[];
   if (threadId) {
-    sql = `SELECT ${cols} FROM messages WHERE id != $1 AND thread_id = $2 ORDER BY st ASC`;
+    sql = `SELECT ${cols} FROM messages WHERE id != $1 AND thread_id = $2 ORDER BY timeline_at ASC`;
     args = [messageId, threadId];
   } else if (pid) {
-    sql = `SELECT ${cols} FROM messages WHERE id != $1 AND pid = $2 AND thread_id IS NULL ORDER BY st ASC`;
+    sql = `SELECT ${cols} FROM messages WHERE id != $1 AND pid = $2 AND thread_id IS NULL ORDER BY timeline_at ASC`;
     args = [messageId, pid];
   } else {
     return [];
@@ -1246,18 +1264,18 @@ export async function listMessageNeighbours(id: ID): Promise<{
 }> {
   const db = await getDb();
   const curRows = await db.select<Record<string, unknown>[]>(
-    "SELECT st FROM messages WHERE id = $1",
+    "SELECT timeline_at FROM messages WHERE id = $1",
     [id],
   );
-  const curSt = curRows[0]?.st as string | undefined;
+  const curSt = curRows[0]?.timeline_at as string | undefined;
   if (!curSt) return { prev: null, next: null };
   const [prevRows, nextRows] = await Promise.all([
     db.select<Record<string, unknown>[]>(
-      "SELECT id, st, subj, pid, bucket FROM messages WHERE st < $1 ORDER BY st DESC LIMIT 1",
+      "SELECT id, timeline_at AS st, subj, pid, bucket FROM messages WHERE timeline_at < $1 ORDER BY timeline_at DESC LIMIT 1",
       [curSt],
     ),
     db.select<Record<string, unknown>[]>(
-      "SELECT id, st, subj, pid, bucket FROM messages WHERE st > $1 ORDER BY st ASC LIMIT 1",
+      "SELECT id, timeline_at AS st, subj, pid, bucket FROM messages WHERE timeline_at > $1 ORDER BY timeline_at ASC LIMIT 1",
       [curSt],
     ),
   ]);
@@ -1304,7 +1322,7 @@ export async function listMessagesByIdsLight(ids: ID[]): Promise<Message[]> {
   const db = await getDb();
   const conditions = ids.map((_, i) => `id = $${i + 1}`).join(" OR ");
   const rows = await db.select<Record<string, unknown>[]>(
-    `SELECT id, pid, subj, prev, tm, st, ac, bucket, direction, unread,
+    `SELECT id, pid, subj, prev, tm, st, sent_at, received_at, ac, bucket, direction, unread,
             labels_json, attachments_json, trackers_json, thread_id,
             reply_later, set_aside, bubble_up_at, remind_at, to_addr,
             cc_json, bcc_json, deleted_at, calendar_json
@@ -1387,8 +1405,13 @@ export async function listMessagesForInsights(
       direction: ((r.direction as string) ?? "in") as "in" | "out",
     }));
   }
+  // Bounded: insights charts render weekly/monthly aggregates — anything
+  // older than a year is invisible but would still cross the IPC bridge
+  // on a large mailbox (§11.7 discipline applies to stats too).
   const rows = await db.select<Record<string, unknown>[]>(
-    `SELECT id, pid, st, thread_id, bucket, direction FROM messages`,
+    `SELECT id, pid, st, thread_id, bucket, direction FROM messages
+      WHERE st >= $1 ORDER BY st DESC LIMIT 20000`,
+    [new Date(Date.now() - 366 * 86400_000).toISOString()],
   );
   return rows.map((r) => ({
     id: r.id as string,
@@ -1429,24 +1452,31 @@ export async function listContactsByIds(ids: ID[]): Promise<Contact[]> {
 
 export async function upsertMessage(m: Message): Promise<void> {
   const db = await getDb();
+  // `timeline_at` is the indexed sort/group key (receivedAt ?? sentAt ?? st).
+  // Kept consistent here because both writers (frontend upsert + Rust sync)
+  // must produce the same value.
+  const timelineAt = m.receivedAt ?? m.sentAt ?? m.st;
   await db.execute(
     `INSERT INTO messages (
-      id, pid, subj, prev, body, body_html, tm, st, ac, bucket, direction, unread,
+      id, pid, subj, prev, body, body_html, tm, st, sent_at, received_at, timeline_at, ac, bucket, direction, unread, is_newsletter,
       labels_json, attachments_json, trackers_json,
       reply_later, set_aside, bubble_up_at, remind_at, deleted_at,
-      to_addr, cc_json, bcc_json, thread_id, calendar_json
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+      to_addr, cc_json, bcc_json, thread_id, calendar_json, rfc_message_id
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
     ON CONFLICT(id) DO UPDATE SET
       pid=excluded.pid, subj=excluded.subj, prev=excluded.prev,
       body=excluded.body, body_html=excluded.body_html, tm=excluded.tm, st=excluded.st,
+      sent_at=excluded.sent_at, received_at=excluded.received_at, timeline_at=excluded.timeline_at,
       ac=excluded.ac, bucket=excluded.bucket, direction=excluded.direction, unread=excluded.unread,
+      is_newsletter=excluded.is_newsletter,
       labels_json=excluded.labels_json, attachments_json=excluded.attachments_json,
       trackers_json=excluded.trackers_json,
       reply_later=excluded.reply_later, set_aside=excluded.set_aside,
       bubble_up_at=excluded.bubble_up_at, remind_at=excluded.remind_at,
       deleted_at=excluded.deleted_at,
       to_addr=excluded.to_addr, cc_json=excluded.cc_json, bcc_json=excluded.bcc_json,
-      thread_id=excluded.thread_id, calendar_json=excluded.calendar_json`,
+      thread_id=excluded.thread_id, calendar_json=excluded.calendar_json,
+      rfc_message_id=excluded.rfc_message_id`,
     [
       m.id,
       m.pid,
@@ -1456,10 +1486,14 @@ export async function upsertMessage(m: Message): Promise<void> {
       m.bodyHtml ?? null,
       m.tm,
       m.st,
+      m.sentAt ?? null,
+      m.receivedAt ?? null,
+      timelineAt,
       m.ac,
       m.bucket,
       m.direction ?? "in",
       m.unread ? 1 : 0,
+      m.isNewsletter ? 1 : 0,
       safeStringify(m.labels),
       safeStringify(m.attachments),
       safeStringify(m.trackers ?? []),
@@ -1473,6 +1507,7 @@ export async function upsertMessage(m: Message): Promise<void> {
       safeStringify(m.bcc ?? []),
       m.threadId ?? null,
       safeStringify(m.calendarInvite),
+      m.rfcMessageId ?? null,
     ],
   );
   await indexEntity(m.id, "message", m.subj, m.body);
@@ -1529,12 +1564,78 @@ export async function moveMessageToBucket(
  *  `upsertMessage(lightweightRow)` would overwrite the stored body with
  *  empty strings — irreversible data loss (the ReadTogether bug from
  *  2026-09-22). This scoped UPDATE touches exactly one column. */
+/** Gate 待审数（chip 计数用）。 */
+export async function countGatePending(): Promise<number> {
+  const db = await getDb();
+  const rows = await db.select<Array<{ total: number }>>(
+    "SELECT COUNT(*) AS total FROM contacts WHERE screened = 0 OR first_seen = 1",
+    [],
+  );
+  return rows[0]?.total ?? 0;
+}
+
+/** 未读订阅邮件数（chip 计数用）。 */
+export async function countUnreadNewsletters(): Promise<number> {
+  const db = await getDb();
+  const rows = await db.select<Array<{ total: number }>>(
+    "SELECT COUNT(*) AS total FROM messages WHERE bucket = 'imbox' AND unread = 1 AND is_newsletter = 1",
+    [],
+  );
+  return rows[0]?.total ?? 0;
+}
+
+/** Messages carrying a label (folder view). Bounded projection — the
+ *  folder list renders previews only; full bodies load in the panel. */
+export async function listMessagesByLabel(labelId: ID, limit = 50): Promise<Message[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT id, pid, subj, prev, tm, st, sent_at, received_at, ac, bucket, direction, unread,
+            labels_json, substr(body, 1, 2000) AS body, NULL AS body_html
+       FROM messages
+      WHERE labels_json LIKE $1
+      ORDER BY timeline_at DESC LIMIT ${Math.max(1, Math.min(limit, 200))}`,
+    [`%"${labelId}"%`],
+  );
+  return rows.map((r) => ({ ...rowToMessage(r), bodyHtml: null }));
+}
+
+export async function removeLabelFromMessage(messageId: ID, labelId: ID): Promise<void> {
+  const db = await getDb();
+  const row = await db.select<Record<string, unknown>[]>(
+    "SELECT labels_json FROM messages WHERE id = $1",
+    [messageId],
+  );
+  const current = safeParse<ID[]>(row[0]?.labels_json as string, []);
+  const next = current.filter((id) => id !== labelId);
+  await db.execute("UPDATE messages SET labels_json = $1 WHERE id = $2", [
+    safeStringify(next),
+    messageId,
+  ]);
+}
+
+/** Scoped bulk update: mark every message from one contact read without
+ *  touching bodies — used by the Gate batch triage panel. */
+export async function markAllReadByContact(contactId: ID): Promise<void> {
+  const db = await getDb();
+  await db.execute("UPDATE messages SET unread = 0 WHERE pid = $1", [contactId]);
+}
+
 export async function markMessageUnread(id: ID, unread: boolean): Promise<void> {
   const db = await getDb();
   await db.execute("UPDATE messages SET unread = $1 WHERE id = $2", [
     unread ? 1 : 0,
     id,
   ]);
+  // Two-way read state: mirror the change onto the IMAP server so the
+  // mailbox stays consistent in every client (webmail, phone…). Fire and
+  // forget — the local row is already correct and a failed STORE self-
+  // heals on the next sync.
+  try {
+    const { safeInvoke } = await import("../services/backend");
+    void safeInvoke("imap_set_seen", { messageId: id, seen: !unread });
+  } catch {
+    /* browser mode / older runtime — local-only */
+  }
 }
 
 /** Set the three workflow pile flags (reply_later / set_aside /
@@ -1570,13 +1671,13 @@ export async function setMessagePileFlags(
 export async function listFocusReplyMessages(limit = 200): Promise<Message[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
-    `SELECT id, pid, subj, prev, body, tm, st, ac, bucket, direction, unread,
+    `SELECT id, pid, subj, prev, body, tm, st, sent_at, received_at, ac, bucket, direction, unread,
             labels_json, attachments_json, trackers_json,
             reply_later, set_aside, bubble_up_at, remind_at, deleted_at,
             to_addr, cc_json, bcc_json, thread_id, calendar_json
        FROM messages
       WHERE reply_later = 1 AND bucket != 'trash' AND bucket != 'spam'
-      ORDER BY st DESC
+      ORDER BY timeline_at DESC
       LIMIT $1`,
     [Math.max(1, Math.min(limit, 500))],
   );
@@ -1878,6 +1979,12 @@ export async function listTasks(): Promise<Task[]> {
   return rows.map(rowToTask);
 }
 
+export async function listTasksPage(limit = 100): Promise<Task[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>("SELECT * FROM tasks ORDER BY created_at DESC LIMIT $1", [Math.max(1, Math.min(10_000, limit))]);
+  return rows.map(rowToTask);
+}
+
 export async function listContactTasks(contactId: ID): Promise<Task[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>(
@@ -1890,12 +1997,13 @@ export async function listContactTasks(contactId: ID): Promise<Task[]> {
 export async function upsertTask(t: Task): Promise<void> {
   const db = await getDb();
   await db.execute(
-    `INSERT INTO tasks (id,title,due,status,priority,related_contact_id,related_event_id,notes,created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    `INSERT INTO tasks (id,title,due,status,priority,related_contact_id,related_event_id,notes,created_at,related_message_id,direction)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      ON CONFLICT(id) DO UPDATE SET
        title=excluded.title, due=excluded.due, status=excluded.status,
        priority=excluded.priority, related_contact_id=excluded.related_contact_id,
-       related_event_id=excluded.related_event_id, notes=excluded.notes`,
+       related_event_id=excluded.related_event_id, notes=excluded.notes,
+       related_message_id=excluded.related_message_id, direction=excluded.direction`,
     [
       t.id,
       t.title,
@@ -1906,6 +2014,8 @@ export async function upsertTask(t: Task): Promise<void> {
       t.relatedEventId ?? null,
       t.notes,
       t.createdAt,
+      t.relatedMessageId ?? null,
+      t.direction ?? null,
     ],
   );
 }
@@ -1913,6 +2023,102 @@ export async function upsertTask(t: Task): Promise<void> {
 export async function deleteTask(id: ID): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM tasks WHERE id = $1", [id]);
+}
+
+function rowToExtractionRun(r: Record<string, unknown>): TaskExtractionRun {
+  return { sourceMessageId: r.source_message_id as string, state: r.state as TaskExtractionRun["state"], mode: r.mode as TaskExtractionRun["mode"], createdAt: r.created_at as string, updatedAt: r.updated_at as string };
+}
+
+function rowToTaskSuggestion(r: Record<string, unknown>): TaskSuggestion {
+  return { id: r.id as string, sourceMessageId: r.source_message_id as string, relatedContactId: (r.related_contact_id as string) ?? undefined, title: r.title as string, notes: r.notes as string, due: (r.due as string) ?? undefined, priority: r.priority as TaskSuggestion["priority"], direction: r.direction as TaskSuggestion["direction"], status: r.status as TaskSuggestion["status"], acceptedTaskId: (r.accepted_task_id as string) ?? undefined, createdAt: r.created_at as string };
+}
+
+export async function getTaskExtractionRun(sourceMessageId: ID): Promise<TaskExtractionRun | null> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>("SELECT * FROM task_extraction_runs WHERE source_message_id = $1", [sourceMessageId]);
+  return rows[0] ? rowToExtractionRun(rows[0]) : null;
+}
+
+export async function upsertTaskExtractionRun(r: TaskExtractionRun): Promise<void> {
+  const db = await getDb();
+  await db.execute(`INSERT INTO task_extraction_runs (source_message_id,state,mode,created_at,updated_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT(source_message_id) DO UPDATE SET state=excluded.state, mode=excluded.mode, updated_at=excluded.updated_at`, [r.sourceMessageId,r.state,r.mode,r.createdAt,r.updatedAt]);
+}
+
+export async function updateTaskExtractionRunState(sourceMessageId: ID, state: TaskExtractionRun["state"]): Promise<void> {
+  const db = await getDb();
+  await db.execute("UPDATE task_extraction_runs SET state = $1, updated_at = $2 WHERE source_message_id = $3", [state, new Date().toISOString(), sourceMessageId]);
+}
+
+export async function listQueuedTaskExtractionRuns(limit = 25): Promise<TaskExtractionRun[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>("SELECT * FROM task_extraction_runs WHERE state = 'queued' ORDER BY created_at ASC LIMIT $1", [Math.max(1, Math.min(25, limit))]);
+  return rows.map(rowToExtractionRun);
+}
+
+export async function recoverTaskExtractionRuns(): Promise<void> {
+  const db = await getDb();
+  // A request may have reached the model before interruption. Never silently spend again.
+  for (;;) {
+    const rows = await db.select<Record<string, unknown>[]>("SELECT source_message_id FROM task_extraction_runs WHERE state = 'processing' LIMIT 25");
+    if (!rows.length) return;
+    for (const row of rows) {
+      const id = row.source_message_id as string;
+      await deletePendingTaskSuggestions(id);
+      await updateTaskExtractionRunState(id, "failed");
+    }
+  }
+}
+
+export async function deletePendingTaskSuggestions(sourceMessageId: ID): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM task_suggestions WHERE source_message_id = $1 AND status = 'pending'", [sourceMessageId]);
+}
+
+export async function upsertTaskSuggestion(s: TaskSuggestion): Promise<void> {
+  const db = await getDb();
+  await db.execute(`INSERT INTO task_suggestions (id,source_message_id,related_contact_id,title,notes,due,priority,direction,status,accepted_task_id,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(id) DO UPDATE SET title=excluded.title, notes=excluded.notes, due=excluded.due, priority=excluded.priority, direction=excluded.direction, status=excluded.status, accepted_task_id=excluded.accepted_task_id`, [s.id,s.sourceMessageId,s.relatedContactId ?? null,s.title,s.notes,s.due ?? null,s.priority,s.direction,s.status,s.acceptedTaskId ?? null,s.createdAt]);
+}
+
+export async function listPendingTaskSuggestions(limit = 100): Promise<TaskSuggestion[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>("SELECT * FROM task_suggestions WHERE status = 'pending' ORDER BY created_at ASC LIMIT $1", [Math.max(1, Math.min(100, limit))]);
+  return rows.map(rowToTaskSuggestion);
+}
+
+export async function listMessageTaskSuggestions(sourceMessageId: ID): Promise<TaskSuggestion[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>("SELECT * FROM task_suggestions WHERE source_message_id = $1 ORDER BY created_at ASC LIMIT 3", [sourceMessageId]);
+  return rows.map(rowToTaskSuggestion);
+}
+
+async function finishTaskReview(sourceMessageId: ID): Promise<void> {
+  const suggestions = await listMessageTaskSuggestions(sourceMessageId);
+  const run = await getTaskExtractionRun(sourceMessageId);
+  if (run && suggestions.every(s => s.status !== "pending")) await upsertTaskExtractionRun({ ...run, state: "reviewed", updatedAt: new Date().toISOString() });
+}
+
+export async function confirmTaskSuggestion(edited: TaskSuggestion): Promise<ID> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>("SELECT * FROM task_suggestions WHERE id = $1", [edited.id]);
+  if (!rows[0]) throw new Error("建议已不可用");
+  const saved = rowToTaskSuggestion(rows[0]);
+  if (saved.status === "accepted" && saved.acceptedTaskId) return saved.acceptedTaskId;
+  if (saved.status !== "pending" || edited.direction === "unclear" || !edited.title.trim()) throw new Error("请确认标题和承诺方向");
+  const id = `task-${saved.id}`;
+  await upsertTask({ id, title: edited.title.trim(), notes: edited.notes, due: edited.due, priority: edited.priority, direction: edited.direction, relatedMessageId: saved.sourceMessageId, relatedContactId: saved.relatedContactId, status: "todo", createdAt: saved.createdAt });
+  await upsertTaskSuggestion({ ...saved, ...edited, sourceMessageId: saved.sourceMessageId, status: "accepted", acceptedTaskId: id });
+  await finishTaskReview(saved.sourceMessageId);
+  return id;
+}
+
+export async function dismissTaskSuggestion(id: ID): Promise<void> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>("SELECT * FROM task_suggestions WHERE id = $1", [id]);
+  if (!rows[0]) return;
+  const saved = rowToTaskSuggestion(rows[0]);
+  if (saved.status !== "pending") return;
+  await upsertTaskSuggestion({ ...saved, status: "dismissed" });
+  await finishTaskReview(saved.sourceMessageId);
 }
 
 /* ── Draft CRUD ──────────────────────────────────────────── */
@@ -2514,6 +2720,8 @@ export async function resetAllData(): Promise<void> {
     "bundle_configs",
     "drafts",
     "tasks",
+    "task_suggestions",
+    "task_extraction_runs",
     "events",
     "files",
     "messages",
@@ -2559,6 +2767,29 @@ export async function loadAppSettings(
   if (v?.agent?.llm?.apiKey) {
     v.agent.llm.apiKey = "";
   }
+  if (v?.agent) {
+    v.agent.autoExtractTasks = v.agent.autoExtractTasks === true;
+    v.agent.taskExtractionEnabledAt = v.agent.taskExtractionEnabledAt ?? null;
+  }
+  // Tray/background prefs: additive feature — older prefs files predate
+  // this object, so merge over defaults instead of trusting the file.
+  if (v?.preferences) {
+    v.preferences.gateGuideSeen = v.preferences.gateGuideSeen === true;
+    v.preferences.notifications = {
+      permissionPrompted: false,
+      ...(v.preferences.notifications ?? ({} as never)),
+    } as AppSettings["preferences"]["notifications"];
+    const backgroundDefaults = {
+      closeToTray: true,
+      launchAtLogin: false,
+      showUnreadBadge: true,
+      keepGateway: true,
+    };
+    v.preferences.background = {
+      ...backgroundDefaults,
+      ...(v.preferences.background ?? {}),
+    };
+  }
   return (
     v ?? {
       profile: {
@@ -2586,8 +2817,16 @@ export async function loadAppSettings(
           autoDownloadAttachments: true,
           maxAttachmentMb: 25,
         },
+        background: {
+          closeToTray: true,
+          launchAtLogin: false,
+          showUnreadBadge: true,
+          keepGateway: true,
+        },
       },
       agent: {
+        autoExtractTasks: false,
+        taskExtractionEnabledAt: null,
         autoDraft: false,
         autoSummarize: true,
         memoryEditable: true,
@@ -2613,7 +2852,7 @@ export async function saveAppSettings(
   store: import("@tauri-apps/plugin-store").Store,
   s: AppSettings,
 ): Promise<void> {
-  await store.set(APP_SETTINGS_KEY, s);
+  await store.set(APP_SETTINGS_KEY, { ...s, agent: { ...s.agent, llm: { ...s.agent.llm, apiKey: "" } } });
   await store.save();
 }
 

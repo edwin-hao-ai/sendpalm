@@ -34,6 +34,7 @@ import {
   listTasks,
   listFiles,
   emptyTrash,
+  saveAppSettings,
 } from "../stores/data";
 import {
   appSettings,
@@ -45,6 +46,10 @@ import {
   type SettingsTab,
 } from "../stores/ui";
 import { Modal } from "../components/Modal";
+import { PageHeader } from "../components/PageHeader";
+import { LlmProviderSettings } from "../components/LlmProviderSettings";
+import { AgentConnectionPanel } from "../components/AgentConnectionPanel";
+import { RulesSettings } from "../components/RulesSettings";
 import { Icon } from "../components/Icon";
 import { Avatar } from "../components/Avatar";
 import { Empty, ErrorState } from "../components/Empty";
@@ -55,6 +60,7 @@ import { uid } from "../utils/id";
 import type {
   Account,
   AccountSettings,
+  AppSettings,
   Label,
   Shortcut,
   Snippet,
@@ -65,8 +71,6 @@ import {
   listProviders as fetchProviders,
   vaultSave,
   vaultDelete,
-  vaultSetSecret,
-  LLM_API_KEY_VAULT_KEY,
   getSyncState,
   syncNow,
 } from "../services/backend";
@@ -105,7 +109,7 @@ const SHORTCUT_ACTION_LABELS: Record<string, string> = {
   "app:agent": "Agent 面板",
   "app:notifications": "通知",
   "nav:screener": "Gate（筛选台）",
-  "nav:imbox": "Imbox（收件箱）",
+  "nav:imbox": "Inbox（收件箱）",
   "nav:feed": "Stream（信息流）",
   "nav:paperTrail": "Records（记录）",
   "nav:contacts": "联系人",
@@ -213,14 +217,14 @@ export function Settings() {
   let saveTimeout: ReturnType<typeof setTimeout> | undefined;
   let savedReset: ReturnType<typeof setTimeout> | undefined;
   createEffect(() => {
-    const settings = appSettings;
+    // Read a snapshot inside the effect so nested pipeline settings are tracked.
+    const settings = JSON.parse(JSON.stringify(appSettings)) as AppSettings;
     clearTimeout(saveTimeout);
     saveTimeout = setTimeout(async () => {
       setSaveState("saving");
       try {
         const store = await load(STORE_PATH);
-        await store.set("app_settings", settings);
-        await store.save();
+        await saveAppSettings(store, settings);
         setSaveState("saved");
         clearTimeout(savedReset);
         savedReset = setTimeout(() => {
@@ -269,26 +273,10 @@ export function Settings() {
         fallback={
           <>
             <Show when={mobileTab() === null}>
-              <header
-                style={{
-                  padding: "var(--space-5) var(--space-5) 0",
-                  display: "flex",
-                  "align-items": "baseline",
-                  gap: "var(--space-3)",
-                }}
-              >
-                <h2
-                  style={{
-                    "font-family": "var(--font-display)",
-                    "font-size": "var(--text-h1)",
-                    "font-weight": "800",
-                    margin: 0,
-                  }}
-                >
-                  设置
-                </h2>
-                <SaveIndicator state={saveState()} />
-              </header>
+              <PageHeader
+                title="设置"
+                actions={<SaveIndicator state={saveState()} />}
+              />
               <SettingsMenu active={activeTab()} onSelect={navigateToTab} />
             </Show>
             <Show when={mobileTab() !== null}>
@@ -322,26 +310,11 @@ export function Settings() {
         }
       >
         {/* Desktop / tablet: left rail + content column */}
-        <header
-          style={{
-            padding: "var(--space-5) var(--space-6) 0",
-            display: "flex",
-            "align-items": "baseline",
-            gap: "var(--space-3)",
-          }}
-        >
-          <h2
-            style={{
-              "font-family": "var(--font-display)",
-              "font-size": "var(--text-h1)",
-              "font-weight": "800",
-              margin: 0,
-            }}
-          >
-            设置
-          </h2>
-          <SaveIndicator state={saveState()} />
-        </header>
+        <PageHeader
+          title="设置"
+          class="settings-header"
+          actions={<SaveIndicator state={saveState()} />}
+        />
         <div
           style={{
             flex: 1,
@@ -1845,6 +1818,11 @@ function PreferencesTab() {
         }
       />
 
+      <SectionTitle>邮件规则</SectionTitle>
+      <RulesSettings />
+
+      <SectionTitle>后台与启动</SectionTitle>
+      <BackgroundSettingsTab />
       <SectionTitle>通知</SectionTitle>
       <PreferencesNotificationsTab />
     </div>
@@ -1857,6 +1835,15 @@ function AgentTab() {
   return (
     <div>
       <SectionTitle>Agent 行为</SectionTitle>
+      <Toggle
+        label="自动从新 Inbox 邮件提取任务"
+        checked={s.agent.autoExtractTasks}
+        onChange={(enabled) => {
+          setAppSettings("agent", "taskExtractionEnabledAt", enabled ? new Date().toISOString() : null);
+          setAppSettings("agent", "autoExtractTasks", enabled);
+        }}
+      />
+      <p style={{ color: "var(--text-muted)", "font-size": "var(--text-caption)" }}>默认关闭。启用后，仅将通过 Gate 的新 Inbox 邮件发送至已配置模型；不会扫描历史邮件。建议需确认才成为任务。</p>
       <Toggle
         label="自动起草回复"
         checked={s.agent.autoDraft}
@@ -1882,63 +1869,20 @@ function AgentTab() {
         在 Agent 面板的「记忆」标签页中可以查看和编辑所有记忆，改动会自动保存。
       </p>
 
-      <SectionTitle>模型服务（兼容 OpenAI API）</SectionTitle>
-      <Field
-        label="接口地址"
-        hint="留空时使用 https://api.openai.com/v1；本地 Ollama 填 http://localhost:11434/v1"
+      <SectionTitle>AI Agent 连接</SectionTitle>
+      <AgentConnectionPanel />
+
+      <SectionTitle>模型服务</SectionTitle>
+      <LlmProviderSettings />
+      <p
+        style={{
+          margin: "var(--space-2) 0 var(--space-3)",
+          "font-size": "var(--text-caption)",
+          color: "var(--text-muted)",
+        }}
       >
-        <input
-          type="text"
-          placeholder="https://api.openai.com/v1"
-          value={llm().baseUrl}
-          onInput={(e) =>
-            setAppSettings("agent", "llm", "baseUrl", e.currentTarget.value)
-          }
-          style={inputStyle}
-        />
-      </Field>
-      <Field
-        label="API 密钥"
-        hint="保存在系统钥匙串，不会写入本地配置文件。本地模型可留空。"
-      >
-        <input
-          type="password"
-          placeholder="sk-…"
-          value={llm().apiKey}
-          onInput={(e) =>
-            // Update the in-memory store so the input stays responsive;
-            // the keychain write happens on blur (onChange) below.
-            setAppSettings("agent", "llm", "apiKey", e.currentTarget.value)
-          }
-          onChange={async (e) => {
-            try {
-              await vaultSetSecret(LLM_API_KEY_VAULT_KEY, e.currentTarget.value);
-            } catch (err) {
-              showToast({
-                message: "API 密钥保存失败，请重试",
-                kind: "error",
-                source: "vault",
-                detail: String(err),
-              });
-            }
-          }}
-          style={inputStyle}
-        />
-      </Field>
-      <Field
-        label="模型"
-        hint="例如 gpt-4o-mini / claude-3-5-sonnet / llama3.1:8b"
-      >
-        <input
-          type="text"
-          placeholder="gpt-4o-mini"
-          value={llm().model}
-          onInput={(e) =>
-            setAppSettings("agent", "llm", "model", e.currentTarget.value)
-          }
-          style={inputStyle}
-        />
-      </Field>
+        当前模型：{llm().model || "未设置"}
+      </p>
       <div
         style={{
           display: "grid",
@@ -3089,6 +3033,88 @@ function download(name: string, content: string, mime: string) {
   a.download = name;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function BackgroundSettingsTab() {
+  const bg = () => appSettings.preferences.background;
+  const [autostartState, { refetch }] = createResource(async () => {
+    try {
+      const api = await import("@tauri-apps/plugin-autostart");
+      return await api.isEnabled();
+    } catch {
+      return false; // browser/test mode — no plugin
+    }
+  });
+
+  const setLaunchAtLogin = async (v: boolean) => {
+    try {
+      const api = await import("@tauri-apps/plugin-autostart");
+      if (v) await api.enable();
+      else await api.disable();
+      setAppSettings("preferences", "background", "launchAtLogin", v);
+      await refetch();
+    } catch (e) {
+      showToast({
+        message: "自动启动设置失败，请重试",
+        kind: "error",
+        detail: String(e),
+      });
+    }
+  };
+
+  // Changes auto-save via the Settings debounced effect; Rust reads the
+  // prefs file at each decision point (close/tray/badge).
+  return (
+    <div style={{ display: "grid", gap: "var(--space-3)", "max-width": "520px" }}>
+      <p
+        style={{
+          margin: 0,
+          "font-size": "var(--text-caption)",
+          color: "var(--text-muted)",
+        }}
+      >
+        关掉窗口时 SendPalm 继续在后台收取邮件、推送通知，并保持本地
+        Agent 网关可用。退出只发生在托盘菜单（或窗口可见时按 ⌘Q）。
+      </p>
+      <ToggleRow
+        label="关闭窗口时最小化到托盘"
+        description="红色关闭按钮隐藏窗口；从托盘菜单退出。"
+        checked={bg().closeToTray}
+        onChange={(v) =>
+          setAppSettings("preferences", "background", "closeToTray", v)
+        }
+      />
+      <ToggleRow
+        label="登录时自动启动"
+        description="开机后直接在托盘运行，无需手动打开。"
+        checked={autostartState() ?? bg().launchAtLogin}
+        onChange={(v) => void setLaunchAtLogin(v)}
+      />
+      <ToggleRow
+        label="显示未读徽标"
+        description="托盘图标上显示新邮件数量（macOS 菜单栏数字）。"
+        checked={bg().showUnreadBadge}
+        onChange={(v) =>
+          setAppSettings("preferences", "background", "showUnreadBadge", v)
+        }
+      />
+      <ToggleRow
+        label="后台保持 Agent 网关"
+        description="窗口关闭后，OpenCode / Claude Code 等 Agent 仍可读写邮件。"
+        checked={bg().keepGateway}
+        onChange={(v) => {
+          setAppSettings("preferences", "background", "keepGateway", v);
+          if (!v) {
+            showToast({
+              message: "网关开关在下次启动 SendPalm 时生效",
+              kind: "info",
+              ttlMs: 3000,
+            });
+          }
+        }}
+      />
+    </div>
+  );
 }
 
 function PreferencesNotificationsTab() {

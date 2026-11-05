@@ -28,8 +28,14 @@ import { Avatar } from "../components/Avatar";
 import { Empty } from "../components/Empty";
 import { ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
-import { htmlEmailSrcdoc } from "../utils/html";
-import { setView, showToast } from "../stores/ui";
+import { htmlEmailSrcdoc, htmlToPlainText, looksLikeHtml } from "../utils/html";
+import { PageHeader } from "../components/PageHeader";
+import { setView, showToast, appSettings } from "../stores/ui";
+import { formatMessageDate } from "../utils/message-dates";
+
+/** Profile timezone for mail date labels (falls back to OS zone in helpers). */
+const profileTz = () => appSettings.profile.timezone;
+
 import { registerPrepend } from "../services/sync-events";
 
 const PREVIEW_PARAGRAPHS = 2;
@@ -73,10 +79,24 @@ export function Stream() {
     },
   );
 
+  const MAX_EXPANDED_HTML = 5;
+
   const toggle = (id: string) => {
     const next = new Set(expanded());
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+      // Each expanded HTML card mounts a sandboxed iframe + pays a
+      // DOMPurify pass on its body_html. Unbounded "expand everything"
+      // is the Stream memory hog — cap concurrent expanded cards and
+      // collapse the oldest (insertion order) past the cap.
+      while (next.size > MAX_EXPANDED_HTML) {
+        const oldest = next.values().next().value;
+        if (oldest === undefined) break;
+        next.delete(oldest);
+      }
+    }
     setExpanded(next);
   };
 
@@ -228,7 +248,17 @@ interface StreamCardProps {
 }
 
 function StreamCard(props: StreamCardProps) {
-  const paragraphs = createMemo(() => splitParagraphs(props.m.body || ""));
+  // Derive preview paragraphs from the RICH part when it exists: the
+  // text/plain fallback of HTML mail is full of `<https://…>` reference
+  // link syntax and "无法阅读此邮件" boilerplate, which read as broken.
+  // Expanded cards already render the sanitized HTML iframe.
+  const paragraphs = createMemo(() => {
+    const source =
+      props.m.bodyHtml && looksLikeHtml(props.m.bodyHtml)
+        ? htmlToPlainText(props.m.bodyHtml)
+        : (props.m.body ?? "");
+    return splitParagraphs(source);
+  });
   const hasHtml = () => !!props.m.bodyHtml;
   // Text paragraphs are the fallback rendering for plain-text mail and
   // the collapsed preview for HTML mail. When an HTML body is expanded,
@@ -237,11 +267,24 @@ function StreamCard(props: StreamCardProps) {
   const showParagraphs = createMemo(
     () => !(hasHtml() && props.expanded) && paragraphs().length > 0,
   );
-  const visibleParagraphs = createMemo(() =>
-    props.expanded
-      ? paragraphs()
-      : paragraphs().slice(0, PREVIEW_PARAGRAPHS),
-  );
+  const visibleParagraphs = createMemo(() => {
+    if (props.expanded) return paragraphs();
+    // Character cap, not just paragraph count: HTML-derived text often
+    // arrives as ONE giant paragraph — a 2-paragraph slice then shows
+    // the entire body and the card looks broken ("no HTML rendering").
+    const out: string[] = [];
+    let chars = 0;
+    for (const p of paragraphs().slice(0, PREVIEW_PARAGRAPHS)) {
+      if (chars + p.length > 280) {
+        const room = Math.max(0, 280 - chars);
+        if (room > 40) out.push(p.slice(0, room).trimEnd() + "…");
+        break;
+      }
+      out.push(p);
+      chars += p.length + 1;
+    }
+    return out;
+  });
 
   return (
     <article
@@ -288,7 +331,7 @@ function StreamCard(props: StreamCardProps) {
               color: "var(--text-muted)",
             }}
           >
-            {props.m.tm}
+            {formatMessageDate(props.m, profileTz(), "list").primary.value}
           </div>
         </div>
         <button
@@ -513,35 +556,10 @@ function ActionButton(props: {
 
 function SectionHeader(props: { title: string; subtitle?: string }) {
   return (
-    <header
-      style={{
-        padding: "var(--space-6) var(--space-5) var(--space-3)",
-        "text-align": "center",
-      }}
-    >
-      <h1
-        style={{
-          "font-family": "var(--font-display)",
-          "font-size": "var(--text-h1)",
-          "font-weight": 800,
-          margin: 0,
-          "margin-bottom": "var(--space-1)",
-        }}
-      >
-        {props.title}
-      </h1>
-      <Show when={props.subtitle}>
-        <p
-          style={{
-            color: "var(--text-secondary)",
-            margin: 0,
-            "font-size": "var(--text-caption)",
-          }}
-        >
-          {props.subtitle}
-        </p>
-      </Show>
-    </header>
+    <PageHeader
+      title={props.title}
+      description={props.subtitle ? <p>{props.subtitle}</p> : undefined}
+    />
   );
 }
 

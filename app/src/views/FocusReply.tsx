@@ -38,8 +38,15 @@ import {
   setComposeOpen,
   setComposeContext,
   showToast,
+  appSettings,
 } from "../stores/ui";
+import { formatMessageDate } from "../utils/message-dates";
+
+/** Profile timezone for mail date labels (falls back to OS zone in helpers). */
+const profileTz = () => appSettings.profile.timezone;
+
 import { Avatar } from "../components/Avatar";
+import { PageHeader } from "../components/PageHeader";
 import { Icon } from "../components/Icon";
 import { ErrorState } from "../components/Empty";
 import { ResourceGate } from "../components/ResourceGate";
@@ -95,57 +102,32 @@ export function FocusReply() {
         "flex-direction": "column",
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          "align-items": "center",
-          "justify-content": "space-between",
-          gap: "var(--space-3)",
-          padding: "var(--space-4) var(--space-5)",
-          "border-bottom": "0.5px solid var(--border)",
-        }}
-      >
-        <div>
-          <h1
-            style={{
-              "font-family": "var(--font-display)",
-              "font-size": "var(--text-h1)",
-              "font-weight": "800",
-              color: "var(--text-primary)",
-              margin: 0,
-            }}
-          >
-            专注回复
-          </h1>
-          <p
-            style={{
-              margin: "2px 0 0",
-              color: "var(--text-muted)",
-              "font-size": "var(--text-caption)",
-            }}
-          >
-            {pendingCount()} 封待回复
-          </p>
-        </div>
-        <button
-          onClick={close}
-          title="关闭专注回复"
-          aria-label="关闭专注回复"
-          style={{
-            display: "inline-flex",
-            "align-items": "center",
-            "justify-content": "center",
-            width: "44px",
-            height: "44px",
-            "border-radius": "var(--radius-pill)",
-            background: "var(--paper-mid)",
-            color: "var(--text-secondary)",
-            border: "none",
-            cursor: "pointer",
-          }}
-        >
-          <Icon name="ph-x" size={18} />
-        </button>
+      <div style={{ "border-bottom": "0.5px solid var(--border)" }}>
+        <PageHeader
+          title="专注回复"
+          description={<p>{pendingCount()} 封待回复</p>}
+          actions={
+            <button
+              onClick={close}
+              title="关闭专注回复"
+              aria-label="关闭专注回复"
+              style={{
+                display: "inline-flex",
+                "align-items": "center",
+                "justify-content": "center",
+                width: "44px",
+                height: "44px",
+                "border-radius": "var(--radius-pill)",
+                background: "var(--paper-mid)",
+                color: "var(--text-secondary)",
+                border: "none",
+                cursor: "pointer",
+              }}
+            >
+              <Icon name="ph-x" size={18} />
+            </button>
+          }
+        />
       </div>
 
       <ResourceGate
@@ -451,7 +433,7 @@ function FocusReplyItem(props: {
               color: "var(--text-muted)",
             }}
           >
-            {props.m.tm}
+            {formatMessageDate(props.m, profileTz(), "list").primary.value}
           </span>
         </div>
         <h2
@@ -637,7 +619,7 @@ function DoneState(props: { onBack: () => void }) {
           cursor: "pointer",
         }}
       >
-        返回 Imbox
+        返回 Inbox
       </button>
     </div>
   );

@@ -16,6 +16,7 @@ import { listCompaniesWithCounts, type CompanyGroup } from "../stores/data";
 import { Avatar } from "../components/Avatar";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
+import { PageHeader } from "../components/PageHeader";
 import { ResourceGate } from "../components/ResourceGate";
 import {
   setDetailOpen,
@@ -45,27 +46,10 @@ export function Companies() {
           padding: "0 var(--space-5) var(--space-5)",
         }}
       >
-        <header style={{ padding: "var(--space-5) 0" }}>
-          <h1
-            style={{
-              "font-family": "var(--font-display)",
-              "font-size": "var(--text-h1)",
-              "font-weight": "800",
-              margin: 0,
-            }}
-          >
-            公司
-          </h1>
-          <p
-            style={{
-              color: "var(--text-secondary)",
-              "font-size": "var(--text-caption)",
-              margin: "var(--space-1) 0 0",
-            }}
-          >
-            按公司分组 · 看到所有人和沟通历史
-          </p>
-        </header>
+        <PageHeader
+          title="公司"
+          description={<p>按公司分组 · 看到所有人和沟通历史</p>}
+        />
 
         <ResourceGate
           resource={groups}

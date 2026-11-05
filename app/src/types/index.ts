@@ -146,8 +146,14 @@ export interface Message {
   prev: string;
   body: string;
   bodyHtml?: string | null;
-  tm: string; // display timestamp string
-  st: ISODate; // ISO timestamp for sorting
+  tm: string; // display timestamp string (UTC, legacy — do not show directly)
+  st: ISODate; // compatibility ISO timestamp (sender date when known)
+  /** Sender-declared date from the RFC 5322 `Date` header. Null/undefined when
+   *  the header was missing or malformed — never fabricated. */
+  sentAt?: ISODate | null;
+  /** Mail server receipt time (`INTERNALDATE`). The trustworthy timeline value
+   *  for Inbox ordering; null until fetched for legacy rows. */
+  receivedAt?: ISODate | null;
   ac: ID; // account id
   bucket: MessageBucket;
   direction?: "in" | "out";
@@ -169,6 +175,13 @@ export interface Message {
   deletedAt?: ISODate | null;
   /** Parsed iCalendar VEVENT, if this message is a meeting invite. */
   calendarInvite?: IcalEvent | null;
+  /** Mailing-list headers present (List-Id / List-Unsubscribe / List-Post)
+   *  — a newsletter, not a person. Drives Gate hints and notification
+   *  triage. */
+  isNewsletter?: boolean;
+  /** The sender's RFC 5322 Message-ID — replies set In-Reply-To to it so
+   *  recipients' clients can thread the conversation. */
+  rfcMessageId?: string;
 }
 
 export interface IcalEvent {
@@ -308,6 +321,30 @@ export interface CalendarEvent {
 
 export type TaskStatus = "todo" | "doing" | "done";
 export type TaskPriority = "low" | "normal" | "high";
+export type TaskDirection = "mine" | "theirs";
+export type TaskExtractionRunState = "queued" | "processing" | "pending_review" | "no_tasks" | "failed" | "reviewed" | "skipped";
+export interface TaskExtractionRun {
+  sourceMessageId: ID;
+  state: TaskExtractionRunState;
+  mode: "automatic" | "manual";
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}
+export type TaskSuggestionDirection = TaskDirection | "unclear";
+export type TaskSuggestionStatus = "pending" | "accepted" | "dismissed";
+export interface TaskSuggestion {
+  id: ID;
+  sourceMessageId: ID;
+  relatedContactId?: ID;
+  title: string;
+  notes: string;
+  due?: ISODate;
+  priority: TaskPriority;
+  direction: TaskSuggestionDirection;
+  status: TaskSuggestionStatus;
+  acceptedTaskId?: ID;
+  createdAt: ISODate;
+}
 
 export interface Task {
   id: ID;
@@ -317,6 +354,8 @@ export interface Task {
   priority: TaskPriority;
   relatedContactId?: ID;
   relatedEventId?: ID;
+  relatedMessageId?: ID;
+  direction?: TaskDirection;
   notes: string;
   createdAt: ISODate;
 }
@@ -542,7 +581,12 @@ export interface AppSettings {
       quietHoursEnabled: boolean;
       quietHoursStart: string;
       quietHoursEnd: string;
+      /** True once the user has seen (and acted on or dismissed) the
+       *  first-run notification prompt. Stops the prompt reappearing. */
+      permissionPrompted?: boolean;
     };
+    /** True once the Gate how-to banner has been dismissed. */
+    gateGuideSeen?: boolean;
     security: {
       appLock: boolean;
       screenshotAllowed: boolean;
@@ -552,8 +596,21 @@ export interface AppSettings {
       autoDownloadAttachments: boolean;
       maxAttachmentMb: number;
     };
+    /** Background & launch behavior (tray). Always present after
+     *  `loadAppSettings` normalization — direct access is safe. */
+    background: {
+      /** Close button hides to tray instead of quitting (default on). */
+      closeToTray: boolean;
+      launchAtLogin: boolean;
+      /** Unread count on the tray icon (macOS title / menu header). */
+      showUnreadBadge: boolean;
+      /** Keep the local Agent gateway running in the background. */
+      keepGateway: boolean;
+    };
   };
   agent: {
+    autoExtractTasks: boolean;
+    taskExtractionEnabledAt: ISODate | null;
     autoDraft: boolean;
     autoSummarize: boolean;
     memoryEditable: boolean;

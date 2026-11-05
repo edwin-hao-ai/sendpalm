@@ -2,6 +2,15 @@
 import { render } from "solid-js/web";
 import App from "./App";
 
+// Native-app feel: never show the browser context menu. Users read this
+// as "a web page, not an app". Editable fields keep their menu (copy /
+// paste / spellcheck) — native text fields do too.
+document.addEventListener("contextmenu", (e) => {
+  const t = e.target as HTMLElement | null;
+  if (t?.closest?.("input, textarea, [contenteditable=true]")) return;
+  e.preventDefault();
+});
+
 // Browser-mode Tauri shim — installs `window.__TAURI_INTERNALS__` mock so
 // services/backend.ts can run in plain `pnpm dev` (no Tauri shell).
 // No-op when running inside the real Tauri runtime.

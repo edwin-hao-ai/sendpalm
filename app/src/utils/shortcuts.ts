@@ -164,7 +164,7 @@ export function useGlobalShortcuts() {
       // Imbox has its own local x-key handler; avoid double toast.
       if (view() === "imbox") return;
       e.preventDefault();
-      showToast({ message: "多选暂只在 Imbox 可用", kind: "info" });
+       showToast({ message: "多选暂只在 Inbox 可用", kind: "info" });
     },
     "list:open": (e) => {
       if (!isListView(view())) return;

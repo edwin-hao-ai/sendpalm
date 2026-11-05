@@ -25,7 +25,7 @@
  */
 import { listen } from "@tauri-apps/api/event";
 import { IS_BROWSER } from "./tauri-shim";
-import { bumpSoftRefreshTick } from "../stores/ui";
+import { bumpSoftRefreshTick, showToast, setView } from "../stores/ui";
 import type { Message } from "../types";
 
 export interface SyncReport {
@@ -48,6 +48,34 @@ export interface SyncReport {
  *  registered for the same bucket (e.g. Imbox + a future widget). */
 export type PrependHandler = (ids: string[]) => void | Promise<void>;
 const prependRegistry = new Map<string, Set<PrependHandler>>();
+const newMessagesRegistry = new Set<PrependHandler>();
+const pendingNewMessageIds = new Set<string>();
+const MAX_PENDING_NEW_MESSAGE_IDS = 200;
+
+export function registerNewMessages(handler: PrependHandler): () => void {
+  newMessagesRegistry.add(handler);
+  if (pendingNewMessageIds.size) {
+    const ids = [...pendingNewMessageIds];
+    pendingNewMessageIds.clear();
+    void Promise.resolve(handler(ids)).catch(() => {});
+  }
+  return () => { newMessagesRegistry.delete(handler); };
+}
+
+export function notifyNewMessages(ids: string[]): void {
+  if (!newMessagesRegistry.size) {
+    for (const id of ids) {
+      if (pendingNewMessageIds.has(id)) continue;
+      if (pendingNewMessageIds.size >= MAX_PENDING_NEW_MESSAGE_IDS) {
+        const oldest = pendingNewMessageIds.values().next().value;
+        if (oldest !== undefined) pendingNewMessageIds.delete(oldest);
+      }
+      pendingNewMessageIds.add(id);
+    }
+    return;
+  }
+  for (const handler of newMessagesRegistry) void Promise.resolve(handler([...new Set(ids)])).catch(() => {});
+}
 
 export function registerPrepend(bucket: string, handler: PrependHandler): () => void {
   let set = prependRegistry.get(bucket);
@@ -122,11 +150,28 @@ export function startSyncEventBridge(): () => void {
     // contact counts) update. Paginated lists already get the new ids below.
     bumpSoftRefreshTick();
     if (ids.length > 0) {
+      notifyNewMessages(ids);
       notifyBucket("imbox", ids);
       notifyBucket("feed", ids);
       notifyBucket("paperTrail", ids);
       notifyBucket("trash", ids);
       notifyBucket("spam", ids);
+    }
+    // Catch-up surge (e.g. sync resumed after weeks): a single cycle
+    // delivering a big batch would otherwise land silently — offer the
+    // bulk triage entry point right away.
+    if (event.payload.new_messages >= 50) {
+      showToast({
+        message: `同步收到 ${event.payload.new_messages} 封新邮件`,
+        kind: "info",
+        ttlMs: 12_000,
+        action: {
+          label: "去批量整理",
+          run: () => {
+            setView("screener");
+          },
+        },
+      });
     }
   })
     .then((fn) => {

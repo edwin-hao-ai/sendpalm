@@ -9,6 +9,7 @@
  */
 
 import { priorityScore } from "./priority";
+import { messageTimelineAt } from "./message-dates";
 import type { Contact, Message } from "../types";
 
 export type SortMode = "newest" | "oldest" | "most_relevant";
@@ -29,9 +30,15 @@ export function sortImboxMessages(
   const map = new Map(contacts.map((c) => [c.id, c]));
   const out = messages.slice();
   if (mode === "newest") {
-    out.sort((a, b) => new Date(b.st).getTime() - new Date(a.st).getTime());
+    out.sort(
+      (a, b) =>
+        Date.parse(messageTimelineAt(b)) - Date.parse(messageTimelineAt(a)),
+    );
   } else if (mode === "oldest") {
-    out.sort((a, b) => new Date(a.st).getTime() - new Date(b.st).getTime());
+    out.sort(
+      (a, b) =>
+        Date.parse(messageTimelineAt(a)) - Date.parse(messageTimelineAt(b)),
+    );
   } else {
     out.sort(
       (a, b) =>

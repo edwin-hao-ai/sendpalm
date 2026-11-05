@@ -6,7 +6,7 @@
  *  (--accent, --accent-soft, --ruby, --bg-elevated, --ink-secondary,
  *  --space-7, --text-h5, …) referenced but never defined. An unresolved
  *  `var()` invalidates the whole declaration, which silently turned the
- *  primary Gate "批准到 Imbox" button into white-on-transparent (invisible)
+ *  primary Gate "批准到 Inbox" button into white-on-transparent (invisible)
  *  and blanked several count badges. This test fails the build if a token
  *  regresses to undefined.
  *

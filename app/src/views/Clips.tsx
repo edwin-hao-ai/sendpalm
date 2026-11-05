@@ -11,6 +11,7 @@ import {
 } from "../stores/data";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { Empty, ErrorState } from "../components/Empty";
+import { PageHeader } from "../components/PageHeader";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { ResourceGate } from "../components/ResourceGate";
@@ -97,32 +98,10 @@ export function Clips() {
         animation: "view-enter 0.3s var(--ease-out) both",
       }}
     >
-      <header
-        style={{
-          padding: "var(--space-6) var(--space-5) var(--space-3)",
-          "text-align": "center",
-        }}
-      >
-        <h2
-          style={{
-            "font-family": "var(--font-display)",
-            "font-size": "var(--text-h3)",
-            "font-weight": "800",
-            margin: 0,
-          }}
-        >
-          Clips
-        </h2>
-        <p
-          style={{
-            color: "var(--text-secondary)",
-            "font-size": "var(--text-caption)",
-            margin: "var(--space-1) 0 0",
-          }}
-        >
-          从邮件里摘下来的文字片段 · 一键复制粘贴
-        </p>
-      </header>
+      <PageHeader
+        title="Clips"
+        description={<p>从邮件里摘下来的文字片段 · 一键复制粘贴</p>}
+      />
 
       <ResourceGate
         resource={clips}
@@ -150,7 +129,7 @@ export function Clips() {
             icon="ph-bookmarks"
             title="还没有 Clip"
             description="在邮件里选中文字后点「Clip」，金句、地址、代码片段都收在这里，一键复制。"
-            action={{ label: "去 Imbox 选一段", onClick: () => setView("imbox") }}
+            action={{ label: "去 Inbox 选一段", onClick: () => setView("imbox") }}
           />
         }
       >

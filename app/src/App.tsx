@@ -27,6 +27,7 @@ import { DropBar } from "./components/DropBar";
 import { Compose } from "./compose/Compose";
 import { ResurfaceLoop } from "./services/reminder";
 import { startSyncEventBridge } from "./services/sync-events";
+import { startTaskExtractionService } from "./services/task-extraction";
 import { ShortcutHelp } from "./components/ShortcutHelp";
 import { BulkActionMenu } from "./components/BulkActionMenu";
 import { initApp } from "./bootstrap";
@@ -52,10 +53,14 @@ export default function App() {
 
   useGlobalShortcuts();
   onCleanup(startSyncEventBridge());
+  let stopTaskExtraction: (() => void) | undefined;
+  let disposed = false;
+  onCleanup(() => { disposed = true; stopTaskExtraction?.(); });
 
   onMount(async () => {
     try {
       await initApp();
+      if (!disposed) stopTaskExtraction = startTaskExtractionService();
     } catch (e) {
       setInitError(String(e));
     }

@@ -20,6 +20,7 @@ import {
   listContacts,
 } from "../stores/data";
 import { Modal } from "../components/Modal";
+import { PageHeader } from "../components/PageHeader";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
@@ -427,28 +428,16 @@ export function Calendar() {
       }}
     >
       <style>{CALENDAR_CSS}</style>
-      <header
+      <div
         style={{
-          padding: "var(--space-5)",
-          display: "flex",
-          "align-items": "center",
-          gap: "var(--space-3)",
-          "flex-wrap": "wrap",
           "border-bottom": "1px solid var(--cal-border)",
           "background-color": "var(--cal-surface)",
         }}
       >
-        <h2
-          style={{
-            "font-family": "var(--font-display)",
-            "font-size": "var(--text-h3)",
-            "font-weight": "800",
-            margin: 0,
-            flex: 1,
-          }}
-        >
-          日历
-        </h2>
+      <PageHeader
+        title="日历"
+        actions={
+        <>
         <button
           onClick={() => setCursor(new Date())}
           style={touchBtn(toolbarBtn)}
@@ -565,7 +554,10 @@ export function Calendar() {
         >
           <Icon name="ph-plus" size={12} /> 新建
         </button>
-      </header>
+        </>
+        }
+      />
+      </div>
 
       <PeriodHeader date={cursor()} view={view()} />
 

@@ -300,6 +300,19 @@ function matchRow(
         );
       case "match":
         return matchFts(cond.value, row);
+      case "like": {
+        const hay = String(colVal ?? "").toLowerCase();
+        const raw = String(cond.value ?? "").toLowerCase();
+        // SQLite LIKE: % = any run, _ = one char. Anchored if no leading %.
+        const starts = raw.startsWith("%");
+        const ends = raw.endsWith("%");
+        const core = raw.replace(/^%+|%+$/g, "").replace(/_/g, ".");
+        if (!core) return true;
+        const re = new RegExp(
+          `${starts ? "" : "^"}${core}${ends ? "" : "$"}`,
+        );
+        return re.test(hay);
+      }
       case "is null":
         return colVal == null;
       case "is not null":
@@ -380,6 +393,14 @@ function parseWhere(
     i = afterCol;
     let col = rawCol;
 
+    // LIKE <value> — keyword operator (tokenized as an id).
+    if (normalizeId(tokens[i]) === "like") {
+      i++;
+      const v = resolveValue(tokens, i, bindValues);
+      i = v.next;
+      conditions.push({ col, op: "like", value: v.value });
+      continue;
+    }
     // IS NULL / IS NOT NULL
     if (normalizeId(tokens[i]) === "is") {
       i++;
@@ -720,6 +741,7 @@ function runInsert(sql: string, bindValues: unknown[]): QueryResult {
     }
 
     let onConflictUpdates: { col: string }[] | null = null;
+    let idCol = "id";
     i = close + 1;
     if (
       normalizeId(tokens[i]) === "on" &&
@@ -729,6 +751,7 @@ function runInsert(sql: string, bindValues: unknown[]): QueryResult {
       let j = i + 2;
       const conflictOpen = tokens[j];
       if (conflictOpen?.kind === "sym" && conflictOpen.value === "(") {
+        idCol = normalizeId(tokens[j + 1]) || "id";
         j = findClosingParen(tokens, j) + 1;
       }
       if (normalizeId(tokens[j]) === "do") j++;
@@ -740,7 +763,6 @@ function runInsert(sql: string, bindValues: unknown[]): QueryResult {
     }
 
     const table = getTable(tableName);
-    const idCol = "id";
     const existingIdx = table.findIndex((r) => r[idCol] === row[idCol]);
     if (existingIdx >= 0) {
       if (onConflictUpdates) {

@@ -77,7 +77,10 @@ describe("getReadTogetherCandidates", () => {
     expect(out.map((m) => m.id)).toEqual(["m1"]);
   });
 
-  it("excludes unscreened or blocked contacts", () => {
+  it("excludes blocked contacts but keeps unscreened mail readable", () => {
+    // Reading is not approving: unscreened (Gate-pending) senders must be
+    // readable here — otherwise the view sits empty while Inbox shows
+    // thousands unread. Blocked senders stay out.
     const contacts = [
       mkContact("a"),
       mkContact("b", { screened: false }),
@@ -89,7 +92,7 @@ describe("getReadTogetherCandidates", () => {
       mkMsg("m3", "c", { unread: true }),
     ];
     const out = getReadTogetherCandidates(msgs, contacts);
-    expect(out.map((m) => m.id)).toEqual(["m1"]);
+    expect(out.map((m) => m.id)).toEqual(["m1", "m2"]);
   });
 
   it("sorts newest first", () => {

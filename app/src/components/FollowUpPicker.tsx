@@ -114,7 +114,7 @@ export function FollowUpPicker(props: PickerProps) {
           "margin-bottom": "var(--space-3)",
         }}
       >
-        到期时会在 Imbox 顶部浮起并发出通知。
+        到期时会在 Inbox 顶部浮起并发出通知。
       </p>
       <div
         style={{

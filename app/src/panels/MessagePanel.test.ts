@@ -24,6 +24,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { moreMenuItemDefs } from "./MessagePanel";
 
+it("adds per-message task extraction without removing the existing More actions", () => {
+  const items = moreMenuItemDefs({ bucket: "imbox", setAsideActive: false });
+  expect(items.find(i => i.id === "extract-tasks")?.label).toBe("提取任务");
+  for (const id of ["follow-up", "clip", "ask-agent", "archive", "trash"]) expect(items.some(i => i.id === id)).toBe(true);
+});
+
 describe("MessagePanel iframe ref cleanup", () => {
   it("disconnects the ResizeObserver when the iframe ref fires with null", () => {
     const disconnect = vi.fn();
@@ -539,11 +545,11 @@ describe("moreMenuItemDefs", () => {
     expect(ids).toContain("move-paperTrail");
   });
 
-  it("keeps the Imbox move target for messages in other buckets", () => {
+  it("keeps the Inbox move target for messages in other buckets", () => {
     const defs = moreMenuItemDefs({ bucket: "feed", setAsideActive: false });
     const imbox = defs.find((d) => d.id === "move-imbox");
     expect(imbox).toBeDefined();
-    expect(imbox!.label).toBe("移到 Imbox");
+    expect(imbox!.label).toBe("移到 Inbox");
   });
 
   it("moves the separator onto the first surviving move item", () => {
@@ -561,7 +567,7 @@ describe("moreMenuItemDefs", () => {
     expect(byId.get("forward")).toBe("转发");
     expect(byId.get("trash")).toBe("移到回收站");
     expect(byId.get("spam")).toBe("移到垃圾邮件");
-    expect(byId.get("move-imbox")).toBe("移到 Imbox");
+    expect(byId.get("move-imbox")).toBe("移到 Inbox");
     expect(byId.get("move-feed")).toBe("移到 Stream");
     expect(byId.get("move-paperTrail")).toBe("移到 Records");
   });

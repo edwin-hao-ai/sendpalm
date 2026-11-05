@@ -68,7 +68,7 @@ const VIEW_COMMANDS: Command[] = [
   },
   {
     id: "v.imbox",
-    label: "打开 Imbox（收件箱）",
+    label: "打开 Inbox（收件箱）",
     icon: "ph-tray",
     group: "Views",
     run: () => setView("imbox"),
@@ -163,6 +163,27 @@ const VIEW_COMMANDS: Command[] = [
     icon: "ph-target",
     group: "Views",
     run: () => setView("focusReply"),
+  },
+  {
+    id: "v.readTogether",
+    label: "打开一起读（逐封过未读）",
+    icon: "ph-book-open-text",
+    group: "Views",
+    run: () => setView("readTogether"),
+  },
+  {
+    id: "v.trash",
+    label: "打开回收站",
+    icon: "ph-trash",
+    group: "Views",
+    run: () => setView("trash"),
+  },
+  {
+    id: "v.spam",
+    label: "打开垃圾邮件",
+    icon: "ph-warning-circle",
+    group: "Views",
+    run: () => setView("spam"),
   },
   {
     id: "v.insights",

@@ -23,6 +23,7 @@ export type ViewName =
   | "insights"
   | "drafts"
   | "followUps"
+  | "tasks"
   | "clips"
   | "search"
   | "settings"
@@ -32,6 +33,7 @@ export type ViewName =
   | "replyLater"
   | "setAside"
   | "bubbleUp"
+  | "folders"
   | "onboarding";
 
 export type ContactTab =
@@ -136,6 +138,23 @@ export function bumpSoftRefreshTick(): void {
 export const [gateCandidateCount, setGateCandidateCount] = createSignal(0);
 
 export const [contactTab, setContactTab] = createSignal<ContactTab>("Timeline");
+/** Most severe sync issue across accounts, as an error code:
+ *  missing_credentials | auth_failed | network | sync_failed | null.
+ *  Drives the Imbox banner and Topbar copy — a changed password, a dead
+ *  network, and a server outage must tell the user different things. */
+export type MailSyncIssue =
+  | "missing_credentials"
+  | "auth_failed"
+  | "network"
+  | "sync_failed"
+  | null;
+export const [mailSyncIssue, setMailSyncIssue] = createSignal<MailSyncIssue>(
+  null,
+);
+/** @deprecated use mailSyncIssue() — kept for one release of call sites. */
+export const mailCredentialsNeeded = () =>
+  mailSyncIssue() === "missing_credentials" || mailSyncIssue() === "auth_failed";
+
 export const [settingsTab, setSettingsTab] =
   createSignal<SettingsTab>("profile");
 export const [peopleFilter, setPeopleFilter] =
@@ -234,7 +253,9 @@ export const [appSettings, setAppSettings] = createStore<AppSettings>({
       quietHoursEnabled: false,
       quietHoursStart: "22:00",
       quietHoursEnd: "08:00",
+      permissionPrompted: false,
     },
+    gateGuideSeen: false,
     security: {
       appLock: false,
       screenshotAllowed: true,
@@ -244,8 +265,16 @@ export const [appSettings, setAppSettings] = createStore<AppSettings>({
       autoDownloadAttachments: true,
       maxAttachmentMb: 25,
     },
+    background: {
+      closeToTray: true,
+      launchAtLogin: false,
+      showUnreadBadge: true,
+      keepGateway: true,
+    },
   },
   agent: {
+    autoExtractTasks: false,
+    taskExtractionEnabledAt: null,
     autoDraft: false,
     autoSummarize: true,
     memoryEditable: true,

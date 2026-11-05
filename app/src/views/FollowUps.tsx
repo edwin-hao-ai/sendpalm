@@ -23,6 +23,7 @@ import {
   showToast,
 } from "../stores/ui";
 import { Empty, ErrorState } from "../components/Empty";
+import { PageHeader } from "../components/PageHeader";
 import { Avatar } from "../components/Avatar";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Icon } from "../components/Icon";
@@ -135,32 +136,15 @@ export function FollowUps() {
         animation: "view-enter 0.3s var(--ease-out) both",
       }}
     >
-      <header
-        style={{
-          padding: "var(--space-6) var(--space-5) var(--space-3)",
-          "text-align": "center",
-        }}
-      >
-        <h2
-          style={{
-            "font-family": "var(--font-display)",
-            "font-size": "var(--text-h3)",
-            "font-weight": "800",
-            margin: 0,
-          }}
-        >
-          跟进提醒
-        </h2>
-        <p
-          style={{
-            color: "var(--text-secondary)",
-            "font-size": "var(--text-caption)",
-            margin: "var(--space-1) 0 0",
-          }}
-        >
-          {total()} 项待处理 · 打开任意邮件，在底部点「更多 → 跟进提醒」即可添加
-        </p>
-      </header>
+      <PageHeader
+        title="跟进提醒"
+        description={
+          <p>
+            {total()} 项待处理 ·
+            打开任意邮件，在底部点「更多 → 跟进提醒」即可添加
+          </p>
+        }
+      />
 
       <ConfirmDialog
         open={removeId() !== null}
@@ -202,7 +186,7 @@ export function FollowUps() {
             icon="ph-bell-ringing"
             title="没有跟进提醒"
             description="打开任意邮件，在底部点「更多 → 跟进提醒」，这里会列出所有需要回头处理的消息。"
-            action={{ label: "去 Imbox", onClick: () => setView("imbox") }}
+            action={{ label: "去 Inbox", onClick: () => setView("imbox") }}
           />
         }
         isEmpty={() => total() === 0}

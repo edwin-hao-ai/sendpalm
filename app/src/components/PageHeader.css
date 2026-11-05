@@ -1,0 +1,77 @@
+/** Shared page/section heading styles — token-backed, no palette
+ *  changes. The header row wraps (never clips) at 375px and everything
+ *  stays left-aligned; centering is owned by Empty/onboarding styles. */
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-5) var(--space-5) var(--space-3);
+  max-width: 100%;
+}
+
+.page-header-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.page-header-title {
+  font-size: var(--text-h1);
+  color: var(--text-primary);
+  /* Left-aligned by default; never centered. */
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.page-header-desc {
+  margin-top: var(--space-1);
+  font-size: var(--text-body-sm);
+  line-height: var(--leading-body);
+  color: var(--text-secondary);
+  max-width: 60ch;
+}
+
+.page-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  /* Keep tap targets touch-sized. */
+  min-height: 44px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-3) 0 var(--space-2);
+}
+
+.section-heading-title {
+  font-size: var(--text-h2);
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.section-heading-title--h3 {
+  font-size: var(--text-h3);
+}
+
+.section-heading-desc {
+  margin-top: var(--space-1);
+  font-size: var(--text-body-sm);
+  color: var(--text-secondary);
+  max-width: 60ch;
+}
+
+.section-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-height: 44px;
+}

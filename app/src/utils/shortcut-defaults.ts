@@ -60,7 +60,7 @@ export const DEFAULT_SHORTCUTS: Shortcut[] = [
   {
     id: "sc-nav-imbox",
     combo: "⌘2",
-    label: "Imbox",
+    label: "Inbox",
     action: "nav:imbox",
     editable: true,
   },

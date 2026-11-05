@@ -3,16 +3,29 @@
  * User approves (choose destination: imbox/feed/paperTrail) or blocks (screened=false, blocked=true).
  */
 
-import { For, Show, createMemo, createResource, createSignal } from "solid-js";
+import {
+  For,
+  Show,
+  createMemo,
+  createResource,
+  createSignal,
+  type JSX,
+} from "solid-js";
 import { t } from "../i18n";
+import { extractTasksForMessage } from "../services/task-extraction";
 import {
   listContacts,
   listGateQueue,
   upsertContact,
   updateMessagesBucketByContact,
+  markAllReadByContact,
 } from "../stores/data";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { emailBodyPreview } from "../utils/html";
+import { gateBodyPreview } from "../utils/html";
+import { suggestBucket, BUCKET_SUGGEST_LABEL } from "../utils/suggest";
+import { agentChat } from "../services/backend";
+import { loadLlmKey } from "../services/llm-config";
+import { appSettings, setAppSettings } from "../stores/ui";
 
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
@@ -22,6 +35,7 @@ import type { Contact, Message, MessageBucket } from "../types";
 import { showToast, setView } from "../stores/ui";
 import { useRefreshEffect, useSoftRefreshEffect, useViewport } from "../utils/gestures";
 import { SwipeActions } from "../components/SwipeActions";
+import { PageHeader } from "../components/PageHeader";
 
 const BUCKETS: {
   id: MessageBucket;
@@ -29,7 +43,7 @@ const BUCKETS: {
   icon: string;
   hint: string;
 }[] = [
-  { id: "imbox", label: "Imbox", icon: "ph-tray", hint: "重要邮件" },
+  { id: "imbox", label: "Inbox", icon: "ph-tray", hint: "重要邮件" },
   { id: "feed", label: "Stream", icon: "ph-newspaper", hint: "资讯与 newsletter" },
   { id: "paperTrail", label: "Records", icon: "ph-receipt", hint: "收据与账单" },
 ];
@@ -69,15 +83,43 @@ export function Gate() {
     () => queueItems() ?? [],
   );
 
+  // Locally-decided contacts (approved/blocked). The card advances the
+  // INSTANT the user decides — the DB writes and the next card are not on
+  // the critical path. The previous "await writes + refetch the whole
+  // queue" made every decision feel laggy with hundreds of candidates.
+  const [decidedIds, setDecidedIds] = createSignal<Set<string>>(new Set());
+  const visibleQueue = createMemo(() =>
+    queue().filter((q) => !decidedIds().has(q.contact.id)),
+  );
+
   const [cursor, setCursor] = createSignal(0);
   const [busy, setBusy] = createSignal(false);
   const current = (): { contact: Contact; message: Message } | undefined =>
-    queue()[cursor()];
+    visibleQueue()[cursor()];
+
+  /** Optimistically hide the card and clamp the cursor. */
+  const advance = (contactId: string) => {
+    setDecidedIds((prev) => {
+      const next = new Set(prev);
+      next.add(contactId);
+      return next;
+    });
+    setCursor((c) => Math.max(0, Math.min(c, visibleQueue().length - 2)));
+  };
+
+  const restore = (contactId: string) => {
+    setDecidedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(contactId);
+      return next;
+    });
+  };
 
   const approve = async (bucket: MessageBucket) => {
     const cur = current();
     if (!cur || busy()) return;
     setBusy(true);
+    advance(cur.contact.id);
     try {
       const updatedContact: Contact = {
         ...cur.contact,
@@ -87,13 +129,13 @@ export function Gate() {
       };
       await upsertContact(updatedContact);
       await updateMessagesBucketByContact(cur.contact.id, bucket);
+      if (bucket === "imbox" && cur.message) void extractTasksForMessage(cur.message.id, "automatic").catch(() => {});
       showToast({
-        message: `已批准 → ${bucket === "imbox" ? "Imbox" : bucket === "feed" ? "Stream" : "Records"}`,
+        message: `已批准 → ${bucket === "imbox" ? "Inbox" : bucket === "feed" ? "Stream" : "Records"}`,
         kind: "success",
       });
-      await refetchQueue();
-      setCursor(0);
     } catch (err) {
+      restore(cur.contact.id);
       showToast({
         message: "操作失败，请重试",
         kind: "error",
@@ -109,6 +151,7 @@ export function Gate() {
     const cur = current();
     if (!cur || busy()) return;
     setBusy(true);
+    advance(cur.contact.id);
     try {
       const updatedContact: Contact = {
         ...cur.contact,
@@ -130,13 +173,13 @@ export function Gate() {
               screened: false,
               blocked: false,
             });
+            restore(cur.contact.id);
             await refetchQueue();
           },
         },
       });
-      await refetchQueue();
-      setCursor(0);
     } catch (err) {
+      restore(cur.contact.id);
       showToast({
         message: "操作失败，请重试",
         kind: "error",
@@ -145,6 +188,174 @@ export function Gate() {
       });
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** AI 分类建议：一次调用给当前选中发件人逐一出建议（数据只去用户
+   *  配置的提供商）。结果以徽标呈现，确认后才生效。 */
+  const [aiSuggestions, setAiSuggestions] = createSignal<
+    Record<string, "imbox" | "feed" | "paperTrail">
+  >({});
+  const [aiBusy, setAiBusy] = createSignal(false);
+
+  const aiSuggest = async () => {
+    if (aiBusy()) return;
+    const llm = appSettings.agent.llm;
+    if (!llm.model) {
+      showToast({ message: "先在 设置 → 模型服务 配置模型", kind: "info" });
+      return;
+    }
+    setAiBusy(true);
+    try {
+      const key = await loadLlmKey("custom").catch(() => null);
+      const candidates = visibleQueue().slice(0, 30).map((q) => ({
+        id: q.contact.id,
+        from: q.contact.emails[0]?.value ?? q.contact.name,
+        subj: q.message.subj,
+        snippet: (q.message.prev || q.message.body || "").slice(0, 300),
+      }));
+      const resp = await agentChat(
+        {
+          base_url: llm.baseUrl || "https://api.openai.com/v1",
+          api_key: key ?? "",
+          model: llm.model,
+          temperature: 0,
+          max_tokens: 1024,
+        },
+        [
+          {
+            role: "system",
+            content:
+              "你是邮件分类器。为每个发件人选择 imbox(重要私人邮件)、feed(订阅/newsletter/推广)、paperTrail(收据/账单/验证码/系统通知)之一。只输出 JSON 对象，键为发件人 id，值为桶 id。",
+          },
+          {
+            role: "user",
+            content: JSON.stringify(candidates),
+          },
+        ],
+      );
+      const text = resp?.content ?? "";
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) {
+        showToast({ message: "模型没有返回有效建议", kind: "error" });
+        return;
+      }
+      const parsed = JSON.parse(match[0]) as Record<string, string>;
+      const clean: Record<string, "imbox" | "feed" | "paperTrail"> = {};
+      for (const [id, bucket] of Object.entries(parsed)) {
+        if (bucket === "imbox" || bucket === "feed" || bucket === "paperTrail") {
+          clean[id] = bucket;
+        }
+      }
+      setAiSuggestions(clean);
+      showToast({
+        message: `AI 给了 ${Object.keys(clean).length} 条建议——点「按 AI 建议应用」确认`,
+        kind: "info",
+        ttlMs: 6000,
+      });
+    } catch (e) {
+      showToast({ message: `AI 建议失败：${e}`, kind: "error" });
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const applyAiSuggestions = async () => {
+    const sug = aiSuggestions();
+    const ids = Object.keys(sug);
+    if (ids.length === 0 || bulkBusy()) return;
+    setBulkBusy(true);
+    let ok = 0;
+    try {
+      for (const id of ids) {
+        const item = visibleQueue().find((q) => q.contact.id === id);
+        if (!item) continue;
+        await upsertContact({
+          ...item.contact,
+          firstSeen: false,
+          screened: true,
+          defaultBucket: sug[id]!,
+        });
+        await updateMessagesBucketByContact(id, sug[id]!);
+        ok += 1;
+      }
+      showToast({ message: `已按 AI 建议整理 ${ok} 位发件人`, kind: "success" });
+      setAiSuggestions({});
+      await refetchQueue();
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const [batchMode, setBatchMode] = createSignal(false);
+  const [selected, setSelected] = createSignal<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = createSignal(false);
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAll = () =>
+    setSelected(new Set<string>(visibleQueue().map((q) => q.contact.id)));
+  const clearSelection = () => setSelected(new Set<string>());
+
+  /** Bulk-apply a decision to every selected sender. Sequential writes keep
+   *  the DB happy; progress surfaces via the toast. */
+  const bulkApply = async (
+    kind: "imbox" | "feed" | "paperTrail" | "block" | "read",
+  ) => {
+    const ids = [...selected()];
+    if (ids.length === 0 || bulkBusy()) return;
+    setBulkBusy(true);
+    let ok = 0;
+    try {
+      for (const id of ids) {
+        const item = visibleQueue().find((q) => q.contact.id === id);
+        if (!item) continue;
+        if (kind === "read") {
+          await markAllReadByContact(id);
+        } else if (kind === "block") {
+          await upsertContact({
+            ...item.contact,
+            firstSeen: false,
+            screened: true,
+            blocked: true,
+          });
+          await updateMessagesBucketByContact(id, "spam");
+        } else {
+          await upsertContact({
+            ...item.contact,
+            firstSeen: false,
+            screened: true,
+            defaultBucket: kind,
+          });
+          await updateMessagesBucketByContact(id, kind);
+          if (kind === "imbox" && item.message) {
+            void extractTasksForMessage(item.message.id, "automatic").catch(() => {});
+          }
+        }
+        ok += 1;
+      }
+      showToast({
+        message:
+          kind === "read"
+            ? `已把 ${ok} 位发件人的邮件标为已读`
+            : kind === "block"
+              ? `已屏蔽 ${ok} 位发件人`
+              : `已批准 ${ok} 位发件人`,
+        kind: "success",
+      });
+      clearSelection();
+      await refetchQueue();
+    } catch (err) {
+      showToast({ message: "批量操作失败，请重试", kind: "error", detail: String(err) });
+    } finally {
+      setBulkBusy(false);
     }
   };
 
@@ -167,66 +378,132 @@ export function Gate() {
             />
           }
         >
-      <header
-        style={{ "margin-bottom": "var(--space-5)", "text-align": "center" }}
-      >
-        <div
-          style={{
-            display: "inline-flex",
-            "align-items": "center",
-            gap: "var(--space-2)",
-            padding: "6px 14px",
-            background: "var(--paper-mid)",
-            "border-radius": "var(--radius-pill)",
-            "font-size": "var(--text-caption)",
-            color: "var(--text-secondary)",
-            "font-weight": "600",
-          }}
-        >
-          <Icon name="ph-shield-check" size={14} />
-          筛选台 · {queue().length} 位待审
-        </div>
-        <h2
-          style={{
-            "font-family": "var(--font-display)",
-            "font-size": "var(--text-h3)",
-            "font-weight": "800",
-            margin: "var(--space-3) 0 var(--space-1)",
-          }}
-        >
-          决定谁可以进入你的 Imbox
-        </h2>
-        <p
-          style={{
-            color: "var(--text-secondary)",
-            "font-size": "var(--text-body-sm)",
-            margin: 0,
-          }}
-        >
-          {t("gate.intro.body", "陌生发件人会先停在这里。批准后按分类投递，屏蔽后不再出现。")}
-        </p>
-        <button
-          onClick={() => setView("screenerHistory")}
-          style={{
-            "margin-top": "var(--space-3)",
-            padding: "6px 14px",
-            background: "transparent",
-            border: "none",
-            color: "var(--palm)",
-            "font-weight": "700",
-            "font-size": "var(--text-caption)",
-            cursor: "pointer",
-            display: "inline-flex",
-            "align-items": "center",
-            gap: "4px",
-          }}
-        >
-          <Icon name="ph-clock-counter-clockwise" size={14} />
-          查看 Gate 历史
-        </button>
-      </header>
+      <PageHeader
+        title="决定谁可以进入你的 Inbox"
+        description={
+          <span
+            style={{
+              display: "inline-flex",
+              "align-items": "center",
+              gap: "var(--space-2)",
+            }}
+          >
+            <Icon name="ph-shield-check" size={14} />
+            筛选台 · {visibleQueue().length} 位待审 ·{" "}
+            {t("gate.intro.body", "陌生发件人会先停在这里。批准后按分类投递，屏蔽后不再出现。")}
+          </span>
+        }
+        actions={
+          <>
+          <button
+            data-batch-toggle
+            onClick={() => {
+              setBatchMode(!batchMode());
+              clearSelection();
+            }}
+            style={{
+              padding: "6px 14px",
+              background: batchMode() ? "var(--palm-soft)" : "transparent",
+              border: "none",
+              color: batchMode() ? "var(--palm)" : "var(--palm)",
+              "font-weight": "700",
+              "font-size": "var(--text-caption)",
+              cursor: "pointer",
+              display: "inline-flex",
+              "align-items": "center",
+              gap: "4px",
+              "border-radius": "var(--radius-pill)",
+            }}
+          >
+            <Icon name="ph-list-checks" size={14} />
+            批量整理
+          </button>
+          <button
+            onClick={() => setView("screenerHistory")}
+            style={{
+              padding: "6px 14px",
+              background: "transparent",
+              border: "none",
+              color: "var(--palm)",
+              "font-weight": "700",
+              "font-size": "var(--text-caption)",
+              cursor: "pointer",
+              display: "inline-flex",
+              "align-items": "center",
+              gap: "4px",
+            }}
+          >
+            <Icon name="ph-clock-counter-clockwise" size={14} />
+            查看 Gate 历史
+          </button>
+          </>
+        }
+      />
 
       <Show when={queueItems() !== undefined} fallback={<GateSkeleton />}>
+      <Show when={!appSettings.preferences.gateGuideSeen && visibleQueue().length > 0}>
+        <div
+          data-gate-guide
+          style={{
+            display: "flex",
+            "align-items": "center",
+            gap: "var(--space-3)",
+            margin: "0 0 var(--space-3)",
+            padding: "10px 14px",
+            "border-radius": "var(--radius-md)",
+            background: "var(--palm-soft)",
+            color: "var(--text-primary)",
+            "font-size": "var(--text-body-sm)",
+            "line-height": 1.6,
+          }}
+        >
+          <Icon name="ph-shield-check" size={18} />
+          <span style={{ flex: 1 }}>
+            <b>筛选台怎么用：</b>下面的都是第一次给你写信的发件人。对每个人决定一次：
+            <b>批准到 Inbox</b>（重要的人）、<b>Stream</b>（订阅和 newsletter）、
+            <b>Records</b>（收据账单），或<b>阻止</b>。以后他们的邮件会自动归位。
+            人多时点右上角「批量整理」一次性处理。
+          </span>
+          <button
+            type="button"
+            aria-label="知道了"
+            onClick={() =>
+              setAppSettings("preferences", "gateGuideSeen", true)
+            }
+            style={{
+              "flex-shrink": 0,
+              padding: "4px 12px",
+              "border-radius": "var(--radius-pill)",
+              border: "none",
+              background: "var(--palm)",
+              color: "#fff",
+              "font-size": "var(--text-caption)",
+              "font-weight": 700,
+              cursor: "pointer",
+            }}
+          >
+            知道了
+          </button>
+        </div>
+      </Show>
+      <Show
+        when={!batchMode()}
+        fallback={
+          <BatchPanel
+            items={visibleQueue()}
+            selected={selected()}
+            busy={bulkBusy()}
+            aiBusy={aiBusy()}
+            aiCount={Object.keys(aiSuggestions()).length}
+            onAiSuggest={() => void aiSuggest()}
+            onAiApply={() => void applyAiSuggestions()}
+            onToggle={toggleSelect}
+            onSelectAll={selectAll}
+            onClear={clearSelection}
+            onApply={(kind) => void bulkApply(kind)}
+          />
+        }
+      >
       <Show when={current()} fallback={<DoneState />}>
         {(pair) => {
           const c = () => pair().contact;
@@ -328,13 +605,14 @@ export function Gate() {
                       "max-height": "240px",
                       "overflow-y": "auto",
                     }}
-                    innerHTML={emailBodyPreview(m().body, m().bodyHtml)}
+                    innerHTML={gateBodyPreview(m().body)}
                   />
                 </div>
 
                 <div
                   style={{
                     display: "flex",
+                    "flex-wrap": "wrap",
                     gap: "var(--space-2)",
                     "margin-bottom": "var(--space-4)",
                   }}
@@ -342,6 +620,18 @@ export function Gate() {
                   <For each={BUCKETS}>
                     {(b) => (
                       <button
+                        data-suggested={(() => {
+                          const sug = suggestBucket(m());
+                          return sug.bucket === b.id && b.id !== "imbox"
+                            ? "true"
+                            : undefined;
+                        })()}
+                        title={(() => {
+                          const sug = suggestBucket(m());
+                          return sug.bucket === b.id
+                            ? `建议：${BUCKET_SUGGEST_LABEL[b.id]}（${sug.reasons.join("、")}）`
+                            : b.hint;
+                        })()}
                         onClick={() => approve(b.id)}
                         disabled={busy()}
                         data-testid={`gate-approve-${b.id}`}
@@ -418,7 +708,7 @@ export function Gate() {
                 color: "var(--text-muted)",
               }}
             >
-              第 {cursor() + 1} / {queue().length} 位待审
+              第 {cursor() + 1} / {visibleQueue().length} 位待审
             </p>
             </>
           );
@@ -426,6 +716,219 @@ export function Gate() {
       </Show>
       </Show>
       </Show>
+      </Show>
+    </div>
+  );
+}
+
+/** Batch triage panel — newsletter-scale queues can't be cleared one card
+ *  at a time. Aggregates every pending sender into a multi-select list with
+ *  bulk decisions. */
+function BatchPanel(props: {
+  items: { contact: Contact; message: Message }[];
+  selected: Set<string>;
+  busy: boolean;
+  aiBusy: boolean;
+  aiCount: number;
+  onAiSuggest: () => void;
+  onAiApply: () => void;
+  onToggle: (id: string) => void;
+  onSelectAll: () => void;
+  onClear: () => void;
+  onApply: (kind: "imbox" | "feed" | "paperTrail" | "block" | "read") => void;
+}) {
+  const allSelected = () =>
+    props.items.length > 0 && props.selected.size === props.items.length;
+  const btn = (danger = false): JSX.CSSProperties => ({
+    padding: "8px 14px",
+    "min-height": "40px",
+    "border-radius": "var(--radius-pill)",
+    background: danger ? "transparent" : "var(--palm-soft)",
+    border: danger ? "1.5px solid var(--status-danger)" : "none",
+    color: danger ? "var(--status-danger)" : "var(--palm)",
+    "font-size": "var(--text-caption)",
+    "font-weight": 700,
+    cursor: props.busy ? "default" : "pointer",
+    opacity: props.busy ? 0.6 : 1,
+    "white-space": "nowrap",
+  });
+  return (
+    <div data-gate-batch style={{ "margin-top": "var(--space-3)" }}>
+      <div
+        style={{
+          display: "flex",
+          "align-items": "center",
+          gap: "var(--space-2)",
+          "margin-bottom": "var(--space-2)",
+          "font-size": "var(--text-caption)",
+          color: "var(--text-secondary)",
+        }}
+      >
+        <button
+          onClick={() => (allSelected() ? props.onClear() : props.onSelectAll())}
+          style={{ ...btn(), padding: "4px 12px", "min-height": "32px" }}
+        >
+          {allSelected() ? "清除选择" : `全选 ${props.items.length} 位`}
+        </button>
+        <span style={{ "margin-left": "auto" }}>已选 {props.selected.size} 位</span>
+      </div>
+      <div
+        style={{
+          display: "flex",
+          "flex-direction": "column",
+          gap: "4px",
+          "max-height": "52dvh",
+          "overflow-y": "auto",
+        }}
+      >
+        <For each={props.items}>
+          {(item) => {
+            const email = item.contact.emails[0]?.value ?? "";
+            const isNl = !!item.message.isNewsletter;
+            return (
+              <label
+                data-batch-row={item.contact.id}
+                style={{
+                  display: "flex",
+                  "align-items": "center",
+                  gap: "var(--space-3)",
+                  padding: "10px var(--space-3)",
+                  "border-radius": "var(--radius-md)",
+                  background: "color-mix(in srgb, var(--paper-light) 82%, transparent)",
+                  border: "0.5px solid var(--border)",
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={props.selected.has(item.contact.id)}
+                  onChange={() => props.onToggle(item.contact.id)}
+                  style={{ width: "18px", height: "18px", "flex-shrink": 0 }}
+                />
+                <Avatar name={item.contact.name} src={item.contact.avatar} size={36} />
+                <span style={{ flex: 1, "min-width": 0 }}>
+                  <span style={{ display: "flex", "align-items": "baseline", gap: "6px" }}>
+                    <span
+                      style={{
+                        "font-size": "var(--text-body-sm)",
+                        "font-weight": 600,
+                        color: "var(--text-primary)",
+                        "white-space": "nowrap",
+                        overflow: "hidden",
+                        "text-overflow": "ellipsis",
+                      }}
+                    >
+                      {item.contact.name}
+                    </span>
+                    <Show
+                      when={(() => {
+                        const sug = suggestBucket(item.message);
+                        return sug.bucket !== "imbox" ? sug : null;
+                      })()}
+                    >
+                      {(sug) => (
+                        <span
+                          data-suggest-pill
+                          style={{
+                            "font-size": "var(--text-micro)",
+                            "font-weight": 700,
+                            color: "var(--text-secondary)",
+                            background: "var(--paper-mid)",
+                            "border-radius": "var(--radius-pill)",
+                            padding: "1px 7px",
+                            "flex-shrink": 0,
+                          }}
+                        >
+                          建议 {BUCKET_SUGGEST_LABEL[sug().bucket]}
+                        </span>
+                      )}
+                    </Show>
+                    <Show when={isNl}>
+                      <span
+                        data-newsletter-pill
+                        style={{
+                          "font-size": "var(--text-micro)",
+                          "font-weight": 700,
+                          color: "var(--palm)",
+                          background: "var(--palm-soft)",
+                          "border-radius": "var(--radius-pill)",
+                          padding: "1px 7px",
+                          "flex-shrink": 0,
+                        }}
+                      >
+                        订阅 · 建议 Stream
+                      </span>
+                    </Show>
+                  </span>
+                  <span
+                    style={{
+                      display: "block",
+                      "font-size": "var(--text-caption)",
+                      color: "var(--text-muted)",
+                      "white-space": "nowrap",
+                      overflow: "hidden",
+                      "text-overflow": "ellipsis",
+                    }}
+                  >
+                    {email} · {item.message.subj || "(无主题)"}
+                  </span>
+                </span>
+              </label>
+            );
+          }}
+        </For>
+      </div>
+      <Show when={props.items.length === 0}>
+        <p style={{ "text-align": "center", color: "var(--text-muted)", "font-size": "var(--text-body-sm)" }}>
+          都审完了 🎉
+        </p>
+      </Show>
+      <div
+        style={{
+          display: "flex",
+          gap: "var(--space-2)",
+          "flex-wrap": "wrap",
+          "margin-top": "var(--space-3)",
+          position: "sticky",
+          bottom: "var(--space-3)",
+        }}
+      >
+        <button disabled={props.busy} style={btn()} onClick={() => props.onApply("imbox")}>
+          批准到 Inbox
+        </button>
+        <button disabled={props.busy} style={btn()} onClick={() => props.onApply("feed")}>
+          到 Stream
+        </button>
+        <button disabled={props.busy} style={btn()} onClick={() => props.onApply("paperTrail")}>
+          到 Records
+        </button>
+        <button disabled={props.busy} style={btn()} onClick={() => props.onApply("read")}>
+          标为已读
+        </button>
+        <button
+          type="button"
+          data-ai-suggest
+          disabled={props.aiBusy}
+          onClick={props.onAiSuggest}
+          style={{ ...btn(), border: "1px dashed var(--palm)" }}
+        >
+          {props.aiBusy ? "AI 分析中…" : "✨ AI 建议"}
+        </button>
+        <Show when={props.aiCount > 0}>
+          <button
+            type="button"
+            data-ai-apply
+            disabled={props.busy}
+            onClick={props.onAiApply}
+            style={btn()}
+          >
+            按 AI 建议应用（{props.aiCount}）
+          </button>
+        </Show>
+        <button disabled={props.busy} style={btn(true)} onClick={() => props.onApply("block")}>
+          屏蔽
+        </button>
+      </div>
     </div>
   );
 }
@@ -479,12 +982,12 @@ function DoneState() {
   return (
     <Empty
       icon="ph-check-circle"
-      title="都审完了，Imbox 见"
+      title="都审完了，Inbox 见"
       description={t(
         "gate.empty.body",
         "现在没有陌生发件人需要审核。新的陌生发件人会先停在这里。",
       )}
-      action={{ label: "回到 Imbox", onClick: () => setView("imbox") }}
+      action={{ label: "回到 Inbox", onClick: () => setView("imbox") }}
     />
   );
 }
@@ -538,40 +1041,25 @@ export function ScreenerHistory() {
           />
         }
       >
-        <header
-          style={{
-            display: "flex",
-            "align-items": "center",
-            gap: "var(--space-3)",
-            "margin-bottom": "var(--space-5)",
-          }}
-        >
-        <button
-          onClick={() => setView("screener")}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: "var(--text-muted)",
-            cursor: "pointer",
-            padding: "4px",
-          }}
-          aria-label="返回筛选台"
-          title="返回筛选台"
-        >
-          <Icon name="ph-arrow-left" size={20} />
-        </button>
-        <h2
-          style={{
-            "font-family": "var(--font-display)",
-            "font-size": "var(--text-h3)",
-            "font-weight": "800",
-            margin: 0,
-            flex: 1,
-          }}
-        >
-          Gate 历史
-        </h2>
-      </header>
+        <PageHeader
+          title="Gate 历史"
+          actions={
+            <button
+              onClick={() => setView("screener")}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "var(--text-muted)",
+                cursor: "pointer",
+                padding: "4px",
+              }}
+              aria-label="返回筛选台"
+              title="返回筛选台"
+            >
+              <Icon name="ph-arrow-left" size={20} />
+            </button>
+          }
+        />
 
       <div
         style={{

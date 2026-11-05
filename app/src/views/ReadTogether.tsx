@@ -39,8 +39,15 @@ import {
   setComposeOpen,
   setComposeContext,
   showToast,
+  appSettings,
 } from "../stores/ui";
+import { formatMessageDate } from "../utils/message-dates";
+
+/** Profile timezone for mail date labels (falls back to OS zone in helpers). */
+const profileTz = () => appSettings.profile.timezone;
+
 import { Avatar } from "../components/Avatar";
+import { PageHeader } from "../components/PageHeader";
 import { Icon } from "../components/Icon";
 import { Empty, ErrorState } from "../components/Empty";
 import { SkeletonList } from "../components/Skeleton";
@@ -72,9 +79,17 @@ export function ReadTogether() {
   // Apply the same workflow / Gate filters the prototype uses so a
   // message the user has set aside, marked reply-later, or bubble-up'd
   // doesn't reappear here.
+  // Newsletter skip: reading mode is for people. Promo/newsletter mail is
+  // batch-consumed in Stream — a toggle keeps it out of the one-at-a-time
+  // flow so 500 newsletters don't stand between you and real mail.
+  const [skipNewsletter, setSkipNewsletter] = createSignal(false);
+
   const unread = createMemo<Message[]>(() => {
     const list = unreadRaw() ?? [];
-    return getReadTogetherCandidates(list, contacts() ?? []);
+    const candidates = getReadTogetherCandidates(list, contacts() ?? []);
+    return skipNewsletter()
+      ? candidates.filter((m) => !m.isNewsletter)
+      : candidates;
   });
 
   // The current card. The lightweight row is enough for the index/cursor
@@ -86,9 +101,20 @@ export function ReadTogether() {
     async (id) => (id ? await getMessage(id) : null),
   );
 
+  // `.latest` keeps the previous message on screen while the next one
+  // loads — without it the whole card unmounts and the user stares at a
+  // blank page between messages (reported as "white flash + feels
+  // laggy"). A slim progress hairline on the header signals the swap.
   const current = createMemo<Message | undefined>(
-    () => currentFull() ?? unread()[index()],
+    () => currentFull.latest ?? unread()[index()],
   );
+
+  // Prefetch the next full body in the background so advancing is
+  // instant once the current one is resolved.
+  createEffect(() => {
+    const nextId = unread()[index() + 1]?.id;
+    if (nextId) void getMessage(nextId).catch(() => {});
+  });
 
   const contactMap = createMemo(() => {
     const map = new Map<string, Contact>();
@@ -279,7 +305,7 @@ export function ReadTogether() {
                 padding: "var(--space-5)",
               }}
             >
-              <div style={{ "max-width": "680px", margin: "0 auto" }}>
+              <div style={{ "max-width": "960px", margin: "0 auto" }}>
                 <SkeletonList count={1} height={320} />
               </div>
             </div>
@@ -291,62 +317,74 @@ export function ReadTogether() {
               <Empty
                 icon="ph-check-circle"
                 title="全部读完了 🎉"
-                description="没有未读邮件了。新邮件到了会出现在 Imbox。"
-                action={{ label: "返回 Imbox", onClick: close }}
+                description="没有未读邮件了。新邮件到了会出现在 Inbox。"
+                action={{ label: "返回 Inbox", onClick: close }}
               />
             }
           >
-            <div
-              style={{
-                display: "flex",
-                "align-items": "center",
-                "justify-content": "space-between",
-                gap: "var(--space-3)",
-                padding: "var(--space-4) var(--space-5)",
-                "border-bottom": "0.5px solid var(--border)",
-              }}
-            >
-              <div>
-                <h1
-                  style={{
-                    "font-family": "var(--font-display)",
-                    "font-size": "var(--text-h3)",
-                    "font-weight": "800",
-                    color: "var(--text-primary)",
-                    margin: 0,
-                  }}
-                >
-                  一起读
-                </h1>
-                <p
-                  style={{
-                    margin: "2px 0 0",
-                    "font-size": "var(--text-caption)",
-                    color: "var(--text-muted)",
-                  }}
-                >
-                  第 {index() + 1} / {unread().length} 封
-                </p>
-              </div>
-              <button
-                onClick={close}
-                title="关闭一起读"
-                aria-label="关闭一起读"
-                style={{
-                  display: "inline-flex",
-                  "align-items": "center",
-                  "justify-content": "center",
-                  width: "44px",
-                  height: "44px",
-                  "border-radius": "var(--radius-pill)",
-                  background: "var(--paper-mid)",
-                  color: "var(--text-secondary)",
-                  border: "none",
-                  cursor: "pointer",
-                }}
-              >
-                <Icon name="ph-x" size={18} />
-              </button>
+            <div style={{ "border-bottom": "0.5px solid var(--border)" }}>
+              <PageHeader
+                title="一起读"
+                description={
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      "align-items": "center",
+                      gap: "var(--space-2)",
+                    }}
+                  >
+                    <span>
+                      第 {index() + 1} / {unread().length} 封
+                    </span>
+                    <button
+                      type="button"
+                      data-skip-newsletter
+                      aria-pressed={skipNewsletter()}
+                      onClick={() => {
+                        setSkipNewsletter(!skipNewsletter());
+                        setIndex(0);
+                      }}
+                      style={{
+                        padding: "1px 10px",
+                        "border-radius": "var(--radius-pill)",
+                        border: "none",
+                        background: skipNewsletter()
+                          ? "var(--palm-soft)"
+                          : "var(--paper-mid)",
+                        color: skipNewsletter()
+                          ? "var(--palm)"
+                          : "var(--text-secondary)",
+                        "font-size": "var(--text-micro)",
+                        "font-weight": 700,
+                        cursor: "pointer",
+                      }}
+                    >
+                      跳过订阅邮件
+                    </button>
+                  </span>
+                }
+                actions={
+                  <button
+                    onClick={close}
+                    title="关闭一起读"
+                    aria-label="关闭一起读"
+                    style={{
+                      display: "inline-flex",
+                      "align-items": "center",
+                      "justify-content": "center",
+                      width: "44px",
+                      height: "44px",
+                      "border-radius": "var(--radius-pill)",
+                      background: "var(--paper-mid)",
+                      color: "var(--text-secondary)",
+                      border: "none",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Icon name="ph-x" size={18} />
+                  </button>
+                }
+              />
             </div>
 
             <div
@@ -354,11 +392,21 @@ export function ReadTogether() {
                 flex: 1,
                 overflow: "auto",
                 padding: "var(--space-5)",
+                display: "flex",
+                "flex-direction": "column",
               }}
             >
               <div
                 style={{
-                  "max-width": "680px",
+                  // Wide reading column: emails at 680px waste half of a
+                  // desktop window and feel "cramped into a postcard".
+                  "max-width": "960px",
+                  width: "100%",
+                  // Fill the viewport vertically: a short email used to end
+                  // mid-screen leaving a dead void before the action bar
+                  // (worst on small laptops). The card now stretches like a
+                  // sheet of paper and the actions sit right under it.
+                  flex: 1,
                   margin: "0 auto",
                   background: "var(--paper-light)",
                   border: "0.5px solid var(--border)",
@@ -409,7 +457,7 @@ export function ReadTogether() {
                       color: "var(--text-muted)",
                     }}
                   >
-                    {current()!.tm}
+                    {formatMessageDate(current()!, profileTz(), "list").primary.value}
                   </span>
                 </div>
 

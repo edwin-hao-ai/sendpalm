@@ -12,7 +12,8 @@
  *  (e.g. setAside / replyLater excluded upstream). */
 
 import type { Message } from "../types";
-import { dateBucket, bucketLabel, type DateBucketKey } from "../utils/date";
+import { bucketLabel, type DateBucketKey } from "../utils/date";
+import { dateBucketInZone, messageTimelineAt } from "../utils/message-dates";
 
 export type Item = Message | Bundle;
 
@@ -31,6 +32,7 @@ export interface DateGroup {
 
 export function groupItemsByDate(
   items: Item[],
+  timezone: string | undefined,
   now: Date = new Date(),
 ): DateGroup[] {
   const out: DateGroup[] = [];
@@ -39,7 +41,14 @@ export function groupItemsByDate(
   for (const item of items) {
     const firstMessage: Message =
       "messages" in item ? item.messages[0]! : item;
-    const bucket: DateBucketKey = dateBucket(firstMessage.st, now);
+    // Buckets follow the real receipt time (receivedAt) in the user's
+    // configured timezone — sender-declared dates and the host OS zone
+    // both mislead here.
+    const bucket: DateBucketKey = dateBucketInZone(
+      messageTimelineAt(firstMessage),
+      timezone,
+      now,
+    );
     const key =
       typeof bucket === "string"
         ? bucket

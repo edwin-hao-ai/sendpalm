@@ -18,7 +18,7 @@ interface TargetSpec {
 }
 
 const TARGETS: readonly TargetSpec[] = [
-  { id: "imbox", label: "Imbox", icon: "ph-tray", kind: "bucket" },
+  { id: "imbox", label: "Inbox", icon: "ph-tray", kind: "bucket" },
   { id: "feed", label: "Stream", icon: "ph-newspaper", kind: "bucket" },
   { id: "paperTrail", label: "Records", icon: "ph-receipt", kind: "bucket" },
   { id: "pending", label: "稍后回复", icon: "ph-clock", kind: "workflow" },

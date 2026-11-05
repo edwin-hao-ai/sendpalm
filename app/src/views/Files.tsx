@@ -19,6 +19,7 @@ import {
 } from "solid-js";
 import { listFiles, listContacts } from "../stores/data";
 import { Empty, ErrorState } from "../components/Empty";
+import { PageHeader } from "../components/PageHeader";
 import { Icon } from "../components/Icon";
 import { ResourceGate } from "../components/ResourceGate";
 import { SkeletonList } from "../components/Skeleton";
@@ -161,27 +162,10 @@ export function Files() {
     <div style={{ animation: "view-enter 0.3s var(--ease-out) both" }}>
       <style>{FILES_CSS}</style>
       <div style={{ "max-width": "920px", margin: "0 auto" }}>
-        <header style={{ padding: "var(--space-5)" }}>
-          <h1
-            style={{
-              "font-family": "var(--font-display)",
-              "font-size": "var(--text-h1)",
-              "font-weight": "800",
-              margin: 0,
-            }}
-          >
-            文件
-          </h1>
-          <p
-            style={{
-              color: "var(--text-secondary)",
-              "font-size": "var(--text-caption)",
-              margin: "var(--space-1) 0 0",
-            }}
-          >
-            附件管理 · {items().length} 项
-          </p>
-        </header>
+        <PageHeader
+          title="文件"
+          description={<p>附件管理 · {items().length} 项</p>}
+        />
 
         <div
           style={{

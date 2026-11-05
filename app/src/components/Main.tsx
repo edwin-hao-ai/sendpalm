@@ -97,6 +97,7 @@ const FollowUps = lazy(() =>
     default: m.FollowUps as Component,
   })),
 );
+const Tasks = lazy(() => import("../views/Tasks").then(m => ({ default: m.Tasks as Component })));
 const Clips = lazy(() =>
   import("../views/Clips").then((m) => ({ default: m.Clips as Component })),
 );
@@ -121,6 +122,9 @@ const ReadTogether = lazy(() =>
 // PileBoard is parameterised by pileId; the lazy wrapper can't see the
 // props type because dynamic imports erase the signature, so we cast to
 // Component<{ pileId: string }> at the call site instead.
+const Folders = lazy(() =>
+  import("../views/Folders").then((m) => ({ default: m.Folders as Component })),
+);
 const PileBoard = lazy(() =>
   import("../views/PileBoard").then((m) => ({
     default: m.PileBoard as Component<{ pileId: string }>,
@@ -206,6 +210,9 @@ function ViewSwitch() {
             <Files />
           </KeepAlive>
         </Match>
+        <Match when={view() === "folders"}>
+          <Folders />
+        </Match>
         <Match when={view() === "insights"}>
           <KeepAlive active={view() === "insights"}>
             <Insights />
@@ -216,6 +223,7 @@ function ViewSwitch() {
             <Drafts />
           </KeepAlive>
         </Match>
+        <Match when={view() === "tasks"}><Tasks /></Match>
         <Match when={view() === "followUps"}>
           <KeepAlive active={view() === "followUps"}>
             <FollowUps />

@@ -21,11 +21,13 @@ import {
   setErrorLogOpened,
   showToast,
   appSettings,
+  setMailSyncIssue,
+  type MailSyncIssue,
 } from "../stores/ui";
 import { NAV_SECTIONS } from "../utils/labels";
 import { navDisplayLabel } from "./Sidebar";
 import { Avatar } from "./Avatar";
-import { getSyncState, syncNow } from "../services/backend";
+import { getSyncState, syncNow, type SyncStateDto } from "../services/backend";
 import { createSignal, createResource, onCleanup } from "solid-js";
 import { listAccounts, countUnreadNotifications } from "../stores/data";
 
@@ -59,6 +61,18 @@ export function Topbar() {
         position: "relative",
         "z-index": "var(--z-sticky)",
         "-webkit-app-region": "drag",
+      }}
+      onMouseDown={(e) => {
+        // Belt-and-suspenders window drag: `-webkit-app-region: drag` is
+        // unreliable inside the glass/blur titlebar on some macOS builds
+        // (cursor stays a resize arrow and the window won't move). A
+        // direct mousedown → startDragging works everywhere. Only when
+        // the press lands on the bar itself — interactive children are
+        // no-drag and stopPropagation below.
+        if (e.target !== e.currentTarget) return;
+        void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+          void getCurrentWindow().startDragging();
+        });
       }}
     >
       <div
@@ -348,14 +362,12 @@ function NotificationBell(props: { onClick: () => void }) {
   );
 }
 
-function SyncBadge() {
+export function SyncBadge() {
   const { isMobile } = useViewport();
   const [accounts] = createResource(listAccounts);
   const [open, setOpen] = createSignal(false);
   const [busyIds, setBusyIds] = createSignal<Set<string>>(new Set());
-  const [states, setStates] = createSignal<
-    Record<string, { last_uid: number; last_synced_at: string; busy: boolean }>
-  >({});
+  const [states, setStates] = createSignal<Record<string, SyncStateDto>>({});
 
   const emailAccounts = () =>
     (accounts() ?? []).filter((a) => a.type === "email");
@@ -366,25 +378,33 @@ function SyncBadge() {
       setStates({});
       return;
     }
-    const next: Record<
-      string,
-      { last_uid: number; last_synced_at: string; busy: boolean }
-    > = {};
+    const next: Record<string, SyncStateDto> = {};
     await Promise.all(
       list.map(async (a) => {
         try {
-          const s = await getSyncState(a.id);
-          next[a.id] = {
-            last_uid: s.last_uid,
-            last_synced_at: s.last_synced_at,
-            busy: s.busy,
-          };
+          next[a.id] = await getSyncState(a.id);
         } catch {
-          next[a.id] = { last_uid: 0, last_synced_at: "", busy: false };
+          next[a.id] = {
+            account_id: a.id,
+            uid_validity: 0,
+            last_uid: 0,
+            last_synced_at: "",
+            busy: false,
+            status: "never_synced",
+            error_code: null,
+          };
         }
       }),
     );
     setStates(next);
+    // Drive the Imbox banner + status copy from the same data (stores/ui
+    // mailSyncIssue). Severity order: credentials > network > generic.
+    const code = (id: string) => next[id]?.error_code;
+    const worst = list
+      .map((a) => code(a.id))
+      .find((c) => c === "auth_failed" || c === "missing_credentials")
+      ?? list.map((a) => code(a.id)).find((c) => c === "network" || c === "sync_failed");
+    setMailSyncIssue((worst ?? null) as MailSyncIssue | undefined ?? null);
   };
 
   // Event-driven refresh: re-pull sync state when the sync bridge
@@ -549,15 +569,37 @@ function SyncBadge() {
             {(a) => {
               const s = () => states()[a.id];
               const busy = () => busyIds().has(a.id) || s()?.busy;
+              const status = () => s()?.status ?? "never_synced";
               const syncedAt = () => {
                 const t = s()?.last_synced_at;
-                if (!t || t === "未配置（无 Tauri runtime）") return "—";
+                if (!t || t === "未配置（无 Tauri runtime）") return "";
                 const d = new Date(t);
-                if (Number.isNaN(d.getTime())) return "—";
+                if (Number.isNaN(d.getTime())) return "";
                 return d.toLocaleTimeString([], {
                   hour: "2-digit",
                   minute: "2-digit",
                 });
+              };
+              /** One honest line about the mailbox. A failed or
+               *  never-completed sync never renders as "最近同步". */
+              const statusLine = () => {
+                if (busy()) return "正在同步…";
+                switch (status()) {
+                  case "needs_credentials":
+                    return s()?.error_code === "auth_failed"
+                      ? "密码已失效，请重新输入"
+                      : "需要输入密码";
+                  case "error":
+                    return s()?.error_code === "network"
+                      ? "网络异常，自动重试中"
+                      : "同步失败";
+                  case "connected":
+                    return syncedAt()
+                      ? `最近同步 ${syncedAt()}`
+                      : "尚未同步";
+                  default:
+                    return "尚未同步";
+                }
               };
               return (
                 <div
@@ -586,12 +628,14 @@ function SyncBadge() {
                       style={{
                         margin: 0,
                         "font-size": "var(--text-micro)",
-                        color: busy() ? "var(--palm)" : "var(--text-muted)",
+                        color: busy()
+                          ? "var(--palm)"
+                          : status() === "needs_credentials" || status() === "error"
+                            ? "var(--danger, #C0392B)"
+                            : "var(--text-muted)",
                       }}
                     >
-                      <Show when={busy()} fallback={<>最近同步 {syncedAt()}</>}>
-                        正在同步…
-                      </Show>
+                      {statusLine()}
                     </p>
                   </div>
                   <button
@@ -612,6 +656,23 @@ function SyncBadge() {
                   >
                     {busy() ? "…" : "同步"}
                   </button>
+                  <Show when={status() === "needs_credentials"}>
+                    <button
+                      onClick={goToAccounts}
+                      title="前往 设置 → 账户 输入密码"
+                      style={{
+                        padding: "4px 10px",
+                        "border-radius": "var(--radius-pill)",
+                        background: "var(--paper-mid)",
+                        color: "var(--text-primary)",
+                        "font-size": "var(--text-micro)",
+                        "font-weight": "700",
+                        "white-space": "nowrap",
+                      }}
+                    >
+                      去设置
+                    </button>
+                  </Show>
                 </div>
               );
             }}

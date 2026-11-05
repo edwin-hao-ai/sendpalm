@@ -34,8 +34,15 @@ import {
   setSelectedMessageId,
   setDetailOpen,
   setView,
+  appSettings,
 } from "../stores/ui";
+import { formatMessageDate } from "../utils/message-dates";
+
+/** Profile timezone for mail date labels (falls back to OS zone in helpers). */
+const profileTz = () => appSettings.profile.timezone;
+
 import { Avatar } from "../components/Avatar";
+import { PageHeader } from "../components/PageHeader";
 import { Icon } from "../components/Icon";
 import { Empty, ErrorState } from "../components/Empty";
 import { SkeletonList } from "../components/Skeleton";
@@ -66,7 +73,7 @@ const PILE_META: Record<
     subtitle: "这些邮件等着你有空时回复",
     icon: "ph-clock",
     options: { replyLaterOnly: true, setAsideOnly: false, bubbleUpOnly: false },
-    removeLabel: "移回 Imbox",
+    removeLabel: "移回 Inbox",
     removeIcon: "ph-tray",
   },
   setAside: {
@@ -74,12 +81,12 @@ const PILE_META: Record<
     subtitle: "留作参考、稍后处理的邮件",
     icon: "ph-push-pin",
     options: { replyLaterOnly: false, setAsideOnly: true, bubbleUpOnly: false },
-    removeLabel: "移回 Imbox",
+    removeLabel: "移回 Inbox",
     removeIcon: "ph-tray",
   },
   bubbleUp: {
     title: "提醒",
-    subtitle: "到点会回到 Imbox 顶部的邮件",
+    subtitle: "到点会回到 Inbox 顶部的邮件",
     icon: "ph-arrow-fat-line-up",
     options: { replyLaterOnly: false, setAsideOnly: false, bubbleUpOnly: true },
     removeLabel: "取消提醒",
@@ -252,83 +259,57 @@ export function PileBoard(props: { pileId: PileId }) {
       class="imbox-view"
       style={{ padding: "0 var(--space-5) var(--space-5)" }}
     >
-      <header
-        style={{
-          display: "flex",
-          "align-items": "center",
-          gap: "var(--space-3)",
-          padding: "var(--space-5) 0 var(--space-3)",
-          "max-width": "720px",
-          margin: "0 auto",
-        }}
-      >
-        <button
-          onClick={() => setView("imbox")}
-          aria-label="返回 Imbox"
-          title="返回 Imbox"
-          style={{
-            display: "inline-flex",
-            "align-items": "center",
-            gap: "6px",
-            padding: "0 14px",
-            "min-height": "44px",
-            "border-radius": "var(--radius-pill)",
-            background: "var(--paper-mid)",
-            border: "0",
-            color: "var(--text-secondary)",
-            "font-size": "var(--text-caption)",
-            "font-weight": "700",
-            cursor: "pointer",
-            "white-space": "nowrap",
-          }}
-        >
-          <Icon name="ph-arrow-left" size={14} />
-          返回 Imbox
-        </button>
-        <div style={{ flex: 1 }}>
-          <h1
-            style={{
-              "font-family": "var(--font-display)",
-              "font-size": "var(--text-h1)",
-              "font-weight": "800",
-              margin: 0,
-              display: "flex",
-              "align-items": "center",
-              gap: "var(--space-2)",
-            }}
-          >
-            <Icon name={meta().icon} size={20} />
-            {meta().title}
-            <span
-              data-pile-total
-              style={{
-                display: "inline-flex",
-                "align-items": "center",
-                "justify-content": "center",
-                "min-width": "24px",
-                height: "24px",
-                padding: "0 8px",
-                "border-radius": "var(--radius-pill)",
-                background: "var(--paper-mid)",
-                color: "var(--text-secondary)",
-                "font-size": "var(--text-caption)",
-                "font-weight": "700",
-              }}
-            >
-              {total()}
-            </span>
-          </h1>
-          <p
-            style={{
-              margin: "2px 0 0",
-              color: "var(--text-muted)",
-              "font-size": "var(--text-caption)",
-            }}
-          >
-            {meta().subtitle}
-          </p>
-        </div>
-      </header>
+      <div style={{ "max-width": "720px", margin: "0 auto" }}>
+        <PageHeader
+          title={meta().title}
+          description={<p>{meta().subtitle}</p>}
+          actions={
+            <>
+              <span
+                data-pile-total
+                style={{
+                  display: "inline-flex",
+                  "align-items": "center",
+                  "justify-content": "center",
+                  "min-width": "24px",
+                  height: "24px",
+                  padding: "0 8px",
+                  "border-radius": "var(--radius-pill)",
+                  background: "var(--paper-mid)",
+                  color: "var(--text-secondary)",
+                  "font-size": "var(--text-caption)",
+                  "font-weight": "700",
+                }}
+              >
+                {total()}
+              </span>
+              <button
+                onClick={() => setView("imbox")}
+                aria-label="返回 Inbox"
+                title="返回 Inbox"
+                style={{
+                  display: "inline-flex",
+                  "align-items": "center",
+                  gap: "6px",
+                  padding: "0 14px",
+                  "min-height": "44px",
+                  "border-radius": "var(--radius-pill)",
+                  background: "var(--paper-mid)",
+                  border: "0",
+                  color: "var(--text-secondary)",
+                  "font-size": "var(--text-caption)",
+                  "font-weight": "700",
+                  cursor: "pointer",
+                  "white-space": "nowrap",
+                }}
+              >
+                <Icon name="ph-arrow-left" size={14} />
+                返回 Inbox
+              </button>
+            </>
+          }
+        />
+      </div>
 
       <Show
         when={!paged.resource.error}
@@ -353,8 +334,8 @@ export function PileBoard(props: { pileId: PileId }) {
               <Empty
                 icon={meta().icon}
                 title={`「${meta().title}」是空的`}
-                description={`${meta().subtitle}。处理完了？回 Imbox 继续。`}
-                action={{ label: "返回 Imbox", onClick: () => setView("imbox") }}
+                description={`${meta().subtitle}。处理完了？回 Inbox 继续。`}
+                action={{ label: "返回 Inbox", onClick: () => setView("imbox") }}
               />
             </Show>
           }
@@ -501,7 +482,7 @@ function PileBoardRow(props: {
             class="feed-time"
             style={{ visibility: hovered() ? "hidden" : "visible" }}
           >
-            {props.m.tm}
+            {formatMessageDate(props.m, profileTz(), "list").primary.value}
           </span>
         </div>
         <div class="feed-bottom-row">

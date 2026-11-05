@@ -110,7 +110,7 @@ export function RemindPicker(props: PickerProps) {
           "margin-bottom": "var(--space-3)",
         }}
       >
-        到时间后，消息会浮回 Imbox 顶部并通知你。
+        到时间后，消息会浮回 Inbox 顶部并通知你。
       </p>
       <div
         style={{

@@ -45,11 +45,11 @@ describe("buildShortcutGroups", () => {
 
   it("renders every row in Chinese (no raw English labels leak through)", () => {
     for (const item of flat()) {
-      // Brand nouns (Imbox/Gate/Stream/Records/Clips/Agent) are allowed;
+      // Brand nouns (Inbox/Gate/Stream/Records/Clips/Agent) are allowed;
       // anything else ASCII-only is a leak of the English DEFAULT_SHORTCUTS label.
       if (/[A-Za-z]/.test(item.label)) {
         expect(item.label).toMatch(
-          /Imbox|Gate|Stream|Records|Clips|Agent|Esc/,
+          /Inbox|Gate|Stream|Records|Clips|Agent|Esc/,
         );
       }
     }

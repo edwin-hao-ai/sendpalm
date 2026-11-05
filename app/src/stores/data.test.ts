@@ -840,3 +840,20 @@ describe("listFocusReplyMessages", () => {
 // function is exercised end-to-end by `e2e/perf-views.spec.ts` which
 // runs against the real Tauri SQL plugin in CI; that test would catch
 // any regression in the SQL itself.
+
+describe("folder (label) membership", () => {
+  it("listMessagesByLabel finds labeled mail; removeLabelFromMessage drops it", async () => {
+    const { listMessagesByLabel, removeLabelFromMessage } = await import("./data");
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(
+      makeMessage("m-labeled", "c1", { labels: ["lbl_x"] }),
+    );
+    await upsertMessage(makeMessage("m-plain", "c1"));
+
+    const inFolder = await listMessagesByLabel("lbl_x");
+    expect(inFolder.map((m) => m.id)).toEqual(["m-labeled"]);
+
+    await removeLabelFromMessage("m-labeled", "lbl_x");
+    expect(await listMessagesByLabel("lbl_x")).toEqual([]);
+  });
+});

@@ -3,6 +3,7 @@
  */
 
 import type { ContactStage, FileType } from "../types";
+import type { ViewName } from "../stores/ui";
 
 export const STAGE_LABEL: Record<ContactStage, string> = {
   explore: "探索期",
@@ -32,7 +33,7 @@ export const STAGE_SUGGEST: Record<ContactStage, string> = {
 };
 
 export const BUCKET_LABEL: Record<string, string> = {
-  imbox: "Imbox",
+  imbox: "Inbox",
   feed: "Stream",
   paperTrail: "Records",
   trash: "回收站",
@@ -89,7 +90,7 @@ export const NAV_SECTIONS: NavSection[] = [
     view: "screener",
     hint: "⌘1",
   },
-  { id: "imbox", label: "Imbox", icon: "ph-tray", view: "imbox", hint: "⌘2" },
+  { id: "imbox", label: "Inbox", icon: "ph-tray", view: "imbox", hint: "⌘2" },
   {
     id: "feed",
     label: "Stream",
@@ -132,6 +133,7 @@ export const NAV_SECTIONS: NavSection[] = [
     hint: "⌘7",
   },
   { id: "drafts", label: "Drafts", icon: "ph-pencil-line", view: "drafts" },
+  { id: "tasks", label: "Tasks", icon: "ph-check-square", view: "tasks" },
   {
     id: "followUps",
     label: "Follow-ups",
@@ -139,6 +141,7 @@ export const NAV_SECTIONS: NavSection[] = [
     view: "followUps",
   },
   { id: "clips", label: "Clips", icon: "ph-bookmarks", view: "clips" },
+  { id: "folders", label: "文件夹", icon: "ph-folder", view: "folders" },
   {
     id: "insights",
     label: "Insights",
@@ -149,4 +152,58 @@ export const NAV_SECTIONS: NavSection[] = [
   { id: "trash", label: "Trash", icon: "ph-trash", view: "trash" },
   { id: "spam", label: "Spam", icon: "ph-warning-circle", view: "spam" },
   { id: "settings", label: "Settings", icon: "ph-gear", view: "settings" },
+];
+
+/** Workspace metadata is additive; NAV_SECTIONS remains the route/shortcut source. */
+export interface NavGroup {
+  id: string;
+  label: string;
+  icon: string;
+  defaultView: ViewName;
+  views: ViewName[];
+}
+
+export const NAV_GROUPS: NavGroup[] = [
+  {
+    id: "mail",
+    label: "Mail",
+    icon: "ph-tray",
+    defaultView: "imbox",
+    views: ["screener", "imbox", "feed", "paperTrail", "drafts", "spam", "trash"],
+  },
+  {
+    id: "calendar",
+    label: "Calendar",
+    icon: "ph-calendar",
+    defaultView: "calendar",
+    views: ["calendar"],
+  },
+  {
+    id: "contacts",
+    label: "Contacts",
+    icon: "ph-users",
+    defaultView: "contacts",
+    views: ["contacts", "companies"],
+  },
+  {
+    id: "tasks",
+    label: "Tasks",
+    icon: "ph-bell-ringing",
+    defaultView: "tasks",
+    views: ["tasks", "followUps"],
+  },
+  {
+    id: "library",
+    label: "Library",
+    icon: "ph-paperclip",
+    defaultView: "files",
+    views: ["files", "clips", "folders"],
+  },
+  {
+    id: "more",
+    label: "More",
+    icon: "ph-dots-three",
+    defaultView: "insights",
+    views: ["insights", "settings"],
+  },
 ];

@@ -193,3 +193,27 @@ describe("plainTextToHtml", () => {
     expect(result).not.toContain("<script>");
   });
 });
+
+describe("gateBodyPreview", () => {
+  it("strips raw HTML instead of showing tag soup", async () => {
+    const { gateBodyPreview } = await import("./html");
+    const html = `<!DOCTYPE html><html><body><div>Big sale</div><p>Up to 50% off</p></body></html>`;
+    const out = gateBodyPreview(html);
+    expect(out).toContain("Big sale");
+    expect(out).toContain("Up to 50% off");
+    expect(out).not.toContain("<div");
+    expect(out).not.toContain("DOCTYPE");
+  });
+
+  it("passes genuine plain text through (linkified)", async () => {
+    const { gateBodyPreview } = await import("./html");
+    const out = gateBodyPreview("你好，详见 https://example.com/docs");
+    expect(out).toContain("你好");
+    expect(out).toContain('href="https://example.com/docs"');
+  });
+
+  it("returns empty for empty bodies", async () => {
+    const { gateBodyPreview } = await import("./html");
+    expect(gateBodyPreview("")).toBe("");
+  });
+});

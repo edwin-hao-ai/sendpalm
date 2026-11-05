@@ -13,6 +13,7 @@ import {
 import { Avatar } from "../components/Avatar";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
+import { PageHeader } from "../components/PageHeader";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { SkeletonList } from "../components/Skeleton";
 import { ContactEditModal } from "../components/ContactEditModal";
@@ -196,45 +197,29 @@ export function Contacts() {
           padding: "0 var(--space-5) var(--space-5)",
         }}
       >
-        <header
-          style={{
-            padding: "var(--space-5) 0",
-            display: "flex",
-            "align-items": "center",
-            gap: "var(--space-4)",
-            "flex-wrap": "wrap",
-          }}
-        >
-          <h1
-            style={{
-              "font-family": "var(--font-display)",
-              "font-size": "var(--text-h1)",
-              "font-weight": "800",
-              margin: 0,
-              flex: 1,
-            }}
-          >
-            联系人
-          </h1>
-          <button
-            onClick={() => setCreating(true)}
-            style={{
-              padding: "8px 16px",
-              background: "var(--palm)",
-              color: "white",
-              "border-radius": "var(--radius-pill)",
-              "font-size": "var(--text-caption)",
-              "font-weight": "700",
-              display: "flex",
-              "align-items": "center",
-              gap: "4px",
-              cursor: "pointer",
-              border: "none",
-            }}
-          >
-            <Icon name="ph-plus" size={12} /> 新建
-          </button>
-        </header>
+        <PageHeader
+          title="联系人"
+          actions={
+            <button
+              onClick={() => setCreating(true)}
+              style={{
+                padding: "8px 16px",
+                background: "var(--palm)",
+                color: "white",
+                "border-radius": "var(--radius-pill)",
+                "font-size": "var(--text-caption)",
+                "font-weight": "700",
+                display: "flex",
+                "align-items": "center",
+                gap: "4px",
+                cursor: "pointer",
+                border: "none",
+              }}
+            >
+              <Icon name="ph-plus" size={12} /> 新建
+            </button>
+          }
+        />
 
         <div
           style={{

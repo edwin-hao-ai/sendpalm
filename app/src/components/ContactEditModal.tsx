@@ -443,7 +443,7 @@ export function ContactEditModal(props: ContactEditModalProps) {
               aria-describedby="default-bucket-hint"
               style={inputStyle}
             >
-              <option value="imbox">Imbox（重要邮件）</option>
+              <option value="imbox">Inbox（重要邮件）</option>
               <option value="feed">Stream（资讯与 newsletter）</option>
               <option value="paperTrail">Records（收据与账单）</option>
             </select>

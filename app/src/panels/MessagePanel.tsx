@@ -12,6 +12,7 @@ import {
   onMount,
   onCleanup,
 } from "solid-js";
+import { extractTasksForMessage } from "../services/task-extraction";
 import {
   getContact,
   getMessage,
@@ -41,6 +42,7 @@ import {
   setSelectedContactId,
   bumpRefreshTick,
   setAgentPanelOpen,
+  appSettings,
 } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
@@ -51,6 +53,7 @@ import { RemindPicker } from "../components/RemindPicker";
 import { LabelPicker } from "../components/LabelPicker";
 import { MovePicker } from "../components/MovePicker";
 import { uid } from "../utils/id";
+import { formatMessageDate } from "../utils/message-dates";
 import { addDays, isoNow, relativeTime } from "../utils/date";
 import { trackerSummary } from "../utils/trackers";
 import type { Clip, Contact, FollowUp, Message, Sticky } from "../types";
@@ -70,6 +73,8 @@ import {
   analyzeImages,
   extractExternalImageUrls,
   htmlEmailSrcdoc,
+  htmlToPlainText,
+  looksLikeHtml,
   plainTextToHtml,
   prefetchImages,
 } from "../utils/html";
@@ -423,7 +428,7 @@ export function MessagePanel(props: { messageId: string }) {
 
   const bucketLabel = (bucket: string) => {
     const map: Record<string, string> = {
-      imbox: "Imbox",
+      imbox: "Inbox",
       feed: "Stream",
       paperTrail: "Records",
       trash: "回收站",
@@ -481,7 +486,7 @@ export function MessagePanel(props: { messageId: string }) {
       `主题: ${m.subj}`,
       `发件人: ${c?.name ?? "未知"} <${c?.emails[0]?.value ?? ""}>`,
       `收件人: ${m.to ?? ""}`,
-      `日期: ${m.tm}`,
+      `日期: ${formatMessageDate(m, appSettings.profile.timezone, "detail").primary.value}`,
       "",
       m.body || m.prev || "",
     ].join("\n");
@@ -506,7 +511,7 @@ export function MessagePanel(props: { messageId: string }) {
       `主题: ${m.subj}`,
       `发件人: ${c?.name ?? "未知"} <${c?.emails[0]?.value ?? ""}>`,
       `收件人: ${m.to ?? ""}`,
-      `日期: ${m.tm}`,
+      `日期: ${formatMessageDate(m, appSettings.profile.timezone, "detail").primary.value}`,
       "",
       m.body || m.prev || "",
     ].join("\n");
@@ -720,7 +725,11 @@ export function MessagePanel(props: { messageId: string }) {
   const addClip = async () => {
     const m = message();
     if (!m) return;
-    const selection = window.getSelection()?.toString().trim();
+    // The body renders in a sandboxed iframe — fall back to the selection
+    // it posted up (see htmlEmailSrcdoc's mouseup reporter).
+    const selection =
+      window.getSelection()?.toString().trim() ||
+      lastIframeSelection.trim();
     if (!selection) {
       showToast({
         message: "请先在邮件正文里选中文字，再点『更多 → 保存为 Clip』",
@@ -728,6 +737,7 @@ export function MessagePanel(props: { messageId: string }) {
       });
       return;
     }
+    lastIframeSelection = "";
     const c: Clip = {
       id: uid("cl"),
       text: selection,
@@ -1128,9 +1138,28 @@ export function MessagePanel(props: { messageId: string }) {
                           "font-size": "var(--text-micro)",
                           color: "var(--text-muted)",
                           "white-space": "nowrap",
+                          "text-align": "right",
+                          "flex-shrink": 0,
                         }}
+                        title={(() => {
+                          const p = formatMessageDate(
+                            m,
+                            appSettings.profile.timezone,
+                            "detail",
+                          );
+                          return p.secondary
+                            ? `${p.primary.label}: ${p.primary.value}\n${p.secondary.label}: ${p.secondary.value}`
+                            : `${p.primary.label}: ${p.primary.value}`;
+                        })()}
                       >
-                        {m.tm}
+                        {(() => {
+                          const p = formatMessageDate(
+                            m,
+                            appSettings.profile.timezone,
+                            "list",
+                          );
+                          return p.primary.value;
+                        })()}
                       </span>
                     </div>
 
@@ -1185,7 +1214,11 @@ export function MessagePanel(props: { messageId: string }) {
                                 "overflow-wrap": "anywhere",
                                 "word-break": "break-word",
                               }}
-                              innerHTML={plainTextToHtml(m.body)}
+                              innerHTML={plainTextToHtml(
+                                looksLikeHtml(m.body)
+                                  ? htmlToPlainText(m.body)
+                                  : m.body,
+                              )}
                             />
                           }
                         >
@@ -1682,6 +1715,23 @@ export function MessagePanel(props: { messageId: string }) {
             onSaveDraft={saveAsDraft}
             onMoveToBucket={moveToBucketDirect}
             onAskAgent={askAgentAboutMessage}
+            onExtractTasks={async () => {
+              const current = message();
+              if (!current) return;
+              showToast({ message: "正在读取此邮件的任务建议…", kind: "info" });
+              try {
+                const result = await extractTasksForMessage(current.id, "manual");
+                if (result.state === "unavailable") {
+                  showToast({ message: result.message ?? "请先配置模型", kind: "info" });
+                  return;
+                }
+                const copy = result.state === "no_tasks" ? "此邮件未发现明确任务" : result.state === "failed" ? "提取失败，可再次点击重试" : result.state === "reviewed" ? "此邮件的任务建议已处理" : result.state === "skipped" ? "此邮件未提取任务" : "任务建议已保存，请在 Tasks 中确认";
+                showToast({ message: copy, kind: result.state === "failed" ? "error" : "info" });
+                if (result.state === "failed" || result.state === "no_tasks" || result.state === "skipped") return;
+                setDetailOpen(false);
+                setView("tasks");
+              } catch { showToast({ message: "提取失败，请重试", kind: "error" }); }
+            }}
           />
         </div>
       </Show>
@@ -1994,13 +2044,14 @@ export function moreMenuItemDefs(opts: {
     { id: "follow-up", icon: "ph-bell-ringing", label: "跟进提醒" },
     { id: "sticky", icon: "ph-note", label: "添加便签" },
     { id: "clip", icon: "ph-bookmark-simple", label: "保存为 Clip" },
+    { id: "extract-tasks", icon: "ph-check-square", label: "提取任务", testId: "message-extract-tasks" },
   ];
   const moves: MoreMenuItemDef[] = (
     [
       {
         id: "move-imbox",
         icon: "ph-tray",
-        label: "移到 Imbox",
+        label: "移到 Inbox",
         testId: "message-move-imbox",
         bucket: "imbox",
       },
@@ -2071,6 +2122,7 @@ function MoreMenu(props: {
   onSaveDraft: () => Promise<void> | void;
   onMoveToBucket: (bucket: Message["bucket"]) => Promise<void> | void;
   onAskAgent: () => Promise<void> | void;
+  onExtractTasks: () => Promise<void> | void;
 }) {
   const [open, setOpen] = createSignal(false);
 
@@ -2086,6 +2138,7 @@ function MoreMenu(props: {
     "move-feed": () => void props.onMoveToBucket("feed"),
     "move-paperTrail": () => void props.onMoveToBucket("paperTrail"),
     "ask-agent": () => void props.onAskAgent(),
+    "extract-tasks": () => void props.onExtractTasks(),
     label: () => props.onLabel(),
     move: () => props.onMove(),
     "save-draft": () => void props.onSaveDraft(),
@@ -2262,6 +2315,8 @@ function MessagePanelSkeleton() {
  *  its own. Owns its own `currentIframe` ref so the postMessage
  *  handlers (sendpalm:open-url, sendpalm:show-images) target only
  *  this message's iframe and not a sibling's. */
+let lastIframeSelection = "";
+
 function MessageBodyIframe(props: { message: Message; senderEmail?: string }) {
   const m = () => props.message;
   const [iframeSrc, setIframeSrc] = createSignal("");
@@ -2340,6 +2395,13 @@ function MessageBodyIframe(props: { message: Message; senderEmail?: string }) {
     ) {
       e.preventDefault?.();
       openUrl(e.data.href).catch(() => {});
+    } else if (
+      e.data.type === "sendpalm:selection" &&
+      typeof e.data.text === "string"
+    ) {
+      // The sandboxed iframe's selection, posted up on mouseup — the
+      // parent cannot read it cross-origin. Consumed by "save as Clip".
+      lastIframeSelection = e.data.text;
     }
   };
 
@@ -2434,7 +2496,9 @@ function MessageBodyIframe(props: { message: Message; senderEmail?: string }) {
             "word-break": "break-word",
             "margin-bottom": "var(--space-2)",
           }}
-          innerHTML={plainTextToHtml(m().body)}
+          innerHTML={plainTextToHtml(
+            looksLikeHtml(m().body) ? htmlToPlainText(m().body) : m().body,
+          )}
         />
         <div
           style={{

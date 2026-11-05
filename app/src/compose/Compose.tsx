@@ -570,6 +570,14 @@ export function Compose() {
         dataBase64: a.dataBase64,
       }));
       const htmlBody = plainTextToHtml(d.body);
+      // Replies/Reply-All carry In-Reply-To so recipients' clients can
+      // thread the conversation (Gmail threads on References/In-Reply-To,
+      // not on subject). Forward intentionally doesn't.
+      const ctx = composeContext();
+      const inReplyTo =
+        (ctx.mode === "reply" || ctx.mode === "replyAll")
+          ? ctx.originalMsg?.rfcMessageId
+          : undefined;
       const result = await sendEmailViaBackend(
         recipient,
         subject,
@@ -580,6 +588,7 @@ export function Compose() {
         d.bcc,
         d.fromAlias,
         htmlBody,
+        inReplyTo,
       );
       await persistDraft("sent");
       void closeCompose();

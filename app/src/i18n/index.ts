@@ -43,8 +43,8 @@ export const activeLocale: Accessor<Locale> = locale;
 
 const dictionaries: Partial<Record<Locale, Record<string, string>>> = {
   "en-US": {
-    "imbox.heading": "Imbox",
-    "imbox.empty.title": "Imbox is for messages that need you",
+    "imbox.heading": "Inbox",
+    "imbox.empty.title": "Inbox is for messages that need you",
     "imbox.empty.body":
       "Important conversations land here. Nothing? Wait for your next check-in.",
     "imbox.tab.new": "New for you",

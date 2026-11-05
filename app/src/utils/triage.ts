@@ -2,6 +2,7 @@
  * Keeps component logic small and testable.
  */
 
+import { messageTimelineAt } from "./message-dates";
 import type { Contact, Message } from "../types";
 
 export function getFocusReplyCandidates(
@@ -27,9 +28,16 @@ export function getReadTogetherCandidates(
         !m.bubbleUpAt &&
         m.unread,
     )
+    // Blocked senders stay out; unscreened (Gate-pending) mail IS readable
+    // here — reading is not approving, and with a real backlog the screened
+    // filter made "read together" permanently empty while Inbox showed
+    // thousands unread.
     .filter((m) => {
       const c = contactMap.get(m.pid);
-      return c && c.screened && !c.blocked;
+      return !c || !c.blocked;
     })
-    .sort((a, b) => new Date(b.st).getTime() - new Date(a.st).getTime());
+    .sort(
+      (a, b) =>
+        Date.parse(messageTimelineAt(b)) - Date.parse(messageTimelineAt(a)),
+    );
 }

@@ -2,11 +2,12 @@
 
 import { Show, createResource, createSignal, createEffect } from "solid-js";
 import { getTask, upsertTask, deleteTask } from "../stores/data";
-import { setDetailOpen, setSelectedTaskId, showToast } from "../stores/ui";
+import { setDetailOpen, setSelectedTaskId, showToast, bumpSoftRefreshTick } from "../stores/ui";
 import { Icon } from "../components/Icon";
 import type { Task } from "../types";
 import { relativeTime } from "../utils/date";
 import { useRefreshEffect } from "../utils/gestures";
+import { openTaskSource } from "../services/task-extraction";
 
 export function TaskPanel(props: { taskId: string }) {
   const [task, { refetch }] = createResource(() => props.taskId, getTask);
@@ -25,6 +26,7 @@ export function TaskPanel(props: { taskId: string }) {
     const d = draft();
     if (!d) return;
     await upsertTask(d);
+    bumpSoftRefreshTick();
     await refetch();
     showToast({ message: "已保存", kind: "success" });
   };
@@ -32,6 +34,7 @@ export function TaskPanel(props: { taskId: string }) {
   const remove = async () => {
     if (!confirm("确定要删除这个任务？")) return;
     await deleteTask(props.taskId);
+    bumpSoftRefreshTick();
     setSelectedTaskId(null);
     setDetailOpen(false);
     showToast({ message: "已删除", kind: "info" });
@@ -175,6 +178,14 @@ export function TaskPanel(props: { taskId: string }) {
                   }}
                 />
               </Field>
+              <Show when={t.relatedMessageId}>
+                <button
+                  style={{ "min-height": "44px", color: "var(--palm)", "margin-top": "var(--space-3)" }}
+                  onClick={async () => {
+                    if (!(await openTaskSource(t.relatedMessageId!))) showToast({ message: "来源邮件已不可用", kind: "info" });
+                  }}
+                >来源邮件</button>
+              </Show>
               <p
                 style={{
                   "font-size": "var(--text-micro)",

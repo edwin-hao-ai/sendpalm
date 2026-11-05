@@ -83,7 +83,7 @@ export function startResurfaceLoop(): () => void {
         id: uid("nt"),
         type: "surfaced",
         title: "消息回浮",
-        body: `${slice.subj} 回到了 Imbox 顶部`,
+        body: `${slice.subj} 回到了 Inbox 顶部`,
         ref: { type: "message", id: slice.id },
         read: false,
         createdAt: nowIso,
@@ -92,7 +92,7 @@ export function startResurfaceLoop(): () => void {
         message: `回浮：${slice.subj}`,
         kind: "info",
         action: {
-          label: "打开 Imbox",
+          label: "打开 Inbox",
           run: () => {
             setView("imbox");
           },
@@ -147,7 +147,7 @@ export function startResurfaceLoop(): () => void {
         message: `跟进到期：${m.subj}`,
         kind: "info",
         action: {
-          label: "打开 Imbox",
+          label: "打开 Inbox",
           run: () => {
             setView("imbox");
           },

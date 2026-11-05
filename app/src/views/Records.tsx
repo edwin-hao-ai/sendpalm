@@ -7,6 +7,7 @@ import { usePaginatedMessages } from "../utils/paginated-messages";
 import { Avatar } from "../components/Avatar";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
+import { PageHeader } from "../components/PageHeader";
 import {
   setDetailOpen,
   setSelectedMessageId,
@@ -115,34 +116,15 @@ export function Records() {
           />
         }
       >
-        <header
-          style={{
-            padding: "var(--space-6) var(--space-5) var(--space-3)",
-            "text-align": "center",
-          }}
-        >
-          <h1
-            style={{
-              "font-family": "var(--font-display)",
-              "font-size": "var(--text-h1)",
-              "font-weight": "800",
-              margin: 0,
-              "margin-bottom": "var(--space-1)",
-            }}
-          >
-            Records
-          </h1>
-          <p
-            style={{
-              color: "var(--text-secondary)",
-              margin: 0,
-              "font-size": "var(--text-caption)",
-            }}
-          >
-            发票 / 物流 / 系统通知。安静躺着，需要时随时搜。
-            {paged.hasMore() ? ` · ${items().length}/${paged.total()}` : ""}
-          </p>
-        </header>
+        <PageHeader
+          title="Records"
+          description={
+            <p>
+              发票 / 物流 / 系统通知。安静躺着，需要时随时搜。
+              {paged.hasMore() ? ` · ${items().length}/${paged.total()}` : ""}
+            </p>
+          }
+        />
 
         <Show
           when={paged.resource.state !== "pending"}

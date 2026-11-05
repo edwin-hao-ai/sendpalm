@@ -22,7 +22,7 @@ import {
   appSettings,
 } from "../stores/ui";
 import { contactsList, refetchContacts } from "../stores/contacts";
-import { agentChat } from "../services/backend";
+import { agentChat, DEFAULT_LLM_BASE_URL } from "../services/backend";
 import { IS_BROWSER } from "../services/tauri-shim";
 import { uid } from "../utils/id";
 import { isoNow } from "../utils/date";
@@ -328,7 +328,7 @@ export function useAgent() {
     try {
       const reply = await agentChat(
         {
-          base_url: llm.baseUrl.trim() || "https://api.openai.com/v1",
+          base_url: llm.baseUrl.trim() || DEFAULT_LLM_BASE_URL,
           api_key: llm.apiKey,
           model: llm.model.trim(),
           temperature: llm.temperature,
