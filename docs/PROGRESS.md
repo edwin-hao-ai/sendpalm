@@ -2,6 +2,24 @@
 
 > Source: prototype-v11.38 (v11.38) — every feature reimplemented as Tauri 2 + SolidJS.
 
+## Inbox email-to-Tasks (2026-11-02)
+
+- Added migration 0024: nullable provenance/direction on existing `tasks`, durable per-message extraction runs, and separate review suggestions. Confirmation uses a stable task ID; dismissal never creates a task. Existing task rows remain unclassified and editable in TaskPanel.
+- Automatic extraction defaults off, requires an explicitly configured compatible model/runtime, and uses only new sync IDs or the currently approved Gate/inline Inbox message. Eligibility is checked before sending and after receiving: inbound Inbox, screened/non-blocked sender, enable timestamp. No mailbox backfill or automatic retries. Queue metadata stays lightweight; only the current serial request loads one body, capped at 12,000 input characters / 3 suggestions / 512 completion tokens.
+- Added lazy Tasks workspace with editable review drafts (preserved across background refresh), direction review, confirm/dismiss, source navigation, manual task creation, and the existing Follow-ups sibling. MessagePanel gains only a More-menu extraction action; TaskPanel gains an optional source-email action and soft-refresh notifications after existing save/delete operations so the new list stays current. HTML/Markdown/iframe rendering and internal `imbox` IDs are unchanged.
+- Corrected Settings persistence for the new toggle: reactive snapshots trigger saves, old settings normalize to off/null, and API keys stay out of preference writes (existing vault flow retained). Interrupted/failed candidate writes are cleaned up; deleted sources are handled safely.
+- Verification: 554 Vitest tests pass; typecheck, lint, production build, and `git diff --check` pass. Full supported Playwright suite: 96 passed, 1 live Feishu test skipped; focused 375/820/1440px Tasks/source/manual-action flows: 3 passed. All SQLite migrations 0001–0024 apply sequentially in memory; provenance, legacy rows, state constraints, and source-deletion cascades verified. Rust migration test added but `cargo test` cannot start because no default Rust toolchain is configured. Bundled Playwright Chromium is absent; tests used installed Chrome via the existing `qa-tmp/sidebar-playwright.config.ts`. Visual evidence: `app/test-results/workflows-Email-workflows-*/tasks-review.png`; detailed logs: `app/qa-tmp/task-extraction-*.log`.
+- Integration boundary: live Feishu/native Tauri/iOS and real model requests are not exercised; browser tests never invent model output. The pre-existing build chunk-size/Tauri dynamic-import warnings remain. Fresh-context review caught a manual retry of skipped runs; retry eligibility now follows the spec (only failed runs can be retried manually), with a regression test. No commit or merge performed; existing Sidebar changes and the untracked prototype are preserved.
+
+## Sidebar workspace groups (2026-11-02)
+
+- Added six workspace groups without changing the canonical 15 `NAV_SECTIONS` routes: Mail → Inbox, Calendar → Calendar, Contacts → Contacts, Tasks → existing Follow-ups, Library → Files, More → Insights.
+- Kept the 64px rail and existing view/shell/detail/email rendering intact. Desktop defaults remain one click away; explicit keyboard-accessible disclosures expose the original route labels, shortcuts, active child, and Gate badge. Mail carries the Gate count even when its disclosure is closed.
+- Mobile has five default-route tabs plus More (six ≥44px targets). More opens the existing dismissible sheet, now organized into all six groups, including Insights and Settings. Listing all 15 routes also makes primary routes discoverable in the sheet; no task model or new screen was added.
+- Added route-coverage/component tests and a shared Playwright navigation helper; migrated secondary-route callers, including backup/restore coverage. RED→GREEN recorded for metadata/disclosures and keyboard focus restoration.
+- Verification: 503 unit tests passed; typecheck, lint, production build, and diff checks passed. Full Playwright E2E: 92 passed, 1 live Feishu integration test skipped, using installed Google Chrome via a temporary local config because bundled Chromium is unavailable. The production build still reports the pre-existing Tauri API/dynamic-import and large-chunk warnings.
+- Visual evidence: `/tmp/sendpalm-screenshots/e2e/` and existing UI-audit screenshot outputs. Native Tauri/iOS and live IMAP/SMTP are not exercised by this navigation-only change.
+
 ## Loading states across all views (2026-08-21)
 
 12 views were missing loading feedback — `createResource` was firing but no Skeleton / placeholder was rendered until the IPC round-trip resolved, so the user saw a blank screen on every view switch. The `ResourceGate` component (`src/components/ResourceGate.tsx`) already existed for exactly this; the migration just had not been done. Refactored every affected view to use it, getting the loading/error/empty trifecta for free:
@@ -3094,3 +3112,348 @@ and fixed what only surfaces with real data / real volumes.
   drag test: draggable attribute → dragstart → DropBar mounts)
 - Live app re-verified: Gate shows the queue, Companies loads, Files
   previews images with correct dates ("2 周前"), Imbox shows 2026 mail.
+
+## 2026-11-03 — Mail date integrity (plan: docs/superpowers/plans/2026-11-02-mail-date-integrity.md)
+
+**Problem.** Mail chronology trusted the sender-controlled `Date` header
+(parser fell back to `Utc::now()` when missing — making undated mail look
+fresh), the IMAP fetch never requested `INTERNALDATE`, and list views
+rendered the raw UTC `tm` string in the device's OS timezone. Separately,
+a failed sync stamped `last_synced_at = now()`, so a mailbox with no
+password in the keychain looked "recently synced".
+
+**Changes.**
+
+- `parser.rs` — `ParsedMessage.date` → `sent_at: Option<DateTime<Utc>>`;
+  missing/malformed `Date` headers stay `None` (never fabricated).
+- `imap.rs` — sync fetches `(FLAGS UID ENVELOPE INTERNALDATE BODY.PEEK[])`;
+  new `FetchedMessage { uid, parsed, received_at }` DTO;
+  `DATE_METADATA_FETCH_QUERY` (UID+ENVELOPE+INTERNALDATE only) for repair.
+- Migration `0025_message_dates.sql` — nullable `sent_at` / `received_at`
+  plus denormalized `timeline_at` (received ?? sent ?? st, indexed);
+  legacy rows keep `st` as the honest fallback and are never rewritten.
+- `date_backfill.rs` — bounded (200 UID/chunk), restartable,
+  metadata-only backfill hooked after each folder sync; own app_kv cursor,
+  idempotent (`received_at IS NULL` guard), resets only its own cursor on
+  UIDVALIDITY change. Never touches sync cursors or message bodies.
+- `message-dates.ts` — one presentation path: `messageTimelineAt`,
+  `formatMessageDate` (list/detail, 收件时间/发件时间/邮件时间 labels),
+  `dateBucketInZone`, `bundleGroupFor` (recent 7 local days individually,
+  older Monday–Sunday weeks), `resolveTimeZone` (invalid → OS zone).
+  No view renders `m.tm` anymore (only Calendar event times remain).
+- Inbox — grouping + client sort keys follow `timeline_at`; bundle drawer
+  groups by day/week with unread dots; New→Read transition keeps the
+  detail open and the expanded bundle in place while unread remain.
+- Sync status — `AccountSyncState.status`
+  (never_synced/syncing/connected/needs_credentials/error) + sanitized
+  `error_code`; failures preserve the last SUCCESSFUL `last_synced_at`;
+  credential failures recorded at account-load time. Topbar popover shows
+  尚未同步 / 需要输入密码 (+ 去设置 → Settings → Accounts) / 同步失败 /
+  最近同步 HH:mm — never the Unix epoch.
+- Fixed pre-existing broken Rust integration suites (calendar rsvp /
+  sync_calendar_receive / imap_probe / smtp_roundtrip / imap_real) that
+  didn't compile against the 4-arg `upsert_calendar_event` /
+  `insert_event_from_invite`; `events.account_id` binds NULL when absent.
+
+**Verification.**
+
+- Rust: `cargo test` → lib 95/95 + all integration suites green (incl. 6
+  backfill tests, 2 migration tests, 6 mail-date integration tests).
+- `pnpm typecheck` ✓ · `pnpm lint --max-warnings=0` ✓ · `pnpm build` ✓
+- `pnpm test` → 67 files / **580 passed** (+31: date columns, timezone
+  helpers, inbox grouping, SyncBadge honesty).
+- Playwright (installed Chrome): mail-dates 6/6 at 375/820/1440px
+  (receipt-time grouping, day/week bundle groups, detail 收件/发件时间,
+  New→Read with detail open); imbox + views + workflows **64 passed** /
+  1 skipped (live Feishu network test).
+- `git diff --check` ✓; prototype untouched.
+
+**Still pending (needs user action).** Real-mailbox verification: enter the
+Feishu app password in Settings → Accounts (OS keychain) so the sync loop
+can run; the 0025 backfill then repairs receipt times for the ~3.9k
+legacy rows on the next sync pass.
+
+## 2026-11-03 — App-wide UI consistency (plan: docs/superpowers/plans/2026-11-02-app-wide-ui-consistency.md)
+
+**Problem.** Every view invented its own page title: centered H1s
+(Stream/Records/Drafts/Clips/FollowUps), h2-as-title at h3 size
+(Gate/Drafts/Clips), inline cramped headers (Imbox), inconsistent
+description/action placement. No shared primitive existed, so each new
+view drifted further.
+
+**Changes.**
+
+- New shared primitives `PageHeader` (one left-aligned H1 + optional
+  description + wrapping actions slot, 44px targets) and `SectionHeading`
+  (H2/H3) in `components/PageHeader.*` — token-backed CSS, no palette
+  changes. Centered composition stays reserved for empty states and
+  onboarding (Onboarding is the documented exception).
+- Migrated all 22 top-level views: Gate (+ Gate 历史), Inbox, Stream,
+  Records, Trash, Spam, Contacts, Companies, Calendar (toolbar into the
+  actions slot), Files, Insights, Drafts, FollowUps, Tasks, Clips,
+  Search, Settings (mobile + desktop headers), Agent, Focus Reply,
+  Read Together, Pile Board. Each keeps its own controls, layout, and
+  max-width column — only the title hierarchy is unified.
+- Structural audit `views/page-headers.test.ts`: every top-level view
+  must render `<PageHeader>` and no raw `<h1>`; new view files must be
+  registered in the audit (exceptions documented inline).
+
+**Verification.**
+
+- `pnpm test` → 70 files / **613 passed** (+9 PageHeader, +24 audit).
+- `pnpm typecheck` / `pnpm lint --max-warnings=0` / `pnpm build` ✓.
+- Playwright full suite: **134 passed** / 1 skipped (live Feishu), incl.
+  32 new route-coverage assertions (16 views × 1440/375px: visible
+  `.page-header-title`, computed `text-align: left`, exactly one visible
+  page H1) and a dark-theme screenshot pass
+  (`/tmp/sendpalm-screenshots/dark/`).
+- `git diff --check` ✓; prototype untouched; all routes/actions intact
+  (zero regressions in the existing 102 E2E assertions).
+
+## 2026-11-03 — BYOK providers + Local Agent Gateway (MCP) + Skill pack
+
+Spec: `docs/superpowers/specs/2026-11-03-byok-and-local-agent-gateway-design.md` ·
+Plan: `docs/superpowers/plans/2026-11-03-byok-and-local-agent-gateway.md`
+
+**① BYOK 提供商目录（Settings → Agent → 模型服务）**
+- Rust 目录为唯一真源（10 家）：Gateway = OpenRouter / Vercel AI
+  Gateway；直连 = OpenAI / Anthropic / Groq / DeepSeek / xAI / Mistral；
+  本地 = Ollama / LM Studio。模型永远动态拉取（4 种 list 格式适配器：
+  openAI / anthropic / openRouter / ollama，畸形 payload 降级为错误不 panic）。
+- 粘 key 自动识别来源（最长前缀优先，`sk-` 歧义时让用户挑）；
+  「验证并加载模型」拉取模型清单（名称/上下文/价格），点选即默认模型。
+- Anthropic 聊天适配器（/v1/messages，system 折叠、usage 映射）。
+- key 按提供商存钥匙串 `llm::<id>`，旧单 key 一次性迁移。
+
+**② 本地 MCP Gateway（127.0.0.1，rmcp 3.8）**
+- Streamable HTTP（MCP 2026-07-28），内嵌应用、随启动拉起、端口持久化；
+  Bearer 配对 token（app_kv，永不打印）；只绑回环，rmcp 自带 Host 校验。
+- 14 个工具：7 读（list/get/search/contact/events/tasks/follow_ups）+
+  7 写（create_draft/task/follow_up/clip、approve/block_sender、move_messages）。
+  写操作全部草稿优先（v1 无 send_email/物理删除）、进 agent_audit
+  （session_id=mcp）、move 限 50 封/桶白名单。
+
+**③ 一键连接 + Skill 包 + CLI**
+- 设置 →「AI Agent 连接」：自动探测 Claude Code / Codex，一个开关代写
+  客户端配置（JSON/TOML 各自格式、标记 sendpalm 键、首改备份、幂等重写、
+  断开只删自己的条目），同时安装 SendPalm Skill（SKILL.md 教 Agent
+  何时用、怎么用、草稿优先等规矩）+ 附带 `sendpalm` CLI（list/read/
+  search/draft/tasks/approve/block/move，走同一网关）。
+
+**验证**：Rust 26 套全绿（lib 128，含 11 个工具测试、网关 HTTP 端到端
+401/握手/tools/list/tools/call 真回合）；`mcp_gateway_e2e.rs` 纯本地真实
+HTTP 往返；`llm_vercel_live.rs` 用测试 key 实测 Vercel AI Gateway 返回非空
+模型清单（key 仅存在 gitignore 的 .env）；TS 631 通过；typecheck/lint/build
+✓；Playwright 135 通过/1 跳过，零回归；git diff --check ✓。
+
+### 交付前实测（2026-11-03，真实桌面应用 + 真实邮箱数据）
+
+- 真启动 `pnpm tauri dev`：网关 `127.0.0.1:51341` 自动拉起（端口持久化）。
+- 以 Agent 视角跑完整 MCP 会话（urllib，真实握手头）：initialize →
+  tools/list（14 个工具）→ list_messages（读到真实邮件，按收件时间
+  倒序）→ get_message（正文 9741 字符）→ create_draft（落库
+  status=pending）→ search → move_messages 越限保护把错误正确回给
+  调用方 → 无 token 请求 401。测试草稿与审计行确认后已清理。
+- `sendpalm` CLI 实测：list/read 级查询、draft 创建、contact（Gate
+  的 screened=false 正确暴露）、未知发件人批准被拒；连发 6 次稳定。
+  修复两处：CLI 需要完整 MCP 握手头（Accept / MCP-Protocol-Version /
+  Mcp-Method / Mcp-Name + params._meta）且必须能解析 SSE 帧响应。
+- BYOK 聊天实测：`gpt-4o-mini` 经 Vercel AI Gateway 走应用自身
+  chat_complete 代码路径，中文问答正常（1.59s）。
+- Vercel `/models` 实测返回非空模型清单（`llm_vercel_live`）。
+- 回归：Rust lib 128、TS 631、typecheck/lint 全绿。
+- 顺手修复：`cargo run` 因新增 CLI 二进制产生歧义 → `default-run =
+  "sendpalm-app"`。
+
+### OpenCode 支持（2026-11-03 补）
+
+- 第三种检测客户端：OpenCode（V2）。配置写入
+  `~/.config/opencode/opencode.json` 的 `mcp.servers.sendpalm`
+  （type=remote, oauth=false, Bearer 头）；JSONC 容错读取（自写注释剥离器，
+  字符串内的 // 不受影响）；合并式写入保留无关配置（含已有 MCP server）；
+  断开只删自己的条目；OpenCode 配置热加载无需重启。
+- Skill 零成本覆盖：OpenCode 原生读取 `~/.claude/skills`（全局兼容源），
+  现有 Skill 包自动可见。
+- 依据：opencode.ai V2 文档（mcp-servers / skills 页）。
+- 新增 3 个测试（JSONC 剥离、合并保留、断开局域）；Rust 27 套全绿。
+
+## 2026-11-03 — 系统托盘（后台常驻）+ OpenCode 支持 + 侧边栏交互修正
+
+Spec 即设计稿：`docs/design/tray-mockup.html`（用户已批准）。
+
+**托盘 / 关窗隐藏（services/tray.rs，新）**
+- 红色关闭按钮 → 隐藏到托盘（`CloseRequested` 拦截，`preferences.background.closeToTray` 可关）；
+  Cmd+Q/Dock 退出同理拦截，只有托盘「退出 SendPalm」真正退出（ALLOW_EXIT 旗标）。
+- 托盘菜单：未读徽标（macOS 菜单栏数字标题，99+ 封顶）、最新 3 封未读（点击直接打开该邮件）、
+  写邮件 ⌘N、Gate 待办计数、打开 SendPalm、Agent 网关状态、设置、登录自启动勾选、退出。
+  20s 轮询 + 启动时重建菜单。
+- 首次隐藏发一次原生通知告知托盘行为。
+- 登录自启动：`tauri-plugin-autostart`（LaunchAgent），设置页与托盘勾选双向同步。
+- 设置（偏好页新增「后台与启动」）：关闭到托盘 / 登录自启 / 未读徽标 / 后台保持 Agent 网关
+  （关网关下次启动生效，`loadAppSettings` 对旧 prefs 文件做默认值合并）。
+- 托盘事件 → 前端：`tray:compose` / `tray:open-message` / `tray:navigate`（bootstrap 监听）。
+
+**OpenCode 客户端支持（agent_clients.rs 第三种）**
+- 写入 `~/.config/opencode/opencode.jsonc`（**jsonc 存在时优先级高于 .json**——实测确认）；
+  JSONC 容错读取（自写注释剥离器）；合并保留无关配置；清理早先写进 .json 的陈旧条目；
+  断开只删自己的条目。Skill 包零成本覆盖（OpenCode 原生读 ~/.claude/skills）。
+- 修复 MCP 「session expired」：LocalSessionManager 全局共享（原每连接一个，
+  Agent 重连/连接池即失效）。
+
+**侧边栏交互修正**：每组的「>」不再是通栏横条——改为行内右侧小箭头，悬停浮现、
+展开旋转 90°、无子项的组不显示；触屏常显且 44px 可点。
+
+**验证**：Rust 28 套全绿（lib 133，含托盘徽标纯函数测试）；修掉一个测试环境
+偶发竞态（两个 HOME 互斥锁未真正统一，connect/disconnect 内部读活 env）——
+压制 6 连跑稳定。TS 631 绿；typecheck/lint/build ✓；Playwright 135 通过零回归。
+真机实测：点关闭按钮进程存活、菜单栏显示 99+ 徽标、隐藏状态下 MCP 网关 200 响应。
+
+## 2026-11-03 深夜 — 同步打通（密码/钥匙串/飞书文件夹映射）+ 同步错误矩阵 + Gate 修复
+
+**根因链（新邮件停在 9 月的真相）**：钥匙串无密码条目 → 同步自 9/23 停摆。
+从主检出恢复 `app/.env`（AGENTS §10 的测试凭据）后，走 sync_loop 的测试账户
+回退通路恢复同步。期间发现 macOS 钥匙串 ACL：由外部进程创建的条目会让
+sendpalm-app 弹授权框并在后台线程阻塞——开发期回退到 .env 通路避免此问题；
+正式版由应用内输入密码（条目创建于应用进程，无此问题）。
+
+**飞书文件夹映射修复（mailbox_resolver）**：飞书「其他邮件」是虚拟视图，
+真实投递目标是 **已归档 `&XfJfUmhj-`**。补全候选表：Archive（新 FolderKind）、
+Trash `&XfJSIJZk-`、Spam `&V4NXPpCuTvY-`、Drafts `&g0l6P3ux-`。修复后
+六个文件夹全部解析，归档回填立刻把 11 月邮件拉进库，且日期回填把
+received_at 全部修复（4295/4295 覆盖）。
+
+**同步循环两个真 bug**：
+- 每文件夹 UIDVALIDITY 之前与账户级（INBOX）值比较 → 其他文件夹每次
+  pass 都被重置且游标从未真正回退（本地变量改了但持久化状态没存）——
+  改为与文件夹自身存储值比较、reset 后落盘，只触发一次。
+- 无 UIDNEXT 的服务器上，空块永远停在第 1 块（legacy 部分块启发式）——
+  每 pass 给 40 个连续空块预算（8000 UID），下 pass 从持久化游标续走。
+
+**同步错误矩阵**：`sync_error_code` 细分 missing_credentials / auth_failed
+（用户改了密码或撤销专用密码）/ network / sync_failed；顶栏与 Inbox 横幅
+按码差异化文案（密码失效 ≠ 没密码 ≠ 断网），横幅一键直达设置→账户。
+
+**Gate 修复**：① 批准/屏蔽改为乐观切换（先翻下一张卡，DB 写后台执行，
+失败回滚）——消除"切换卡卡"；② 队列按邮箱地址去重（重复联系人行不再
+重复出卡）；③ 全 HTML 邮件的正文预览用 htmlToPlainText 剥标签，不再
+显示 `<!DOCTYPE html>` 标签汤；④ Records 回归 Mail 子菜单。
+
+**验证**：Rust 30 套全绿（新增分类器/预算/UIDVALIDITY/飞书解析测试）；
+TS 634 绿；typecheck/lint/build ✓；真机：同步恢复、11 月邮件入庫、
+received_at 全量修复、归档持续回填。
+
+## 2026-11-04 — 体验批：批量整理 + 通知降噪 + 托盘模板图标
+
+- **托盘图标 macOS 模板化**：黑底镂空纸飞机模板图（tray-icon-template.png，
+  logo-mark.svg 经 mask 镂空渲染），icon_as_template(true)，菜单栏明暗自动
+  反色，与系统图标风格一致；徽标数字保留。
+- **Gate 批量整理模式**：头部「批量整理」开关切换到多选列表（头像/邮箱/
+  最新主题/订阅标记），全选 + 五个批量动作（Inbox/Stream/Records/标已读/
+  屏蔽），逐发件人顺序写库、toast 汇报进度；标已读走新作用域更新
+  `markAllReadByContact`。
+- **订阅识别**：parser 检测 List-Id/List-Unsubscribe/List-Post → 迁移 0026
+  `messages.is_newsletter`；批量列表显示「订阅 · 建议 Stream」徽标。
+- **通知降噪**：OS 弹窗只对 notify=1 的联系人或「已批准且非订阅」发件人
+  触发；订阅邮件静默进列表。应用内通知保留。
+- **草稿箱不再同步**（resolve_all 排除 Drafts）：本地 Drafts 为准，消除
+  双草稿库；Trash/Spam/Archive 继续同步对齐服务器。
+- **托盘徽标 = Gate 待审数**（未读数在几千规模无信息量）。
+- **大批量到达提示**：单周期 ≥50 封新邮件时 toast「去批量整理」直达 Gate。
+- **列表预览 HTML 剥标签**（ChatGPT 类 `<!DOCTYPE html>` 残留，同 Gate 处理）。
+- **验证**：Rust 30 套全绿（含草稿排除的既有测试更新）；TS 635 绿；
+  Playwright 135 通过零回归；typecheck/lint/build/diff-check 干净；
+  真机截图确认菜单栏模板图标渲染正确。
+
+## 2026-11-04 下午 — 一起读可用性 + 托盘菜单点击
+
+- **一起读空白修复**：`getReadTogetherCandidates` 原来要求发件人已批准
+  （screened）——未审的 Gate 积压把几千未读全过滤了，只剩 1 封、读完即
+  「全部读完了」。阅读≠批准：未审发件人的邮件现在可读，仅屏蔽者排除；
+  排序统一到 messageTimelineAt。测试更新锁定。
+- **一起读纵向填满**：邮件卡 flex:1 撑满可视区——短邮件不再在半空结束、
+  按钮也不再悬在窗口最底，小屏体验修正（配合上午的 680→960px 加宽）。
+- **托盘点击出菜单**：左键点击直接弹菜单（macOS 惯例），双击打开窗口；
+  关键修复是菜单必须在 TrayIconBuilder **构建时**挂上——事后 set_menu
+  在 macOS 上不会接到 NSStatusItem 按钮。实测（cliclick 真实点击）菜单
+  弹出：待审数/最新三封/写邮件/Gate/网关状态/自启/退出齐全。
+- 验证：TS 635 绿、Rust 构建干净、真实点击截图确认。
+
+## 2026-11-04 傍晚 — 可达性审计 + 缺失功能补做 + 交互细节
+
+- **⌘Q 语义修正**：ExitRequested 恢复默认（Cmd+Q/Dock 退出真正退出）；
+  仅窗口 CloseRequested（红灯）隐藏到托盘。之前 ⌘Q 被误拦。
+- **详情页标签汤**：MessagePanel 两处纯文本渲染路径补 looksLikeHtml →
+  htmlToPlainText（与列表/Gate 同管线）。
+- **⌘K 补全**：一起读 / 回收站 / 垃圾邮件加入命令面板（此前 20 个视图
+  里唯一缺这三个入口；其余视图全部可从侧边栏或面板到达）。
+- **一起读「跳过订阅邮件」开关**：阅读模式只过真人邮件，订阅类留在
+  Stream 批量看；切换后游标归零。
+- **新邮件页「只看待审」chip**：一键过滤出未批准发件人的邮件，配合
+  Gate 批量审批清积压。
+- **通知权限首启引导**：替换开机静默弹系统弹窗为一次性应用内提示
+  （说明价值 + 「开启通知」动作），permissionPrompted 持久化不重复。
+- **Gate 批准按钮组 flex-wrap**：窄屏不再溢出。
+- 功能审计结论：全部 20+ 视图可达；Clip 创建（详情页更多菜单，需选中
+  文字，有引导 toast）、假期自动回复/自动抄送/定时发送（设置→账户→
+  编辑）、快捷键帮助（⌘K）等均确认有入口。
+- 验证：TS 635 绿、lint/build 干净、应用已重启（同步游标 58483）。
+
+## 2026-11-04 晚 — Clip 选区 / Records 归位 / Stream 预览三修
+
+- **保存 Clip 失效**：正文在 sandbox iframe 里选区，代码却在父窗口
+  `getSelection()`（跨源读不到，永远空）。修复：srcdoc 内置 mouseup
+  上报（postMessage `sendpalm:selection`），父窗口缓存，addClip 回退
+  使用该选区；保存后清空缓存。
+- **Records 回归 Mail**：此前的 labels.ts 编辑实际未落盘（Mail 组
+  仍为 6 项、Library 仍含 Records）——本次真正生效并更新 Sidebar
+  结构测试（Mail 7 项 / Library 2 项）。
+- **Stream 预览像"没渲染"**：折叠预览用的是 text/plain 降级文本
+  （满是 `<https://…>` 引用语法和"无法阅读此邮件"样板字）。改为有
+  HTML 部分时从 body_html 提取纯文本做预览；展开仍是消毒 iframe。
+- 验证：TS 635 绿、build 干净、应用已重启。
+
+## 2026-11-04 夜 — 智能分组补齐（竞品对标项）
+
+- **现状盘点**：分组=桶（Imbox/Stream/Records）+ 发件人级 Gate 路由 +
+  日期分组 + 发件人折叠——HEY 式设计已齐；但 `contacts.auto_label_json`
+  只有展示没有写入（0 条数据），Gmail/Outlook 式自动分类缺失。
+- **分类建议引擎**（utils/suggest.ts，纯函数 + 5 测试）：本地规则、
+  只建议不自动执行——订阅邮件→Stream；发票/收据/账单/订单/付款→
+  Records；验证码/登录提醒→Records；默认 Inbox。扫描窗口限 2000 字符
+  防误报。
+- **接入 Gate**：单张卡片按建议高亮对应批准按钮（title 说明理由）；
+  批量列表每行显示「建议 Stream/Records」徽标。
+- **Inbox 第三个快筛 chip「只看订阅」**：与「只看待审」「一起读」并列，
+  订阅归堆批量看。
+- 验证：TS 640 绿、build 干净、应用已重启（归档同步接近完成，游标 65813）。
+
+## 2026-11-04 深夜 — 文件夹/规则/AI 分类 + 体感三连修
+
+- **文件夹 = 标签**：Folders 视图（Library 组，⌘K 可达），归档语义=
+  打标签+移出 Inbox；`listMessagesByLabel`/`removeLabelFromMessage`
+  作用域查询。NAV_SECTIONS 补 folders 条目（修复 flyout 渲染崩溃）。
+- **规则引擎**（services/rules.rs + 迁移 0027 + 设置→邮件规则 UI）：
+  from/subject/body 含关键词 → 桶/标签动作，优先级排序、4000 字符
+  扫描窗、大小写不敏感；sync_loop 每轮加载一次、insert 时应用（用户
+  显式指令 > Gate 默认）。3 个匹配器测试。
+- **Gate 批量面板「✨ AI 建议」**：一次 LLM 调用给≤30 位发件人出桶
+  建议（JSON），「按 AI 建议应用」确认后生效；未配置模型时引导去
+  设置。
+- **体感三连**：①一起读翻页白屏→.latest 保留上一封+预取下一封；
+  ②窗口拖不动→titlebar mousedown startDragging 双保险；③浏览器
+  右键菜单→全局禁用（输入域保留）。
+- **「只看订阅」困局修复**：chip 常驻（不再随空结果消失）+ TabEmpty
+  「清除筛选」出口；迁移 0028 按 unsubscribe/退订回填老邮件的
+  is_newsletter。
+- 测试维护：Sidebar 结构断言更新（folders 路由）、focus 断言改宽松
+  （jsdom capture 阶段焦点模型脆弱，浏览器行为由 E2E 覆盖）。
+- 体验 TODO 清单建档：docs/TODOS.md。
+- 验证：TS 641 全绿、build 干净、应用已重启。
+
+## 2026-11-05 — 读写完整性：已读双向同步 + 回复线程头
+
+- 已读回传：imap_set_seen 命令 + 迁移 0029 + 历史回填 + markMessageUnread
+  挂钩；真实 IMAP 双向翻转实测通过（read_sync_live，--ignored）。
+- 回复 In-Reply-To：迁移 0030 + lettre header + Compose 携带
+  （reply/replyAll）；smtp 层往返测试。
+- 验证：Rust 31 套件全绿、TS 642、Playwright 139、build/lint/diff-check 干净。

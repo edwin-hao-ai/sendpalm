@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SendPalm 托盘设计稿</title>
+<style>
+  :root {
+    --paper: #F7F4EF; --paper-light: #FDFCFA; --paper-mid: #EFEAE2;
+    --ink: #231C33; --ink-2: #5A5468; --ink-3: #8B8496;
+    --palm: #0A8F63; --palm-soft: #E4F3EC;
+    --glass: rgba(253,252,250,.82);
+    --border: rgba(35,28,51,.10);
+    --danger: #C0392B; --amber: #B7791F;
+    --radius: 12px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "PingFang SC", "SF Pro Text", sans-serif;
+    background: linear-gradient(160deg, #EDE8DF, #E2DBCF);
+    color: var(--ink); padding: 48px 24px 96px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 30px; letter-spacing: -.01em; }
+  .sub { color: var(--ink-2); margin-top: 8px; max-width: 720px; line-height: 1.7; }
+  h2 { font-size: 18px; margin: 48px 0 6px; }
+  .note { color: var(--ink-3); font-size: 13px; margin-bottom: 20px; line-height: 1.6; }
+  .stage {
+    background:
+      radial-gradient(circle at 20% 0%, rgba(255,255,255,.5), transparent 60%),
+      linear-gradient(180deg, #D8D2C6, #CFC8BA);
+    border-radius: 16px; padding: 36px 28px 28px;
+    display: flex; flex-direction: column; gap: 28px; align-items: center;
+    border: 1px solid rgba(0,0,0,.06);
+  }
+
+  /* ── macOS 菜单栏 ─────────────────────────── */
+  .menubar {
+    width: 100%; background: var(--glass);
+    backdrop-filter: blur(24px) saturate(1.8); -webkit-backdrop-filter: blur(24px) saturate(1.8);
+    border-radius: 10px; border: 0.5px solid var(--border);
+    height: 30px; display: flex; align-items: center; padding: 0 14px;
+    font-size: 13px; color: var(--ink); box-shadow: 0 6px 24px rgba(0,0,0,.10);
+    justify-content: space-between;
+  }
+  .menubar .left { display: flex; gap: 16px; align-items: center; font-weight: 600; }
+  .menubar .right { display: flex; gap: 14px; align-items: center; color: var(--ink-2); }
+  .tray-icon {
+    position: relative; display: inline-flex; width: 22px; height: 22px;
+    align-items: center; justify-content: center;
+    background: var(--palm); border-radius: 6px; color: #fff; font-size: 12px; font-weight: 700;
+  }
+  .tray-badge {
+    position: absolute; top: -6px; right: -8px; min-width: 15px; height: 15px;
+    background: var(--danger); color: #fff; border-radius: 8px; font-size: 9px;
+    display: flex; align-items: center; justify-content: center; padding: 0 3px;
+    box-shadow: 0 0 0 1.5px var(--paper-light); font-weight: 700;
+  }
+
+  /* ── 托盘下拉菜单 ─────────────────────────── */
+  .menu {
+    width: 320px; background: var(--glass);
+    backdrop-filter: blur(28px) saturate(1.8); -webkit-backdrop-filter: blur(28px) saturate(1.8);
+    border-radius: var(--radius); border: 0.5px solid var(--border);
+    box-shadow: 0 12px 40px rgba(0,0,0,.18), 0 0 0 0.5px rgba(255,255,255,.4) inset;
+    padding: 8px; font-size: 13px;
+  }
+  .menu-head {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px 10px;
+    border-bottom: 0.5px solid var(--border); margin-bottom: 6px;
+  }
+  .menu-head .logo { width: 24px; height: 24px; background: var(--palm); border-radius: 7px; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px; }
+  .menu-head b { font-size: 13px; }
+  .menu-head .status { margin-left: auto; font-size: 11px; color: var(--palm); display: flex; align-items: center; gap: 4px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--palm); }
+  .menu-item {
+    display: flex; align-items: center; gap: 10px; padding: 7px 10px;
+    border-radius: 8px; cursor: default; color: var(--ink);
+  }
+  .menu-item:hover { background: var(--palm-soft); }
+  .menu-item .ico { width: 18px; text-align: center; color: var(--ink-2); }
+  .menu-item .kbd { margin-left: auto; color: var(--ink-3); font-size: 12px; }
+  .menu-sep { height: 0.5px; background: var(--border); margin: 6px 10px; }
+  .mail-preview {
+    display: flex; gap: 10px; padding: 8px 10px; border-radius: 8px; align-items: flex-start;
+  }
+  .mail-preview:hover { background: var(--paper-mid); }
+  .mail-preview .avatar { width: 28px; height: 28px; border-radius: 50%; background: #D9B8E0; color: #5B2C6F; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+  .mail-preview .t { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+  .mail-preview .p { color: var(--ink-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+  .mail-preview .when { margin-left: auto; font-size: 11px; color: var(--ink-3); flex-shrink: 0; }
+  .section-label { font-size: 11px; color: var(--ink-3); padding: 6px 10px 2px; font-weight: 600; }
+  .agent-state { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); padding: 6px 10px; }
+  .agent-state .pill { background: var(--palm-soft); color: var(--palm); border-radius: 20px; padding: 1px 8px; font-size: 11px; font-weight: 600; }
+
+  .row { display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; }
+  .col { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+
+  /* ── 设置页 toggle ────────────────────────── */
+  .settings-card {
+    width: 420px; background: var(--paper-light); border-radius: var(--radius);
+    border: 0.5px solid var(--border); padding: 18px 20px; box-shadow: 0 4px 16px rgba(0,0,0,.05);
+  }
+  .settings-card h3 { font-size: 14px; margin-bottom: 4px; }
+  .settings-card .desc { font-size: 12px; color: var(--ink-3); margin-bottom: 14px; }
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-top: 0.5px solid var(--border); font-size: 13px; }
+  .toggle-row .hint { display: block; font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+  .switch { width: 40px; height: 24px; border-radius: 20px; background: var(--palm); position: relative; flex-shrink: 0; }
+  .switch::after { content: ""; position: absolute; width: 20px; height: 20px; border-radius: 50%; background: #fff; top: 2px; right: 2px; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+  .switch.off { background: #C9C3B8; }
+  .switch.off::after { right: auto; left: 2px; }
+
+  /* ── 关闭窗口时的提示 toast ───────────────── */
+  .toast {
+    width: 340px; background: var(--ink); color: #F5F2EA; border-radius: var(--radius);
+    padding: 14px 16px; font-size: 13px; display: flex; gap: 12px; align-items: flex-start;
+    box-shadow: 0 12px 32px rgba(0,0,0,.3);
+  }
+  .toast b { color: #fff; }
+  .toast .mini { font-size: 12px; color: #B9B2C6; margin-top: 3px; line-height: 1.5; }
+  .toast .undo { color: #7BD6AF; font-weight: 600; white-space: nowrap; }
+
+  .dark { filter: none; }
+  .dark .menu, .dark .menubar { background: rgba(38,32,52,.78); color: #EFEAF6; border-color: rgba(255,255,255,.12); }
+  .dark .menu-item, .dark .mail-preview .t { color: #EFEAF6; }
+  .dark .menu-item:hover, .dark .mail-preview:hover { background: rgba(122,214,175,.12); }
+  .dark .mail-preview .p { color: #B9B2C6; }
+  .dark .menu-head b { color: #fff; }
+  .dark .section-label, .dark .mail-preview .when, .dark .agent-state { color: #8F88A0; }
+  .dark .menu-sep, .dark .menu-head { border-color: rgba(255,255,255,.12); }
+  .dark .menu-item .kbd, .dark .menu-item .ico { color: #8F88A0; }
+  .dark .agent-state .pill { background: rgba(122,214,175,.15); color: #7BD6AF; }
+  .dark .menu-head .status { color: #7BD6AF; }
+  .dark .menu-head .logo { background: #7BD6AF; color: #1E2B25; }
+
+  .principle { background: var(--paper-light); border: 0.5px solid var(--border); border-left: 3px solid var(--palm); border-radius: 8px; padding: 12px 16px; font-size: 13px; line-height: 1.7; color: var(--ink-2); margin-bottom: 12px; }
+  .principle b { color: var(--ink); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>SendPalm 托盘（后台常驻）设计稿</h1>
+  <p class="sub">解决的核心问题：<b>关掉窗口 ≠ 退出应用</b>。只要 SendPalm 在托盘里活着，新邮件推送、后台同步、以及 AI Agent 通过本地 Gateway 读写邮件就全部保持可用。点红色关闭按钮时窗口隐藏到托盘；<b>退出只发生在托盘菜单里</b>（或 ⌘Q）。</p>
+
+  <h2>① 托盘菜单一览（点菜单栏图标展开）</h2>
+  <p class="note">macOS 菜单栏 / Windows·Linux 系统托盘通用结构：最新邮件 → 快捷动作 → 连接状态 → 设置 → 退出。未读数就是菜单栏图标上的小红徽标。</p>
+  <div class="stage">
+    <div class="menubar" style="max-width: 560px;">
+      <div class="left"><span>⌘</span><span>Finder</span><span style="font-weight:400">文件</span><span style="font-weight:400">编辑</span></div>
+      <div class="right">
+        <span class="tray-icon">S<span class="tray-badge">3</span></span>
+        <span>🔋 100%</span><span>⌘</span><span>11月3日 周一</span>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col">
+        <div class="menu">
+          <div class="menu-head">
+            <span class="logo">S</span>
+            <b>SendPalm</b>
+            <span class="status"><span class="dot"></span>同步正常 · 1 个账户</span>
+          </div>
+          <div class="section-label">新邮件 · 3</div>
+          <div class="mail-preview">
+            <span class="avatar">AC</span>
+            <span><span class="t">App Store Connect</span><br><span class="p">Review of your app is complete…</span></span>
+            <span class="when">07:24</span>
+          </div>
+          <div class="mail-preview">
+            <span class="avatar" style="background:#BFE3D2;color:#1E5B41">迪</span>
+            <span><span class="t">Hong Kong Disneyland</span><br><span class="p">万圣狂欢 · 年度反派派对</span></span>
+            <span class="when">昨天</span>
+          </div>
+          <div class="mail-preview">
+            <span class="avatar" style="background:#F5D9C0;color:#7A4A1F">TE</span>
+            <span><span class="t">Technically</span><br><span class="p">What's Google doing with AI?</span></span>
+            <span class="when">周一</span>
+          </div>
+          <div class="menu-sep"></div>
+          <div class="menu-item"><span class="ico">✉️</span>写邮件<span class="kbd">⌘N</span></div>
+          <div class="menu-item"><span class="ico">🛡</span>处理 Gate 筛选<span class="kbd">3</span></div>
+          <div class="menu-item"><span class="ico">📥</span>打开 SendPalm<span class="kbd">⌘⇧O</span></div>
+          <div class="menu-sep"></div>
+          <div class="agent-state">Agent 连接 <span class="pill">OpenCode · 已连接</span></div>
+          <div class="menu-item"><span class="ico">⚙️</span>设置…</div>
+          <div class="menu-item"><span class="ico">🚀</span>登录时自动启动</div>
+          <div class="menu-item" style="color:var(--danger)"><span class="ico">⏏</span>退出 SendPalm<span class="kbd">⌘Q</span></div>
+        </div>
+        <span style="font-size:12px;color:var(--ink-3)">亮色 · 有未读</span>
+      </div>
+
+      <div class="col dark">
+        <div class="menu">
+          <div class="menu-head">
+            <span class="logo">S</span>
+            <b>SendPalm</b>
+            <span class="status"><span class="dot" style="background:#7BD6AF"></span>后台运行中</span>
+          </div>
+          <div class="section-label">没有新邮件</div>
+          <div class="agent-state" style="padding-top:10px">Agent 连接 <span class="pill">已连接</span></div>
+          <div class="menu-sep"></div>
+          <div class="menu-item"><span class="ico">✉️</span>写邮件<span class="kbd">⌘N</span></div>
+          <div class="menu-item"><span class="ico">📥</span>打开 SendPalm<span class="kbd">⌘⇧O</span></div>
+          <div class="menu-item"><span class="ico">⚙️</span>设置…</div>
+          <div class="menu-item" style="color:#E88">⏏ 退出 SendPalm</div>
+        </div>
+        <span style="font-size:12px;color:var(--ink-3)">暗色 · 零收件（简洁态）</span>
+      </div>
+    </div>
+  </div>
+
+  <h2>② 设置里新增「后台与启动」</h2>
+  <div class="stage" style="align-items:flex-start;">
+    <div class="settings-card">
+      <h3>后台与启动</h3>
+      <div class="desc">关掉窗口时 SendPalm 继续在后台收取邮件、推送通知，并保持本地 Agent 网关可用。</div>
+      <div class="toggle-row">
+        <span>关闭窗口时最小化到托盘<b class="hint">红色关闭按钮隐藏窗口；从托盘菜单或 ⌘Q 退出</b></span>
+        <span class="switch"></span>
+      </div>
+      <div class="toggle-row">
+        <span>登录时自动启动</span>
+        <span class="switch"></span>
+      </div>
+      <div class="toggle-row">
+        <span>显示菜单栏未读徽标</span>
+        <span class="switch"></span>
+      </div>
+      <div class="toggle-row">
+        <span>后台保持 Agent 网关<b class="hint">关闭后 AI Agent 仍可读写邮件；从托盘菜单可暂停</b></span>
+        <span class="switch"></span>
+      </div>
+    </div>
+  </div>
+
+  <h2>③ 第一次关闭窗口时的提示</h2>
+  <div class="stage" style="align-items:flex-start;">
+    <div class="toast">
+      <span>🌴</span>
+      <span><b>SendPalm 已最小化到托盘</b><div class="mini">邮件推送与 Agent 网关继续在后台运行。再次点击托盘图标或按 ⌘⇧O 唤回。</div></span>
+      <span class="undo">知道了</span>
+    </div>
+  </div>
+
+  <h2>设计要点</h2>
+  <div class="principle"><b>关窗 ≠ 退出。</b>macOS 上红色关闭按钮默认隐藏窗口（应用仍在 Dock）；真正的退出只在托盘菜单 / ⌘Q。Windows 同理（X → 托盘）。</div>
+  <div class="principle"><b>托盘 = 状态 + 入口，不是第二个 App。</b>菜单只放：最新几封邮件（点击直接打开对应会话）、写邮件、Gate 待办、连接状态、设置、退出。</div>
+  <div class="principle"><b>Agent 网关在后台保持可用</b>——这正是你提到的痛点：托盘活着，OpenCode / Claude Code 随时能读写邮件，不需要主窗口开着。</div>
+  <div class="principle"><b>未读徽标</b>实时显示在托盘图标上；数字为 0 时徽标消失，菜单切换为简洁态。</div>
+</div>
+</body>
+</html>
