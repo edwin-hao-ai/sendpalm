@@ -58,7 +58,10 @@ fn case_insensitive_match_for_inbox() {
 }
 
 #[test]
-fn resolve_all_returns_inbox_then_sent() {
+fn resolve_all_returns_inbox_then_sent_without_drafts() {
+    // Drafts are deliberately excluded: SendPalm's local Drafts box is
+    // canonical and syncing the server drafts folder produced two
+    // competing draft stores.
     let mailboxes = vec![
         "&XfJT0ZAB-".to_string(),
         "INBOX".to_string(),
@@ -67,11 +70,7 @@ fn resolve_all_returns_inbox_then_sent() {
     let resolved = resolve_all(&mailboxes);
     assert_eq!(
         resolved,
-        vec![
-            "INBOX".to_string(),
-            "&XfJT0ZAB-".to_string(),
-            "&XfJ8T-".to_string(),
-        ]
+        vec!["INBOX".to_string(), "&XfJT0ZAB-".to_string()]
     );
 }
 

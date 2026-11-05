@@ -94,12 +94,12 @@ async fn imap_sync_returns_messages() {
         bundle.highest_uid,
         bundle.messages.len()
     );
-    for (uid, m) in bundle.messages.iter().take(3) {
+    for fetched in bundle.messages.iter().take(3) {
         eprintln!(
             "[imap] uid={} from={} subj={}",
-            uid,
-            m.sender_email,
-            m.subject.chars().take(50).collect::<String>()
+            fetched.uid,
+            fetched.parsed.sender_email,
+            fetched.parsed.subject.chars().take(50).collect::<String>()
         );
     }
 }

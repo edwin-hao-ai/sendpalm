@@ -5,6 +5,7 @@
 use super::{parser, EmailCredentials, SyncReport};
 use async_imap::{Client, Session};
 use async_native_tls::{TlsConnector, TlsStream};
+use chrono::{DateTime, FixedOffset, Utc};
 use futures::StreamExt;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
@@ -12,6 +13,15 @@ use tokio_util::compat::{Compat, TokioAsyncReadCompatExt};
 
 use async_imap::extensions::idle::IdleResponse;
 use std::time::Duration;
+
+/// FETCH attributes for the incremental new-mail sync. `INTERNALDATE` is the
+/// mail server's own receipt timestamp — the only trustworthy timeline value,
+/// since the sender controls the `Date` header.
+pub const SYNC_FETCH_QUERY: &str = "(FLAGS UID ENVELOPE INTERNALDATE BODY.PEEK[])";
+
+/// FETCH attributes for the date-repair backfill. Metadata only: no message
+/// bodies are downloaded, so repairing a 4k-message mailbox stays cheap.
+pub const DATE_METADATA_FETCH_QUERY: &str = "(UID ENVELOPE INTERNALDATE)";
 
 /// Hard cap per sync tick — protects the UI from 100k+ message mailboxes.
 /// We round-trip per chunk so a slow IMAP server doesn't hold the connection.
@@ -208,13 +218,14 @@ impl ImapClient {
         let range = format!("{start_uid}:{end_uid}");
         eprintln!("[imap] FETCH {range} on {mailbox_name}");
         let mut stream = session
-            .uid_fetch(&range, "(FLAGS UID ENVELOPE BODY.PEEK[])")
+            .uid_fetch(&range, SYNC_FETCH_QUERY)
             .await
             .map_err(|e| format!("fetch: {e}"))?;
 
         while let Some(msg) = stream.next().await {
             let msg = msg.map_err(|e| format!("fetch item: {e}"))?;
             let Some(uid) = msg.uid else { continue };
+            let received_at = utc_from_internal_date(msg.internal_date());
             let body_opt = msg.body();
             let Some(body_bytes) = body_opt else { continue };
             let raw = body_bytes.to_vec();
@@ -223,7 +234,11 @@ impl ImapClient {
                     if uid > highest_uid {
                         highest_uid = uid;
                     }
-                    messages.push((uid, parsed));
+                    messages.push(FetchedMessage {
+                        uid,
+                        parsed,
+                        received_at,
+                    });
                 }
                 Err(e) => {
                     eprintln!("[imap] parse uid={uid} failed: {e}");
@@ -241,6 +256,85 @@ impl ImapClient {
             highest_uid,
             messages,
         })
+    }
+
+    /// Metadata-only date fetch for the repair backfill: UID, ENVELOPE and
+    /// INTERNALDATE — never message bodies. `start_uid`/`end_uid` is an
+    /// inclusive UID range (RFC 3501 §6.4.8).
+    pub async fn fetch_date_metadata(
+        &self,
+        mailbox_name: &str,
+        start_uid: u32,
+        end_uid: u32,
+    ) -> Result<Vec<super::date_backfill::DateMetadataRow>, String> {
+        use super::date_backfill::DateMetadataRow;
+
+        let mut session = self.connect().await?;
+        let wire_name = encode_utf7_imap(mailbox_name);
+        session
+            .select(&wire_name)
+            .await
+            .map_err(|e| format!("select {mailbox_name} ({wire_name}): {e}"))?;
+
+        let range = format!("{start_uid}:{end_uid}");
+        let mut stream = session
+            .uid_fetch(&range, DATE_METADATA_FETCH_QUERY)
+            .await
+            .map_err(|e| format!("fetch date metadata: {e}"))?;
+
+        let mut rows = Vec::new();
+        while let Some(msg) = stream.next().await {
+            let msg = msg.map_err(|e| format!("fetch date metadata item: {e}"))?;
+            let Some(uid) = msg.uid else { continue };
+            let received_at = utc_from_internal_date(msg.internal_date());
+            // The envelope's date is the server's parse of the sender's
+            // Date header — same value parse_email would extract, without
+            // downloading the body.
+            let sent_at = msg
+                .envelope()
+                .and_then(|env| env.date.as_ref())
+                .and_then(|raw| {
+                    std::str::from_utf8(raw)
+                        .ok()
+                        .and_then(|s| DateTime::parse_from_rfc2822(s.trim()).ok())
+                })
+                .map(|d| d.with_timezone(&Utc));
+            rows.push(DateMetadataRow {
+                uid,
+                sent_at,
+                received_at,
+            });
+        }
+        drop(stream);
+        let _ = session.logout().await;
+        Ok(rows)
+    }
+
+    /// Write the \\Seen flag back to the server for one message so the
+    /// read state is two-way (local read → server read, and vice versa
+    /// on the next sync). Best-effort: callers treat failure as
+    /// "syncs next time".
+    pub async fn set_seen(
+        &self,
+        mailbox_name: &str,
+        uid: u32,
+        seen: bool,
+    ) -> Result<(), String> {
+        let mut session = self.connect().await?;
+        let wire_name = encode_utf7_imap(mailbox_name);
+        session
+            .select(&wire_name)
+            .await
+            .map_err(|e| format!("select {mailbox_name}: {e}"))?;
+        let query = if seen { "+FLAGS (\\Seen)" } else { "-FLAGS (\\Seen)" };
+        let mut stream = session
+            .uid_store(uid.to_string(), query)
+            .await
+            .map_err(|e| format!("uid_store: {e}"))?;
+        while stream.next().await.is_some() {}
+        drop(stream);
+        let _ = session.logout().await;
+        Ok(())
     }
 
     /// Fetch the raw RFC822 bytes of a single message by UID. Used by the
@@ -276,6 +370,22 @@ impl ImapClient {
     }
 }
 
+/// One parsed message plus the attributes that are not part of the MIME body.
+///
+/// `received_at` is the mail server's `INTERNALDATE` (RFC 3501 §2.3.3) mapped to
+/// UTC. It is `None` only when the server omits the attribute.
+#[derive(Debug, Clone)]
+pub struct FetchedMessage {
+    pub uid: u32,
+    pub parsed: super::parser::ParsedMessage,
+    pub received_at: Option<DateTime<Utc>>,
+}
+
+/// Map an IMAP `INTERNALDATE` (server clock, with its own UTC offset) to UTC.
+pub fn utc_from_internal_date(value: Option<DateTime<FixedOffset>>) -> Option<DateTime<Utc>> {
+    value.map(|d| d.with_timezone(&Utc))
+}
+
 /// One fetch round result.
 #[derive(Debug)]
 pub struct SyncBundle {
@@ -283,7 +393,7 @@ pub struct SyncBundle {
     pub uid_validity: u32,
     pub uid_next: Option<u32>,
     pub highest_uid: u32,
-    pub messages: Vec<(u32, super::parser::ParsedMessage)>,
+    pub messages: Vec<FetchedMessage>,
 }
 
 impl SyncBundle {
@@ -419,4 +529,37 @@ fn percent_encode(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod date_tests {
+    use super::*;
+
+    fn fixed(rfc3339: &str) -> DateTime<FixedOffset> {
+        DateTime::parse_from_rfc3339(rfc3339).unwrap()
+    }
+
+    #[test]
+    fn internal_date_is_converted_to_utc() {
+        let converted = utc_from_internal_date(Some(fixed("2024-01-01T18:00:00+08:00")));
+        assert_eq!(
+            converted.map(|d| d.to_rfc3339()),
+            Some("2024-01-01T10:00:00+00:00".to_string())
+        );
+    }
+
+    #[test]
+    fn missing_internal_date_stays_empty() {
+        assert_eq!(utc_from_internal_date(None), None);
+    }
+
+    #[test]
+    fn date_metadata_query_never_requests_a_body() {
+        assert!(DATE_METADATA_FETCH_QUERY.contains("INTERNALDATE"));
+        assert!(DATE_METADATA_FETCH_QUERY.contains("ENVELOPE"));
+        assert!(
+            !DATE_METADATA_FETCH_QUERY.contains("BODY"),
+            "backfill must stay metadata-only: {DATE_METADATA_FETCH_QUERY}"
+        );
+    }
 }

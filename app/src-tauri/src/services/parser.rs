@@ -21,7 +21,16 @@ pub struct ParsedMessage {
     pub subject: String,
     pub body_text: String,
     pub body_html: Option<String>,
-    pub date: DateTime<Utc>,
+    /// Sender-declared timestamp, parsed from a valid RFC 5322 `Date` header.
+    /// `None` when the header is missing or malformed — the parser never
+    /// substitutes "now" because that would make old mail look freshly sent.
+    /// The IMAP server's `INTERNALDATE` is the reliable timeline value and
+    /// travels separately as `FetchedMessage.received_at`.
+    pub sent_at: Option<DateTime<Utc>>,
+    /// True when the message carries mailing-list headers (List-Id /
+    /// List-Unsubscribe / List-Post) — it's a newsletter, not a person.
+    #[serde(default)]
+    pub is_newsletter: bool,
     pub attachments: Vec<ParsedAttachment>,
     /// Parsed iCalendar VEVENT, if the message carries a `text/calendar`
     /// invitation. Serialized to JSON and persisted alongside the message
@@ -69,10 +78,13 @@ pub fn parse_email(raw: &[u8]) -> Result<ParsedMessage, String> {
 
     let subject = header_value(&parsed.headers, "Subject").unwrap_or_default();
 
-    let date = header_value(&parsed.headers, "Date")
+    let sent_at = header_value(&parsed.headers, "Date")
         .and_then(|s| DateTime::parse_from_rfc2822(&s).ok())
-        .map(|d| d.with_timezone(&Utc))
-        .unwrap_or_else(Utc::now);
+        .map(|d| d.with_timezone(&Utc));
+
+    let is_newsletter = ["List-Id", "List-Unsubscribe", "List-Post"]
+        .iter()
+        .any(|h| header_value(&parsed.headers, h).is_some());
 
     let body_text = extract_text(&parsed).unwrap_or_default();
     let attachments = collect_attachments(&parsed);
@@ -90,7 +102,8 @@ pub fn parse_email(raw: &[u8]) -> Result<ParsedMessage, String> {
         subject,
         body_text,
         body_html,
-        date,
+        sent_at,
+        is_newsletter,
         attachments,
         calendar_invite,
     })
@@ -389,7 +402,24 @@ Hello world!\r\n";
         assert_eq!(parsed.sender_name.as_deref(), Some("Alice Example"));
         assert_eq!(parsed.subject, "Test message");
         assert_eq!(parsed.body_text, "Hello world!\r\n");
-        assert_eq!(parsed.date.to_rfc3339(), "2024-01-01T10:00:00+00:00");
+        assert_eq!(
+            parsed.sent_at.map(|d| d.to_rfc3339()),
+            Some("2024-01-01T10:00:00+00:00".to_string())
+        );
+    }
+
+    #[test]
+    fn missing_date_header_leaves_sent_at_empty() {
+        let raw = "From: a@a.com\r\nSubject: no date\r\n\r\nbody\r\n";
+        let parsed = parse_email(raw.as_bytes()).unwrap();
+        assert!(parsed.sent_at.is_none());
+    }
+
+    #[test]
+    fn malformed_date_header_leaves_sent_at_empty() {
+        let raw = "From: a@a.com\r\nSubject: bad date\r\nDate: 32 Jan 2024\r\n\r\nbody\r\n";
+        let parsed = parse_email(raw.as_bytes()).unwrap();
+        assert!(parsed.sent_at.is_none());
     }
 
     #[test]
@@ -517,3 +547,13 @@ Content-Transfer-Encoding: base64\r\n\
         assert!(!html.contains("cid:image001"));
     }
 }
+
+    #[test]
+    fn detects_newsletter_by_list_headers() {
+        let raw = "From: a@a.com\r\nSubject: weekly\r\nList-Unsubscribe: <https://x.com/u>\r\n\r\nbody\r\n";
+        assert!(parse_email(raw.as_bytes()).unwrap().is_newsletter);
+        let raw2 = "From: a@a.com\r\nSubject: hi\r\nList-Id: news.x.com\r\n\r\nbody\r\n";
+        assert!(parse_email(raw2.as_bytes()).unwrap().is_newsletter);
+        let raw3 = "From: a@a.com\r\nSubject: personal\r\n\r\nbody\r\n";
+        assert!(!parse_email(raw3.as_bytes()).unwrap().is_newsletter);
+    }

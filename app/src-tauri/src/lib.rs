@@ -167,6 +167,48 @@ pub fn run() {
             sql: include_str!("../migrations/0023_files_st_backfill.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 24,
+            description: "email task provenance and extraction review queue",
+            sql: include_str!("../migrations/0024_email_task_extraction.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 30,
+            description: "persist rfc message id for reply threading",
+            sql: include_str!("../migrations/0030_rfc_message_id.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 29,
+            description: "imap folder/uid identity for flag sync",
+            sql: include_str!("../migrations/0029_imap_identity.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 28,
+            description: "backfill newsletter flag for legacy mail",
+            sql: include_str!("../migrations/0028_newsletter_backfill.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 27,
+            description: "user mail automation rules",
+            sql: include_str!("../migrations/0027_mail_rules.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 26,
+            description: "newsletter flag for notification triage and gate hints",
+            sql: include_str!("../migrations/0026_message_newsletter.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 25,
+            description: "split sender date from server receipt date (sent_at/received_at/timeline_at)",
+            sql: include_str!("../migrations/0025_message_dates.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     eprintln!("[sendpalm] starting tauri builder");
@@ -180,8 +222,81 @@ pub fn run() {
                 .unwrap_or(false);
             eprintln!("[sendpalm] background sync disabled={}", disable);
             if !disable {
+                tauri::async_runtime::spawn({
+                    let handle = app.handle().clone();
+                    async move {
+                        if let Ok(pool) = services::sync_loop::open_pool().await {
+                            let _ = services::sync_loop::backfill_imap_identity(&pool).await;
+                            let _ = pool;
+                            let _ = handle;
+                        }
+                    }
+                });
                 services::sync_loop::start(app.handle().clone());
                 services::scheduled_send::start(app.handle().clone());
+            }
+            // Local MCP gateway for AI agents (spec 2026-11-03). Runs
+            // even when background sync is disabled — it is user-invoked
+            // tooling, not background sync. Failure must never block boot.
+            {
+                let mcp_state = services::mcp::McpGatewayState::default();
+                app.manage(mcp_state.clone());
+                let gateway_enabled =
+                    services::tray::read_background_prefs(app.handle()).keep_gateway;
+                if !gateway_enabled {
+                    eprintln!("[mcp] gateway disabled by preferences.background.keepGateway");
+                }
+                tauri::async_runtime::spawn(async move {
+                    if !gateway_enabled {
+                        return;
+                    }
+                    match services::sync_loop::open_pool().await {
+                        Ok(pool) => {
+                            match services::mcp::start_mcp_server(pool.clone()).await {
+                                Ok(port) => {
+                                    eprintln!("[mcp] gateway listening on 127.0.0.1:{port}");
+                                    if let Some(ep) = services::mcp::mcp_endpoint(&pool).await {
+                                        mcp_state.set(ep);
+                                    }
+                                }
+                                Err(e) => eprintln!("[mcp] gateway failed to start: {e}"),
+                            }
+                        }
+                        Err(e) => eprintln!("[mcp] gateway: no db pool: {e}"),
+                    }
+                });
+            }
+            // System tray + close-to-tray (design: docs/design/tray-mockup.html).
+            // The gateway start above already ran; if keepGateway is off the
+            // MCP block still started it — tray prefs only gate *future*
+            // behavior at boot, so nothing to undo here for v1.
+            {
+                use tauri::Manager;
+                if let Some(window) = app.get_webview_window("main") {
+                    let handle = app.handle().clone();
+                    window.on_window_event(move |event| {
+                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                            if crate::services::tray::intercept_close(&handle) {
+                                api.prevent_close();
+                            }
+                        }
+                    });
+                }
+                tauri::async_runtime::spawn({
+                    let handle = app.handle().clone();
+                    async move {
+                        match crate::services::sync_loop::open_pool().await {
+                            Ok(pool) => {
+                                if let Err(e) =
+                                    crate::services::tray::setup_tray(&handle, pool)
+                                {
+                                    eprintln!("[tray] setup failed: {e}");
+                                }
+                            }
+                            Err(e) => eprintln!("[tray] no db pool: {e}"),
+                        }
+                    }
+                });
             }
             eprintln!("[sendpalm] setup done");
             Ok(())
@@ -198,6 +313,10 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--tray"]),
+        ))
         .invoke_handler(tauri::generate_handler![
             commands::sync_now,
             commands::list_mailboxes,
@@ -216,10 +335,35 @@ pub fn run() {
             commands::notification_settings::notify_settings_changed,
             commands::image_proxy::fetch_image,
             commands::agent_chat,
+            commands::llm_list_models,
+            commands::list_llm_providers,
+            commands::detect_agent_clients,
+            commands::connect_agent_client,
+            commands::disconnect_agent_client,
+            commands::mcp_gateway_status,
+            commands::list_mail_rules,
+            commands::upsert_mail_rule,
+            commands::delete_mail_rule,
+            commands::imap_set_seen,
         ])
-        .run(tauri::generate_context!());
-    if let Err(e) = result {
-        let msg = format!("[sendpalm] tauri run error: {:?}", e);
+        .build(tauri::generate_context!());
+    let app = match result {
+        Ok(app) => app,
+        Err(e) => {
+            let msg = format!("[sendpalm] tauri run error: {:?}", e);
+            let tmp = std::env::temp_dir().join("sendpalm-run-error.log");
+            let _ = std::fs::write(&tmp, &msg);
+            eprintln!("{}", msg);
+            std::process::exit(1);
+        }
+    };
+    // ExitRequested is left at the default: Cmd+Q / Dock-quit is an
+    // explicit quit intent and must actually quit (design: 红灯关闭→托盘,
+    // ⌘Q / 托盘菜单→退出). Hiding only happens on window CloseRequested.
+    app.run(|_handle, _event| {});
+    eprintln!("[sendpalm] tauri run returned");
+    if false {
+        let msg = "[sendpalm] tauri run error: unreachable".to_string();
         let tmp = std::env::temp_dir().join("sendpalm-run-error.log");
         let _ = std::fs::write(&tmp, &msg);
         eprintln!("{}", msg);

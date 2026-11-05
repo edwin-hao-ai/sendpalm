@@ -38,6 +38,7 @@ async fn fresh_pool() -> SqlitePool {
         include_str!("../migrations/0018_calendar_rsvp.sql"),
         include_str!("../migrations/0019_attendee_responses.sql"),
         include_str!("../migrations/0020_calendar_recurrence.sql"),
+        include_str!("../migrations/0021_events_account_id.sql"),
     ];
     for sql in migrations {
         sqlx::raw_sql(sql)
@@ -45,6 +46,15 @@ async fn fresh_pool() -> SqlitePool {
             .await
             .unwrap_or_else(|e| panic!("migration failed: {e}\n---\n{sql}"));
     }
+    // events.account_id is a real FK (0021) — give the auto-import path a
+    // resolvable account row.
+    sqlx::query(
+        "INSERT INTO accounts (id, type, provider, label, display_name, status, privacy, color, avatar, last_sync) \
+         VALUES ('acct_test','email','feishu','test','test','connected','unified','#0A8F63','','')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     pool
 }
 
@@ -80,7 +90,7 @@ fn make_invite(method: &str, uid: &str, summary: &str) -> IcalEvent {
 async fn request_invite_creates_event() {
     let pool = fresh_pool().await;
     let invite = invite_from(REQUEST_EML);
-    insert_event_from_invite(&pool, &invite, "c_alice")
+    insert_event_from_invite(&pool, &invite, "c_alice", "acct_test")
         .await
         .expect("insert");
 
@@ -105,8 +115,8 @@ async fn duplicate_request_does_not_create_a_second_event() {
     // The auto-import path must NOT create two rows.
     let pool = fresh_pool().await;
     let invite = invite_from(REQUEST_EML);
-    insert_event_from_invite(&pool, &invite, "c_alice").await.unwrap();
-    insert_event_from_invite(&pool, &invite, "c_alice").await.unwrap();
+    insert_event_from_invite(&pool, &invite, "c_alice", "acct_test").await.unwrap();
+    insert_event_from_invite(&pool, &invite, "c_alice", "acct_test").await.unwrap();
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM events")
         .fetch_one(&pool)
         .await
@@ -120,12 +130,12 @@ async fn updated_request_refreshes_existing_row() {
     // The local row should be updated, not duplicated.
     let pool = fresh_pool().await;
     let mut invite = invite_from(REQUEST_EML);
-    insert_event_from_invite(&pool, &invite, "c_alice").await.unwrap();
+    insert_event_from_invite(&pool, &invite, "c_alice", "acct_test").await.unwrap();
 
     invite.sequence = Some(1);
     invite.dtstart = Some("2026-02-01T10:00:00Z".to_string());
     invite.dtend = Some("2026-02-01T11:00:00Z".to_string());
-    insert_event_from_invite(&pool, &invite, "c_alice").await.unwrap();
+    insert_event_from_invite(&pool, &invite, "c_alice", "acct_test").await.unwrap();
 
     let (dt, seq): (String, Option<i64>) = sqlx::query_as(
         "SELECT dt, ical_sequence FROM events WHERE ical_uid = $1",
@@ -142,7 +152,7 @@ async fn updated_request_refreshes_existing_row() {
 async fn cancellation_deletes_matching_event() {
     let pool = fresh_pool().await;
     let invite = invite_from(REQUEST_EML);
-    insert_event_from_invite(&pool, &invite, "c_alice").await.unwrap();
+    insert_event_from_invite(&pool, &invite, "c_alice", "acct_test").await.unwrap();
     assert!(
         sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM events")
             .fetch_one(&pool)
@@ -152,7 +162,7 @@ async fn cancellation_deletes_matching_event() {
     );
 
     let cancel = invite_from(CANCEL_EML);
-    insert_event_from_invite(&pool, &cancel, "c_alice").await.unwrap();
+    insert_event_from_invite(&pool, &cancel, "c_alice", "acct_test").await.unwrap();
 
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM events")
         .fetch_one(&pool)
@@ -165,7 +175,7 @@ async fn cancellation_deletes_matching_event() {
 async fn cancellation_for_unknown_uid_is_a_noop() {
     let pool = fresh_pool().await;
     let cancel = make_invite("CANCEL", "never-existed@example.com", "Whatever");
-    insert_event_from_invite(&pool, &cancel, "c_alice")
+    insert_event_from_invite(&pool, &cancel, "c_alice", "acct_test")
         .await
         .expect("noop");
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM events")
@@ -180,7 +190,7 @@ async fn reply_merges_partstat_into_attendee_responses() {
     // 1. Organizer's invite gets auto-imported.
     let pool = fresh_pool().await;
     let invite = invite_from(REQUEST_EML);
-    insert_event_from_invite(&pool, &invite, "c_alice").await.unwrap();
+    insert_event_from_invite(&pool, &invite, "c_alice", "acct_test").await.unwrap();
 
     // 2. Bob replies with ACCEPTED.
     let reply = IcalEvent {
@@ -206,7 +216,7 @@ async fn reply_merges_partstat_into_attendee_responses() {
         vtimezones: vec![],
         sequence: Some(0),
     };
-    insert_event_from_invite(&pool, &reply, "c_bob")
+    insert_event_from_invite(&pool, &reply, "c_bob", "acct_test")
         .await
         .expect("reply");
 
@@ -230,7 +240,7 @@ async fn reply_does_not_create_a_new_event_row() {
     // 1. No matching organizer event in the DB.
     let pool = fresh_pool().await;
     let reply = make_invite("REPLY", "ghost-uid@example.com", "ghost event");
-    insert_event_from_invite(&pool, &reply, "c_alice")
+    insert_event_from_invite(&pool, &reply, "c_alice", "acct_test")
         .await
         .expect("reply for unknown event is noop");
 
@@ -245,7 +255,7 @@ async fn reply_does_not_create_a_new_event_row() {
 async fn multiple_replies_are_merged() {
     let pool = fresh_pool().await;
     let invite = invite_from(REQUEST_EML);
-    insert_event_from_invite(&pool, &invite, "c_alice").await.unwrap();
+    insert_event_from_invite(&pool, &invite, "c_alice", "acct_test").await.unwrap();
 
     // Bob accepts first.
     let reply_bob = IcalEvent {
@@ -271,7 +281,7 @@ async fn multiple_replies_are_merged() {
         vtimezones: vec![],
         sequence: Some(0),
     };
-    insert_event_from_invite(&pool, &reply_bob, "c_bob").await.unwrap();
+    insert_event_from_invite(&pool, &reply_bob, "c_bob", "acct_test").await.unwrap();
 
     // Then Bob changes his mind and declines.
     let reply_bob_decline = IcalEvent {
@@ -281,7 +291,7 @@ async fn multiple_replies_are_merged() {
         }],
         ..reply_bob.clone()
     };
-    insert_event_from_invite(&pool, &reply_bob_decline, "c_bob")
+    insert_event_from_invite(&pool, &reply_bob_decline, "c_bob", "acct_test")
         .await
         .unwrap();
 
@@ -294,7 +304,7 @@ async fn multiple_replies_are_merged() {
         attendees: vec!["carol@example.com".to_string()],
         ..reply_bob.clone()
     };
-    insert_event_from_invite(&pool, &reply_carol, "c_carol")
+    insert_event_from_invite(&pool, &reply_carol, "c_carol", "acct_test")
         .await
         .unwrap();
 
@@ -318,7 +328,7 @@ async fn reply_email_lowercased_for_dedup() {
     // existing attendee entry on a case-insensitive basis.
     let pool = fresh_pool().await;
     let invite = invite_from(REQUEST_EML);
-    insert_event_from_invite(&pool, &invite, "c_alice").await.unwrap();
+    insert_event_from_invite(&pool, &invite, "c_alice", "acct_test").await.unwrap();
 
     let reply = IcalEvent {
         uid: Some("alice-meeting-2026-01-15@example.com".to_string()),
@@ -343,7 +353,7 @@ async fn reply_email_lowercased_for_dedup() {
         vtimezones: vec![],
         sequence: Some(0),
     };
-    insert_event_from_invite(&pool, &reply, "c_bob").await.unwrap();
+    insert_event_from_invite(&pool, &reply, "c_bob", "acct_test").await.unwrap();
 
     let map_json: String = sqlx::query_scalar(
         "SELECT attendee_responses_json FROM events WHERE ical_uid = $1",

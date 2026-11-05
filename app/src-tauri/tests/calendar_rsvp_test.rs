@@ -40,6 +40,7 @@ async fn fresh_pool() -> SqlitePool {
         include_str!("../migrations/0018_calendar_rsvp.sql"),
         include_str!("../migrations/0019_attendee_responses.sql"),
         include_str!("../migrations/0020_calendar_recurrence.sql"),
+        include_str!("../migrations/0021_events_account_id.sql"),
     ];
     for sql in migrations {
         sqlx::raw_sql(sql)
@@ -64,7 +65,7 @@ fn event_from_cancel_eml() -> IcalEvent {
 async fn request_inserts_new_event() {
     let pool = fresh_pool().await;
     let invite = event_from_request_eml();
-    let id = upsert_calendar_event(&pool, &invite, Some("c_alice"))
+    let id = upsert_calendar_event(&pool, &invite, Some("c_alice"), None)
         .await
         .expect("insert");
     assert!(id.starts_with("evt_"));
@@ -86,7 +87,7 @@ async fn request_inserts_new_event() {
 async fn duplicate_uid_updates_existing_row_in_place() {
     let pool = fresh_pool().await;
     let invite1 = event_from_request_eml();
-    let id1 = upsert_calendar_event(&pool, &invite1, Some("c_alice"))
+    let id1 = upsert_calendar_event(&pool, &invite1, Some("c_alice"), None)
         .await
         .unwrap();
 
@@ -97,7 +98,7 @@ async fn duplicate_uid_updates_existing_row_in_place() {
     invite2.sequence = Some(1);
     invite2.dtstart = Some("2026-02-01T10:00:00Z".to_string());
     invite2.dtend = Some("2026-02-01T11:00:00Z".to_string());
-    let id2 = upsert_calendar_event(&pool, &invite2, Some("c_alice"))
+    let id2 = upsert_calendar_event(&pool, &invite2, Some("c_alice"), None)
         .await
         .unwrap();
 
@@ -122,14 +123,14 @@ async fn duplicate_uid_updates_existing_row_in_place() {
 async fn stale_sequence_is_no_op() {
     let pool = fresh_pool().await;
     let invite1 = event_from_request_eml();
-    let id1 = upsert_calendar_event(&pool, &invite1, Some("c_alice"))
+    let id1 = upsert_calendar_event(&pool, &invite1, Some("c_alice"), None)
         .await
         .unwrap();
 
     // Same SEQUENCE again — should be a no-op, not an UPDATE.
     let mut invite2 = invite1.clone();
     invite2.dtstart = Some("2099-01-01T10:00:00Z".to_string()); // would change
-    let id2 = upsert_calendar_event(&pool, &invite2, Some("c_alice"))
+    let id2 = upsert_calendar_event(&pool, &invite2, Some("c_alice"), None)
         .await
         .unwrap();
     assert_eq!(id1, id2);
@@ -150,7 +151,7 @@ async fn stale_sequence_is_no_op() {
 async fn cancel_deletes_matching_event() {
     let pool = fresh_pool().await;
     let invite = event_from_request_eml();
-    let id = upsert_calendar_event(&pool, &invite, Some("c_alice"))
+    let id = upsert_calendar_event(&pool, &invite, Some("c_alice"), None)
         .await
         .unwrap();
     assert!(
@@ -164,7 +165,7 @@ async fn cancel_deletes_matching_event() {
     // Organizer sends a CANCEL with the same UID.
     let cancel = event_from_cancel_eml();
     assert_eq!(cancel.method.as_deref(), Some("CANCEL"));
-    let deleted = upsert_calendar_event(&pool, &cancel, None).await.unwrap();
+    let deleted = upsert_calendar_event(&pool, &cancel, None, None).await.unwrap();
     assert_eq!(deleted, "alice-meeting-2026-01-15@example.com");
 
     // Event row is gone.
@@ -201,7 +202,7 @@ async fn cancel_for_unknown_uid_returns_empty() {
         vtimezones: vec![],
         sequence: Some(0),
     };
-    let r = upsert_calendar_event(&pool, &cancel, None).await.unwrap();
+    let r = upsert_calendar_event(&pool, &cancel, None, None).await.unwrap();
     assert_eq!(r, "");
 }
 
@@ -210,7 +211,7 @@ async fn reply_does_not_create_event() {
     let pool = fresh_pool().await;
     let mut reply = event_from_request_eml();
     reply.method = Some("REPLY".to_string());
-    let r = upsert_calendar_event(&pool, &reply, Some("c_bob"))
+    let r = upsert_calendar_event(&pool, &reply, Some("c_bob"), None)
         .await
         .unwrap();
     assert_eq!(r, "");
@@ -229,7 +230,7 @@ async fn full_flow_invite_then_update_then_cancel() {
     let pool = fresh_pool().await;
 
     // Step 1: initial invite
-    let r1 = upsert_calendar_event(&pool, &event_from_request_eml(), None)
+    let r1 = upsert_calendar_event(&pool, &event_from_request_eml(), None, None)
         .await
         .unwrap();
     assert!(!r1.is_empty());
@@ -238,11 +239,11 @@ async fn full_flow_invite_then_update_then_cancel() {
     let mut updated = event_from_request_eml();
     updated.sequence = Some(1);
     updated.dtstart = Some("2026-03-01T10:00:00Z".to_string());
-    let r2 = upsert_calendar_event(&pool, &updated, None).await.unwrap();
+    let r2 = upsert_calendar_event(&pool, &updated, None, None).await.unwrap();
     assert_eq!(r2, r1, "reschedule hits the same row");
 
     // Step 3: organizer cancels
-    let r3 = upsert_calendar_event(&pool, &event_from_cancel_eml(), None)
+    let r3 = upsert_calendar_event(&pool, &event_from_cancel_eml(), None, None)
         .await
         .unwrap();
     assert!(!r3.is_empty());

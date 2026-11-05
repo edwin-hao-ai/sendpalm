@@ -4,7 +4,7 @@
 use super::EmailCredentials;
 use lettre::{
     address::Envelope,
-    message::{header::ContentType, Attachment, Mailbox, MultiPart, SinglePart},
+    message::{header::ContentType, header, Attachment, Mailbox, MultiPart, SinglePart},
     transport::smtp::authentication::Credentials,
     AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
 };
@@ -65,6 +65,7 @@ impl SmtpClient {
         cc: &[String],
         bcc: &[String],
         reply_to: Option<&str>,
+        in_reply_to: Option<&str>,
         subject: &str,
         body: &str,
         html_body: Option<String>,
@@ -88,6 +89,7 @@ impl SmtpClient {
             &cc_mbs,
             &bcc_mbs,
             reply_to_mb.as_ref(),
+            in_reply_to,
             subject,
             &message_id,
             body,
@@ -110,6 +112,7 @@ impl SmtpClient {
         cc: &[Mailbox],
         bcc: &[Mailbox],
         reply_to: Option<&Mailbox>,
+        in_reply_to: Option<&str>,
         subject: &str,
         message_id: &str,
         body: &str,
@@ -140,6 +143,9 @@ impl SmtpClient {
             .message_id(Some(message_id.to_owned()));
         if let Some(rt) = reply_to {
             builder = builder.reply_to(rt.clone());
+        }
+        if let Some(irt) = in_reply_to.filter(|s| !s.trim().is_empty()) {
+            builder = builder.header(header::InReplyTo::from(irt.to_string()));
         }
         for mb in to {
             builder = builder.to(mb.clone());
@@ -311,6 +317,28 @@ mod tests {
     }
 
     #[test]
+    fn in_reply_to_header_round_trips() {
+        let from = "A <a@x.com>".parse().unwrap();
+        let to = vec!["B <b@x.com>".parse().unwrap()];
+        let msg = SmtpClient::build_message(
+            &from,
+            &to,
+            &[],
+            &[],
+            None,
+            Some("<orig-123@mail.example>"),
+            "hello",
+            "<id@sendpalm>",
+            "plain text",
+            None,
+            vec![],
+        )
+        .unwrap();
+        let raw = String::from_utf8_lossy(&msg.formatted()).to_string();
+        assert!(raw.contains("In-Reply-To: <orig-123@mail.example>"));
+    }
+
+    #[test]
     fn builds_without_network() {
         let creds = EmailCredentials {
             email: "a@b.com".into(),
@@ -333,6 +361,7 @@ mod tests {
             &to,
             &[],
             &[],
+            None,
             None,
             "hello",
             "<id@sendpalm>",
@@ -357,6 +386,7 @@ mod tests {
             &to,
             &cc,
             &[],
+            None,
             None,
             "hello",
             "<id@sendpalm>",
@@ -387,6 +417,7 @@ mod tests {
             &to,
             &[],
             &[],
+            None,
             None,
             "hello",
             "<id@sendpalm>",

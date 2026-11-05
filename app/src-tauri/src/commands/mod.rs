@@ -38,16 +38,27 @@ pub async fn sync_now(
             last_uid: prev.last_uid,
             last_synced_at: prev.last_synced_at,
             busy: true,
+            status: crate::services::state::AccountSyncStatus::Syncing,
+            error_code: None,
         },
     );
     let result = client.sync(&mailbox, prev.last_uid).await;
     let bundle = match result {
         Ok(b) => b,
         Err(e) => {
+            let code = crate::services::sync_loop::sync_error_code_pub(&e);
+            let needs_credentials =
+                matches!(code, "missing_credentials" | "auth_failed");
             state.put(
                 &account_id,
                 crate::services::state::AccountSyncState {
                     busy: false,
+                    status: if needs_credentials {
+                        crate::services::state::AccountSyncStatus::NeedsCredentials
+                    } else {
+                        crate::services::state::AccountSyncStatus::Error
+                    },
+                    error_code: Some(code.to_string()),
                     ..prev
                 },
             );
@@ -61,6 +72,8 @@ pub async fn sync_now(
             last_uid: bundle.highest_uid,
             last_synced_at: chrono::Utc::now(),
             busy: false,
+            status: crate::services::state::AccountSyncStatus::Connected,
+            error_code: None,
         },
     );
     Ok(bundle.report(&account_id, bundle.messages.len(), 0))
@@ -93,6 +106,7 @@ pub async fn send_message(
     cc: Option<String>,
     bcc: Option<String>,
     from_override: Option<String>,
+    in_reply_to: Option<String>,
 ) -> Result<SendResult, String> {
     // Resolve credentials: prefer the explicit account_id from the From selector;
     // fall back to the test credentials when no account is selected (dev only).
@@ -178,6 +192,7 @@ pub async fn send_message(
             &cc_addrs,
             &bcc_addrs,
             Some(&outgoing_settings.reply_to),
+            in_reply_to.as_deref(),
             &subject,
             &body,
             html_body,
@@ -228,6 +243,8 @@ pub async fn get_sync_state(app: AppHandle, account_id: String) -> Result<SyncSt
         last_uid: s.last_uid,
         last_synced_at: s.last_synced_at.to_rfc3339(),
         busy: s.busy,
+        status: s.status.as_str().to_string(),
+        error_code: s.error_code.clone(),
     })
 }
 
@@ -421,7 +438,7 @@ pub async fn upsert_calendar_event(
     .bind(serde_json::to_string(&invite.rdates).unwrap_or_else(|_| "[]".into()))
     .bind(serde_json::to_string(&invite.exdates).unwrap_or_else(|_| "[]".into()))
     .bind(invite.dtstart_tzid.as_deref().unwrap_or(""))
-    .bind(account_id.unwrap_or(""))
+    .bind(account_id)
     .execute(pool)
     .await
     .map_err(|e| format!("insert event: {e}"))?;
@@ -611,6 +628,10 @@ pub struct SyncStateDto {
     pub last_uid: u32,
     pub last_synced_at: String,
     pub busy: bool,
+    /// never_synced | syncing | connected | needs_credentials | error
+    pub status: String,
+    /// Sanitized machine-readable error code; None on success.
+    pub error_code: Option<String>,
 }
 
 /// M11 — Run a single OpenAI-compatible chat completion against the
@@ -627,4 +648,122 @@ pub async fn agent_chat(
         &crate::services::llm::ChatRequest { config, messages },
     )
     .await
+}
+
+#[tauri::command]
+pub async fn llm_list_models(
+    config: crate::services::llm::LlmConfig,
+) -> Result<Vec<crate::services::llm::LlmModelInfo>, String> {
+    crate::services::llm::list_models(&config).await
+}
+
+#[tauri::command]
+pub fn list_llm_providers() -> Vec<crate::services::llm::LlmProviderDto> {
+    crate::services::llm::provider_dtos()
+}
+
+#[tauri::command]
+pub async fn detect_agent_clients(
+    state: tauri::State<'_, crate::services::mcp::McpGatewayState>,
+) -> Result<Vec<crate::services::agent_clients::AgentClientDto>, String> {
+    // The endpoint is set at startup; if it's missing (server failed to
+    // start), clients show as installed-but-not-connectable.
+    let url = state.get().map(|e| e.url).unwrap_or_default();
+    Ok(crate::services::agent_clients::detect_clients(&url).await)
+}
+
+#[tauri::command]
+pub async fn connect_agent_client(
+    id: String,
+    state: tauri::State<'_, crate::services::mcp::McpGatewayState>,
+) -> Result<(), String> {
+    let ep = state
+        .get()
+        .ok_or_else(|| "MCP gateway is not running — restart SendPalm".to_string())?;
+    crate::services::agent_clients::connect_client(&id, &ep.url, &ep.token).await
+}
+
+#[tauri::command]
+pub async fn disconnect_agent_client(id: String) -> Result<(), String> {
+    crate::services::agent_clients::disconnect_client(&id).await
+}
+
+#[tauri::command]
+pub fn mcp_gateway_status(
+    state: tauri::State<'_, crate::services::mcp::McpGatewayState>,
+) -> Option<crate::services::mcp::McpStatusDto> {
+    state.get().map(|ep| crate::services::mcp::McpStatusDto {
+        url: ep.url,
+        token_preview: format!("{}…", &ep.token[..ep.token.len().min(10)]),
+    })
+}
+
+#[tauri::command]
+pub async fn list_mail_rules() -> Result<Vec<crate::services::rules::MailRule>, String> {
+    let pool = crate::services::sync_loop::open_pool().await?;
+    crate::services::rules::list_rules(&pool).await
+}
+
+#[tauri::command]
+pub async fn upsert_mail_rule(
+    rule: crate::services::rules::MailRule,
+) -> Result<(), String> {
+    let pool = crate::services::sync_loop::open_pool().await?;
+    sqlx::query(
+        "INSERT INTO mail_rules (id, name, enabled, match_field, match_pattern, action_bucket, action_label, priority) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) \
+         ON CONFLICT(id) DO UPDATE SET name=excluded.name, enabled=excluded.enabled, \
+           match_field=excluded.match_field, match_pattern=excluded.match_pattern, \
+           action_bucket=excluded.action_bucket, action_label=excluded.action_label, \
+           priority=excluded.priority",
+    )
+    .bind(&rule.id)
+    .bind(&rule.name)
+    .bind(if rule.enabled { 1 } else { 0 })
+    .bind(&rule.match_field)
+    .bind(&rule.match_pattern)
+    .bind(rule.action_bucket.as_deref())
+    .bind(rule.action_label.as_deref())
+    .bind(rule.priority)
+    .execute(&pool)
+    .await
+    .map_err(|e| format!("upsert rule: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_mail_rule(id: String) -> Result<(), String> {
+    let pool = crate::services::sync_loop::open_pool().await?;
+    sqlx::query("DELETE FROM mail_rules WHERE id = $1")
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("delete rule: {e}"))?;
+    Ok(())
+}
+
+/// Two-way read state: mark a message read/unread ON THE SERVER too.
+/// Reads the message's imap identity, resolves the account credentials,
+/// and issues UID STORE. Fire-and-forget from the UI's perspective —
+/// failures are logged, never surfaced as user errors (the local state
+/// is already correct and the next sync self-heals flags).
+#[tauri::command]
+pub async fn imap_set_seen(message_id: String, seen: bool) -> Result<(), String> {
+    let pool = crate::services::sync_loop::open_pool().await?;
+    let row: Option<(String, Option<i64>, String)> = sqlx::query_as(
+        "SELECT ac, imap_uid, COALESCE(imap_folder, '') FROM messages WHERE id = $1",
+    )
+    .bind(&message_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|e| format!("lookup message: {e}"))?;
+    let Some((account_id, Some(uid), folder)) = row else {
+        return Ok(()); // local row without IMAP identity — nothing to sync
+    };
+    if folder.is_empty() {
+        return Ok(());
+    }
+    let creds = crate::services::sync_loop::resolve_account_credentials(&account_id).await?;
+    let client = ImapClient::new(creds);
+    client.set_seen(&folder, uid as u32, seen).await
 }

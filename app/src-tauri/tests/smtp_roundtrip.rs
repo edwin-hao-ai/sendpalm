@@ -62,6 +62,7 @@ async fn smtp_send_to_self() {
             &[],
             &[],
             None,
+            None,
             &subject,
             body,
             None,
@@ -96,7 +97,7 @@ async fn smtp_send_to_self() {
             }
             last_uid = next.highest_uid;
             all.extend(next.messages);
-            if all.iter().any(|(_, m)| m.subject.trim() == subject.trim()) {
+            if all.iter().any(|f| f.parsed.subject.trim() == subject.trim()) {
                 break;
             }
         }
@@ -107,7 +108,7 @@ async fn smtp_send_to_self() {
             all.len(),
             last_uid
         );
-        if all.iter().any(|(_, m)| m.subject.trim() == subject.trim()) {
+        if all.iter().any(|f| f.parsed.subject.trim() == subject.trim()) {
             found = true;
             break;
         }

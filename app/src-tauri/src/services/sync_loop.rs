@@ -101,7 +101,7 @@ async fn run_loop(app: AppHandle) -> Result<(), String> {
         std::collections::HashMap::new();
 
     loop {
-        let desired = load_sync_accounts(&pool).await?;
+        let desired = load_sync_accounts(&pool, &app.state::<crate::services::state::SyncStateStore>()).await?;
 
         // Start any account that isn't already running.
         for account in &desired {
@@ -309,8 +309,11 @@ async fn build_test_fallback_account() -> Result<SyncAccount, String> {
     })
 }
 
-async fn load_sync_accounts(pool: &SqlitePool) -> Result<Vec<SyncAccount>, String> {
-    let db_accounts = load_accounts(pool).await?;
+async fn load_sync_accounts(
+    pool: &SqlitePool,
+    store: &crate::services::state::SyncStateStore,
+) -> Result<Vec<SyncAccount>, String> {
+    let db_accounts = load_accounts(pool, store).await?;
     if !db_accounts.is_empty() {
         return Ok(db_accounts);
     }
@@ -334,7 +337,10 @@ async fn load_sync_accounts(pool: &SqlitePool) -> Result<Vec<SyncAccount>, Strin
     }
 }
 
-async fn load_accounts(pool: &SqlitePool) -> Result<Vec<SyncAccount>, String> {
+async fn load_accounts(
+    pool: &SqlitePool,
+    store: &crate::services::state::SyncStateStore,
+) -> Result<Vec<SyncAccount>, String> {
     let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
         "SELECT id, provider, email, settings_json FROM accounts WHERE type = 'email'",
     )
@@ -358,7 +364,24 @@ async fn load_accounts(pool: &SqlitePool) -> Result<Vec<SyncAccount>, String> {
                 enabled: true,
                 settings_json,
             }),
-            Err(e) => eprintln!("[sync] skipping account {id}: {e}"),
+            Err(e) => {
+                eprintln!("[sync] skipping account {id}: {e}");
+                // The account exists but cannot sync (almost always: no
+                // password in the keychain). Surface it in the sync badge
+                // so the user sees "needs password" instead of a silently
+                // stale mailbox. Preserve any previous successful sync
+                // timestamp — this is a credentials failure, not a sync.
+                let prev = store.get(&id);
+                store.put(
+                    &id,
+                    crate::services::state::AccountSyncState {
+                        last_synced_at: prev.last_synced_at,
+                        status: crate::services::state::AccountSyncStatus::NeedsCredentials,
+                        error_code: Some("missing_credentials".to_string()),
+                        ..Default::default()
+                    },
+                );
+            }
         }
     }
     Ok(accounts)
@@ -478,20 +501,115 @@ async fn delete_sync_state(pool: &SqlitePool, account_id: &str) -> Result<(), St
         .map_err(|e| e.to_string())
 }
 
+/// Map a sync error to a sanitized machine-readable code. Never carries
+/// the original message — IMAP/server strings can echo credentials or
+/// account details.
+/// Classify a sync error into a stable, user-facing code. The UI renders
+/// different guidance per code — a changed password, a dead network, and a
+/// server outage must not look the same.
+///
+/// - `missing_credentials`: nothing in the keychain to try.
+/// - `auth_failed`: credentials were tried and REJECTED (user changed the
+///   mailbox password / revoked the app password). Same entry point as
+///   missing, different copy.
+/// - `network`: DNS/TCP/TLS/timeout — nothing wrong with the account;
+///   retry silently.
+/// - `sync_failed`: anything else (server errors, parser bugs).
+/// Public wrapper for the command layer (sync_now shares classification).
+pub fn sync_error_code_pub(e: &str) -> &'static str {
+    sync_error_code(e)
+}
+
+pub(crate) fn sync_error_code(e: &str) -> &'static str {
+    let lower = e.to_lowercase();
+    if lower.contains("keyring") && !lower.contains("authentication") && !lower.contains("failed") {
+        return "missing_credentials";
+    }
+    if lower.contains("no password in keyring")
+        || (lower.contains("keyring") && lower.contains("empty"))
+    {
+        return "missing_credentials";
+    }
+    if lower.contains("authentication")
+        || lower.contains("invalid credential")
+        || lower.contains("login failed")
+        || lower.contains("username or password")
+        || lower.contains("unauthorized")
+        || lower.contains("535")
+        || lower.contains("530")
+    {
+        return "auth_failed";
+    }
+    if lower.contains("network")
+        || lower.contains("dns")
+        || lower.contains("timed out")
+        || lower.contains("timeout")
+        || lower.contains("connection refused")
+        || lower.contains("no route")
+        || lower.contains("offline")
+        || lower.contains("tls")
+        || lower.contains("certificate")
+    {
+        return "network";
+    }
+    "sync_failed"
+}
+
+fn sync_failure_status(e: &str) -> crate::services::state::AccountSyncStatus {
+    matches!(sync_error_code(e), "missing_credentials" | "auth_failed")
+        .then_some(crate::services::state::AccountSyncStatus::NeedsCredentials)
+        .unwrap_or(crate::services::state::AccountSyncStatus::Error)
+}
+
+#[cfg(test)]
+mod sync_error_class_tests {
+    use super::sync_error_code;
+
+    #[test]
+    fn classifies_the_user_scenarios() {
+        // Password never entered / keychain entry deleted.
+        assert_eq!(sync_error_code("no password in keyring"), "missing_credentials");
+        // User changed the mailbox password or revoked the app password.
+        assert_eq!(
+            sync_error_code("authentication failed: [ALERT] Invalid credentials"),
+            "auth_failed"
+        );
+        assert_eq!(
+            sync_error_code("535 5.7.8 Error: authentication failed: UGFzc3dvcmQ6"),
+            "auth_failed"
+        );
+        assert_eq!(sync_error_code("LOGIN failed"), "auth_failed");
+        // Airplane Wi-Fi / firewall / IPv6-only network.
+        assert_eq!(sync_error_code("dns error: failed to lookup address"), "network");
+        assert_eq!(sync_error_code("connection refused"), "network");
+        assert_eq!(sync_error_code("tls handshake timeout"), "network");
+        // Genuine server-side problems.
+        assert_eq!(sync_error_code("select INBOX: no such mailbox"), "sync_failed");
+        assert_eq!(sync_error_code("parse uid=123: malformed header"), "sync_failed");
+    }
+}
+
 async fn sync_and_notify(
     app: &AppHandle,
     pool: &SqlitePool,
     client: &ImapClient,
     account: &mut SyncAccount,
 ) -> Result<(), String> {
+    use crate::services::state::{AccountSyncState, AccountSyncStatus};
+
     let store = app.state::<crate::services::state::SyncStateStore>();
+    let prev = store.get(&account.account_id);
     store.put(
         &account.account_id,
-        crate::services::state::AccountSyncState {
+        AccountSyncState {
             uid_validity: account.uid_validity,
             last_uid: account.last_uid,
-            last_synced_at: chrono::Utc::now(),
+            // Keep the last successful timestamp while syncing — a busy
+            // flag is not freshness.
+            last_synced_at: prev.last_synced_at,
             busy: true,
+            status: AccountSyncStatus::Syncing,
+            error_code: None,
         },
     );
 
@@ -507,11 +625,15 @@ async fn sync_and_notify(
         Err(e) => {
             store.put(
                 &account.account_id,
-                crate::services::state::AccountSyncState {
+                AccountSyncState {
                     uid_validity: account.uid_validity,
                     last_uid: account.last_uid,
-                    last_synced_at: chrono::Utc::now(),
+                    // A failed attempt must not advance the freshness
+                    // timestamp — preserve the last successful value.
+                    last_synced_at: prev.last_synced_at,
                     busy: false,
+                    status: sync_failure_status(&e),
+                    error_code: Some(sync_error_code(&e).to_string()),
                 },
             );
             return Err(e);
@@ -523,11 +645,13 @@ async fn sync_and_notify(
 
     store.put(
         &account.account_id,
-        crate::services::state::AccountSyncState {
+        AccountSyncState {
             uid_validity: new_uv,
             last_uid: new_last_uid,
             last_synced_at: chrono::Utc::now(),
             busy: false,
+            status: AccountSyncStatus::Connected,
+            error_code: None,
         },
     );
 
@@ -580,6 +704,9 @@ async fn sync_one(
         .and_then(|s| serde_json::from_str(s).ok())
         .unwrap_or_default();
     let folders = sync_folders_from_json(&settings);
+    // User automation rules — loaded once per sync pass and threaded into
+    // every insert so rule-routed mail lands where the user asked.
+    let rules = crate::services::rules::list_rules(pool).await.unwrap_or_default();
 
     let mut total_inserted = 0u32;
     let mut inbox_cursor = account.last_uid;
@@ -588,7 +715,7 @@ async fn sync_one(
 
     for folder in &folders {
         let state_key = format!("sync_state::{}::{}", account.account_id, folder);
-        let (folder_last_uid, _folder_uid_validity) =
+        let (folder_last_uid, folder_prev_uid_validity) =
             load_folder_sync_state(pool, &state_key).await?;
         let is_inbox = folder.eq_ignore_ascii_case("INBOX");
         // For INBOX, keep using the legacy account-level state as the source of
@@ -606,6 +733,7 @@ async fn sync_one(
             client,
             account,
             folder,
+            &rules,
             start_uid,
             // Only trigger vacation replies for new mail in INBOX.
             if is_inbox { previous_last_uid } else { 0 },
@@ -627,6 +755,42 @@ async fn sync_one(
         };
         total_inserted += inserted;
         new_message_ids.append(&mut folder_new_ids);
+
+        // Per-folder UIDVALIDITY: the account-level value only mirrors
+        // INBOX, so comparing every folder against it re-fired the reset on
+        // every pass (the cursor rewound locally while the persisted folder
+        // state kept the old cursor — the folder could never advance).
+        // Compare against the folder's OWN stored validity, and persist the
+        // reset so the re-walk starts from scratch exactly once.
+        if let Some(reset_to) = detect_uid_validity_change(folder_prev_uid_validity, uid_validity)
+        {
+            eprintln!(
+                "[sync_loop] UIDVALIDITY changed for {folder} ({} → {}); resetting cursor to {}",
+                folder_prev_uid_validity, uid_validity, reset_to
+            );
+            let reset_key = format!("sync_state::{}::{folder}", account.account_id);
+            let _ =
+                save_folder_sync_state(pool, &reset_key, reset_to, uid_validity).await;
+        }
+
+        // Repair missing sent/received dates for rows this folder has
+        // already synced. Metadata-only (no bodies); failures are logged
+        // and retried next tick — never fail the folder sync over it.
+        let backfill_result = crate::services::date_backfill::run_date_backfill(
+            pool,
+            &account.account_id,
+            folder,
+            cursor,
+            uid_validity,
+            |start, end| client.fetch_date_metadata(folder, start, end),
+        )
+        .await;
+        if let Err(e) = backfill_result {
+            eprintln!(
+                "[sync] date backfill failed for {}/{}: {e}",
+                account.account_id, folder
+            );
+        }
 
         // sync_folder persists the cursor per-chunk (so a mid-backfill
         // error doesn't lose progress). Here we just keep the legacy
@@ -733,6 +897,18 @@ pub fn should_continue_after_chunk(
     chunk_size >= crate::services::imap::MAX_PER_TICK
 }
 
+/// Without UIDNEXT, a folder whose lowest UIDs were all expunged would
+/// loop forever on chunk 1: every pass refetches the same empty range and
+/// the legacy "partial chunk" heuristic stops after one chunk. Allow a
+/// bounded number of consecutive empty chunks per pass so the walk makes
+/// progress and the pass still terminates; the next pass resumes where the
+/// persisted cursor left off.
+pub const LEGACY_EMPTY_CHUNK_BUDGET: u32 = 40;
+
+pub fn legacy_empty_budget_exhausted(consecutive_empty_chunks: u32) -> bool {
+    consecutive_empty_chunks >= LEGACY_EMPTY_CHUNK_BUDGET
+}
+
 /// Test seam: given a starting cursor and a list of `(uid, success)`
 /// outcomes, return `(inserted, new_cursor)`. The cursor is the largest UID
 /// whose outcome was `success`; it never advances past a failed UID.
@@ -763,6 +939,7 @@ async fn sync_folder(
     client: &ImapClient,
     account: &SyncAccount,
     folder: &str,
+    rules: &[crate::services::rules::MailRule],
     start_uid: u32,
     previous_last_uid: u32,
     state_key: &str,
@@ -773,6 +950,7 @@ async fn sync_folder(
     let mut uid_validity = 0u32;
     let mut cursor = start_uid;
     let mut new_ids: Vec<String> = Vec::new();
+    let mut consecutive_empty_chunks = 0u32;
 
     loop {
         let bundle = client.sync(folder, cursor).await?;
@@ -782,18 +960,35 @@ async fn sync_folder(
         // broke here, which is what left ~3500 messages unbackfilled on the
         // Feishu account (most chunks after the first hit a sparse range).
         if bundle.messages.is_empty() {
+            consecutive_empty_chunks += 1;
             cursor = cursor
                 .saturating_add(crate::services::imap::MAX_PER_TICK);
             // Persist so we resume from the new cursor even if a later chunk
             // fails.
             let _ = save_folder_sync_state(pool, state_key, cursor, uid_validity).await;
-            if !should_continue_after_chunk(cursor, bundle.uid_next, 0) {
-                break;
+            match bundle.uid_next {
+                Some(_) => {
+                    if !should_continue_after_chunk(cursor, bundle.uid_next, 0) {
+                        break;
+                    }
+                }
+                None => {
+                    // Legacy server without UIDNEXT: keep walking empty
+                    // ranges within this pass's budget, then resume next
+                    // pass from the persisted cursor.
+                    if legacy_empty_budget_exhausted(consecutive_empty_chunks) {
+                        eprintln!(
+                            "[sync] folder={folder} legacy empty-chunk budget reached at cursor={cursor}; resuming next pass"
+                        );
+                        break;
+                    }
+                }
             }
             continue;
         }
+        consecutive_empty_chunks = 0;
         let mut chunk_outcomes: Vec<(u32, bool)> = Vec::with_capacity(bundle.messages.len());
-        for (uid, parsed) in &bundle.messages {
+        for fetched in &bundle.messages {
             match insert_message(
                 app,
                 data_dir,
@@ -801,18 +996,20 @@ async fn sync_folder(
                 account,
                 folder,
                 folder_kind,
-                *uid,
-                parsed,
+                rules,
+                fetched.uid,
+                &fetched.parsed,
+                fetched.received_at,
                 previous_last_uid,
             )
             .await
             {
                 Ok(Some(new_id)) => {
                     new_ids.push(new_id);
-                    chunk_outcomes.push((*uid, true));
+                    chunk_outcomes.push((fetched.uid, true));
                 }
-                Ok(None) => chunk_outcomes.push((*uid, true)),
-                Err(_) => chunk_outcomes.push((*uid, false)),
+                Ok(None) => chunk_outcomes.push((fetched.uid, true)),
+                Err(_) => chunk_outcomes.push((fetched.uid, false)),
             }
         }
         let (chunk_inserted, chunk_last_ok) = advance_cursor(cursor, &chunk_outcomes);
@@ -837,20 +1034,11 @@ async fn sync_folder(
         }
     }
 
-    let new_uv = uid_validity;
-    if let Some(reset_to) = detect_uid_validity_change(account.uid_validity, new_uv) {
-        eprintln!(
-            "[sync_loop] UIDVALIDITY changed for {folder} ({} → {}); resetting cursor to {}",
-            account.uid_validity, new_uv, reset_to
-        );
-        cursor = reset_to;
-    }
-
     eprintln!(
         "[sync] folder={folder} inserted={inserted} cursor={cursor} new_ids={}",
         new_ids.len()
     );
-    Ok((inserted, cursor, new_uv, new_ids))
+    Ok((inserted, cursor, uid_validity, new_ids))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -861,8 +1049,10 @@ async fn insert_message(
     account: &SyncAccount,
     folder: &str,
     folder_kind: Option<crate::services::mailbox_resolver::FolderKind>,
+    rules: &[crate::services::rules::MailRule],
     uid: u32,
     parsed: &crate::services::parser::ParsedMessage,
+    received_at: Option<chrono::DateTime<chrono::Utc>>,
     previous_last_uid: u32,
 ) -> Result<Option<String>, String> {
     let is_self = parsed
@@ -875,7 +1065,23 @@ async fn insert_message(
         is_self,
     )
     .await?;
-    let bucket = compute_message_bucket(&route);
+    let mut bucket: &str = compute_message_bucket(&route);
+    let mut owned_bucket: Option<String> = None;
+    let mut rule_label: Option<String> = None;
+    if rules.iter().any(|r| r.enabled) {
+        let (rule_bucket, label) = crate::services::rules::apply_rules(
+            rules,
+            &parsed.sender_email,
+            parsed.sender_name.as_deref().unwrap_or(""),
+            &parsed.subject,
+            &parsed.body_text,
+        );
+        if let Some(b) = rule_bucket {
+            owned_bucket = Some(b);
+        }
+        rule_label = label;
+    }
+    let bucket_bind: String = owned_bucket.clone().unwrap_or_else(|| bucket.to_string());
     let contact_id = route.id;
     let folder_slug = folder.replace(['/', ' '], "_");
     let mid = format!("imap_{}_{folder_slug}_{uid}", account.account_id);
@@ -906,10 +1112,17 @@ async fn insert_message(
     let body_html = parsed.body_html.as_deref().unwrap_or("");
     let cc_json = serde_json::to_string(&parsed.cc).unwrap_or_else(|_| "[]".to_string());
     let bcc_json = serde_json::to_string(&parsed.bcc).unwrap_or_else(|_| "[]".to_string());
+    // The compatibility `st` column predates the split sent/received fields.
+    // Prefer the sender's own date (what users expect in a mail list) and fall
+    // back to the server receipt time when the Date header is missing or
+    // invalid. Never invent a timestamp: both are absent only when the server
+    // omits INTERNALDATE, in which case we keep sync time so a NOT NULL column
+    // stays valid — such rows are reported as legacy by the UI.
+    let timeline = parsed.sent_at.or(received_at).unwrap_or_else(chrono::Utc::now);
     let insert_result = sqlx::query(
         "INSERT OR IGNORE INTO messages \
-         (id, pid, subj, prev, body, body_html, tm, st, ac, bucket, direction, unread, labels_json, attachments_json, trackers_json, thread_id, calendar_json, to_addr, cc_json, bcc_json) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1, '[]', '[]', '[]', $12, $13, $14, $15, $16)"
+         (id, pid, subj, prev, body, body_html, tm, st, sent_at, received_at, timeline_at, ac, bucket, direction, unread, is_newsletter, labels_json, attachments_json, trackers_json, thread_id, calendar_json, to_addr, cc_json, bcc_json, imap_folder, imap_uid, rfc_message_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 1, $15, '[]', '[]', '[]', $16, $17, $18, $19, $20, $21, $22, $23)"
     )
     .bind(&mid)
     .bind(&contact_id)
@@ -917,16 +1130,23 @@ async fn insert_message(
     .bind(&prev_excerpt)
     .bind(&parsed.body_text)
     .bind(body_html)
-    .bind(parsed.date.format("%Y-%m-%d %H:%M").to_string())
-    .bind(parsed.date.to_rfc3339())
+    .bind(timeline.format("%Y-%m-%d %H:%M").to_string())
+    .bind(timeline.to_rfc3339())
+    .bind(parsed.sent_at.map(|d| d.to_rfc3339()))
+    .bind(received_at.map(|d| d.to_rfc3339()))
+    .bind(timeline.to_rfc3339())
     .bind(&account.account_id)
-    .bind(bucket)
+    .bind(&bucket_bind)
     .bind(direction)
+    .bind(if parsed.is_newsletter { 1 } else { 0 })
     .bind(parsed.thread_id.as_deref().unwrap_or(""))
     .bind(calendar_json.as_deref())
     .bind(&parsed.to_addr)
     .bind(&cc_json)
     .bind(&bcc_json)
+    .bind(folder)
+    .bind(uid)
+    .bind(&parsed.message_id)
     .execute(pool)
     .await
     .map_err(|e| format!("insert message uid={uid}: {e}"))?;
@@ -939,6 +1159,30 @@ async fn insert_message(
     } else {
         None
     };
+
+    // Rule-driven label ("folder") assignment — same UPDATE pattern as
+    // attachments so the INSERT stays idempotent.
+    if let Some(label_id) = rule_label {
+        let existing: Option<(String,)> = sqlx::query_as(
+            "SELECT labels_json FROM messages WHERE id = $1",
+        )
+        .bind(&mid)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("rule label lookup uid={uid}: {e}"))?;
+        if let Some((json,)) = existing {
+            let mut ids: Vec<String> =
+                serde_json::from_str(&json).unwrap_or_default();
+            if !ids.iter().any(|x| x == &label_id) {
+                ids.push(label_id);
+                let _ = sqlx::query("UPDATE messages SET labels_json = $1 WHERE id = $2")
+                    .bind(serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into()))
+                    .bind(&mid)
+                    .execute(pool)
+                    .await;
+            }
+        }
+    }
 
     // Index the message for full-text search.
     let search_body = format!(
@@ -955,7 +1199,7 @@ async fn insert_message(
         pool,
         &contact_id,
         &mid,
-        &parsed.date.to_rfc3339(),
+        &timeline.to_rfc3339(),
         &parsed.attachments,
     )
     .await
@@ -1001,18 +1245,36 @@ async fn insert_message(
         .await
         .map_err(|e| format!("insert notification uid={uid}: {e}"))?;
 
-        // OS-level desktop notification. Skipped automatically when
-        // desktop_enabled is false or during quiet hours.
-        let store = app.state::<crate::services::state::SyncStateStore>();
-        let prefs = store.notification_prefs();
-        let _ = crate::services::desktop_notifier::notify_new_mail(
-            app,
-            &prefs,
-            &account.account_id,
-            &title,
-            sender,
+        // OS-level desktop notification — noise gate: only ping for mail
+        // from PEOPLE the user cares about: contacts flagged notify=1, or
+        // already-screened senders whose message is not a newsletter.
+        // Newsletter/promo mail (List-*) arrives silently into the lists —
+        // otherwise a busy mailbox drowns the notification center and the
+        // user disables notifications entirely.
+        let flags: Option<(i64, i64)> = sqlx::query_as(
+            "SELECT notify, screened FROM contacts WHERE id = $1",
         )
-        .await;
+        .bind(&contact_id)
+        .fetch_optional(pool)
+        .await
+        .unwrap_or(None);
+        let should_ping_os = flags
+            .map(|(notify, screened)| {
+                notify == 1 || (screened == 1 && !parsed.is_newsletter)
+            })
+            .unwrap_or(false);
+        if should_ping_os {
+            let store = app.state::<crate::services::state::SyncStateStore>();
+            let prefs = store.notification_prefs();
+            let _ = crate::services::desktop_notifier::notify_new_mail(
+                app,
+                &prefs,
+                &account.account_id,
+                &title,
+                sender,
+            )
+            .await;
+        }
 
         // Trigger vacation auto-responder for new mail.
         let _ = maybe_send_vacation_reply(pool, &account.account_id, &account.creds, parsed).await;
@@ -1100,6 +1362,7 @@ async fn maybe_send_vacation_reply(
         &[sender.to_string()],
         &[],
         &[],
+        None,
         None,
         &reply_subject,
         &body,
@@ -1739,7 +2002,12 @@ pub fn build_from_mailbox(account_email: &str, display_name: &str) -> Result<Str
 }
 
 pub async fn open_pool() -> Result<SqlitePool, String> {
-    let path = db_path();
+    open_pool_at(&db_path()).await
+}
+
+/// Path-parameterized variant for tests and the MCP gateway (same WAL +
+/// busy-timeout + 8-connection settings, different file location).
+pub async fn open_pool_at(path: &std::path::Path) -> Result<SqlitePool, String> {
     let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", path.display()))
         .map_err(|e| format!("parse db url: {e}"))?
         .create_if_missing(true)
@@ -1764,7 +2032,7 @@ pub async fn open_pool() -> Result<SqlitePool, String> {
         .map_err(|e| format!("connect db: {e}"))
 }
 
-fn db_path() -> PathBuf {
+pub(crate) fn db_path() -> PathBuf {
     // Mirror the tauri-plugin-sql `sqlite:sendpalm.db` resolution:
     // macOS: $HOME/Library/Application Support/com.sendpalm.app/sendpalm.db
     let dir = dirs_app_support();
@@ -1884,4 +2152,90 @@ mod tests {
         assert!(!should_continue_after_chunk(1152, None, 158));
         assert!(!should_continue_after_chunk(0, None, 0));
     }
+}
+
+#[cfg(test)]
+mod folder_walk_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_empty_chunk_budget_terminates_a_pass() {
+        assert!(!legacy_empty_budget_exhausted(0));
+        assert!(!legacy_empty_budget_exhausted(39));
+        assert!(legacy_empty_budget_exhausted(40));
+        // 8000 UIDs of walking per pass: 40 chunks × 200.
+        assert_eq!(LEGACY_EMPTY_CHUNK_BUDGET * crate::services::imap::MAX_PER_TICK, 8000);
+    }
+
+    #[test]
+    fn uid_validity_reset_requires_stored_value() {
+        // First sync of a folder (stored 0) never resets.
+        assert_eq!(detect_uid_validity_change(0, 5), None);
+        // Unchanged validity: no reset.
+        assert_eq!(detect_uid_validity_change(5, 5), None);
+        // Rebuilt folder: reset exactly once (the caller persists the new
+        // validity with the reset cursor, so it can't re-fire).
+        assert_eq!(detect_uid_validity_change(1, 5), Some(0));
+    }
+}
+
+/// One-time backfill of imap identity for rows synced before the columns
+/// existed (0029). The message id encodes `imap_<acct>_<folder_slug>_<uid>`;
+/// folder slugs are lossy (spaces→_), so match against the account's known
+/// syncFolders and take the candidate whose prefix fits. Rows that can't be
+/// identified stay null (they just don't flag-sync).
+pub async fn backfill_imap_identity(pool: &SqlitePool) -> Result<u32, String> {
+    let done: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM app_kv WHERE key = 'imap_identity_backfilled'")
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| format!("backfill check: {e}"))?;
+    if done.is_some() {
+        return Ok(0);
+    }
+    let rows = sqlx::query_as::<_, (String, String)>(
+        "SELECT id, ac FROM messages WHERE imap_uid IS NULL AND id LIKE 'imap\\_%' ESCAPE '\\' LIMIT 20000",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("backfill scan: {e}"))?;
+
+    let mut updated = 0u32;
+    for (id, ac) in rows {
+        let Some(rest) = id.strip_prefix("imap_") else { continue };
+        // Account folders to try, longest-slug first so "Sent Items" wins
+        // over "Sent" when both could prefix-match.
+        let settings = load_account_settings_json(&ac).await.unwrap_or_default();
+        let folders = crate::services::sync_loop::sync_folders_from_json(&settings);
+        let mut candidates: Vec<String> = folders.clone();
+        candidates.push("INBOX".to_string());
+        candidates.sort_by_key(|f| std::cmp::Reverse(f.len()));
+
+        for folder in candidates {
+            let slug = folder.replace(['/', ' '], "_");
+            let prefix = format!("imap_{ac}_{slug}_");
+            if let Some(uid_str) = id.strip_prefix(&prefix) {
+                if let Ok(uid) = uid_str.parse::<i64>() {
+                    let _ = sqlx::query(
+                        "UPDATE messages SET imap_folder = $1, imap_uid = $2 WHERE id = $3",
+                    )
+                    .bind(&folder)
+                    .bind(uid)
+                    .bind(&id)
+                    .execute(pool)
+                    .await;
+                    updated += 1;
+                    break;
+                }
+            }
+        }
+    }
+    sqlx::query(
+        "INSERT INTO app_kv (key, value, updated_at) VALUES ('imap_identity_backfilled', '1', datetime('now'))",
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| format!("backfill mark: {e}"))?;
+    eprintln!("[sync] imap identity backfill: {updated} rows");
+    Ok(updated)
 }

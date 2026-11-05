@@ -87,12 +87,12 @@ async fn fetch_from_multiple_folders() {
                     bundle.highest_uid,
                     bundle.messages.len()
                 );
-                for (uid, m) in bundle.messages.iter().take(3) {
+                for fetched in bundle.messages.iter().take(3) {
                     eprintln!(
                         "    uid={} from={} subj={:?}",
-                        uid,
-                        m.sender_email,
-                        m.subject.chars().take(60).collect::<String>()
+                        fetched.uid,
+                        fetched.parsed.sender_email,
+                        fetched.parsed.subject.chars().take(60).collect::<String>()
                     );
                 }
             }

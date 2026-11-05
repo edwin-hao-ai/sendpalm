@@ -3,6 +3,8 @@
 //! See AGENTS.md §10 "Real backend integration" for the design and
 //! `docs/CREDENTIALS.md` for the test account.
 
+pub mod agent_clients;
+pub mod date_backfill;
 pub mod db;
 pub mod desktop_notifier;
 pub mod ical;
@@ -10,12 +12,16 @@ pub mod image_proxy;
 pub mod imap;
 pub mod llm;
 pub mod mailbox_resolver;
+pub mod mcp;
 pub mod parser;
+pub mod provider_catalog;
 pub mod providers;
+pub mod rules;
 pub mod scheduled_send;
 pub mod smtp;
 pub mod state;
 pub mod sync_loop;
+pub mod tray;
 pub mod vault;
 
 use serde::{Deserialize, Serialize};
@@ -136,3 +142,9 @@ mod tests {
         );
     }
 }
+
+/// Serializes tests that mutate the process HOME directory. Every
+/// #[cfg(test)] module that does this must share ONE lock — per-module
+/// locks race each other under cargo's default parallel test threads.
+#[cfg(test)]
+pub(crate) static HOME_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

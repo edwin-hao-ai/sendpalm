@@ -10,6 +10,10 @@ pub enum FolderKind {
     Drafts,
     Trash,
     Spam,
+    /// Archive / "all other mail" folders. Feishu delivers its non-important
+    /// stream ("其他邮件") to 已归档, so this is where the bulk of new mail
+    /// actually lives for Feishu accounts.
+    Archive,
 }
 
 /// Look up the server-side name for a desired folder, returning `None` if
@@ -30,7 +34,7 @@ pub fn resolve_folder_name(
             "[Gmail]/Sent Mail",
             "&XfJT0ZAB-", // Feishu
         ],
-        FolderKind::Drafts => &["Drafts", "Draft", "草稿箱", "&XfJ8T-"],
+        FolderKind::Drafts => &["Drafts", "Draft", "草稿箱", "&XfJ8T-", "&g0l6P3ux-"],
         FolderKind::Trash => &[
             "Trash",
             "Deleted",
@@ -38,6 +42,7 @@ pub fn resolve_folder_name(
             "Deleted Messages",
             "已删除",
             "[Gmail]/Trash",
+            "&XfJSIJZk-", // Feishu 已删除
         ],
         FolderKind::Spam => &[
             "Spam",
@@ -47,6 +52,13 @@ pub fn resolve_folder_name(
             "Bulk Mail",
             "垃圾邮件",
             "[Gmail]/Spam",
+            "&V4NXPpCuTvY-", // Feishu 垃圾邮件
+        ],
+        FolderKind::Archive => &[
+            "Archive",
+            "已归档",
+            "&XfJfUmhj-", // Feishu 已归档（=「其他邮件」的实际存放处）
+            "[Gmail]/All Mail",
         ],
     };
     let lower: Vec<String> = server_mailboxes.iter().map(|s| s.to_lowercase()).collect();
@@ -86,7 +98,7 @@ pub fn folder_kind_for_name(folder_name: &str) -> Option<FolderKind> {
         ),
         (
             FolderKind::Drafts,
-            &["Drafts", "Draft", "草稿箱", "&XfJ8T-"],
+            &["Drafts", "Draft", "草稿箱", "&XfJ8T-", "&g0l6P3ux-"],
         ),
         (
             FolderKind::Trash,
@@ -97,6 +109,7 @@ pub fn folder_kind_for_name(folder_name: &str) -> Option<FolderKind> {
                 "Deleted Messages",
                 "已删除",
                 "[Gmail]/Trash",
+                "&XfJSIJZk-",
             ],
         ),
         (
@@ -109,6 +122,16 @@ pub fn folder_kind_for_name(folder_name: &str) -> Option<FolderKind> {
                 "Bulk Mail",
                 "垃圾邮件",
                 "[Gmail]/Spam",
+                "&V4NXPpCuTvY-", // Feishu 垃圾邮件
+            ],
+        ),
+        (
+            FolderKind::Archive,
+            &[
+                "Archive",
+                "已归档",
+                "&XfJfUmhj-", // Feishu 已归档（=「其他邮件」的实际存放处）
+                "[Gmail]/All Mail",
             ],
         ),
     ];
@@ -127,12 +150,15 @@ pub fn folder_kind_for_name(folder_name: &str) -> Option<FolderKind> {
 /// doesn't expose. The first entry is always `Inbox`; if even that is
 /// missing the caller should treat the account as mis-configured.
 pub fn resolve_all(server_mailboxes: &[String]) -> Vec<String> {
+    // Drafts are deliberately NOT synced: SendPalm's local Drafts box is
+    // canonical, and importing the server-side drafts folder produced two
+    // competing draft stores. Trash/Spam sync for server-state parity.
     let kinds = [
         FolderKind::Inbox,
         FolderKind::Sent,
-        FolderKind::Drafts,
         FolderKind::Trash,
         FolderKind::Spam,
+        FolderKind::Archive,
     ];
     let mut out = Vec::with_capacity(kinds.len());
     for k in kinds {
@@ -143,4 +169,41 @@ pub fn resolve_all(server_mailboxes: &[String]) -> Vec<String> {
         }
     }
     out
+}
+#[cfg(test)]
+mod feishu_tests {
+    use super::*;
+
+    #[test]
+    fn resolves_feishu_localized_names() {
+        let server = vec![
+            "INBOX".to_string(),
+            "&XfJfUmhj-".to_string(),   // 已归档
+            "&V4NXPpCuTvY-".to_string(), // 垃圾邮件
+            "&XfJSIJZk-".to_string(),   // 已删除
+            "&XfJT0ZAB-".to_string(),   // 已发送
+            "&g0l6P3ux-".to_string(),   // 草稿箱
+        ];
+        assert_eq!(
+            resolve_folder_name(&server, FolderKind::Archive).as_deref(),
+            Some("&XfJfUmhj-")
+        );
+        assert_eq!(
+            resolve_folder_name(&server, FolderKind::Trash).as_deref(),
+            Some("&XfJSIJZk-")
+        );
+        assert_eq!(
+            resolve_folder_name(&server, FolderKind::Spam).as_deref(),
+            Some("&V4NXPpCuTvY-")
+        );
+        assert_eq!(
+            folder_kind_for_name("&XfJfUmhj-"),
+            Some(FolderKind::Archive)
+        );
+        // resolve_all now includes Archive — this is where Feishu's
+        // "其他邮件" stream lives; without it, new mail never arrives.
+        let all = resolve_all(&server);
+        assert!(all.iter().any(|f| f == "&XfJfUmhj-"));
+        assert_eq!(all.len(), 5);
+    }
 }

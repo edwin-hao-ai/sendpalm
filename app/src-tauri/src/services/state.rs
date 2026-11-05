@@ -10,8 +10,40 @@ use crate::services::desktop_notifier::NotificationPrefs;
 pub struct AccountSyncState {
     pub uid_validity: u32,
     pub last_uid: u32,
+    /// Timestamp of the last SUCCESSFUL sync. A failed attempt never
+    /// advances this — the UI must not present a failure as freshness.
     pub last_synced_at: chrono::DateTime<chrono::Utc>,
     pub busy: bool,
+    pub status: AccountSyncStatus,
+    /// Sanitized machine-readable error code (e.g. "missing_credentials").
+    /// Never a raw error string — those can contain server responses.
+    pub error_code: Option<String>,
+}
+
+/// User-facing sync lifecycle. Serializes to a stable lowercase string for
+/// the IPC boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountSyncStatus {
+    /// No successful sync has ever completed for this account.
+    NeverSynced,
+    Syncing,
+    Connected,
+    /// The account is configured but the OS keychain has no password (or
+    /// the stored one was rejected). Actionable in Settings → Accounts.
+    NeedsCredentials,
+    Error,
+}
+
+impl AccountSyncStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::NeverSynced => "never_synced",
+            Self::Syncing => "syncing",
+            Self::Connected => "connected",
+            Self::NeedsCredentials => "needs_credentials",
+            Self::Error => "error",
+        }
+    }
 }
 
 impl Default for AccountSyncState {
@@ -23,6 +55,8 @@ impl Default for AccountSyncState {
                 .unwrap()
                 .with_timezone(&chrono::Utc),
             busy: false,
+            status: AccountSyncStatus::NeverSynced,
+            error_code: None,
         }
     }
 }
