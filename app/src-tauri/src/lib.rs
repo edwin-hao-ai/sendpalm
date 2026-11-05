@@ -322,6 +322,7 @@ pub fn run() {
             commands::list_mailboxes,
             commands::send_message,
             commands::get_sync_state,
+            commands::get_import_summary,
             commands::list_email_providers,
             commands::vault_save,
             commands::vault_load,

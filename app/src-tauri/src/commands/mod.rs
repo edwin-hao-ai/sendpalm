@@ -248,6 +248,18 @@ pub async fn get_sync_state(app: AppHandle, account_id: String) -> Result<SyncSt
     })
 }
 
+/// What the account's first sync imported, for Settings → Accounts.
+///
+/// Returns `None` when the account has never completed an import, so the row
+/// can stay silent instead of showing a meaningless "0".
+#[tauri::command]
+pub async fn get_import_summary(
+    account_id: String,
+) -> Result<Option<crate::services::ImportSummaryReport>, String> {
+    let pool = crate::services::sync_loop::open_pool().await?;
+    crate::services::sync_loop::load_import_summary(&pool, &account_id).await
+}
+
 #[tauri::command]
 pub async fn list_email_providers() -> Result<Vec<EmailProvider>, String> {
     Ok(provider_list())

@@ -33,6 +33,56 @@ fn detect_uid_validity_change(stored: u32, current: u32) -> Option<u32> {
     }
 }
 
+/// Where the mail being fetched right now sits relative to the account's
+/// first import.
+///
+/// The Gate's promise is "who may write to me **from now on**". A mailbox
+/// that already contains five years of history is not a queue of 3,000
+/// decisions — deciding them one by one is how a new install gets abandoned
+/// on day one. So the first pass treats everything it finds as history:
+/// senders are pre-screened, newsletters are filed into the Feed, and the
+/// Screener only ever sees senders who arrive *after* the import finishes.
+#[derive(Debug, Clone, Copy)]
+pub struct ImportPhase {
+    /// Highest INBOX UID before this pass. 0 means the account has never
+    /// completed a sync, i.e. this pass is the import.
+    pub previous_last_uid: u32,
+    /// Snapshot of "this is the first pass", taken **before** the first
+    /// message is written (the cursor advances during the pass, so reading
+    /// it later would always say "not the first").
+    pub initial: bool,
+}
+
+impl ImportPhase {
+    pub fn new(previous_last_uid: u32) -> Self {
+        Self {
+            previous_last_uid,
+            initial: previous_last_uid == 0,
+        }
+    }
+}
+
+/// Running tally of a first import, so the UI can report what happened
+/// instead of silently rewriting the user's mailbox organisation.
+#[derive(Debug, Default, Clone)]
+pub struct ImportSummary {
+    pub messages: u32,
+    /// Contact ids of the senders encountered. Only senders created by the
+    /// import can be counted here — on a first pass every sender is new, and
+    /// every new sender is auto-screened, so the set size *is* the number of
+    /// senders the user never had to decide about.
+    pub senders: HashSet<String>,
+}
+
+impl ImportSummary {
+    pub fn report(&self) -> crate::services::ImportSummaryReport {
+        crate::services::ImportSummaryReport {
+            messages: self.messages,
+            senders: self.senders.len() as u32,
+        }
+    }
+}
+
 /// When IDLE fails (server doesn't support it, connection drop, etc.), wait
 /// this long before the next sync attempt.
 const IDLE_ERROR_BACKOFF: Duration = Duration::from_secs(60);
@@ -69,12 +119,15 @@ pub struct SyncAccount {
     pub settings_json: Option<String>,
 }
 
-#[derive(Debug)]
+/// Where a sender's mail should land: the Gate decisions already made for
+/// them. Fields are public so the import-transition tests can build routing
+/// fixtures without a database round-trip.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContactRouteInfo {
-    id: String,
-    screened: bool,
-    blocked: bool,
-    default_bucket: String,
+    pub id: String,
+    pub screened: bool,
+    pub blocked: bool,
+    pub default_bucket: String,
 }
 
 /// Start the background sync loop for every configured email account.
@@ -620,7 +673,10 @@ async fn sync_and_notify(
         .map_err(|e| format!("app_data_dir: {e}"))?;
     let result = sync_one(app, &data_dir, pool, client, account, previous_last_uid).await;
 
-    let (n, new_last_uid, new_uv) = match result {
+    // The import summary is carried on the `sync:new-messages` event and
+    // persisted under `import_summary::<account>` for Settings; nothing in
+    // the loop's own state needs it.
+    let (n, new_last_uid, new_uv, _import_summary) = match result {
         Ok(r) => r,
         Err(e) => {
             store.put(
@@ -692,7 +748,13 @@ async fn sync_one(
     client: &ImapClient,
     account: &SyncAccount,
     previous_last_uid: u32,
-) -> Result<(u32, u32, u32), String> {
+) -> Result<(u32, u32, u32, Option<ImportSummary>), String> {
+    // Snapshot the import phase BEFORE the first message is written: the
+    // cursor advances during the pass, so asking later always answers
+    // "not the first one".
+    let phase = ImportPhase::new(previous_last_uid);
+    let mut import = ImportSummary::default();
+
     // Ensure the account row exists in the accounts table so the foreign
     // key on messages.ac is satisfied. For DB-configured accounts this is a
     // no-op update; for the test fallback it creates the row.
@@ -735,8 +797,8 @@ async fn sync_one(
             folder,
             &rules,
             start_uid,
-            // Only trigger vacation replies for new mail in INBOX.
-            if is_inbox { previous_last_uid } else { 0 },
+            phase,
+            &mut import,
             &state_key,
         )
         .await
@@ -809,6 +871,20 @@ async fn sync_one(
         }
     }
 
+    // Only report an import when this pass actually wrote history. A first
+    // pass that found an empty mailbox is not an import the user needs told
+    // about.
+    let summary = if phase.initial && total_inserted > 0 {
+        import.messages = total_inserted;
+        Some(import)
+    } else {
+        None
+    };
+    let summary_report = summary.as_ref().map(ImportSummary::report);
+    if let Some(s) = &summary_report {
+        persist_import_summary(pool, &account.account_id, s).await;
+    }
+
     // Notify the frontend so it can refresh Imbox / Notifications in real time.
     let report = crate::services::SyncReport {
         account_id: account.account_id.clone(),
@@ -818,11 +894,12 @@ async fn sync_one(
         uid_validity: inbox_uid_validity as u64,
         last_uid: inbox_cursor as u64,
         new_message_ids,
+        import_summary: summary_report,
         error: None,
     };
     let _ = app.emit("sync:new-messages", report);
 
-    Ok((total_inserted, inbox_cursor, inbox_uid_validity))
+    Ok((total_inserted, inbox_cursor, inbox_uid_validity, summary))
 }
 
 async fn load_folder_sync_state(pool: &SqlitePool, key: &str) -> Result<(u32, u32), String> {
@@ -842,6 +919,56 @@ async fn load_folder_sync_state(pool: &SqlitePool, key: &str) -> Result<(u32, u3
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as u32;
     Ok((last_uid, uid_validity))
+}
+
+/// `app_kv` key holding an account's first-import tally.
+fn import_summary_key(account_id: &str) -> String {
+    format!("import_summary::{account_id}")
+}
+
+/// Persist what the first import did so Settings → Accounts can keep showing
+/// it long after the one-shot toast is gone.
+pub async fn persist_import_summary(
+    pool: &SqlitePool,
+    account_id: &str,
+    summary: &crate::services::ImportSummaryReport,
+) {
+    let json = match serde_json::to_string(summary) {
+        Ok(j) => j,
+        Err(e) => {
+            eprintln!("[sync] import summary encode failed for {account_id}: {e}");
+            return;
+        }
+    };
+    // Best-effort: losing the tally only costs a Settings line, never mail.
+    if let Err(e) = sqlx::query(
+        "INSERT INTO app_kv (key, value, updated_at) VALUES ($1, $2, datetime('now')) \
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+    )
+    .bind(import_summary_key(account_id))
+    .bind(json)
+    .execute(pool)
+    .await
+    {
+        eprintln!("[sync] import summary save failed for {account_id}: {e}");
+    }
+}
+
+/// Read back the first-import tally (Settings → Accounts). `None` when the
+/// account has never imported — the row then shows nothing rather than "0".
+pub async fn load_import_summary(
+    pool: &SqlitePool,
+    account_id: &str,
+) -> Result<Option<crate::services::ImportSummaryReport>, String> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT value FROM app_kv WHERE key = $1")
+        .bind(import_summary_key(account_id))
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("load import summary {account_id}: {e}"))?;
+    let Some((json,)) = row else { return Ok(None) };
+    serde_json::from_str(&json)
+        .map(Some)
+        .map_err(|e| format!("decode import summary {account_id}: {e}"))
 }
 
 async fn save_folder_sync_state(
@@ -941,7 +1068,8 @@ async fn sync_folder(
     folder: &str,
     rules: &[crate::services::rules::MailRule],
     start_uid: u32,
-    previous_last_uid: u32,
+    phase: ImportPhase,
+    import: &mut ImportSummary,
     state_key: &str,
 ) -> Result<(u32, u32, u32, Vec<String>), String> {
     let folder_kind = crate::services::mailbox_resolver::folder_kind_for_name(folder);
@@ -1000,7 +1128,8 @@ async fn sync_folder(
                 fetched.uid,
                 &fetched.parsed,
                 fetched.received_at,
-                previous_last_uid,
+                phase,
+                import,
             )
             .await
             {
@@ -1053,7 +1182,8 @@ async fn insert_message(
     uid: u32,
     parsed: &crate::services::parser::ParsedMessage,
     received_at: Option<chrono::DateTime<chrono::Utc>>,
-    previous_last_uid: u32,
+    phase: ImportPhase,
+    import: &mut ImportSummary,
 ) -> Result<Option<String>, String> {
     let is_self = parsed
         .sender_email
@@ -1063,9 +1193,20 @@ async fn insert_message(
         &parsed.sender_email,
         parsed.sender_name.as_deref(),
         is_self,
+        phase.initial,
     )
     .await?;
-    let mut bucket: &str = compute_message_bucket(&route);
+    // A sender's own message (our Sent copy) must never count towards
+    // "N senders were auto-screened" — the user is not a stranger to
+    // themselves.
+    if phase.initial && !is_self {
+        import.senders.insert(route.id.clone());
+    }
+    let bucket: &str = if phase.initial {
+        bucket_for_import(&route, parsed.is_newsletter)
+    } else {
+        compute_message_bucket(&route)
+    };
     let mut owned_bucket: Option<String> = None;
     let mut rule_label: Option<String> = None;
     if rules.iter().any(|r| r.enabled) {
@@ -1223,7 +1364,7 @@ async fn insert_message(
     // Only notify for genuinely new mail (skip the historic backlog on
     // the first sync). previous_last_uid == 0 means this is the initial
     // backfill.
-    if previous_last_uid > 0 && uid > previous_last_uid {
+    if phase.previous_last_uid > 0 && uid > phase.previous_last_uid {
         let sender = parsed
             .sender_name
             .as_deref()
@@ -1511,7 +1652,10 @@ pub async fn save_sent_message(
                 .into(),
         );
     }
-    let route = upsert_contact(pool, to_email, None, false).await?;
+    // Replying to someone is not an import: the recipient stays a Gate
+    // candidate unless the user approved them, which is exactly the HEY
+    // model (writing to someone you blocked is itself a decision to revisit).
+    let route = upsert_contact(pool, to_email, None, false, false).await?;
     let mid = format!("sent_{}", uuid::Uuid::new_v4().simple());
     let prev_excerpt = body
         .split('\n')
@@ -1767,11 +1911,37 @@ fn compute_message_bucket(route: &ContactRouteInfo) -> &'static str {
     "imbox"
 }
 
+/// Bucket for a message that arrived during the account's first import.
+///
+/// The import makes exactly **one** automatic filing decision: newsletters go
+/// to the Feed, so five years of Gmail history doesn't hand the user an Imbox
+/// that is 90% promos. Receipts and bills are deliberately NOT auto-filed —
+/// quietly hiding a bill in a bucket the user never asked for is the kind of
+/// silent error that costs trust, and there is no execute+undo UI for
+/// keyword rules yet (see docs/TODOS.md §分类自动化).
+pub fn bucket_for_import(route: &ContactRouteInfo, is_newsletter: bool) -> &'static str {
+    if is_newsletter
+        && !route.blocked
+        && route.screened
+        && !matches!(route.default_bucket.as_str(), "paperTrail" | "trash" | "spam")
+    {
+        return "feed";
+    }
+    compute_message_bucket(route)
+}
+
+/// Upsert a sender and return its routing info.
+///
+/// `bulk_import` marks the account's first sync pass: historical senders are
+/// written straight to `screened = 1` so they never become Gate cards. The
+/// Gate then means what it is supposed to mean — "who may write to me from
+/// now on" — instead of a 3,000-item backlog nobody would ever finish.
 pub async fn upsert_contact(
     pool: &SqlitePool,
     email: &str,
     name: Option<&str>,
     is_self: bool,
+    bulk_import: bool,
 ) -> Result<ContactRouteInfo, String> {
     let id = format!("c_{}", email.replace('@', "_at_").replace('.', "_"));
     let display_name = name
@@ -1788,6 +1958,10 @@ pub async fn upsert_contact(
     // accidentally surface in the Gate screener after the Sent folder is synced.
     let (first_seen, screened, default_bucket) = if is_self {
         (0i64, 1i64, "paperTrail")
+    } else if bulk_import {
+        // Historical sender: pre-screened, filed in the Imbox. Reversible —
+        // the user can re-screen anyone from Contacts.
+        (1i64, 1i64, "imbox")
     } else {
         (1i64, 0i64, "imbox")
     };

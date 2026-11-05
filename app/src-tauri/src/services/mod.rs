@@ -89,6 +89,18 @@ pub fn load_test_credentials() -> Result<EmailCredentials, String> {
     })
 }
 
+/// What the account's **first** sync pass did — the numbers the UI needs to
+/// tell the user that 3,000 historical senders were filed instead of queued
+/// in the Screener.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImportSummaryReport {
+    /// Messages written to the local store during the import.
+    pub messages: u32,
+    /// Distinct senders auto-screened by the import (they never reach the
+    /// Gate). The user's own address is not counted — it is not a stranger.
+    pub senders: u32,
+}
+
 /// Result of one IMAP sync cycle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncReport {
@@ -104,6 +116,11 @@ pub struct SyncReport {
     /// Empty when new_messages == 0.
     #[serde(default)]
     pub new_message_ids: Vec<String>,
+    /// Present only on the pass that imported the account's history. The
+    /// frontend shows a one-shot "silently imported N messages" toast and
+    /// the Settings → Accounts row keeps the numbers afterwards.
+    #[serde(default)]
+    pub import_summary: Option<ImportSummaryReport>,
     pub error: Option<String>,
 }
 
