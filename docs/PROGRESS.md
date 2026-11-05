@@ -3546,3 +3546,29 @@ received_at 全量修复、归档持续回填。
   保留 H1。
 - 验证：Rust 33 套件（`import_transition.rs` 20 条）、TS 659、typecheck/lint
   干净、Playwright 144 通过 / 1 skipped、性能 16.6ms 均帧 0 长任务。
+
+### 2026-11-05 渲染统一 + 筛选台卡牌 + 还原底部 pile 条
+
+用户连续报了三件事：回复页显示 `<!DOCTYPE html>…<style>@font-face…`、筛选台也不渲染
+HTML、以及「底部那排快捷操作被换成一个待处理按钮，魂没了」。
+
+- **HTML-only 邮件不再把源码当正文**（`services/html_text.rs`）：ChatGPT / Stripe
+  这类邮件没有 text/plain 部分，`extract_text` 直接回退到 HTML 源码，于是
+  `messages.body` 里躺着整篇标记，所有「显示文字」的地方（列表预览、筛选台卡、
+  单据卡、搜索提示、复制/下载、iframe 的纯文本兜底）都在给用户看源码。现在
+  回退路径一律 strip，并有一条分块、幂等的回填修复历史行（实测修完全库 0 条残留）。
+- **一个 EmailBody 渲染所有正文**：`components/EmailBody.tsx` 里早就写着「每个
+  界面都必须用它」，但没人用——面板一套 iframe、一起读一套、Stream 一套、专注回复
+  干脆没有（直接把正文当段落打印）。现在面板/一起读/Stream/专注回复/筛选台全部
+  走同一个组件（延迟消毒 + 纯文本流式兜底 + 每消息 postMessage 过滤 + 显示图片 +
+  冷却自动撑高）。顺手修掉两个真 bug：一起读的 iframe 用 `sandbox=""` 却去读
+  `contentDocument`（自动撑高从来没生效过）；纯文本邮件永远显示「正在加载完整版式…」。
+- **筛选台卡牌**：右滑 = 放进卡上建议的桶、左滑 = 拦下、←/→ 键等价，桌面也能滑
+  （之前 `disabled={!isMobile()}`）；批准也能撤销（之前只有屏蔽能）；卡片抬头一行
+  「← 左滑拦下 / 右滑放进 Inbox」；720px 栏宽 + H1 只写「筛选台」，三个桶按钮回到
+  首屏内；正文限高 220 并渲染真 HTML（队列查询不带 body_html，当前这一张才取全行）。
+- **底部 pile 条还原**（revert 2baf2f6）：把「待处理」pill 换掉底部那排计数卡是
+  错的——边读边操作、不用离开列表，才是这套界面的魂。稍后回复 / 已搁置 / 提醒 +
+  专注回复按钮回到列表底部（桌面与手机都在），连带恢复 6c9915a 删掉的 262 行 CSS。
+- 验证：TS 659、typecheck/lint 干净、Playwright 144 通过 / 1 skipped
+  （`render on iPhone` 偶发 flake，单跑复核通过）。
