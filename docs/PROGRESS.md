@@ -3572,3 +3572,33 @@ HTML、以及「底部那排快捷操作被换成一个待处理按钮，魂没�
   专注回复按钮回到列表底部（桌面与手机都在），连带恢复 6c9915a 删掉的 262 行 CSS。
 - 验证：TS 659、typecheck/lint 干净、Playwright 144 通过 / 1 skipped
   （`render on iPhone` 偶发 flake，单跑复核通过）。
+
+### 2026-11-06 侧栏常开 + 把「没验证过」的两件事验证掉
+
+**侧栏常开（复审报告 §3，之前只写了没做）**：≥1024 的 64px 图标轨换成 212px
+两级列表，Mail 组默认展开（筛选台 / 收件箱 / 报刊 / 单据 / 草稿 / 垃圾邮件 /
+回收站），计数右对齐在各自那一行（筛选台 = 待审数，其余 = 未读）。原来的 20px
+hover 小三角是「两个相邻热区、语义相反、一个 64px 一个 20px、hover 才出现」，
+现在一次点击到达任何邮件页。当前所在分组自动展开，所以列表不会长到 17 行。
+768–1023 保持图标轨 + 浮层，手机保持底部栏。
+
+- 计数器同时订阅 hard + soft tick：只订阅 soft 时，首次加载（走 hard tick）
+  会让两个数一直显示 0 —— 上一轮写过这个坑，这次补上了。
+
+**验证 1：真实邮箱首轮导入（之前是「没跑过」）**
+- `tests/import_transition_live.rs`（新增，`SENDPALM_E2E_NETWORK=1` 门控）：
+  连真实 imap.feishu.cn，取 INBOX 第一块（cursor=0），用**真实 MIME 解析器 +
+  真实 upsert_contact(bulk_import=true)** 走一遍首轮导入，断言筛选台 0 张卡、
+  有发件人被自动通过、且 `body_text` 不含 `<!DOCTYPE`/`<html>`。
+  实测：**46 封真实邮件 → 23 位发件人自动通过、4 封进报刊、0 张筛选台卡片**。
+- `tests/imap_real.rs` 之前**根本跑不起来**：rustls 0.23 要求进程级
+  CryptoProvider，而它只在 `lib.rs::run()` 里安装，测试从不调用 → 三个用例
+  都在握手前 panic。现在 `install_crypto_provider()` 抽成公开函数，测试也调。
+  3 个用例全绿（需 `--test-threads=1`：会改进程 env 且持有真连接）。
+
+**验证 2：iOS**
+- `@tauri-apps/api` 2.11.1 vs `tauri` crate 2.12.5 版本不匹配，`tauri ios build`
+  直接拒绝构建 —— 已升到 2.12.4 并对齐。
+- 升级后仍卡在环境：Tauri 要求 iOS **27.2 模拟器 runtime**，本机只有 26.5 /
+  27.1（SDK 是 27.2）。`tauri ios build` 在 Rust 编译之前就退出。
+  这一项**仍未完成**，需要 `xcodebuild -downloadPlatform iOS` 装 27.2 runtime。

@@ -9,15 +9,23 @@ use tauri::Manager;
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    // rustls 0.23 requires a process-level CryptoProvider before any TLS config
-    // is built. We enable the `ring` feature everywhere (lettre, sqlx, reqwest);
-    // install it once here so the IMAP DoH fallback and any other crate that
-    // calls `rustls::ClientConfig::builder()` does not panic at runtime.
+/// Install the process-level rustls CryptoProvider.
+///
+/// rustls 0.23 refuses to build a `ClientConfig` without one, so this must run
+/// before ANY TLS handshake — in the app (from `run()`), and in every test that
+/// talks to a real server. It used to live only inside `run()`, which meant the
+/// gated real-IMAP tests could never pass: they panicked in rustls before
+/// touching the network.
+///
+/// Idempotent: `AlreadySet` means something else won the race, which is fine.
+pub fn install_crypto_provider() {
     if let Err(e) = rustls::crypto::ring::default_provider().install_default() {
-        // AlreadySet is harmless (another dependency installed one first).
         eprintln!("[sendpalm] rustls crypto provider install returned: {:?}", e);
     }
+}
+
+pub fn run() {
+    install_crypto_provider();
 
     // iOS/Tauri swallows panics behind stop_unwind and aborts without a message.
     // Write any panic to a temp file so we can read it back after a crash.

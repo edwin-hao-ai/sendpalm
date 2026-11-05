@@ -3,6 +3,9 @@
 //! Gated behind `SENDPALM_E2E_NETWORK=1` so CI without credentials skips it.
 //! Locally with `app/.env` populated the test connects and asserts at least one
 //! message is fetchable.
+//!
+//! **Run with `--test-threads=1`.** These tests mutate process env (dotenvy)
+//! and hold live connections; run in parallel they race and one flakes.
 
 use sendpalm_app_lib::services::{load_test_credentials, EmailCredentials};
 
@@ -11,6 +14,9 @@ fn e2e_enabled() -> bool {
 }
 
 async fn creds() -> Option<EmailCredentials> {
+    // rustls 0.23 panics on the first handshake without a process-level
+    // provider; the app installs it in run(), which tests never call.
+    sendpalm_app_lib::install_crypto_provider();
     let _ = dotenvy::dotenv();
     // Tests run from `app/src-tauri/`; .env is one level up.
     let _ = dotenvy::from_filename("../.env");
