@@ -9,11 +9,14 @@ import {
   createMemo,
   createResource,
   createSignal,
+  onCleanup,
+  onMount,
   type JSX,
 } from "solid-js";
 import { t } from "../i18n";
 import { extractTasksForMessage } from "../services/task-extraction";
 import {
+  getMessage,
   listContacts,
   listGateQueue,
   upsertContact,
@@ -21,7 +24,7 @@ import {
   markAllReadByContact,
 } from "../stores/data";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { gateBodyPreview } from "../utils/html";
+import { EmailBody } from "../components/EmailBody";
 import { suggestBucket, BUCKET_SUGGEST_LABEL } from "../utils/suggest";
 import { agentChat } from "../services/backend";
 import { loadLlmKey } from "../services/llm-config";
@@ -36,6 +39,7 @@ import { showToast, setView } from "../stores/ui";
 import { useRefreshEffect, useSoftRefreshEffect, useViewport } from "../utils/gestures";
 import { SwipeActions } from "../components/SwipeActions";
 import { PageHeader } from "../components/PageHeader";
+import { VIEW_LABEL } from "../utils/labels";
 
 const BUCKETS: {
   id: MessageBucket;
@@ -50,7 +54,6 @@ const BUCKETS: {
 
 export function Gate() {
   const [queueItems, { refetch: refetchQueue }] = createResource(listGateQueue);
-  const { isMobile } = useViewport();
 
   const handleBodyClick = (e: MouseEvent) => {
     const target = e.target as HTMLElement | null;
@@ -61,6 +64,23 @@ export function Gate() {
     e.stopPropagation();
     openUrl(a.href).catch(() => {});
   };
+
+  // Keyboard is the third channel for the same two decisions (mouse buttons,
+  // swipe, ← / →). The prototype's card is unusable without it on a laptop.
+  const onGateKey = (e: KeyboardEvent) => {
+    const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+    if (tag === "input" || tag === "textarea" || e.metaKey || e.ctrlKey || e.altKey)
+      return;
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      void block();
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      void approve(suggestedBucket());
+    }
+  };
+  onMount(() => window.addEventListener("keydown", onGateKey));
+  onCleanup(() => window.removeEventListener("keydown", onGateKey));
 
   let initialHardRefresh = true;
   useRefreshEffect(() => {
@@ -97,6 +117,35 @@ export function Gate() {
   const current = (): { contact: Contact; message: Message } | undefined =>
     visibleQueue()[cursor()];
 
+  /** What a right-swipe files this sender into.
+   *
+   *  The prototype's Screener asks one question at a time; the bucket is the
+   *  suggestion the card already shows in its own text, so the swipe and the
+   *  highlighted button always agree. */
+  const suggestedBucket = (): MessageBucket => {
+    const m = current()?.message;
+    return m ? suggestBucket(m).bucket : "imbox";
+  };
+
+  /** One short label per bucket for the swipe affordance. The shared
+   *  BUCKET_SUGGEST_LABEL carries the longer "建议" wording for the buttons. */
+  const SUGGEST_LABEL: Record<MessageBucket, string> = {
+    imbox: "Inbox",
+    feed: "Stream",
+    paperTrail: "Records",
+    trash: "回收站",
+    spam: "垃圾邮件",
+  };
+
+  // The queue query deliberately does not carry body_html (325 contacts ×
+  // an 80 KB body each would be tens of MB across the bridge), so the full
+  // row is fetched for the ONE card on screen.
+  const [currentFull] = createResource(
+    () => current()?.message?.id,
+    async (id) => (id ? await getMessage(id) : null),
+  );
+
+
   /** Optimistically hide the card and clamp the cursor. */
   const advance = (contactId: string) => {
     setDecidedIds((prev) => {
@@ -121,6 +170,7 @@ export function Gate() {
     setBusy(true);
     advance(cur.contact.id);
     try {
+      const prevBucket = cur.contact.defaultBucket;
       const updatedContact: Contact = {
         ...cur.contact,
         firstSeen: false,
@@ -130,9 +180,28 @@ export function Gate() {
       await upsertContact(updatedContact);
       await updateMessagesBucketByContact(cur.contact.id, bucket);
       if (bucket === "imbox" && cur.message) void extractTasksForMessage(cur.message.id, "automatic").catch(() => {});
+      // Undo matters more here than anywhere else: a swipe is a reflex, and a
+      // decision the user cannot take back makes them slow down and stop
+      // trusting the gesture.
       showToast({
         message: `已批准 → ${bucket === "imbox" ? "Inbox" : bucket === "feed" ? "Stream" : "Records"}`,
         kind: "success",
+        action: prevBucket === undefined
+          ? undefined
+          : {
+              label: "撤销",
+              run: async () => {
+                await upsertContact({
+                  ...cur.contact,
+                  firstSeen: true,
+                  screened: false,
+                  defaultBucket: prevBucket,
+                });
+                await updateMessagesBucketByContact(cur.contact.id, "imbox");
+                restore(cur.contact.id);
+                await refetchQueue();
+              },
+            },
       });
     } catch (err) {
       restore(cur.contact.id);
@@ -362,9 +431,12 @@ export function Gate() {
   return (
     <div
       style={{
-        "max-width": "560px",
+        // 720px: wide enough that the message reads as a message, narrow
+        // enough that the eye goes to one card. 560px wrapped the H1 onto
+        // three lines and left the buttons below the fold.
+        "max-width": "720px",
         margin: "0 auto",
-        padding: "var(--space-6) var(--space-5)",
+        padding: "var(--space-5)",
         animation: "view-enter 0.3s var(--ease-out) both",
       }}
     >
@@ -379,18 +451,19 @@ export function Gate() {
           }
         >
       <PageHeader
-        title="决定谁可以进入你的收件箱"
+        title={VIEW_LABEL.screener}
         description={
           <span
             style={{
               display: "inline-flex",
               "align-items": "center",
+              "flex-wrap": "wrap",
               gap: "var(--space-2)",
             }}
           >
             <Icon name="ph-shield-check" size={14} />
-            筛选台 · {visibleQueue().length} 位待审 ·{" "}
-            {t("gate.intro.body", "陌生发件人会先停在这里。批准后按分类投递，屏蔽后不再出现。")}
+            {visibleQueue().length} 位待审 ·{" "}
+            {t("gate.intro.body", "第一次给你写信的人会先停在这里。右滑放进，左滑拦下。")}
           </span>
         }
         actions={
@@ -512,14 +585,45 @@ export function Gate() {
             <>
             <SwipeActions
               style={{ "border-radius": "var(--radius-xl)" }}
+              // Swipe works with a mouse too: the prototype's card is the
+              // whole point of the Screener, and gating the gesture to touch
+              // left desktop users with four buttons in a row and no motion.
               leftAction={{
                 label: "屏蔽",
                 icon: "ph-prohibit",
                 color: "red",
                 onClick: () => void block(),
               }}
-              disabled={!isMobile()}
+              rightAction={{
+                label: `放进 ${SUGGEST_LABEL[suggestedBucket()]}`,
+                icon: "ph-check",
+                color: "green",
+                onClick: () => void approve(suggestedBucket()),
+              }}
+              threshold={90}
+              maxDrag={220}
             >
+              {/* Gesture legend — the prototype puts the two directions in
+                  words right above the card so the card does not have to
+                  teach by accident. */}
+              <div
+                data-gate-legend
+                style={{
+                  display: "flex",
+                  "align-items": "center",
+                  "justify-content": "space-between",
+                  "font-size": "var(--text-micro)",
+                  color: "var(--text-muted)",
+                  "font-weight": "600",
+                  "margin-bottom": "var(--space-2)",
+                  padding: "0 var(--space-1)",
+                }}
+              >
+                <span>← 左滑拦下</span>
+                <span>
+                  右滑放进 <strong style={{ color: "var(--palm)" }}>{SUGGEST_LABEL[suggestedBucket()]}</strong>
+                </span>
+              </div>
               <div
                 data-gate-card={c().name}
                 style={{
@@ -594,20 +698,28 @@ export function Gate() {
                   >
                     {m().subj}
                   </strong>
+                  {/* The same renderer every other surface uses. A Screener
+                      card that shows tag soup instead of the message is how a
+                      user decides blind. Expanded bodies scroll inside the
+                      card; the decision buttons stay in reach. */}
                   <div
                     onClick={handleBodyClick}
                     style={{
                       "margin-top": "var(--space-2)",
-                      "font-size": "var(--text-body-sm)",
-                      color: "var(--text-secondary)",
-                      "line-height": 1.5,
-                      "overflow-wrap": "anywhere",
-                      "word-break": "break-word",
-                      "max-height": "240px",
+                      // Keep the three bucket buttons on the first screen:
+                      // a decision the user has to scroll to reach is not a
+                      // decision they will make.
+                      "max-height": "220px",
                       "overflow-y": "auto",
                     }}
-                    innerHTML={gateBodyPreview(m().body)}
-                  />
+                  >
+                    <EmailBody
+                      message={currentFull() ?? m()}
+                      minHeight={120}
+                      showImagesBar={false}
+                      style={{ "font-size": "var(--text-body-sm)" }}
+                    />
+                  </div>
                 </div>
 
                 <div

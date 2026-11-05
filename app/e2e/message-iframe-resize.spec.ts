@@ -159,7 +159,7 @@ async function seedAndOpenMessage(
   // first, then the sanitized srcdoc iframe. The iframe is the
   // `title="Message body"` element in MessageBodyIframe.
   await page
-    .locator('iframe[title="邮件正文"]')
+    .locator('iframe[data-email-body-html]')
     .first()
     .waitFor({ timeout: 5_000 });
 }
@@ -191,7 +191,7 @@ test.describe("MessageBodyIframe — 50× rapid resize → 1 height write per co
     await page.waitForFunction(
       () => {
         const f = document.querySelector<HTMLIFrameElement>(
-          'iframe[title="邮件正文"]',
+          'iframe[data-email-body-html]',
         );
         return !!f && /^\d+(\.\d+)?px$/.test(f.style.height);
       },
@@ -205,7 +205,7 @@ test.describe("MessageBodyIframe — 50× rapid resize → 1 height write per co
     //    change the value (skip-equality) don't increment the counter.
     await page.evaluate(() => {
       const iframe = document.querySelector<HTMLIFrameElement>(
-        'iframe[title="邮件正文"]',
+        'iframe[data-email-body-html]',
       );
       if (!iframe) throw new Error("iframe not found");
       // We replace the entire `style` object with a Proxy that
@@ -272,7 +272,7 @@ test.describe("MessageBodyIframe — 50× rapid resize → 1 height write per co
     //    has access because the sandbox includes `allow-same-origin`).
     const writeCount = await page.evaluate(async () => {
       const iframe = document.querySelector<HTMLIFrameElement>(
-        'iframe[title="邮件正文"]',
+        'iframe[data-email-body-html]',
       );
       if (!iframe) throw new Error("iframe not found");
       const win = iframe.contentWindow as unknown as {
@@ -353,7 +353,7 @@ test.describe("MessageBodyIframe — 50× rapid resize → 1 height write per co
     await page.waitForFunction(
       () => {
         const f = document.querySelector<HTMLIFrameElement>(
-          'iframe[title="邮件正文"]',
+          'iframe[data-email-body-html]',
         );
         return !!f && /^\d+(\.\d+)?px$/.test(f.style.height);
       },
@@ -363,7 +363,7 @@ test.describe("MessageBodyIframe — 50× rapid resize → 1 height write per co
 
     await page.evaluate(() => {
       const iframe = document.querySelector<HTMLIFrameElement>(
-        'iframe[title="邮件正文"]',
+        'iframe[data-email-body-html]',
       );
       if (!iframe) throw new Error("iframe not found");
       const realStyle = iframe.style;
@@ -415,7 +415,7 @@ test.describe("MessageBodyIframe — 50× rapid resize → 1 height write per co
     // first/last windows each split into 2.
     const result = await page.evaluate(async () => {
       const iframe = document.querySelector<HTMLIFrameElement>(
-        'iframe[title="邮件正文"]',
+        'iframe[data-email-body-html]',
       );
       if (!iframe) throw new Error("iframe not found");
       const win = iframe.contentWindow as unknown as {

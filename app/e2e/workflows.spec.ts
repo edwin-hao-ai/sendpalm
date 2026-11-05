@@ -260,7 +260,7 @@ test.describe("Email workflows", () => {
     );
     await navigateTo(page, "screener");
 
-    await expect(page.getByText("决定谁可以进入你的收件箱")).toBeVisible();
+    await expect(page.getByText("筛选台", { exact: true }).first()).toBeVisible();
     await page.getByTestId("gate-approve-imbox").click();
 
     await navigateTo(page, "imbox");

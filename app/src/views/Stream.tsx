@@ -13,7 +13,6 @@
 import {
   For,
   Show,
-  createEffect,
   createMemo,
   createResource,
   createSignal,
@@ -28,8 +27,9 @@ import { Avatar } from "../components/Avatar";
 import { Empty } from "../components/Empty";
 import { ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
-import { htmlEmailSrcdoc, htmlToPlainText, looksLikeHtml } from "../utils/html";
+import { htmlToPlainText, looksLikeHtml } from "../utils/html";
 import { PageHeader } from "../components/PageHeader";
+import { EmailBody } from "../components/EmailBody";
 import { setView, showToast, appSettings } from "../stores/ui";
 import { formatMessageDate } from "../utils/message-dates";
 
@@ -374,7 +374,18 @@ function StreamCard(props: StreamCardProps) {
       </h3>
 
       <Show when={hasHtml() && props.expanded}>
-        <StreamHtmlBody html={props.m.bodyHtml!} title={props.m.subj} />
+        <div
+          data-stream-html
+          style={{
+            margin: "0 0 var(--space-3)",
+            "border-radius": "var(--radius-md)",
+            overflow: "hidden",
+            border: "0.5px solid var(--border)",
+            background: "var(--paper)",
+          }}
+        >
+          <EmailBody message={props.m} minHeight={200} showImagesBar={false} />
+        </div>
       </Show>
 
       <Show when={showParagraphs()}>
@@ -466,61 +477,6 @@ function StreamCard(props: StreamCardProps) {
         </footer>
       </Show>
     </article>
-  );
-}
-
-/** HTML body renderer for an expanded Stream card.
- *  Follows the §11.6 defer pattern: DOMPurify runs in a `setTimeout(0)`
- *  effect so expanding a card never blocks the main thread, and the
- *  iframe auto-sizes to its content on load. */
-function StreamHtmlBody(props: { html: string; title: string }) {
-  const [srcdoc, setSrcdoc] = createSignal("");
-  let stale = 0;
-
-  createEffect(() => {
-    const html = props.html;
-    const myId = ++stale;
-    setTimeout(() => {
-      if (myId !== stale) return;
-      setSrcdoc(htmlEmailSrcdoc(html));
-    }, 0);
-  });
-
-  return (
-    <div
-      data-stream-html
-      style={{
-        margin: "0 0 var(--space-3)",
-        "border-radius": "var(--radius-md)",
-        overflow: "hidden",
-        border: "0.5px solid var(--border)",
-        background: "var(--paper)",
-      }}
-    >
-      <iframe
-        srcdoc={srcdoc()}
-        sandbox=""
-        title={props.title}
-        onLoad={(e) => {
-          const el = e.currentTarget;
-          try {
-            const doc = el.contentDocument;
-            if (doc?.body) {
-              el.style.height = `${doc.body.scrollHeight + 24}px`;
-            }
-          } catch {
-            /* sandboxed — keep default height */
-          }
-        }}
-        style={{
-          width: "100%",
-          border: "0",
-          "min-height": "200px",
-          height: "480px",
-          display: "block",
-        }}
-      />
-    </div>
   );
 }
 

@@ -59,43 +59,23 @@ import { addDays, isoNow, relativeTime } from "../utils/date";
 import { trackerSummary } from "../utils/trackers";
 import type { Clip, Contact, FollowUp, Message, Sticky } from "../types";
 import { useAgent } from "../agent/useAgent";
-import {
-  addCalendarEvent,
-  getImageSenderPolicy,
-  setImageSenderPolicy,
-} from "../services/backend";
+import { addCalendarEvent } from "../services/backend";
 import { saveAttachment } from "../utils/save-attachment";
 import { useRefreshEffect, useViewport } from "../utils/gestures";
 import { notifyMessageUpdated } from "../services/sync-events";
 import { formatMessageSource, messagePreview } from "./message-source";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import {
-  analyzeImages,
-  extractExternalImageUrls,
-  htmlEmailSrcdoc,
+  EmailBody,
+  clearIframeSelection,
+  getIframeSelection,
+  handlePlainTextLinkClick,
+} from "../components/EmailBody";
+import {
   htmlToPlainText,
   looksLikeHtml,
   plainTextToHtml,
-  prefetchImages,
 } from "../utils/html";
-
-/** Click handler used by both the main panel's plain-text body and
- *  the per-message <MessageBodyIframe> fallback. Lives at module
- *  scope so the iframe child component can call it without prop
- *  drilling. Routed through the OS browser via Tauri's opener
- *  plugin, not window.open, so it picks up the user's default
- *  browser + handles the URL parsing correctly. */
-function handlePlainTextLinkClick(e: MouseEvent) {
-  const target = e.target as HTMLElement | null;
-  const a = target?.closest?.("a[href]") as HTMLAnchorElement | null;
-  if (!a) return;
-  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
-    return;
-  e.preventDefault();
-  e.stopPropagation();
-  openUrl(a.href).catch(() => {});
-}
 
 type ViewMode = "rendered" | "plain" | "source";
 
@@ -197,7 +177,7 @@ export function MessagePanel(props: { messageId: string }) {
   });
 
   // The current-message iframe is rendered by a per-message
-  // <MessageBodyIframe> component defined later in this file. Each
+  // <EmailBody> component defined later in this file. Each
   // thread message has its own component instance with its own
   // `iframeSrc` + `iframeReady` state, so opening a sibling message
   // in the thread shows THAT message's body — not the current
@@ -205,7 +185,7 @@ export function MessagePanel(props: { messageId: string }) {
   // all iframes in the thread) was a pre-existing bug.
 
   // (handlePlainTextLinkClick moved to module scope below so the
-  // per-message <MessageBodyIframe> can call it too.)
+  // per-message <EmailBody> can call it too.)
 
   useRefreshEffect(() => {
     void refetchMessage();
@@ -721,7 +701,7 @@ export function MessagePanel(props: { messageId: string }) {
     // it posted up (see htmlEmailSrcdoc's mouseup reporter).
     const selection =
       window.getSelection()?.toString().trim() ||
-      lastIframeSelection.trim();
+      getIframeSelection().trim();
     if (!selection) {
       showToast({
         message: "请先在邮件正文里选中文字，再点『更多 → 保存为 Clip』",
@@ -729,7 +709,7 @@ export function MessagePanel(props: { messageId: string }) {
       });
       return;
     }
-    lastIframeSelection = "";
+    clearIframeSelection();
     const c: Clip = {
       id: uid("cl"),
       text: selection,
@@ -1214,7 +1194,7 @@ export function MessagePanel(props: { messageId: string }) {
                             />
                           }
                         >
-                          <MessageBodyIframe
+                          <EmailBody
                             message={m}
                             senderEmail={
                               !sender().isMe ? sender().email : undefined
@@ -2296,409 +2276,5 @@ function MessagePanelSkeleton() {
         正在加载邮件…
       </div>
     </div>
-  );
-}
-
-/** Per-message iframe with plain-text streaming fallback, Show
- *  images button, and per-sender "always show images" toggle.
- *  Extracted from MessagePanel so each thread message has its own
- *  iframe state — the previous single-`iframeSrc()` signal made
- *  every iframe in the thread show the current message's body, not
- *  its own. Owns its own `currentIframe` ref so the postMessage
- *  handlers (sendpalm:open-url, sendpalm:show-images) target only
- *  this message's iframe and not a sibling's. */
-let lastIframeSelection = "";
-
-function MessageBodyIframe(props: { message: Message; senderEmail?: string }) {
-  const m = () => props.message;
-  const [iframeSrc, setIframeSrc] = createSignal("");
-  const [iframeReady, setIframeReady] = createSignal(false);
-  const [showBusy, setShowBusy] = createSignal(false);
-  const [alwaysShow, setAlwaysShow] = createSignal(false);
-  let pendingSanitize = 0;
-  let currentIframe: HTMLIFrameElement | null = null;
-  let currentIframeResizeObserver: ResizeObserver | null = null;
-  // 200ms cooldown timer + last-write timestamp. See the ref callback
-  // below for the full reasoning. Exposed so onShowImages can re-trigger
-  // a measurement after the prefetched image map is delivered to the
-  // iframe (which causes the body to grow, but the body's contentWindow
-  // is cross-realm so we can't observe it from the host realm).
-  let currentMeasure: (() => void) | null = null;
-  let currentMeasureTimer: ReturnType<typeof setTimeout> | null = null;
-
-  // Image analysis is cheap (regex over bodyHtml) but we still memo
-  // it so the Show images button only re-evaluates when the message
-  // actually changes. Hidden messages (externalImageCount = 0)
-  // collapse the toolbar via the outer <Show when={...}>.
-  const imageAnalysis = createMemo(() => {
-    const html = m().bodyHtml;
-    if (!html) return null;
-    return analyzeImages(html);
-  });
-
-  // Hydrate alwaysShow from the per-sender image policy on mount
-  // and whenever the sender prop changes. The async load races
-  // with the parent's own update via onToggleAlwaysShow, so a
-  // `cancelled` guard prevents stale writes.
-  createEffect(() => {
-    const sender = props.senderEmail;
-    if (!sender) {
-      setAlwaysShow(false);
-      return;
-    }
-    let cancelled = false;
-    void getImageSenderPolicy(sender).then((p) => {
-      if (!cancelled) setAlwaysShow(p === "always");
-    });
-    onCleanup(() => {
-      cancelled = true;
-    });
-  });
-
-  createEffect(() => {
-    const html = m().bodyHtml;
-    if (!html || !html.trim()) {
-      setIframeSrc("");
-      return;
-    }
-    // Reset the ready flag when the message changes so the
-    // plain-text fallback shows for the new message too.
-    setIframeReady(false);
-    const myId = ++pendingSanitize;
-    setTimeout(() => {
-      if (myId !== pendingSanitize) return; // stale
-      setIframeSrc(htmlEmailSrcdoc(html));
-      setIframeReady(true);
-    }, 0);
-  });
-
-  // Window-level message handler — bound to the component's own
-  // iframe via the `e.source === currentIframe?.contentWindow`
-  // check, so we never accidentally receive a sibling thread
-  // message's link click. The `sendpalm:open-url` postMessage is
-  // emitted by the click interceptor injected in `htmlEmailSrcdoc`.
-  const onIframeMessage = (e: MessageEvent) => {
-    if (!e.data || typeof e.data !== "object") return;
-    const iframeWin = currentIframe?.contentWindow;
-    if (!iframeWin || e.source !== iframeWin) return;
-    if (
-      e.data.type === "sendpalm:open-url" &&
-      typeof e.data.href === "string"
-    ) {
-      e.preventDefault?.();
-      openUrl(e.data.href).catch(() => {});
-    } else if (
-      e.data.type === "sendpalm:selection" &&
-      typeof e.data.text === "string"
-    ) {
-      // The sandboxed iframe's selection, posted up on mouseup — the
-      // parent cannot read it cross-origin. Consumed by "save as Clip".
-      lastIframeSelection = e.data.text;
-    }
-  };
-
-  onMount(() => {
-    window.addEventListener("message", onIframeMessage);
-  });
-
-  // Per-component cleanup for the message listener + the
-  // ResizeObserver + the cooldown timer (see commit 58b9df0 for the
-  // original leak; see commit a6ebd81 / this change for the loop).
-  onCleanup(() => {
-    window.removeEventListener("message", onIframeMessage);
-    try {
-      currentIframeResizeObserver?.disconnect();
-    } catch {
-      /* already torn down */
-    }
-    currentIframeResizeObserver = null;
-    if (currentMeasureTimer !== null) {
-      clearTimeout(currentMeasureTimer);
-      currentMeasureTimer = null;
-    }
-    currentMeasure = null;
-    if (currentIframe) {
-      currentIframe.onload = null;
-      currentIframe.dataset.roAttached = "";
-    }
-  });
-
-  const onShowImages = async () => {
-    const html = m().bodyHtml;
-    if (!html) return;
-    setShowBusy(true);
-    try {
-      const urls = extractExternalImageUrls(html);
-      if (urls.length === 0) {
-        showToast({ kind: "info", message: "此邮件没有外部图片" });
-        return;
-      }
-      const map = await prefetchImages(urls);
-      const win = currentIframe?.contentWindow;
-      if (win) {
-        win.postMessage(
-          {
-            type: "sendpalm:show-images",
-            srcMap: Object.fromEntries(map),
-          },
-          "*",
-        );
-        // Re-measure once the image map is delivered to the iframe.
-        // The postMessage is dispatched immediately; the iframe's
-        // image swap + layout pass happens in the next animation
-        // frame. We schedule a measurement in that frame so the
-        // body.scrollHeight is read AFTER the new images have
-        // actually contributed to layout (otherwise we'd capture
-        // the pre-image height and need a second tick).
-        requestAnimationFrame(() => {
-          currentMeasure?.();
-        });
-      }
-    } catch {
-      showToast({ kind: "error", message: "加载图片失败" });
-    } finally {
-      setShowBusy(false);
-    }
-  };
-
-  const onToggleAlwaysShow = async (val: boolean) => {
-    const sender = props.senderEmail;
-    if (!sender) return;
-    setAlwaysShow(val);
-    try {
-      await setImageSenderPolicy(sender, val ? "always" : "ask");
-    } catch {
-      showToast({ kind: "error", message: "保存图片策略失败" });
-    }
-  };
-
-  return (
-    <>
-      {/* Plain-text fallback while DOMPurify sanitize is in flight. */}
-      <Show when={!iframeReady() || !iframeSrc()}>
-        <div
-          class="sp-plaintext-body"
-          data-plaintext-fallback
-          onClick={handlePlainTextLinkClick}
-          style={{
-            "font-size": "var(--text-body-sm)",
-            color: "var(--text-primary)",
-            "line-height": 1.7,
-            "overflow-wrap": "anywhere",
-            "word-break": "break-word",
-            "margin-bottom": "var(--space-2)",
-          }}
-          innerHTML={plainTextToHtml(
-            looksLikeHtml(m().body) ? htmlToPlainText(m().body) : m().body,
-          )}
-        />
-        <div
-          style={{
-            "font-size": "var(--text-micro)",
-            color: "var(--text-muted)",
-            "margin-bottom": "var(--space-3)",
-            "font-style": "italic",
-          }}
-        >
-          <Icon name="ph-arrow-fat-line-up" size={11} /> 正在加载完整版式…
-        </div>
-      </Show>
-      <iframe
-        ref={(el) => {
-          // ResizeObserver leak fix — see commit 58b9df0.
-          if (el === null) {
-            if (currentIframe?.dataset.roAttached === "1") {
-              try {
-                currentIframeResizeObserver?.disconnect();
-              } catch {
-                /* already torn down */
-              }
-              currentIframeResizeObserver = null;
-              if (currentIframe) {
-                currentIframe.dataset.roAttached = "";
-                currentIframe.onload = null;
-              }
-            }
-            return;
-          }
-          currentIframe = el;
-          // 200ms cooldown: every height write bumps `lastWrite`;
-          // subsequent measure() calls within the cooldown window
-          // collapse to the next cooldown boundary. This is the
-          // physical guarantee that a 50-burst (e.g. onload + N
-          // image loads) produces at most ceil(bursts / cooldown)
-          // height writes — usually exactly 1, and never more than
-          // the number of distinct cooldown windows the burst spans.
-          //
-          // Why not ResizeObserver on the iframe body's contentDocument?
-          //   - It was the source of the "ResizeObserver loop completed
-          //     with undelivered notifications" error.
-          //   - The iframe body is cross-realm; the host document's
-          //     ResizeObserver can observe the BODY node (same window),
-          //     but writing `el.style.height` from that callback
-          //     triggers the host iframe's own layout, which fires
-          //     another RO entry on the body, which the browser
-          //     suppresses AND the Tauri webview logs as a
-          //     frame-stalling warning. With long emails (many inline
-          //     images, web fonts, CSS animations), the body's scroll
-          //     height changes across many frames and the loop can
-          //     compound until the webview is unresponsive.
-          //   - The previous rAF-debounce (commit 8bc925d) coalesced
-          //     same-frame bursts but did NOT prevent cross-frame
-          //     burst compounding, and the user still reports the
-          //     loop on real Tauri.
-          //
-          // Why is observing the HOST element safe?
-          //   - The host iframe's size is driven by the OUTER layout
-          //     (window resize, panel toggle, sidebar toggle). None of
-          //     those happen synchronously from inside this callback,
-          //     so writing `el.style.height` here is a one-way trip —
-          //     it does not cause the host to resize again within the
-          //     same frame. The W3C spec
-          //     (https://www.w3.org/TR/resize-observer/#deliver-resize-errors)
-          //     only suppresses notifications when callback → DOM
-          //     write → DOM mutation → callback is synchronous within
-          //     one frame. We break that chain by (a) writing the
-          //     iframe's own height, not the host's, and (b) gating
-          //     the write with a 200ms cooldown so a runaway outer
-          //     resize cannot drive us into a tight loop.
-          //
-          // What about content changes (Show images, etc.)?
-          //   - onShowImages explicitly calls `currentMeasure()` after
-          //     the postMessage delivery, so the image-reveal path
-          //     gets a fresh height write.
-          //   - Other body mutations (font load, CSS animation) are
-          //     not directly observable from the host realm. They
-          //     typically settle within 200ms of onload, which the
-          //     cooldown covers.
-          const COOLDOWN_MS = 200;
-          let lastWrite = 0;
-          const doWrite = () => {
-            currentMeasureTimer = null;
-            lastWrite = performance.now();
-            try {
-              const doc = el.contentDocument;
-              if (doc && doc.body) {
-                const height = doc.body.scrollHeight + 24;
-                // Skip the DOM write if the height is unchanged. This
-                // breaks the only remaining feedback edge: a RO entry
-                // that fires when the host hasn't actually changed
-                // size would otherwise write the same `style.height`
-                // and look identical to a no-op, but the assignment
-                // still forces a style invalidation. Skipping the
-                // assignment when the value matches removes that
-                // micro-cost AND guarantees the next layout pass
-                // produces zero host-geometry change.
-                if (el.style.height !== `${height}px`) {
-                  el.style.height = `${height}px`;
-                }
-              }
-            } catch {
-              /* sandboxed — keep default height */
-            }
-          };
-          const measure = () => {
-            if (currentMeasureTimer !== null) {
-              clearTimeout(currentMeasureTimer);
-            }
-            const now = performance.now();
-            const wait = Math.max(0, COOLDOWN_MS - (now - lastWrite));
-            currentMeasureTimer = setTimeout(doWrite, wait);
-          };
-          currentMeasure = measure;
-          el.onload = measure;
-          try {
-            // Observe the HOST (the iframe element itself), not the
-            // body's contentDocument. See the long comment above.
-            const ro = new ResizeObserver(measure);
-            currentIframeResizeObserver = ro;
-            el.dataset.roAttached = "1";
-            ro.observe(el);
-          } catch {
-            /* sandbox denies */
-          }
-        }}
-        srcdoc={iframeSrc()}
-        sandbox="allow-scripts allow-same-origin"
-        style={{
-          width: "100%",
-          "min-height": "240px",
-          border: "none",
-          "background-color": "transparent",
-        }}
-        title="邮件正文"
-      />
-      {/* Show images + per-sender "always show" — only mount when the
-          sanitized HTML actually contains external <img> tags. The
-          button is per-message because the prefetch map must target
-          this message's iframe, and the checkbox policy is per-sender
-          so the same sender in another thread inherits it. */}
-      <Show
-        when={imageAnalysis() && (imageAnalysis()?.externalImageCount ?? 0) > 0}
-      >
-        <div
-          data-show-images-bar
-          style={{
-            display: "flex",
-            "align-items": "center",
-            "flex-wrap": "wrap",
-            gap: "var(--space-3)",
-            "margin-top": "var(--space-2)",
-            "font-size": "var(--text-caption)",
-            color: "var(--text-secondary)",
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => void onShowImages()}
-            disabled={showBusy()}
-            data-show-images
-            style={{
-              display: "inline-flex",
-              "align-items": "center",
-              gap: "var(--space-1)",
-              padding: "4px 10px",
-              "border-radius": "var(--radius-pill, 999px)",
-              border: "0.5px solid var(--border)",
-              background: "var(--paper-light)",
-              color: "var(--text-primary)",
-              cursor: showBusy() ? "wait" : "pointer",
-              "font-size": "var(--text-caption)",
-              opacity: showBusy() ? 0.6 : 1,
-            }}
-          >
-            <Show
-              when={showBusy()}
-              fallback={<Icon name="ph-image" size={12} />}
-            >
-              <Icon name="ph-spinner" size={12} />
-            </Show>
-            显示图片（{imageAnalysis()?.externalImageCount}）
-          </button>
-          <Show when={props.senderEmail}>
-            <label
-              style={{
-                display: "inline-flex",
-                "align-items": "center",
-                gap: "var(--space-1)",
-                cursor: "pointer",
-                "user-select": "none",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={alwaysShow()}
-                onChange={(e) =>
-                  void onToggleAlwaysShow(e.currentTarget.checked)
-                }
-                data-always-show-images
-                style={{ margin: 0 }}
-              />
-              <span>始终显示此发件人的图片</span>
-            </label>
-          </Show>
-        </div>
-      </Show>
-    </>
   );
 }

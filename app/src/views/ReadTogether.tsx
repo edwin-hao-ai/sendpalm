@@ -48,11 +48,11 @@ const profileTz = () => appSettings.profile.timezone;
 
 import { Avatar } from "../components/Avatar";
 import { PageHeader } from "../components/PageHeader";
+import { EmailBody } from "../components/EmailBody";
 import { Icon } from "../components/Icon";
 import { Empty, ErrorState } from "../components/Empty";
 import { SkeletonList } from "../components/Skeleton";
 import { getReadTogetherCandidates } from "../utils/triage";
-import { htmlEmailSrcdoc } from "../utils/html";
 import type { Contact, Message } from "../types";
 
 const READ_TOGETHER_PAGE = 200;
@@ -271,27 +271,6 @@ export function ReadTogether() {
     });
     await refetchAndAdvance("已移到回收站，全部读完了");
   };
-
-  // Deferred iframe src: htmlEmailSrcdoc runs DOMPurify synchronously,
-  // blocking the main thread for 200-600ms on an 80KB HTML body. Defer
-  // the sanitize so the next-card click path (Next / n / space) doesn't
-  // stall on the previous card's iframe. Stale-closure guard cancels a
-  // slow sanitize from the previous card if the user advances again
-  // before the first one finishes.
-  const [iframeSrc, setIframeSrc] = createSignal("");
-  let pendingSanitize = 0;
-  createEffect(() => {
-    const html = batch() ? undefined : current()?.bodyHtml;
-    if (!html || !html.trim()) {
-      setIframeSrc("");
-      return;
-    }
-    const myId = ++pendingSanitize;
-    setTimeout(() => {
-      if (myId !== pendingSanitize) return;
-      setIframeSrc(htmlEmailSrcdoc(html));
-    }, 0);
-  });
 
   const handleKey = (e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
@@ -572,103 +551,15 @@ export function ReadTogether() {
                   {current()!.subj}
                 </h2>
 
-                <Show
-                  when={
-                    current()!.bodyHtml && current()!.bodyHtml!.trim().length > 0
-                  }
-                  fallback={
-                    <div
-                      data-render-mode="plain"
-                      style={{
-                        color: "var(--text-secondary)",
-                        "font-size": "var(--text-body)",
-                        "line-height": "1.7",
-                        "overflow-wrap": "anywhere",
-                      }}
-                    >
-                      <For each={current()!.body.split(/\n\s*\n/)}>
-                        {(p) =>
-                          p.trim() ? (
-                            <p style={{ margin: "0 0 14px" }}>{p.trim()}</p>
-                          ) : null
-                        }
-                      </For>
-                      <Show when={!current()!.body.trim()}>
-                        <p
-                          style={{
-                            color: "var(--text-muted)",
-                            "font-style": "italic",
-                          }}
-                        >
-                          这封邮件没有纯文本正文。
-                        </p>
-                      </Show>
-                    </div>
-                  }
-                >
-                  {/* While the deferred DOMPurify sanitize is still running
-                      (iframeSrc empty), show the plain-text body so the user
-                      reads the same words within one frame instead of
-                      staring at a blank box (§11.10 pattern). */}
-                  <Show when={iframeSrc()}>
-                    <iframe
-                      data-render-mode="html"
-                      title={`邮件正文：${current()!.subj}`}
-                      srcdoc={iframeSrc()}
-                      sandbox=""
-                      referrerpolicy="no-referrer"
-                      loading="lazy"
-                      style={{
-                        width: "100%",
-                        border: "none",
-                        "min-height": "240px",
-                        background: "transparent",
-                      }}
-                      onLoad={(ev) => {
-                        // Auto-size to the iframe body's scrollHeight so
-                        // long emails don't need a scrollbar inside the card.
-                        const el = ev.currentTarget;
-                        try {
-                          const doc = el.contentDocument;
-                          if (doc?.body) {
-                            el.style.height = `${doc.body.scrollHeight + 24}px`;
-                          }
-                        } catch {
-                          // Cross-origin or sandboxed — leave min-height.
-                        }
-                      }}
-                    />
-                  </Show>
-                  <Show when={!iframeSrc()}>
-                    <div
-                      data-render-mode="plain-pending"
-                      style={{
-                        color: "var(--text-secondary)",
-                        "font-size": "var(--text-body)",
-                        "line-height": "1.7",
-                        "overflow-wrap": "anywhere",
-                      }}
-                    >
-                      <For each={current()!.body.split(/\n\s*\n/)}>
-                        {(p) =>
-                          p.trim() ? (
-                            <p style={{ margin: "0 0 14px" }}>{p.trim()}</p>
-                          ) : null
-                        }
-                      </For>
-                      <Show when={!current()!.body.trim()}>
-                        <p
-                          style={{
-                            color: "var(--text-muted)",
-                            "font-style": "italic",
-                          }}
-                        >
-                          正在加载邮件…
-                        </p>
-                      </Show>
-                    </div>
-                  </Show>
-                </Show>
+                {/* One renderer for every surface. This card had its own
+                    iframe with `sandbox=""`, which cannot read
+                    contentDocument — so its auto-size silently never worked
+                    and long mail scrolled inside a 240px box. */}
+                <EmailBody
+                  message={current()!}
+                  minHeight={240}
+                  showImagesBar={false}
+                />
               </div>
               </Show>
             </div>

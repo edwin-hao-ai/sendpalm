@@ -47,6 +47,7 @@ const profileTz = () => appSettings.profile.timezone;
 
 import { Avatar } from "../components/Avatar";
 import { PageHeader } from "../components/PageHeader";
+import { EmailBody } from "../components/EmailBody";
 import { Icon } from "../components/Icon";
 import { ErrorState } from "../components/Empty";
 import { ResourceGate } from "../components/ResourceGate";
@@ -448,20 +449,10 @@ function FocusReplyItem(props: {
         >
           {props.m.subj}
         </h2>
-        <div
-          style={{
-            color: "var(--text-secondary)",
-            "font-size": "var(--text-body)",
-            "line-height": "1.6",
-            "overflow-wrap": "anywhere",
-          }}
-        >
-          <For each={props.m.body.split(/\n\s*\n/)}>
-            {(p) =>
-              p.trim() ? <p style={{ margin: "0 0 14px" }}>{p.trim()}</p> : null
-            }
-          </For>
-        </div>
+        {/* The message renders through the shared EmailBody — this pane used
+            to dump the text part as paragraphs, which for HTML-only mail (most
+            of it) meant the reader was looking at `<!DOCTYPE html>…<style>`. */}
+        <EmailBody message={props.m} minHeight={160} />
       </div>
 
       {/* Reply draft card */}

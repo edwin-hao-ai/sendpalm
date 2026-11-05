@@ -372,3 +372,47 @@ test("场景：待读超过 500 封时一起读自动进批量模式", async ({ 
   await expect(page.getByRole("button", { name: /下一封/ })).toBeVisible();
   await expect(page.locator("[data-batch-triage]")).toHaveCount(0);
 });
+
+/* ── 9. 筛选台：滑卡片 ───────────────────────────────────────────── */
+
+/**
+ * 原型里筛选台的核心是「一次一个人 + 滑」，不是「一张要填的表」。
+ * 三条通道必须同一个结果：右滑 = 放进建议桶，左滑 = 拦下，键盘 ←/→ 等价。
+ */
+test("场景：在筛选台右滑放行一位发件人", async ({ page }) => {
+  await boot(
+    page,
+    [
+      seedContact("c_s1", "Stranger One", false),
+      seedContact("c_s2", "Stranger Two", false),
+    ],
+    [
+      seedMessage({ id: "s1", pid: "c_s1", subj: "合作邀约", isNewsletter: false }),
+      seedMessage({ id: "s2", pid: "c_s2", subj: "另一个邀约", isNewsletter: false }),
+    ],
+  );
+
+  await page.locator('[data-nav-disclosure="mail"]').click();
+  await page.locator('#workspace-mail [data-nav-view="screener"]').click();
+
+  const card = page.locator("[data-gate-card]");
+  await expect(card).toContainText("Stranger One");
+
+  // 右滑（鼠标也算）：跟手拖过阈值，松手 = 放进建议桶。
+  // 从卡片抬头起手——正文是 iframe，指针事件在框内被它接走。
+  const box = (await card.locator("h3").boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 200, box.y + box.height / 2, {
+    steps: 12,
+  });
+  await page.mouse.up();
+
+  // 下一位上桌，第一位消失。
+  await expect(card).toContainText("Stranger Two", { timeout: 5000 });
+  await expect(page.getByText(/已批准/)).toBeVisible();
+
+  // 键盘 ← 等价于左滑：拦下第二位。
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.getByText(/已屏蔽/)).toBeVisible({ timeout: 5000 });
+});
