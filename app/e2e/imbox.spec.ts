@@ -337,7 +337,7 @@ test.describe("Imbox — single view focus", () => {
     await shoot(page, "03-sections");
   });
 
-  test("first-time sender: pill renders, approve moves row to bucket", async ({
+  test("first-time sender: pill renders and routes the decision to the Screener", async ({
     page,
   }) => {
     // Single first-time message, single first-time contact.
@@ -360,27 +360,17 @@ test.describe("Imbox — single view focus", () => {
       "[data-feed-card='message'][data-message-id='m_first_timer_msg']",
     );
     await expect(card).toBeVisible();
-    // First-time pill renders.
     await expect(card.locator("[data-first-time-pill]")).toBeVisible();
-    // Approve pill is rendered.
-    await expect(
-      card.locator("[data-approve-imbox]"),
-    ).toBeVisible();
-    await expect(card.locator("[data-block-sender]")).toBeVisible();
+    // The four inline bucket buttons are gone: one decision per person
+    // belongs to the Screener (HEY's model), not to the list row.
+    await expect(card.locator("[data-approve-imbox]")).toHaveCount(0);
+    await expect(card.locator("[data-block-sender]")).toHaveCount(0);
 
     await shoot(page, "04-first-time-sender-pill");
 
-    // Click approve → message moves to imbox bucket (stays), contact
-    // gets screened=1. After the optimistic update + backend write,
-    // the pill should disappear (contact is now screened).
-    await card.locator("[data-approve-imbox]").click();
-
-    // Wait for the row to either re-render or be removed. The optimistic
-    // path: pill removed, message still visible (still imbox bucket).
-    // We give it 1s for the upsertContact round-trip.
-    await page.waitForTimeout(1000);
-
-    await shoot(page, "05-after-first-time-approve");
+    // Clicking the pill jumps to the Screener, where the decision lives.
+    await card.locator("[data-first-time-pill]").click();
+    await expect(page.locator("#topbar")).toContainText("筛选台");
   });
 
   test("bundle detection: 3+ unread from same sender collapses to one card", async ({

@@ -17,6 +17,22 @@
   padding: 0 20px 24px;
 }
 
+/* One sheet of paper (HEY): the whole list is a single rounded surface
+ * floating on the page, rows are separated by hairlines instead of hover
+ * backgrounds. Mobile keeps the full-bleed list — a sheet inside a 375px
+ * viewport just costs width. */
+@media (min-width: 768px) {
+  .feed-list {
+    background: var(--surface-elevated);
+    border: 0.5px solid var(--border);
+    border-radius: 20px;
+    box-shadow: 0 1px 2px rgba(35, 28, 51, 0.04);
+    padding: 6px 22px 18px;
+    margin: 4px auto 24px;
+  }
+  .feed-list > .feed-card + .feed-card { border-top: 0.5px solid var(--border); }
+}
+
 .feed-section-header {
   display: flex;
   align-items: center;
@@ -147,9 +163,29 @@
 .feed-card.unread .feed-name { font-weight: 700; color: var(--ink); }
 .feed-card.unread .feed-subject { font-weight: 700; color: var(--ink); }
 
-.feed-card.first-time {
-  border-left: 3px solid var(--palm);
-  padding-left: 9px;
+/* Unread is a dot in the gutter, not a coloured border around the row.
+ * Hidden while hovering so the multi-select checkbox owns that corner. */
+.feed-card.unread::before {
+  content: "";
+  position: absolute;
+  /* Inside the row's left padding; the checkbox starts after it (see
+     .select-checkbox margin-left) so the two never collide. Rows are
+     `content-visibility:auto`, so anything outside the padding box would
+     be clipped. */
+  left: 4px;
+  top: 22px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--palm);
+}
+.feed-card.unread:hover::before { opacity: 0; }
+
+/* Section rule: 今天 4 ───────────────────────────── */
+.imbox-date-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
 }
 
 .feed-avatar {
@@ -356,16 +392,6 @@
   text-align: center;
 }
 
-/* ── First-time sender inline approve ──────────────────────────────── */
-
-.first-time-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-  padding: 8px 12px 4px 52px;
-}
-
 .first-time-pill {
   font-size: 11px;
   font-weight: 700;
@@ -373,38 +399,17 @@
   background: var(--palm-soft);
   border-radius: var(--radius-pill);
   padding: 4px 10px;
-}
-
-.first-time-btn {
-  font-size: 11px;
-  font-weight: 700;
-  border-radius: var(--radius-pill);
-  padding: 4px 12px;
-  border: 0.5px solid var(--border);
-  background: var(--paper);
-  color: var(--text-primary);
+  border: 0;
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-out);
 }
+.first-time-pill:hover { background: color-mix(in srgb, var(--palm) 18%, transparent); }
 
-.first-time-btn.primary { background: var(--palm); color: white; border-color: var(--palm); }
-.first-time-btn:hover { background: var(--paper-mid); }
-.first-time-btn.primary:hover { background: var(--palm-bright); }
-/* Destructive "阻止" reads as danger, not as a third classification
-   choice. Without this it looked identical to Stream / Records. */
-.first-time-btn.danger {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
-  background: transparent;
-}
-.first-time-btn.danger:hover {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
 
 /* ── Selection checkboxes (multi-select) ─────────────────────────────── */
 
 .feed-card .select-checkbox {
+  /* Leaves room for the unread dot in the row's left padding. */
+  margin-left: 8px;
   width: 18px;
   height: 18px;
   border-radius: 50%;

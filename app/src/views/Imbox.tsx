@@ -14,7 +14,6 @@
  *  Gate for a single message. Bulk Gate approval remains in Gate for
  *  the 200+ queue case.
  */
-import { extractTasksForMessage } from "../services/task-extraction";
 import {
   For,
   Show,
@@ -32,13 +31,12 @@ import {
   listContacts,
   listPileMessages,
   moveMessageToBucket,
-  upsertContact,
   markMessageUnread,
   setMessagePileFlags,
 } from "../stores/data";
 import { usePaginatedMessages } from "../utils/paginated-messages";
 import { useViewport } from "../utils/gestures";
-import type { Contact, Message, MessageBucket } from "../types";
+import type { Contact, Message } from "../types";
 import { startDrag, endDrag, type DragTarget } from "../utils/drag";
 import { PileSheet } from "../components/PileSheet";
 import {
@@ -779,73 +777,6 @@ export function Imbox() {
     }
   };
 
-  /* ── First-time sender inline approve/block ──────────────────────── */
-
-  const approveFirstTime = async (m: Message, bucket: MessageBucket) => {
-    try {
-      const c = contactMap().get(m.pid);
-      if (c) {
-        await upsertContact({
-          ...c,
-          firstSeen: false,
-          screened: true,
-          defaultBucket: bucket,
-        });
-      }
-      await moveMessageToBucket(m.id, bucket);
-      if (bucket === "imbox") void extractTasksForMessage(m.id, "automatic").catch(() => {});
-      await refreshAll();
-      showToast({
-        message: `已批准到 ${bucket === "imbox" ? "Inbox" : bucket === "feed" ? "Stream" : "Records"}`,
-        kind: "success",
-      });
-    } catch (err) {
-      console.error("[imbox] approve failed:", err);
-      await refreshAll();
-      showToast({ message: "操作失败，请重试", kind: "error" });
-    }
-  };
-
-  const blockFirstTime = async (m: Message) => {
-    try {
-      const c = contactMap().get(m.pid);
-      if (c) {
-        await upsertContact({
-          ...c,
-          firstSeen: false,
-          screened: true,
-          blocked: true,
-        });
-      }
-      await moveMessageToBucket(m.id, "spam");
-      await refreshAll();
-      showToast({
-        message: `已阻止 ${c?.name ?? m.pid}`,
-        kind: "info",
-        action: {
-          label: "撤销",
-          run: async () => {
-            if (c) {
-              await upsertContact({
-                ...c,
-                firstSeen: true,
-                screened: false,
-                blocked: false,
-              });
-            }
-            await moveMessageToBucket(m.id, "imbox");
-            await refreshAll();
-            showToast({ message: "已撤销", kind: "success" });
-          },
-        },
-      });
-    } catch (err) {
-      console.error("[imbox] block failed:", err);
-      await refreshAll();
-      showToast({ message: "操作失败，请重试", kind: "error" });
-    }
-  };
-
   /* ── Mark a message read when opened ─────────────────────────────── */
 
   const openAndMarkRead = async (m: Message) => {
@@ -1354,8 +1285,6 @@ export function Imbox() {
                       onTrash={(m) => void trash(m)}
                       onSpam={(m) => void spam(m)}
                       onToggleUnread={(m) => void toggleUnread(m)}
-                      onApproveFirstTime={(m, b) => void approveFirstTime(m, b)}
-                      onBlockFirstTime={(m) => void blockFirstTime(m)}
                       onBundleSelect={(b) => toggleBundleSelection(b)}
                       onDragStart={onDragStart}
                       onDragEnd={onDragEnd}
@@ -1845,8 +1774,6 @@ interface RowProps {
   onTrash: (m: Message) => void;
   onSpam: (m: Message) => void;
   onToggleUnread: (m: Message) => void;
-  onApproveFirstTime: (m: Message, b: MessageBucket) => void;
-  onBlockFirstTime: (m: Message) => void;
   onBundleSelect: (b: Bundle) => void;
   onDragStart: (m: Message, ev: DragEvent) => void;
   onDragEnd: (ev: DragEvent) => void;
@@ -1892,8 +1819,6 @@ function ItemRow(props: RowProps) {
       onTrash={props.onTrash}
       onSpam={props.onSpam}
       onToggleUnread={props.onToggleUnread}
-      onApproveFirstTime={props.onApproveFirstTime}
-      onBlockFirstTime={props.onBlockFirstTime}
       onDragStart={props.onDragStart}
       onDragEnd={props.onDragEnd}
       draggable={true}
@@ -1925,8 +1850,6 @@ interface MessageCardProps {
   onTrash: (m: Message) => void;
   onSpam: (m: Message) => void;
   onToggleUnread: (m: Message) => void;
-  onApproveFirstTime?: (m: Message, b: MessageBucket) => void;
-  onBlockFirstTime?: (m: Message) => void;
   onDragStart?: (m: Message, ev: DragEvent) => void;
   onDragEnd?: (ev: DragEvent) => void;
   draggable?: boolean;
@@ -2090,9 +2013,20 @@ function MessageCard(props: MessageCardProps) {
             {props.contact?.name ?? "Unknown"}
           </span>
           <Show when={props.firstTimeSender}>
-            <span class="first-time-pill" data-first-time-pill>
-              首次发件人
-            </span>
+            {/* One decision per person, and it belongs to the Screener
+                (HEY's model). The row links there instead of stacking
+                four bucket buttons inside the list. */}
+            <button
+              class="first-time-pill"
+              data-first-time-pill
+              title="首次发件人 · 去筛选台决定"
+              onClick={(ev) => {
+                ev.stopPropagation();
+                setView("screener");
+              }}
+            >
+              首次发件人 · 去决定
+            </button>
           </Show>
           <span class="feed-spacer" />
           {/* The time stays put: the hover toolbar now parks to its left
@@ -2110,42 +2044,6 @@ function MessageCard(props: MessageCardProps) {
           <span class="feed-preview">{preview()}</span>
         </div>
 
-        <Show when={props.firstTimeSender}>
-          <div
-            class="first-time-actions"
-            data-first-time-actions
-            onClick={(ev) => ev.stopPropagation()}
-          >
-            <button
-              class="first-time-btn primary"
-              onClick={() => props.onApproveFirstTime?.(props.m, "imbox")}
-              data-approve-imbox
-            >
-              批准到 Inbox
-            </button>
-            <button
-              class="first-time-btn"
-              onClick={() => props.onApproveFirstTime?.(props.m, "feed")}
-              data-approve-feed
-            >
-              Stream
-            </button>
-            <button
-              class="first-time-btn"
-              onClick={() => props.onApproveFirstTime?.(props.m, "paperTrail")}
-              data-approve-paper
-            >
-              Records
-            </button>
-            <button
-              class="first-time-btn danger"
-              onClick={() => props.onBlockFirstTime?.(props.m)}
-              data-block-sender
-            >
-              阻止
-            </button>
-          </div>
-        </Show>
       </div>
 
       {/* Action toolbar — only mounted while the card is hovered or
@@ -2576,6 +2474,9 @@ function DateGroupedList(props: {
             >
               {group.items.length}
             </span>
+            {/* HEY uses a hairline to open a section instead of a chip or
+                a tab: 今天 4 ───────────────────── */}
+            <span class="imbox-date-rule" aria-hidden="true" />
           </header>
           <For each={group.items}>
             {(item, localIdx) => props.children(item, group.startIdx + localIdx())}
