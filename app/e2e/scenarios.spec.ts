@@ -281,3 +281,55 @@ test("场景：导入 300 封历史邮件后，筛选台只剩 3 位新发件人
     timeout: 5000,
   });
 });
+
+/* ── 7. 导入后的未读口径 ──────────────────────────────────────────── */
+
+/**
+ * 导入 5 年的邮箱之后，本地库里躺着几千封「技术上未读」的历史邮件。红点
+ * 必须只数最近 30 天，否则用户面对一个永远清不掉的数字——而那正是让人
+ * 放弃一个新邮件客户端的理由。
+ *
+ * 更早的未读没有被藏起来：头部同时报出「更早 N 封未读」，列表照旧能翻到。
+ */
+test("场景：历史未读不计入红点，但仍可在列表里找到", async ({ page }) => {
+  const daysAgo = (d: number) =>
+    new Date(Date.now() - d * 86_400_000).toISOString();
+
+  const contacts = [seedContact("c_pal", "老朋友")];
+  const messages = [
+    // 最近 30 天内的未读：这 5 封才是「待读」。
+    ...[1, 3, 6, 12, 20].map((d, i) =>
+      seedMessage({
+        id: `recent${i}`,
+        pid: "c_pal",
+        subj: `最近的信 ${i + 1}`,
+        sentAt: daysAgo(d),
+        st: daysAgo(d),
+      }),
+    ),
+    // 导入进来的历史未读：不进红点。
+    ...[400, 600, 900].map((d, i) =>
+      seedMessage({
+        id: `old${i}`,
+        pid: "c_pal",
+        subj: `历史邮件 ${i + 1}`,
+        sentAt: daysAgo(d),
+        st: daysAgo(d),
+      }),
+    ),
+  ];
+
+  await boot(page, contacts, messages);
+
+  const counts = page.locator("[data-imbox-counts]");
+  await expect(counts).toContainText("最近 30 天 5 封待读", { timeout: 10_000 });
+  await expect(counts).toContainText("更早 3 封未读");
+
+  // 标签页上的数字与红点一致（只数最近 30 天）……
+  await expect(page.locator("[data-imbox-tab='new']")).toContainText("5");
+
+  // ……而历史未读并没有消失：同一位发件人的未读折叠成一张卡片，展开就能
+  // 看到那封 400 天前的信，只是它不再催人。
+  await page.locator("[data-feed-card='bundle']").click();
+  await expect(page.getByText("历史邮件 1")).toBeVisible();
+});

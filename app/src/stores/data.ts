@@ -785,6 +785,40 @@ export async function countGateCandidates(): Promise<number> {
   return rows.length;
 }
 
+/** How far back the "待读" badge looks.
+ *
+ *  A first import leaves years of genuinely-unread mail in the store. Counting
+ *  all of it would put a number on the badge that the user can never clear —
+ *  the badge means "what needs me now", not "everything that is technically
+ *  unread". Older unread mail stays reachable in the list; the header states
+ *  both numbers so the difference is never a mystery. */
+export const RECENT_UNREAD_DAYS = 30;
+
+/** Ceiling on the recent-unread scan. 2,000 unread messages in 30 days is
+ *  already far past the point where a precise number helps. */
+const RECENT_UNREAD_CAP = 2000;
+
+/** Unread Imbox mail received in the last `days` days. */
+export async function countRecentUnreadImbox(
+  nowIso: string,
+  days: number = RECENT_UNREAD_DAYS,
+): Promise<number> {
+  const db = await getDb();
+  const cutoff = new Date(
+    Date.parse(nowIso) - days * 86_400_000,
+  ).toISOString();
+  // id-only + LIMIT, same constraint as countGateCandidates: the browser
+  // MockDb cannot parse COUNT(*).
+  const rows = await db.select<Array<{ id: ID }>>(
+    `SELECT id FROM messages
+      WHERE bucket = 'imbox' AND direction = 'in' AND unread = 1
+        AND deleted_at IS NULL AND timeline_at >= $1
+      LIMIT ${RECENT_UNREAD_CAP}`,
+    [cutoff],
+  );
+  return rows.length;
+}
+
 /** One card’s worth of data for the Gate screener. */
 export interface GateQueueItem {
   contact: Contact;

@@ -38,6 +38,7 @@ import {
   listFocusReplyMessages,
   upsertSticky,
   countGateCandidates,
+  countRecentUnreadImbox,
 } from "./data";
 import { formatGateCount, GATE_COUNT_LIMIT } from "../utils/counts";
 import { resetMockDb, MockDb } from "../services/mock-db";
@@ -886,5 +887,65 @@ describe("countGateCandidates — bounded screener count", () => {
     expect(formatGateCount(GATE_COUNT_LIMIT - 1)).toBe("499");
     expect(formatGateCount(GATE_COUNT_LIMIT)).toBe(`${GATE_COUNT_LIMIT}+`);
     expect(formatGateCount(GATE_COUNT_LIMIT + 200)).toBe(`${GATE_COUNT_LIMIT}+`);
+  });
+});
+
+describe("countRecentUnreadImbox", () => {
+  beforeEach(() => {
+    resetMockDb();
+  });
+  const now = "2026-11-05T12:00:00.000Z";
+  const daysAgo = (n: number) =>
+    new Date(Date.parse(now) - n * 86_400_000).toISOString();
+
+  it("counts only unread, in, live Imbox mail inside the window", async () => {
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(
+      makeMessage("m-fresh", "c1", { unread: true, receivedAt: daysAgo(2) }),
+    );
+    // Outside the 30-day window: imported history is still unread, but it is
+    // not what the badge means.
+    await upsertMessage(
+      makeMessage("m-old", "c1", { unread: true, receivedAt: daysAgo(400) }),
+    );
+    // Already read.
+    await upsertMessage(
+      makeMessage("m-read", "c1", { unread: false, receivedAt: daysAgo(1) }),
+    );
+    // Not in the Imbox.
+    await upsertMessage(
+      makeMessage("m-feed", "c1", {
+        unread: true,
+        bucket: "feed",
+        receivedAt: daysAgo(1),
+      }),
+    );
+    // Outgoing.
+    await upsertMessage(
+      makeMessage("m-out", "c1", {
+        unread: true,
+        direction: "out",
+        receivedAt: daysAgo(1),
+      }),
+    );
+    // Trashed.
+    await upsertMessage(
+      makeMessage("m-gone", "c1", {
+        unread: true,
+        receivedAt: daysAgo(1),
+        deletedAt: daysAgo(1),
+      }),
+    );
+
+    expect(await countRecentUnreadImbox(now)).toBe(1);
+  });
+
+  it("respects a custom window", async () => {
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(
+      makeMessage("m-10d", "c1", { unread: true, receivedAt: daysAgo(10) }),
+    );
+    expect(await countRecentUnreadImbox(now, 7)).toBe(0);
+    expect(await countRecentUnreadImbox(now, 30)).toBe(1);
   });
 });

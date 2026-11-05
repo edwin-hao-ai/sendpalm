@@ -159,6 +159,7 @@ async fn the_import_reports_what_it_did() {
     let summary = sendpalm_app_lib::services::ImportSummaryReport {
         messages: 3120,
         senders: 214,
+        completed_at: chrono::Utc::now().to_rfc3339(),
     };
     persist_import_summary(&pool, "acct_1", &summary).await;
 
@@ -177,6 +178,7 @@ async fn the_import_reports_what_it_did() {
         &sendpalm_app_lib::services::ImportSummaryReport {
             messages: 5000,
             senders: 300,
+            completed_at: chrono::Utc::now().to_rfc3339(),
         },
     )
     .await;
@@ -226,4 +228,61 @@ fn the_import_respects_blocked_and_self_routes() {
         "paperTrail"
     );
     assert_eq!(bucket_for_import(&route(true, "feed"), false), "feed");
+}
+
+/* ── Post-import quiet window ─────────────────────────────────────── */
+
+use sendpalm_app_lib::services::sync_loop::{
+    inside_import_quiet_window, should_ping_os, IMPORT_QUIET_HOURS,
+};
+
+#[test]
+fn a_message_from_a_person_pings_by_default() {
+    assert!(should_ping_os(false, true, false, false));
+    assert!(should_ping_os(true, false, true, false));
+}
+
+#[test]
+fn newsletters_and_strangers_stay_silent_by_default() {
+    // Not opted in, and either unscreened or a newsletter.
+    assert!(!should_ping_os(false, false, false, false));
+    assert!(!should_ping_os(false, true, true, false));
+}
+
+#[test]
+fn the_quiet_window_silences_everything_but_the_explicit_opt_in() {
+    for (notify, screened, is_newsletter) in
+        [(false, true, false), (false, false, false), (false, true, true)]
+    {
+        assert!(
+            !should_ping_os(notify, screened, is_newsletter, true),
+            "quiet window must suppress notify={notify} screened={screened} newsletter={is_newsletter}"
+        );
+    }
+    // A contact the user explicitly asked to be notified about still pings —
+    // the quiet window is about noise, not about going deaf.
+    assert!(should_ping_os(true, false, true, true));
+}
+
+#[test]
+fn the_quiet_window_lasts_72_hours_from_the_import() {
+    let done = chrono::Utc::now() - chrono::Duration::hours(1);
+    let now = chrono::Utc::now();
+    assert!(inside_import_quiet_window(&done.to_rfc3339(), now));
+
+    let inside = now - chrono::Duration::hours(IMPORT_QUIET_HOURS - 1);
+    assert!(inside_import_quiet_window(&inside.to_rfc3339(), now));
+
+    let outside = now - chrono::Duration::hours(IMPORT_QUIET_HOURS + 1);
+    assert!(!inside_import_quiet_window(&outside.to_rfc3339(), now));
+}
+
+#[test]
+fn a_corrupt_or_future_timestamp_never_silences_the_user() {
+    let now = chrono::Utc::now();
+    assert!(!inside_import_quiet_window("", now));
+    assert!(!inside_import_quiet_window("not a timestamp", now));
+    // A clock that jumped backwards must not mute notifications forever.
+    let future = now + chrono::Duration::hours(24);
+    assert!(!inside_import_quiet_window(&future.to_rfc3339(), now));
 }

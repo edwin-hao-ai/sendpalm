@@ -51,6 +51,10 @@ pub struct ImportPhase {
     /// message is written (the cursor advances during the pass, so reading
     /// it later would always say "not the first").
     pub initial: bool,
+    /// True while the account is inside the post-import quiet window: OS
+    /// notifications are suppressed except for senders the user explicitly
+    /// asked to be pinged about (`notify = 1`).
+    pub os_quiet: bool,
 }
 
 impl ImportPhase {
@@ -58,8 +62,53 @@ impl ImportPhase {
         Self {
             previous_last_uid,
             initial: previous_last_uid == 0,
+            os_quiet: false,
         }
     }
+
+    pub fn with_quiet(mut self, os_quiet: bool) -> Self {
+        self.os_quiet = os_quiet;
+        self
+    }
+}
+
+/// How long after a finished import OS notifications stay suppressed.
+///
+/// The import itself never pings (no message in it is "new mail"). The days
+/// that follow are the risk: a freshly-imported mailbox often looks like a
+/// flood to the user even when the mail is ordinary, and a notification storm
+/// in that window is how people turn notifications off forever.
+pub const IMPORT_QUIET_HOURS: i64 = 72;
+
+/// Is `completed_at` (RFC 3339) inside the quiet window ending at `now`?
+///
+/// Unparseable or empty timestamps answer `false`: a corrupt tally must not
+/// silence a user's notifications indefinitely.
+pub fn inside_import_quiet_window(completed_at: &str, now: chrono::DateTime<chrono::Utc>) -> bool {
+    let Ok(done) = chrono::DateTime::parse_from_rfc3339(completed_at) else {
+        return false;
+    };
+    let elapsed = now.signed_duration_since(done.with_timezone(&chrono::Utc));
+    elapsed >= chrono::Duration::zero()
+        && elapsed < chrono::Duration::hours(IMPORT_QUIET_HOURS)
+}
+
+/// May this message raise an OS notification?
+///
+/// Normal rule: ping for people the user cares about — `notify = 1`, or a
+/// sender already screened in and not sending a newsletter. During the
+/// post-import quiet window only the explicit `notify = 1` opt-in survives;
+/// everything else stays in the in-app notification list.
+pub fn should_ping_os(
+    notify: bool,
+    screened: bool,
+    is_newsletter: bool,
+    os_quiet: bool,
+) -> bool {
+    if os_quiet {
+        return notify;
+    }
+    notify || (screened && !is_newsletter)
 }
 
 /// Running tally of a first import, so the UI can report what happened
@@ -79,6 +128,7 @@ impl ImportSummary {
         crate::services::ImportSummaryReport {
             messages: self.messages,
             senders: self.senders.len() as u32,
+            completed_at: chrono::Utc::now().to_rfc3339(),
         }
     }
 }
@@ -752,7 +802,20 @@ async fn sync_one(
     // Snapshot the import phase BEFORE the first message is written: the
     // cursor advances during the pass, so asking later always answers
     // "not the first one".
-    let phase = ImportPhase::new(previous_last_uid);
+    // A previous pass may already have finished the import; if it did, the
+    // next 72 hours run quiet.
+    let os_quiet = match load_import_summary(pool, &account.account_id).await {
+        Ok(Some(s)) => inside_import_quiet_window(&s.completed_at, chrono::Utc::now()),
+        Ok(None) => false,
+        Err(e) => {
+            eprintln!(
+                "[sync] import summary unreadable for {}: {e} (notifications stay on)",
+                account.account_id
+            );
+            false
+        }
+    };
+    let phase = ImportPhase::new(previous_last_uid).with_quiet(os_quiet);
     let mut import = ImportSummary::default();
 
     // Ensure the account row exists in the accounts table so the foreign
@@ -1399,12 +1462,17 @@ async fn insert_message(
         .fetch_optional(pool)
         .await
         .unwrap_or(None);
-        let should_ping_os = flags
+        let ping = flags
             .map(|(notify, screened)| {
-                notify == 1 || (screened == 1 && !parsed.is_newsletter)
+                should_ping_os(
+                    notify == 1,
+                    screened == 1,
+                    parsed.is_newsletter,
+                    phase.os_quiet,
+                )
             })
             .unwrap_or(false);
-        if should_ping_os {
+        if ping {
             let store = app.state::<crate::services::state::SyncStateStore>();
             let prefs = store.notification_prefs();
             let _ = crate::services::desktop_notifier::notify_new_mail(

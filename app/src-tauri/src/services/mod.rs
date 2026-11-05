@@ -99,6 +99,11 @@ pub struct ImportSummaryReport {
     /// Distinct senders auto-screened by the import (they never reach the
     /// Gate). The user's own address is not counted — it is not a stranger.
     pub senders: u32,
+    /// RFC 3339 timestamp of the pass that finished the import. The 72-hour
+    /// quiet window is measured from here: a mailbox that just reshuffled
+    /// itself should not also start pinging the OS.
+    #[serde(default)]
+    pub completed_at: String,
 }
 
 /// Result of one IMAP sync cycle.

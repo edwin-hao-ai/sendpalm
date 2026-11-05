@@ -214,7 +214,9 @@ test.describe("Imbox — single view focus", () => {
     // same sender into a single card, so the rendered DOM has 1 bundle
     // + the previously-seen page (50 read messages from this single
     // sender — for a multi-sender dataset this would be less).
-    await expect(page.locator("text=/\\d+ 待读 · \\d+ 已读 · \\d+ 总数/")).toBeVisible();
+    await expect(
+      page.locator("text=/最近 30 天 \\d+ 封待读 · \\d+ 已读 · \\d+ 总数/"),
+    ).toBeVisible();
     // Imbox now uses tabs to separate "New for you" / "Previously seen"
     // (the v1 single-section structure was replaced in the 8/18 perf
     // pass to keep unread lists scannable for accounts with thousands

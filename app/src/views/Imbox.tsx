@@ -27,6 +27,7 @@ import {
 } from "solid-js";
 import {
   countGatePending,
+  countRecentUnreadImbox,
   countUnreadNewsletters,
   listContacts,
   listPileMessages,
@@ -144,6 +145,25 @@ export function Imbox() {
     PAGE_SIZE,
   );
   const [activeTab, setActiveTab] = createSignal<ImboxTabId>("new");
+
+  // The badge / red dot counts the last 30 days, not everything that is
+  // technically unread. A first import leaves years of unread history behind;
+  // putting that on the badge would give the user a number they can never
+  // clear. Older unread mail stays in the list — the header states both
+  // numbers so the difference is explicit rather than mysterious.
+  const [recentUnread, { refetch: refetchRecentUnread }] = createResource(() =>
+    countRecentUnreadImbox(new Date().toISOString()),
+  );
+  let _recentSkipMount = true;
+  createEffect(() => {
+    refreshTick();
+    softRefreshTick();
+    if (_recentSkipMount) {
+      _recentSkipMount = false;
+      return;
+    }
+    void refetchRecentUnread();
+  });
 
   // Bucket-changing actions (trash, archive, spam, …) call
   // bumpRefreshTick() in MessagePanel. The high-frequency sync ticks
@@ -1036,6 +1056,7 @@ export function Imbox() {
       <ImboxHeader
         total={newPaged.total() + seenPaged.total()}
         newCount={newPaged.total()}
+        recentUnread={recentUnread() ?? 0}
         previouslySeenCount={seenPaged.total()}
         syncing={syncing()}
         onSync={syncNow}
@@ -1103,7 +1124,7 @@ export function Imbox() {
 
       <ImboxTabs
         active={activeTab()}
-        newCount={newPaged.total()}
+        newCount={recentUnread() ?? 0}
         seenCount={seenPaged.total()}
         onChange={setActiveTab}
       />
@@ -1484,7 +1505,10 @@ function TabEmpty(props: {
 
 function ImboxHeader(props: {
   total: number;
+  /** Everything unread in the Imbox, any age. */
   newCount: number;
+  /** Unread from the last 30 days — the number the badge means. */
+  recentUnread: number;
   previouslySeenCount: number;
   syncing: boolean;
   onSync: () => void | Promise<void>;
@@ -1517,7 +1541,17 @@ function ImboxHeader(props: {
             }}
           >
             <span data-imbox-counts>
-              {props.newCount} 待读 · {props.previouslySeenCount} 已读 · {props.total} 总数
+              最近 30 天 {props.recentUnread} 封待读 ·{" "}
+              {props.previouslySeenCount} 已读 · {props.total} 总数
+              <Show when={props.newCount > props.recentUnread}>
+                <span
+                  data-imbox-older-unread
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  {" "}
+                  · 更早 {props.newCount - props.recentUnread} 封未读
+                </span>
+              </Show>
             </span>
             <span
               style={{
