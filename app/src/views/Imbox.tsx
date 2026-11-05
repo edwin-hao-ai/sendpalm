@@ -1541,32 +1541,55 @@ function ImboxHeader(props: {
             }}
           >
             <span data-imbox-counts>
-              最近 30 天 {props.recentUnread} 封待读 ·{" "}
-              {props.previouslySeenCount} 已读 · {props.total} 总数
-              <Show when={props.newCount > props.recentUnread}>
-                <span
-                  data-imbox-older-unread
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  {" "}
-                  · 更早 {props.newCount - props.recentUnread} 封未读
-                </span>
+              {/* Phone: the three-part count wraps to two lines at 375px and
+                  pushes the first message off the fold, so only the number
+                  that needs acting on survives. */}
+              <Show
+                when={!isMobile()}
+                fallback={
+                  <>
+                    {props.recentUnread} 封待读
+                    <Show when={props.newCount > props.recentUnread}>
+                      <span
+                        data-imbox-older-unread
+                        style={{ color: "var(--text-muted)" }}
+                      >
+                        {" "}
+                        · 更早 {props.newCount - props.recentUnread} 封未读
+                      </span>
+                    </Show>
+                  </>
+                }
+              >
+                最近 30 天 {props.recentUnread} 封待读 ·{" "}
+                {props.previouslySeenCount} 已读 · {props.total} 总数
+                <Show when={props.newCount > props.recentUnread}>
+                  <span
+                    data-imbox-older-unread
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    {" "}
+                    · 更早 {props.newCount - props.recentUnread} 封未读
+                  </span>
+                </Show>
               </Show>
             </span>
-            <span
-              style={{
-                "font-size": "var(--text-micro)",
-                color: "var(--text-muted)",
-                padding: "2px 8px",
-                background: "var(--paper-mid)",
-                "border-radius": "var(--radius-pill)",
-                "font-weight": "700",
-                "white-space": "nowrap",
-              }}
-              data-active-sort
-            >
-              {SORT_LABELS[props.activeSort]}
-            </span>
+            <Show when={!isMobile()}>
+              <span
+                style={{
+                  "font-size": "var(--text-micro)",
+                  color: "var(--text-muted)",
+                  padding: "2px 8px",
+                  background: "var(--paper-mid)",
+                  "border-radius": "var(--radius-pill)",
+                  "font-weight": "700",
+                  "white-space": "nowrap",
+                }}
+                data-active-sort
+              >
+                {SORT_LABELS[props.activeSort]}
+              </span>
+            </Show>
           </span>
         }
         actions={

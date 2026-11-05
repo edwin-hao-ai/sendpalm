@@ -781,6 +781,42 @@ test.describe("UI audit shots — desktop 1440x900", () => {
     await shoot(page, "desktop", "imbox-message-panel", 900);
   });
 
+  test("read together batch mode (past 500 unread)", async ({ page }) => {
+    // Same seeded mailbox, but with the unread queue pushed past the batch
+    // threshold so this round's ReadTogether batch mode is on screen.
+    await page.addInitScript((payload) => {
+      const p = payload as { messages: Message[] };
+      p.messages = [
+        ...p.messages,
+        ...Array.from({ length: 520 }, (_, i) => ({
+          ...p.messages[0],
+          id: `bulk-${i}`,
+          unread: true,
+          subj: `待读邮件 ${i + 1}`,
+          sentAt: new Date(Date.now() - i * 60_000).toISOString(),
+          st: new Date(Date.now() - i * 60_000).toISOString(),
+        })),
+      ];
+      sessionStorage.setItem("__sendpalm_e2e_seed", JSON.stringify(p));
+    }, SEED);
+    await page.goto("/");
+    await page.locator("body.app-ready").waitFor({ timeout: 15_000 });
+    await page.evaluate(
+      () =>
+        (window as never as { __sendpalmE2E: { __seedReady: Promise<void> } })
+          .__sendpalmE2E.__seedReady,
+    );
+    await page.waitForTimeout(500);
+    // 一起读 is not a nav route — it opens from the Imbox header.
+    await navTo(page, "imbox");
+    await page.getByRole("button", { name: "一起读" }).click();
+    await page
+      .locator("[data-batch-triage]")
+      .waitFor({ timeout: 10_000 })
+      .catch(() => {});
+    await shoot(page, "desktop", "read-together-batch", 600);
+  });
+
   test("imbox card hover action bar", async ({ page }) => {
     await bootSeeded(page);
     await navTo(page, "imbox");

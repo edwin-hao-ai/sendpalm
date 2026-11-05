@@ -42,6 +42,31 @@
   min-height: 44px;
 }
 
+/* Phone: the topbar already names the current view ("收件箱"), so repeating
+ * it as a 32px H1 spends ~380px of the first screen saying the same word
+ * twice — the list ends up showing 1.2 messages. The H1 stays in the DOM for
+ * screen readers and document structure; only its pixels go. */
+@media (max-width: 767px) {
+  .page-header {
+    padding: var(--space-3) var(--space-4) var(--space-2);
+  }
+  .page-header-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+  .page-header-desc {
+    margin-top: 0;
+  }
+}
+
 .section-heading {
   display: flex;
   align-items: flex-start;
