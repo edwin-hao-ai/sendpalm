@@ -7,6 +7,7 @@
  */
 
 import { Show, createSignal } from "solid-js";
+import { BUCKET_LABEL } from "../utils/labels";
 import { useDragContext, endDrag, type DragTarget } from "../utils/drag";
 import { Icon } from "./Icon";
 
@@ -18,9 +19,9 @@ interface TargetSpec {
 }
 
 const TARGETS: readonly TargetSpec[] = [
-  { id: "imbox", label: "Inbox", icon: "ph-tray", kind: "bucket" },
-  { id: "feed", label: "Stream", icon: "ph-newspaper", kind: "bucket" },
-  { id: "paperTrail", label: "Records", icon: "ph-receipt", kind: "bucket" },
+  { id: "imbox", label: BUCKET_LABEL.imbox, icon: "ph-tray", kind: "bucket" },
+  { id: "feed", label: BUCKET_LABEL.feed, icon: "ph-newspaper", kind: "bucket" },
+  { id: "paperTrail", label: BUCKET_LABEL.paperTrail, icon: "ph-receipt", kind: "bucket" },
   { id: "pending", label: "稍后回复", icon: "ph-clock", kind: "workflow" },
   { id: "saved", label: "已搁置", icon: "ph-push-pin", kind: "workflow" },
   { id: "remind", label: "提醒", icon: "ph-arrow-fat-line-up", kind: "workflow" },

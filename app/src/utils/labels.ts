@@ -2,7 +2,7 @@
  * Mirrors prototype's D.stageLabel / D.stageColor / D.stageSuggest.
  */
 
-import type { ContactStage, FileType } from "../types";
+import type { ContactStage, FileType, MessageBucket } from "../types";
 import type { ViewName } from "../stores/ui";
 
 export const STAGE_LABEL: Record<ContactStage, string> = {
@@ -32,13 +32,56 @@ export const STAGE_SUGGEST: Record<ContactStage, string> = {
   rekindle: "建议提供新的价值点",
 };
 
-export const BUCKET_LABEL: Record<string, string> = {
-  imbox: "Inbox",
-  feed: "Stream",
-  paperTrail: "Records",
+export const BUCKET_LABEL: Record<MessageBucket, string> = {
+  imbox: "收件箱",
+  feed: "报刊",
+  paperTrail: "单据",
   trash: "回收站",
   spam: "垃圾邮件",
 };
+
+/** User-facing names for every route. This is the ONLY place a view name
+ *  may be spelled out — sidebar, page titles, ⌘K, tooltips and empty
+ *  states all read from here. The English `NAV_SECTIONS[].label` stays
+ *  untouched because it doubles as the `data-nav` test hook. */
+export const VIEW_LABEL: Record<ViewName, string> = {
+  screener: "筛选台",
+  screenerHistory: "筛选历史",
+  imbox: "收件箱",
+  feed: "报刊",
+  paperTrail: "单据",
+  trash: "回收站",
+  spam: "垃圾邮件",
+  contacts: "联系人",
+  companies: "公司",
+  calendar: "日历",
+  files: "文件",
+  insights: "洞察",
+  drafts: "草稿",
+  followUps: "跟进",
+  tasks: "任务",
+  clips: "片段",
+  search: "搜索",
+  settings: "设置",
+  agent: "Agent",
+  focusReply: "专注回复",
+  readTogether: "一起读",
+  replyLater: "稍后回复",
+  setAside: "已搁置",
+  bubbleUp: "提醒",
+  folders: "文件夹",
+  onboarding: "上手",
+};
+
+export function viewLabel(name: ViewName): string {
+  return VIEW_LABEL[name] ?? name;
+}
+
+/** Safe lookup for values that arrive as a plain string (IPC payloads,
+ *  filter state, rule targets). */
+export function bucketLabel(bucket: string): string {
+  return (BUCKET_LABEL as Record<string, string>)[bucket] ?? bucket;
+}
 
 export const BUCKET_ICON: Record<string, string> = {
   imbox: "ph-tray",
@@ -107,7 +150,7 @@ export const NAV_SECTIONS: NavSection[] = [
   },
   {
     id: "contacts",
-    label: "Contacts",
+    label: "联系人",
     icon: "ph-users",
     view: "contacts",
     hint: "⌘5",
@@ -120,7 +163,7 @@ export const NAV_SECTIONS: NavSection[] = [
   },
   {
     id: "calendar",
-    label: "Calendar",
+    label: "日历",
     icon: "ph-calendar",
     view: "calendar",
     hint: "⌘6",
@@ -166,42 +209,42 @@ export interface NavGroup {
 export const NAV_GROUPS: NavGroup[] = [
   {
     id: "mail",
-    label: "Mail",
+    label: "邮件",
     icon: "ph-tray",
     defaultView: "imbox",
     views: ["screener", "imbox", "feed", "paperTrail", "drafts", "spam", "trash"],
   },
   {
     id: "calendar",
-    label: "Calendar",
+    label: "日历",
     icon: "ph-calendar",
     defaultView: "calendar",
     views: ["calendar"],
   },
   {
     id: "contacts",
-    label: "Contacts",
+    label: "联系人",
     icon: "ph-users",
     defaultView: "contacts",
     views: ["contacts", "companies"],
   },
   {
     id: "tasks",
-    label: "Tasks",
+    label: "任务",
     icon: "ph-bell-ringing",
     defaultView: "tasks",
     views: ["tasks", "followUps"],
   },
   {
     id: "library",
-    label: "Library",
+    label: "资料库",
     icon: "ph-paperclip",
     defaultView: "files",
     views: ["files", "clips", "folders"],
   },
   {
     id: "more",
-    label: "More",
+    label: "更多",
     icon: "ph-dots-three",
     defaultView: "insights",
     views: ["insights", "settings"],

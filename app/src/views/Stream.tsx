@@ -170,14 +170,14 @@ export function Stream() {
         when={!paged.resource.error}
         fallback={
           <ErrorState
-            title="Stream 加载失败"
+            title="报刊加载失败"
             message="请检查网络后重试。"
             retry={() => void paged.refresh()}
           />
         }
       >
         <SectionHeader
-          title="The Stream"
+          title="报刊"
           subtitle={`订阅邮件、长文慢慢看。点击卡片展开全文，可同时展开多篇。${
             paged.hasMore() ? ` 已加载 ${items().length}/${paged.total()}` : ""
           }`}

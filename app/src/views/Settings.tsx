@@ -109,9 +109,9 @@ const SHORTCUT_ACTION_LABELS: Record<string, string> = {
   "app:agent": "Agent 面板",
   "app:notifications": "通知",
   "nav:screener": "Gate（筛选台）",
-  "nav:imbox": "Inbox（收件箱）",
-  "nav:feed": "Stream（信息流）",
-  "nav:paperTrail": "Records（记录）",
+  "nav:imbox": "收件箱",
+  "nav:feed": "报刊",
+  "nav:paperTrail": "单据",
   "nav:contacts": "联系人",
   "nav:calendar": "日历",
   "nav:files": "文件",
@@ -1836,14 +1836,14 @@ function AgentTab() {
     <div>
       <SectionTitle>Agent 行为</SectionTitle>
       <Toggle
-        label="自动从新 Inbox 邮件提取任务"
+        label="自动从新收件箱邮件提取任务"
         checked={s.agent.autoExtractTasks}
         onChange={(enabled) => {
           setAppSettings("agent", "taskExtractionEnabledAt", enabled ? new Date().toISOString() : null);
           setAppSettings("agent", "autoExtractTasks", enabled);
         }}
       />
-      <p style={{ color: "var(--text-muted)", "font-size": "var(--text-caption)" }}>默认关闭。启用后，仅将通过 Gate 的新 Inbox 邮件发送至已配置模型；不会扫描历史邮件。建议需确认才成为任务。</p>
+      <p style={{ color: "var(--text-muted)", "font-size": "var(--text-caption)" }}>默认关闭。启用后，仅将通过筛选台的新收件箱邮件发送至已配置模型；不会扫描历史邮件。建议需确认才成为任务。</p>
       <Toggle
         label="自动起草回复"
         checked={s.agent.autoDraft}

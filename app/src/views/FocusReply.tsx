@@ -619,7 +619,7 @@ function DoneState(props: { onBack: () => void }) {
           cursor: "pointer",
         }}
       >
-        返回 Inbox
+        返回收件箱
       </button>
     </div>
   );

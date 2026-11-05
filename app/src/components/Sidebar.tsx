@@ -16,6 +16,7 @@ import { setView, view, type ViewName } from "../stores/ui";
 import {
   NAV_GROUPS,
   NAV_SECTIONS,
+  viewLabel,
   type NavGroup,
   type NavSection,
 } from "../utils/labels";
@@ -24,46 +25,17 @@ import { countGateCandidates } from "../stores/data";
 import { useSoftRefreshEffect } from "../utils/gestures";
 import "./Sidebar.css";
 
-/** User-facing nav labels. HEY brand nouns (Gate / Imbox / Stream /
- *  Records / Clips) stay English; everything else is Chinese.
- *  `NAV_SECTIONS[].label` stays untouched for `data-nav` test hooks. */
-const NAV_LABEL_ZH: Record<string, string> = {
-  screener: "Gate",
-  imbox: "Inbox",
-  feed: "Stream",
-  paperTrail: "Records",
-  contacts: "联系人",
-  companies: "公司",
-  calendar: "日历",
-  files: "文件",
-  drafts: "草稿",
-  followUps: "跟进",
-  tasks: "任务",
-  clips: "Clips",
-  folders: "文件夹",
-  insights: "洞察",
-  trash: "回收站",
-  spam: "垃圾邮件",
-  settings: "设置",
-};
-
-/** Chinese annotation for the brand nouns, shown in tooltips. */
-const NAV_BRAND_NOTE: Record<string, string> = {
-  screener: "筛选台",
-  imbox: "收件箱",
-  feed: "资讯流",
-  paperTrail: "收据账单",
-  clips: "剪藏",
-};
-
+/** Display label for a route. The single source lives in utils/labels.ts
+ *  so the sidebar, page titles, ⌘K and tooltips can never drift apart. */
 export function navDisplayLabel(viewName: string): string {
-  return NAV_LABEL_ZH[viewName] ?? viewName;
+  return viewLabel(viewName as ViewName);
 }
 
+/** Tooltip = name (+ the ⌘ shortcut hint when the section has one).
+ *  Brand nouns no longer need a Chinese annotation: the display label
+ *  is already Chinese. */
 export function navTooltipLabel(section: NavSection): string {
-  const label = navDisplayLabel(section.view);
-  const note = NAV_BRAND_NOTE[section.view];
-  const base = note ? `${label} · ${note}` : label;
+  const base = navDisplayLabel(section.view);
   return section.hint ? `${base} (${section.hint})` : base;
 }
 
@@ -245,7 +217,12 @@ function NavItem(props: {
     (props.section ? navDisplayLabel(props.section.view) : "更多");
   const tooltipLabel = () => {
     if (props.group && props.section) {
-      return `${props.group.label} · ${navTooltipLabel(props.section)}`;
+      // Single-route workspaces (日历 / 联系人 …) would otherwise read
+      // "任务 · 任务" now that both names are Chinese.
+      const child = navTooltipLabel(props.section);
+      return props.group.label === navDisplayLabel(props.section.view)
+        ? child
+        : `${props.group.label} · ${child}`;
     }
     return props.section ? navTooltipLabel(props.section) : "更多功能";
   };

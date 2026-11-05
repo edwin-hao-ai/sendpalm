@@ -587,7 +587,7 @@ function groupLabel(g: string): string {
       meetings: "会议",
       drafts: "草稿",
       snippets: "片段",
-      clips: "Clips",
+      clips: "片段",
       stickies: "便利贴",
       tasks: "任务",
     }[g] ?? g

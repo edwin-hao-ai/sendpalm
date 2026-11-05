@@ -5,6 +5,7 @@
 
 import { For, Show, createResource, createSignal } from "solid-js";
 import { safeInvoke } from "../services/backend";
+import { bucketLabel as bucketName } from "../utils/labels";
 import { showToast } from "../stores/ui";
 import { Icon } from "./Icon";
 
@@ -23,14 +24,6 @@ const FIELD_LABEL: Record<string, string> = {
   from: "发件人",
   subject: "主题",
   body: "正文",
-};
-
-const BUCKET_LABELS: Record<string, string> = {
-  imbox: "Inbox",
-  feed: "Stream",
-  paperTrail: "Records",
-  trash: "回收站",
-  spam: "垃圾邮件",
 };
 
 function listRules(): Promise<MailRule[] | null> {
@@ -121,7 +114,7 @@ export function RulesSettings() {
               <Icon name="ph-flow-arrow" size={14} />
               <span style={{ flex: 1, "font-size": "var(--text-body-sm)" }}>
                 {FIELD_LABEL[r.matchField]}含「{r.matchPattern}」→{" "}
-                {BUCKET_LABELS[r.actionBucket ?? ""] ?? r.actionBucket}
+                {bucketName(r.actionBucket ?? "")}
                 {r.actionLabel ? ` + 文件夹` : ""}
               </span>
               <button

@@ -72,7 +72,7 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
   test("Records view empty state", async ({ page }) => {
     await page.goto("/");
     await navigateToView(page, "paperTrail");
-    await expect(page.getByText("Records 是空的")).toBeVisible();
+    await expect(page.getByText("单据是空的")).toBeVisible();
     await shoot(page, "04-records");
   });
 
@@ -240,10 +240,10 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
         page.locator(`[data-nav-group="${group.id}"]`),
       ).toHaveAttribute("data-active", "true");
       const titles: Record<string, string> = {
-        screener: "Gate",
-        imbox: "Inbox",
-        feed: "Stream",
-        paperTrail: "Records",
+        screener: "筛选台",
+        imbox: "收件箱",
+        feed: "报刊",
+        paperTrail: "单据",
         contacts: "联系人",
         companies: "公司",
         calendar: "日历",
@@ -251,7 +251,7 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
         drafts: "草稿",
         followUps: "跟进",
         tasks: "任务",
-        clips: "Clips",
+        clips: "片段",
         folders: "文件夹",
         insights: "洞察",
         trash: "回收站",
@@ -374,12 +374,12 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     await page.goto("/");
     await navigateToView(page, "feed");
     await page.locator('[data-nav-group="mail"]').click();
-      await expect(page.locator("#topbar")).toContainText("Inbox");
+      await expect(page.locator("#topbar")).toContainText("收件箱");
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     for (const [shortcut, title, group] of [
-      ["1", "Gate", "mail"],
-      // Records moved from Library back into the Mail workspace group.
-      ["4", "Records", "mail"],
+      ["1", "筛选台", "mail"],
+      // 单据 moved from Library back into the Mail workspace group.
+      ["4", "单据", "mail"],
       ["8", "洞察", "more"],
     ]) {
       await page.keyboard.press(`${modifier}+${shortcut}`);
@@ -430,7 +430,7 @@ test.describe("Responsive layout", () => {
     );
     await sheet.locator('[data-nav-view="feed"]').click();
     await expect(sheet).not.toBeVisible();
-    await expect(page.locator('#topbar:has-text("Stream")')).toBeVisible();
+    await expect(page.locator('#topbar:has-text("报刊")')).toBeVisible();
   });
 
   test("Settings page uses iOS-style menu on mobile", async ({ page }) => {
@@ -543,7 +543,7 @@ test.describe("Responsive layout — iPad portrait", () => {
     await expect(nav).toBeVisible();
     await nav.hover();
     const tip = page.locator("[data-testid='sidebar-tooltip']");
-    await expect(tip).toContainText("Tasks");
+    await expect(tip).toContainText("任务");
   });
 });
 

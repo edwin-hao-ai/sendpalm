@@ -186,7 +186,7 @@ export function FollowUps() {
             icon="ph-bell-ringing"
             title="没有跟进提醒"
             description="打开任意邮件，在底部点「更多 → 跟进提醒」，这里会列出所有需要回头处理的消息。"
-            action={{ label: "去 Inbox", onClick: () => setView("imbox") }}
+            action={{ label: "去收件箱", onClick: () => setView("imbox") }}
           />
         }
         isEmpty={() => total() === 0}

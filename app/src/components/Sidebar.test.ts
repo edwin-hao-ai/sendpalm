@@ -1,5 +1,5 @@
-/** Sidebar — nav display labels. Brand nouns stay English; everything
- *  else is Chinese; tooltips carry the Chinese annotation + shortcut. */
+/** Sidebar — nav display labels. Every route name comes from
+ *  utils/labels.VIEW_LABEL; tooltips append the shortcut hint. */
 
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { createComponent } from "solid-js";
@@ -62,9 +62,9 @@ describe("workspace navigation", () => {
   });
   it("selects secondary routes and highlights their workspace and active child", async () => {
     const { container } = render(() => createComponent(Sidebar, {}));
-    fireEvent.click(screen.getByRole("button", { name: "Mail 导航" }));
+    fireEvent.click(screen.getByRole("button", { name: "邮件 导航" }));
     fireEvent.click(
-      screen.getByRole("button", { name: "Stream · 资讯流 (⌘3)" }),
+      screen.getByRole("button", { name: "报刊 (⌘3)" }),
     );
     expect(view()).toBe("feed");
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -73,19 +73,19 @@ describe("workspace navigation", () => {
         .querySelector('[data-nav-group="mail"]')
         ?.getAttribute("data-active"),
     ).toBe("true");
-    fireEvent.click(screen.getByRole("button", { name: "Mail 导航" }));
+    fireEvent.click(screen.getByRole("button", { name: "邮件 导航" }));
     expect(
       screen
-        .getByRole("button", { name: "Stream · 资讯流 (⌘3)" })
+        .getByRole("button", { name: "报刊 (⌘3)" })
         .getAttribute("aria-current"),
     ).toBe("page");
     expect(await screen.findByLabelText("3 项待处理")).toBeTruthy();
     expect(document.querySelector('[data-nav-badge="Gate"]')).not.toBeNull();
-    expect(document.querySelector('[data-nav-badge="Mail"]')).not.toBeNull();
+    expect(document.querySelector('[data-nav-badge="邮件"]')).not.toBeNull();
   });
   it("dismisses disclosures with Escape or outside pointer and returns keyboard focus", () => {
     render(() => createComponent(Sidebar, {}));
-    const trigger = screen.getByRole("button", { name: "Library 导航" });
+    const trigger = screen.getByRole("button", { name: "资料库 导航" });
     fireEvent.click(trigger);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -100,7 +100,7 @@ describe("workspace navigation", () => {
   });
   it("returns focus to the disclosure after choosing a child route", () => {
     render(() => createComponent(Sidebar, {}));
-    const trigger = screen.getByRole("button", { name: "More 导航" });
+    const trigger = screen.getByRole("button", { name: "更多 导航" });
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole("button", { name: "设置" }));
     expect(view()).toBe("settings");
@@ -111,7 +111,7 @@ describe("workspace navigation", () => {
     document.addEventListener("keydown", globalEscape);
     try {
       render(() => createComponent(Sidebar, {}));
-      fireEvent.click(screen.getByRole("button", { name: "Mail 导航" }));
+      fireEvent.click(screen.getByRole("button", { name: "邮件 导航" }));
       fireEvent.keyDown(document.activeElement!, { key: "Escape" });
       expect(screen.queryByRole("dialog")).toBeNull();
       expect(globalEscape).not.toHaveBeenCalled();
@@ -123,7 +123,7 @@ describe("workspace navigation", () => {
     render(() => createComponent(Sidebar, {}));
     expect(
       document.querySelector('[data-nav-group="mail"]')?.getAttribute("aria-label"),
-    ).toContain("Mail · Inbox · 收件箱 (⌘2)");
+    ).toContain("邮件 · 收件箱 (⌘2)");
     expect(
       document.querySelector('[data-nav-group="calendar"]')?.getAttribute("aria-label"),
     ).toContain("日历 (⌘6)");
@@ -134,7 +134,7 @@ describe("workspace navigation", () => {
   it("focuses the active child route when opening a group flyout", () => {
     setView("feed");
     render(() => createComponent(Sidebar, {}));
-    fireEvent.click(screen.getByRole("button", { name: "Mail 导航" }));
+    fireEvent.click(screen.getByRole("button", { name: "邮件 导航" }));
     expect(document.activeElement?.getAttribute("data-nav-view")).toBe("feed");
   });
   it("makes the mobile More sheet modal and keeps keyboard focus inside", () => {
@@ -179,18 +179,19 @@ describe("workspace navigation", () => {
 });
 
 describe("navDisplayLabel", () => {
-  it("keeps HEY brand nouns in English", () => {
-    expect(navDisplayLabel("screener")).toBe("Gate");
-    expect(navDisplayLabel("imbox")).toBe("Inbox");
+  it("renders every route in Chinese", () => {
+    expect(navDisplayLabel("screener")).toBe("筛选台");
+    expect(navDisplayLabel("imbox")).toBe("收件箱");
+    expect(navDisplayLabel("feed")).toBe("报刊");
+    expect(navDisplayLabel("paperTrail")).toBe("单据");
+    expect(navDisplayLabel("clips")).toBe("片段");
+    // The English label stays as the data-nav test hook only.
     expect(NAV_SECTIONS.find((section) => section.view === "imbox")?.label).toBe(
       "Inbox",
     );
-    expect(navDisplayLabel("feed")).toBe("Stream");
-    expect(navDisplayLabel("paperTrail")).toBe("Records");
-    expect(navDisplayLabel("clips")).toBe("Clips");
   });
 
-  it("renders non-brand views in Chinese", () => {
+  it("renders the rest of the routes in Chinese", () => {
     expect(navDisplayLabel("contacts")).toBe("联系人");
     expect(navDisplayLabel("trash")).toBe("回收站");
     expect(navDisplayLabel("spam")).toBe("垃圾邮件");
@@ -209,9 +210,9 @@ describe("navDisplayLabel", () => {
 });
 
 describe("navTooltipLabel", () => {
-  it("annotates brand nouns with Chinese and appends the shortcut hint", () => {
+  it("appends the shortcut hint to the Chinese name", () => {
     const imbox = NAV_SECTIONS.find((s) => s.view === "imbox")!;
-    expect(navTooltipLabel(imbox)).toBe("Inbox · 收件箱 (⌘2)");
+    expect(navTooltipLabel(imbox)).toBe("收件箱 (⌘2)");
   });
 
   it("omits the parenthesised hint when there is none", () => {

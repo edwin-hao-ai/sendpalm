@@ -334,16 +334,16 @@ async function sampleFrames(
 }
 
 const TARGET_VIEWS: ReadonlyArray<{ view: string; label: string }> = [
-  { view: "imbox", label: "Inbox" },
+  { view: "imbox", label: "收件箱" },
   { view: "drafts", label: "Drafts" },
   { view: "files", label: "Files" },
-  { view: "clips", label: "Clips" },
+  { view: "clips", label: "片段" },
   { view: "followUps", label: "FollowUps" },
   { view: "companies", label: "Companies" },
   { view: "insights", label: "Insights" },
   { view: "calendar", label: "Calendar" },
   { view: "settings", label: "Settings" },
-  { view: "paperTrail", label: "Records" },
+  { view: "paperTrail", label: "单据" },
   { view: "spam", label: "Spam" },
   { view: "trash", label: "Trash" },
 ];

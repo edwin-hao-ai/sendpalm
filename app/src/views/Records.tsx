@@ -48,7 +48,7 @@ export function Records() {
       await upsertMessage({ ...m, setAside: true });
       paged.patchMessage(m.id, { setAside: true });
       showToast({
-        message: "已搁置，仍保留在 Records 中",
+        message: "已搁置，仍保留在单据中",
         kind: "success",
         action: { label: "查看搁置堆", run: () => {
             setView("setAside");
@@ -69,7 +69,7 @@ export function Records() {
       await upsertMessage({ ...m, replyLater: true });
       paged.patchMessage(m.id, { replyLater: true });
       showToast({
-        message: "已加入稍后回复，仍保留在 Records 中",
+        message: "已加入稍后回复，仍保留在单据中",
         kind: "success",
         action: { label: "查看稍后回复", run: () => {
             setView("replyLater");
@@ -110,14 +110,14 @@ export function Records() {
         when={!paged.resource.error}
         fallback={
           <ErrorState
-            title="Records 加载失败"
+            title="单据加载失败"
             message="请检查网络后重试。"
             retry={() => void paged.refresh()}
           />
         }
       >
         <PageHeader
-          title="Records"
+          title="单据"
           description={
             <p>
               发票 / 物流 / 系统通知。安静躺着，需要时随时搜。
@@ -384,7 +384,7 @@ function EmptyState() {
   return (
     <Empty
       icon="ph-receipt"
-      title="Records 是空的"
+      title="单据是空的"
       description="发票、物流和系统通知会自动归档到这里。"
     />
   );

@@ -99,7 +99,7 @@ export function Clips() {
       }}
     >
       <PageHeader
-        title="Clips"
+        title="片段"
         description={<p>从邮件里摘下来的文字片段 · 一键复制粘贴</p>}
       />
 
@@ -129,7 +129,7 @@ export function Clips() {
             icon="ph-bookmarks"
             title="还没有 Clip"
             description="在邮件里选中文字后点「Clip」，金句、地址、代码片段都收在这里，一键复制。"
-            action={{ label: "去 Inbox 选一段", onClick: () => setView("imbox") }}
+            action={{ label: "去收件箱选一段", onClick: () => setView("imbox") }}
           />
         }
       >

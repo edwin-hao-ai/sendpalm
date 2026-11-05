@@ -145,7 +145,7 @@ test("场景：用户批量把订阅类发件人归到 Stream", async ({ page })
 
   // 全选 → 批量归到 Stream → 队列清空。
   await page.getByRole("button", { name: /全选/ }).click();
-  await page.getByRole("button", { name: "到 Stream" }).click();
+  await page.getByRole("button", { name: "到报刊" }).click();
   await expect(page.getByText("都审完了 🎉")).toBeVisible({ timeout: 5000 });
 });
 

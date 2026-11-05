@@ -249,7 +249,7 @@ test.describe("Email workflows", () => {
     await page.evaluate(
       "import('/src/stores/ui.ts').then(ui => ui.bumpSoftRefreshTick())",
     );
-    await expect(page.locator('[data-nav-badge="Mail"]')).toHaveAttribute(
+    await expect(page.locator('[data-nav-badge="邮件"]')).toHaveAttribute(
       "data-count",
       "1",
     );
@@ -260,7 +260,7 @@ test.describe("Email workflows", () => {
     );
     await navigateTo(page, "screener");
 
-    await expect(page.getByText("决定谁可以进入你的 Inbox")).toBeVisible();
+    await expect(page.getByText("决定谁可以进入你的收件箱")).toBeVisible();
     await page.getByTestId("gate-approve-imbox").click();
 
     await navigateTo(page, "imbox");
@@ -882,7 +882,7 @@ test.describe("Email workflows", () => {
 
     await page.getByTestId("message-more-menu").click();
     await page.getByTestId("message-move-paperTrail").click();
-    await expect(page.getByText("已移到 Records")).toBeVisible({
+    await expect(page.getByText("已移到 单据")).toBeVisible({
       timeout: 5_000,
     });
 

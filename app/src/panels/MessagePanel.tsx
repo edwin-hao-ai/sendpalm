@@ -52,6 +52,7 @@ import { FollowUpPicker } from "../components/FollowUpPicker";
 import { RemindPicker } from "../components/RemindPicker";
 import { LabelPicker } from "../components/LabelPicker";
 import { MovePicker } from "../components/MovePicker";
+import { bucketLabel as bucketName } from "../utils/labels";
 import { uid } from "../utils/id";
 import { formatMessageDate } from "../utils/message-dates";
 import { addDays, isoNow, relativeTime } from "../utils/date";
@@ -426,16 +427,7 @@ export function MessagePanel(props: { messageId: string }) {
     showToast({ message: "已保存为草稿", kind: "success" });
   };
 
-  const bucketLabel = (bucket: string) => {
-    const map: Record<string, string> = {
-      imbox: "Inbox",
-      feed: "Stream",
-      paperTrail: "Records",
-      trash: "回收站",
-      spam: "垃圾邮件",
-    };
-    return map[bucket] ?? bucket;
-  };
+  const bucketLabel = (bucket: string) => bucketName(bucket);
 
   const moveToBucketDirect = async (bucket: Message["bucket"]) => {
     const m = message();
@@ -2051,21 +2043,21 @@ export function moreMenuItemDefs(opts: {
       {
         id: "move-imbox",
         icon: "ph-tray",
-        label: "移到 Inbox",
+        label: `移到 ${bucketName("imbox")}`,
         testId: "message-move-imbox",
         bucket: "imbox",
       },
       {
         id: "move-feed",
         icon: "ph-newspaper",
-        label: "移到 Stream",
+        label: `移到 ${bucketName("feed")}`,
         testId: "message-move-feed",
         bucket: "feed",
       },
       {
         id: "move-paperTrail",
         icon: "ph-folder",
-        label: "移到 Records",
+        label: `移到 ${bucketName("paperTrail")}`,
         testId: "message-move-paperTrail",
         bucket: "paperTrail",
       },

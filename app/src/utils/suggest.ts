@@ -5,6 +5,7 @@
  *
  *  Signals: newsletter headers, receipt/statement keywords, OTP-ish mail. */
 
+import { BUCKET_LABEL } from "./labels";
 import type { Contact, Message, MessageBucket } from "../types";
 
 const RECEIPT_KEYWORDS = [
@@ -64,10 +65,5 @@ export function suggestBucket(
   return { bucket: "imbox", reasons };
 }
 
-export const BUCKET_SUGGEST_LABEL: Record<MessageBucket, string> = {
-  imbox: "Inbox",
-  feed: "Stream",
-  paperTrail: "Records",
-  trash: "回收站",
-  spam: "垃圾邮件",
-};
+export const BUCKET_SUGGEST_LABEL: Record<MessageBucket, string> =
+  BUCKET_LABEL;

@@ -202,7 +202,7 @@ export function Drafts() {
           <Empty
             icon="ph-pencil-line"
             title="还没有草稿"
-            description="按 ⌘N 写一封新邮件，或直接在 Inbox 里回复。"
+            description="按 ⌘N 写一封新邮件，或直接在收件箱里回复。"
             action={{ label: "新邮件", onClick: () => setComposeOpen(true) }}
           />
         }

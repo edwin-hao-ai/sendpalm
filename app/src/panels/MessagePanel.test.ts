@@ -549,7 +549,7 @@ describe("moreMenuItemDefs", () => {
     const defs = moreMenuItemDefs({ bucket: "feed", setAsideActive: false });
     const imbox = defs.find((d) => d.id === "move-imbox");
     expect(imbox).toBeDefined();
-    expect(imbox!.label).toBe("移到 Inbox");
+    expect(imbox!.label).toBe("移到 收件箱");
   });
 
   it("moves the separator onto the first surviving move item", () => {
@@ -560,16 +560,16 @@ describe("moreMenuItemDefs", () => {
     expect(firstMove!.separator).toBe(true);
   });
 
-  it("labels every item in Chinese (brand nouns stay English)", () => {
+  it("labels every item in Chinese", () => {
     const defs = moreMenuItemDefs({ bucket: "trash", setAsideActive: false });
     const byId = new Map(defs.map((d) => [d.id, d.label]));
     expect(byId.get("reply-all")).toBe("回复全部");
     expect(byId.get("forward")).toBe("转发");
     expect(byId.get("trash")).toBe("移到回收站");
     expect(byId.get("spam")).toBe("移到垃圾邮件");
-    expect(byId.get("move-imbox")).toBe("移到 Inbox");
-    expect(byId.get("move-feed")).toBe("移到 Stream");
-    expect(byId.get("move-paperTrail")).toBe("移到 Records");
+    expect(byId.get("move-imbox")).toBe("移到 收件箱");
+    expect(byId.get("move-feed")).toBe("移到 报刊");
+    expect(byId.get("move-paperTrail")).toBe("移到 单据");
   });
 
   it("marks trash / spam / block as danger", () => {

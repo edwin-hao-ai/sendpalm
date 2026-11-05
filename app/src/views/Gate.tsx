@@ -379,7 +379,7 @@ export function Gate() {
           }
         >
       <PageHeader
-        title="决定谁可以进入你的 Inbox"
+        title="决定谁可以进入你的收件箱"
         description={
           <span
             style={{
@@ -460,8 +460,8 @@ export function Gate() {
           <Icon name="ph-shield-check" size={18} />
           <span style={{ flex: 1 }}>
             <b>筛选台怎么用：</b>下面的都是第一次给你写信的发件人。对每个人决定一次：
-            <b>批准到 Inbox</b>（重要的人）、<b>Stream</b>（订阅和 newsletter）、
-            <b>Records</b>（收据账单），或<b>阻止</b>。以后他们的邮件会自动归位。
+            <b>批准到收件箱</b>（重要的人）、<b>报刊</b>（订阅和 newsletter）、
+            <b>单据</b>（收据账单），或<b>阻止</b>。以后他们的邮件会自动归位。
             人多时点右上角「批量整理」一次性处理。
           </span>
           <button
@@ -856,7 +856,7 @@ function BatchPanel(props: {
                           "flex-shrink": 0,
                         }}
                       >
-                        订阅 · 建议 Stream
+                        订阅 · 建议报刊
                       </span>
                     </Show>
                   </span>
@@ -894,13 +894,13 @@ function BatchPanel(props: {
         }}
       >
         <button disabled={props.busy} style={btn()} onClick={() => props.onApply("imbox")}>
-          批准到 Inbox
+          批准到收件箱
         </button>
         <button disabled={props.busy} style={btn()} onClick={() => props.onApply("feed")}>
-          到 Stream
+          到报刊
         </button>
         <button disabled={props.busy} style={btn()} onClick={() => props.onApply("paperTrail")}>
-          到 Records
+          到单据
         </button>
         <button disabled={props.busy} style={btn()} onClick={() => props.onApply("read")}>
           标为已读
@@ -982,12 +982,12 @@ function DoneState() {
   return (
     <Empty
       icon="ph-check-circle"
-      title="都审完了，Inbox 见"
+      title="都审完了，收件箱见"
       description={t(
         "gate.empty.body",
         "现在没有陌生发件人需要审核。新的陌生发件人会先停在这里。",
       )}
-      action={{ label: "回到 Inbox", onClick: () => setView("imbox") }}
+      action={{ label: "回到收件箱", onClick: () => setView("imbox") }}
     />
   );
 }

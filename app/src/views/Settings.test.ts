@@ -47,7 +47,7 @@ describe("comboFromKeyEvent", () => {
 
 describe("shortcutActionLabel", () => {
   it("maps internal action ids to Chinese names", () => {
-    expect(shortcutActionLabel("nav:imbox", "Inbox")).toBe("Inbox（收件箱）");
+    expect(shortcutActionLabel("nav:imbox", "Inbox")).toBe("收件箱");
     expect(shortcutActionLabel("message:reply-later", "Reply later")).toBe(
       "稍后回复",
     );

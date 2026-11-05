@@ -54,7 +54,10 @@ import { SkeletonList } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/Empty";
 import { ContactEditModal } from "../components/ContactEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+
 import {
+  BUCKET_LABEL,
+  bucketLabel,
   STAGE_COLOR,
   STAGE_LABEL,
   STAGE_SUGGEST,
@@ -92,12 +95,8 @@ const TABS: { id: ContactTab; label: string }[] = [
 const BUCKET_OPTIONS: { id: Contact["defaultBucket"]; label: string }[] = [
   { id: "imbox", label: "Inbox（重要邮件）" },
   { id: "feed", label: "Stream（资讯与 newsletter）" },
-  { id: "paperTrail", label: "Records（收据与账单）" },
+  { id: "paperTrail", label: `${BUCKET_LABEL.paperTrail}（收据与账单）` },
 ];
-
-function bucketLabel(b: Contact["defaultBucket"]): string {
-  return b === "imbox" ? "Inbox" : b === "feed" ? "Stream" : "Records";
-}
 
 /** Comma-joined names for a contact's autofile label ids. */
 export function autoLabelNames(c: Contact, labels: Label[] | undefined): string {

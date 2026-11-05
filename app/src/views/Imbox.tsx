@@ -1612,7 +1612,7 @@ function ImboxHeader(props: {
           keep the sync spinner self-contained here. */}
       <style>{`@keyframes imbox-spin { to { transform: rotate(360deg); } }`}</style>
       <PageHeader
-        title="Inbox"
+        title="收件箱"
         description={
           <span
             style={{

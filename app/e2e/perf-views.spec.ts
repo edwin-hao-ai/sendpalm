@@ -86,7 +86,7 @@ const TARGET_VIEWS: ReadonlyArray<{
   // Baseline: imbox is the heaviest, most-tuned view.
   {
     view: "imbox",
-    label: "Inbox",
+    label: "收件箱",
     rootMarker: "[data-testid='imbox-row'], aside",
   },
   // The suspects (sidebar-navigable views only — search/agent/focusReply
@@ -94,13 +94,13 @@ const TARGET_VIEWS: ReadonlyArray<{
   // the ViewName enum).
   { view: "drafts", label: "Drafts", rootMarker: "h2" },
   { view: "files", label: "Files", rootMarker: "h2" },
-  { view: "clips", label: "Clips", rootMarker: "h2" },
+  { view: "clips", label: "片段", rootMarker: "h2" },
   { view: "followUps", label: "FollowUps", rootMarker: "h2" },
   { view: "companies", label: "Companies", rootMarker: "h2" },
   { view: "insights", label: "Insights", rootMarker: "h2" },
   { view: "calendar", label: "Calendar", rootMarker: "h2" },
   { view: "settings", label: "Settings", rootMarker: "h2" },
-  { view: "paperTrail", label: "Records", rootMarker: "h2" },
+  { view: "paperTrail", label: "单据", rootMarker: "h2" },
   { view: "spam", label: "Spam", rootMarker: "h2" },
   { view: "trash", label: "Trash", rootMarker: "h2" },
 ];
@@ -348,7 +348,7 @@ test.describe("view-switching performance audit (Session 2026-08-21)", () => {
       await clickView(page, t.view, t.label);
       await page.waitForTimeout(150);
     }
-    await clickView(page, "imbox", "Inbox");
+    await clickView(page, "imbox", "收件箱");
     await page.waitForTimeout(300);
 
     const results: Array<Awaited<ReturnType<typeof measureView>>> = [];
@@ -502,7 +502,7 @@ test.describe("scroll performance audit (Session 2026-08-21)", () => {
     await setupPerfObserver(page);
 
     // Land on Imbox + warmup the lazy chunk + initial pagination.
-    await clickView(page, "imbox", "Inbox");
+    await clickView(page, "imbox", "收件箱");
     await page.waitForTimeout(500);
     // Scroll to the top so the test starts from a known position.
     await page.evaluate(() => window.scrollTo({ top: 0 }));
@@ -550,7 +550,7 @@ test.describe("scroll performance audit (Session 2026-08-21)", () => {
     await page.waitForTimeout(200);
     await setupPerfObserver(page);
 
-    await clickView(page, "imbox", "Inbox");
+    await clickView(page, "imbox", "收件箱");
     await page.waitForTimeout(800);
     await page.evaluate(() => window.scrollTo({ top: 0 }));
     await page.waitForTimeout(200);
