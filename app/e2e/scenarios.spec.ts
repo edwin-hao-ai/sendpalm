@@ -224,3 +224,60 @@ test("场景：用户在 Stream 展开订阅邮件看到富文本版面", async 
   await expect(card.locator("iframe")).toBeVisible({ timeout: 5000 });
   await expect(card.locator("iframe")).toHaveAttribute("srcdoc", /Big Update/);
 });
+
+/* ── 6. 首次导入过渡 ──────────────────────────────────────────────── */
+
+/**
+ * 用了五年 Gmail 的人第一次登录：邮箱里已经有 300 封历史邮件、40 位历史
+ * 发件人，导入完成后他们全被静默通过；之后才来了 3 位陌生发件人。
+ *
+ * 筛选台必须只显示这 3 位。导入的历史发件人一个都不能露面——否则「导入
+ * 即劝退」这个坑会以 UI 的形式重新长出来（Rust 侧的入队规则由
+ * `src-tauri/tests/import_transition.rs` 锁定，这里锁的是「列表真的只显示
+ * 未审的」）。
+ */
+test("场景：导入 300 封历史邮件后，筛选台只剩 3 位新发件人", async ({ page }) => {
+  const historySenders = Array.from({ length: 40 }, (_, i) =>
+    seedContact(`c_h${i}`, `历史发件人 ${i + 1}`, /* screened */ true),
+  );
+  const newcomers = ["c_new1", "c_new2", "c_new3"].map((id, i) =>
+    seedContact(id, `新发件人 ${i + 1}`, /* screened */ false),
+  );
+
+  const historyMessages = Array.from({ length: 300 }, (_, i) =>
+    seedMessage({
+      id: `h${i}`,
+      pid: `c_h${i % 40}`,
+      subj: `历史邮件 ${i + 1}`,
+      // 导入时订阅类被自动归到报刊，其余留在收件箱——两种都不该进筛选台。
+      bucket: i % 5 === 0 ? "feed" : "imbox",
+      isNewsletter: i % 5 === 0,
+    }),
+  );
+  const newcomerMessages = newcomers.map((c, i) =>
+    seedMessage({ id: `n${i}`, pid: c.id, subj: `新来信 ${i + 1}` }),
+  );
+
+  await boot(
+    page,
+    [...historySenders, ...newcomers],
+    [...historyMessages, ...newcomerMessages],
+  );
+
+  await page.locator('[data-nav-disclosure="mail"]').click();
+  await page.locator('#workspace-mail [data-nav-view="screener"]').click();
+
+  // 队列里只有 3 位——不是 43 位。
+  await expect(page.getByText(/3 位待审/).first()).toBeVisible({
+    timeout: 10_000,
+  });
+  const card = page.locator("[data-gate-card]");
+  await expect(card).toHaveAttribute("data-gate-card", /新发件人/);
+  await expect(card).not.toContainText("历史发件人");
+
+  // 处理掉一位之后，还剩 2 位（队列是真的，不是静态文案）。
+  await page.getByTestId("gate-approve-imbox").click();
+  await expect(page.getByText(/2 位待审/).first()).toBeVisible({
+    timeout: 5000,
+  });
+});

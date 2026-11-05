@@ -521,6 +521,7 @@ export function Gate() {
               disabled={!isMobile()}
             >
               <div
+                data-gate-card={c().name}
                 style={{
                   background:
                     "color-mix(in srgb, var(--paper-light) 82%, transparent)",
