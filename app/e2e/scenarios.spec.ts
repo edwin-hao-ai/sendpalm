@@ -12,6 +12,7 @@
  * 无法端到端，保留为手工验收项（docs/TODOS.md）。 */
 
 import { test, expect, type Page } from "@playwright/test";
+import { navigateToView } from "./navigation";
 
 /* ── Fixtures ─────────────────────────────────────────────────────── */
 
@@ -139,8 +140,7 @@ test("场景：用户批量把订阅类发件人归到 Stream", async ({ page })
     seedMessage({ id: "b3", pid: "c_s3", subj: "私人问候", isNewsletter: false }),
   ]);
 
-  await page.locator('[data-nav-disclosure="mail"]').click();
-  await page.locator('#workspace-mail [data-nav-view="screener"]').click();
+  await navigateToView(page, "screener");
   await page.getByRole("button", { name: "批量整理" }).click();
 
   // 全选 → 批量归到 Stream → 队列清空。
@@ -176,10 +176,9 @@ test("场景：用户把发票邮件归档进文件夹并查看", async ({ page 
     });
   });
 
-  await page.locator('[data-nav-view="files"]').first().click();
-  // Library 默认进文件；从 flyout 进文件夹。
-  await page.locator('[data-nav-disclosure="library"]').click();
-  await page.locator('[data-nav-view="folders"]').click();
+  // Library 默认进文件；再从分组里进文件夹。
+  await navigateToView(page, "files");
+  await navigateToView(page, "folders");
 
   await expect(page.getByRole("button", { name: "发票" })).toBeVisible();
   await page.getByRole("button", { name: "发票" }).click();
@@ -211,8 +210,7 @@ test("场景：用户在 Stream 展开订阅邮件看到富文本版面", async 
     ],
   );
 
-  await page.locator('[data-nav-disclosure="mail"]').click();
-  await page.locator('#workspace-mail [data-nav-view="feed"]').click();
+  await navigateToView(page, "feed");
 
   const card = page.locator("[data-stream-card]").first();
   await expect(card).toContainText("本周产品更新");
@@ -264,8 +262,7 @@ test("场景：导入 300 封历史邮件后，筛选台只剩 3 位新发件人
     [...historyMessages, ...newcomerMessages],
   );
 
-  await page.locator('[data-nav-disclosure="mail"]').click();
-  await page.locator('#workspace-mail [data-nav-view="screener"]').click();
+  await navigateToView(page, "screener");
 
   // 队列里只有 3 位——不是 43 位。
   await expect(page.getByText(/3 位待审/).first()).toBeVisible({
@@ -392,8 +389,7 @@ test("场景：在筛选台右滑放行一位发件人", async ({ page }) => {
     ],
   );
 
-  await page.locator('[data-nav-disclosure="mail"]').click();
-  await page.locator('#workspace-mail [data-nav-view="screener"]').click();
+  await navigateToView(page, "screener");
 
   const card = page.locator("[data-gate-card]");
   await expect(card).toContainText("Stranger One");

@@ -249,15 +249,11 @@ test.describe("Email workflows", () => {
     await page.evaluate(
       "import('/src/stores/ui.ts').then(ui => ui.bumpSoftRefreshTick())",
     );
-    await expect(page.locator('[data-nav-badge="邮件"]')).toHaveAttribute(
-      "data-count",
-      "1",
-    );
-    await page.locator('[data-nav-disclosure="mail"]').click();
-    await expect(page.locator('[data-nav-badge="Gate"]')).toHaveAttribute(
-      "data-count",
-      "1",
-    );
+    // The Gate count is the wide sidebar's 筛选台 row at ≥1024 and the rail
+    // corner badge below that; both must agree it is 1.
+    await expect(
+      page.locator('[data-nav-count="screener"]').first(),
+    ).toHaveText("1");
     await navigateTo(page, "screener");
 
     await expect(page.getByText("筛选台", { exact: true }).first()).toBeVisible();

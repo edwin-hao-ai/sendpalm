@@ -168,7 +168,10 @@
   --titlebar-height: 0px; /* Tauri Overlay owns the chrome. */
   --titlebar-traffic-pad: 78px; /* Standard macOS traffic-light safe area. */
   --topbar-height: 52px;
-  --sidebar-width: 64px;
+  /* ≥1024: a real sidebar with the Mail group permanently expanded (the
+     20px hover caret was two adjacent hit targets with opposite meanings).
+     768–1023 keeps the icon rail; the phone uses the bottom bar. */
+  --sidebar-width: 212px;
   --sidebar-width-tablet: 64px;
   --bottom-tab-height: 64px;
   --detail-panel-min: 280px;

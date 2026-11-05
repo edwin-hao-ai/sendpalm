@@ -20,8 +20,8 @@ import {
   type NavGroup,
   type NavSection,
 } from "../utils/labels";
-import { useLongPress, useViewport } from "../utils/gestures";
-import { countGateCandidates } from "../stores/data";
+import { useLongPress, useRefreshEffect, useViewport } from "../utils/gestures";
+import { countGateCandidates, countUnreadByBucket } from "../stores/data";
 import { formatGateCount } from "../utils/counts";
 import { useSoftRefreshEffect } from "../utils/gestures";
 import "./Sidebar.css";
@@ -41,7 +41,7 @@ export function navTooltipLabel(section: NavSection): string {
 }
 
 export function Sidebar() {
-  const { isMobile } = useViewport();
+  const { isMobile, isDesktop } = useViewport();
   const [moreOpen, setMoreOpen] = createSignal(false);
   const [disclosure, setDisclosure] = createSignal<{
     group: NavGroup;
@@ -69,8 +69,28 @@ export function Sidebar() {
   // from the IMAP sync shows up without a full app reload.
   const [gateCount, { refetch: refetchGateCount }] =
     createResource(countGateCandidates);
+  // Right-aligned counts for the wide sidebar's mail rows. Same soft tick as
+  // the Gate badge — a sync chunk can land on any of them.
+  const [unread, { refetch: refetchUnread }] =
+    createResource(countUnreadByBucket);
+  // Both ticks, not just the soft one: the soft tick is what a sync chunk
+  // fires, but the initial data load bumps the HARD tick — subscribing only to
+  // soft leaves both counters at 0 until the next sync (the exact bug this
+  // comment replaced last round).
   useSoftRefreshEffect(() => {
     void refetchGateCount();
+    void refetchUnread();
+  });
+  let sidebarTicksReady = false;
+  useRefreshEffect(() => {
+    // createResource already fetched on mount; the first hard tick would be a
+    // duplicate read.
+    if (!sidebarTicksReady) {
+      sidebarTicksReady = true;
+      return;
+    }
+    void refetchGateCount();
+    void refetchUnread();
   });
 
   const navigate = (v: ViewName) => {
@@ -110,6 +130,23 @@ export function Sidebar() {
           "z-index": "var(--z-sticky)",
         }}
       >
+        {/* ≥1024: a real sidebar. The Mail group is permanently expanded, so
+            every mail page is one click — the old 20px hover caret was two
+            adjacent hit targets with opposite meanings (row = go to Inbox,
+            caret = expand), and it only appeared while the pointer was
+            already there. */}
+        <Show when={isDesktop() && !isMobile()}>
+          <WideNav
+            activeGroup={
+              NAV_GROUPS.find((g) => g.views.includes(view()))?.id ?? ""
+            }
+            currentView={view()}
+            gateCount={() => gateCount() ?? 0}
+            unreadCounts={() => unread()}
+            onNavigate={navigate}
+          />
+        </Show>
+        <Show when={!isDesktop() || isMobile()}>
         <For each={NAV_GROUPS}>
           {(group) => (
             <div class="sidebar-workspace">
@@ -162,6 +199,7 @@ export function Sidebar() {
             </div>
           )}
         </For>
+        </Show>
       </nav>
 
       <Show when={disclosure()} keyed>
@@ -189,6 +227,194 @@ export function Sidebar() {
         />
       </Show>
     </>
+  );
+}
+
+/** The ≥1024 sidebar: icon + Chinese label + right-aligned count, with the
+ *  Mail group permanently expanded.
+ *
+ *  Kept as its own component instead of a density flag on NavItem because the
+ *  two shapes share nothing but the labels: one is a 64px icon rail with the
+ *  word underneath, the other is a two-level list. A flag would have meant
+ *  every style in NavItem branching on viewport.
+ *
+ *  The expanded list keeps `id="workspace-<group>"` on its container so the
+ *  same `#workspace-mail [data-nav-view=…]` selectors (and `navigateToView`)
+ *  work whether the group is rendered inline or as a tablet flyout. */
+function WideNav(props: {
+  activeGroup: string;
+  currentView: string;
+  gateCount: () => number;
+  unreadCounts: () => { imbox: number; feed: number; spam: number } | undefined;
+  onNavigate: (v: ViewName) => void;
+}) {
+  // Mail is always open; another group opens when the user is inside it, so
+  // the list never grows to 17 rows.
+  const [expanded, setExpanded] = createSignal<Set<string>>(new Set(["mail"]));
+  createEffect(() => {
+    const g = props.activeGroup;
+    if (!g) return;
+    setExpanded((prev) => (prev.has(g) ? prev : new Set(prev).add(g)));
+  });
+
+  const toggle = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const countFor = (route: string): number => {
+    if (route === "screener") return props.gateCount();
+    const c = props.unreadCounts();
+    if (!c) return 0;
+    if (route === "imbox") return c.imbox;
+    if (route === "feed") return c.feed;
+    if (route === "spam") return c.spam;
+    return 0;
+  };
+
+  return (
+    <div data-wide-nav style={{ width: "100%", padding: "6px 10px 0" }}>
+      <For each={NAV_GROUPS}>
+        {(group) => {
+          const isOpen = () => expanded().has(group.id);
+          const isActive = () => props.activeGroup === group.id;
+          return (
+            <div style={{ "margin-bottom": "2px" }}>
+              <div style={{ display: "flex", "align-items": "center" }}>
+                <button
+                  type="button"
+                  data-nav-group={group.id}
+                  // Single-route groups (日历) have no child row, so the group
+                  // row itself carries the route hook — otherwise there is no
+                  // `data-nav-view` for it anywhere.
+                  data-nav-view={
+                    group.views.length === 1 ? group.views[0] : undefined
+                  }
+                  data-active={isActive()}
+                  aria-current={isActive() ? "page" : undefined}
+                  onClick={() => props.onNavigate(group.defaultView)}
+                  style={{
+                    flex: 1,
+                    "min-width": 0,
+                    display: "flex",
+                    "align-items": "center",
+                    gap: "9px",
+                    height: "34px",
+                    padding: "0 8px",
+                    "border-radius": "var(--radius-md)",
+                    border: "none",
+                    background: isActive() ? "var(--paper-light)" : "transparent",
+                    color: isActive()
+                      ? "var(--text-primary)"
+                      : "var(--text-secondary)",
+                    "font-size": "var(--text-body-sm)",
+                    "font-weight": isActive() ? "800" : "650",
+                    cursor: "pointer",
+                    "text-align": "left",
+                  }}
+                >
+                  <Icon name={group.icon} size={17} />
+                  <span
+                    style={{
+                      overflow: "hidden",
+                      "text-overflow": "ellipsis",
+                      "white-space": "nowrap",
+                    }}
+                  >
+                    {group.label}
+                  </span>
+                </button>
+                <Show when={group.views.length > 1}>
+                  <button
+                    type="button"
+                    class="sidebar-disclosure sidebar-disclosure--static"
+                    data-nav-disclosure={group.id}
+                    aria-label={`${group.label} 导航`}
+                    aria-expanded={isOpen()}
+                    aria-haspopup="false"
+                    aria-controls={`workspace-${group.id}`}
+                    onClick={() => toggle(group.id)}
+                  >
+                    <Icon name="ph-caret-right" size={12} />
+                  </button>
+                </Show>
+              </div>
+              <Show when={isOpen() && group.views.length > 1}>
+                <div id={`workspace-${group.id}`} role="group">
+                  <For each={group.views}>
+                    {(route) => {
+                      const section = NAV_SECTIONS.find((s) => s.view === route);
+                      if (!section) return null;
+                      const active = () => props.currentView === route;
+                      const count = () => countFor(route);
+                      return (
+                        <button
+                          type="button"
+                          data-nav-view={route}
+                          data-active={active()}
+                          aria-current={active() ? "page" : undefined}
+                          onClick={() => props.onNavigate(route)}
+                          style={{
+                            width: "100%",
+                            display: "flex",
+                            "align-items": "center",
+                            gap: "var(--space-2)",
+                            height: "30px",
+                            padding: "0 8px 0 34px",
+                            "border-radius": "var(--radius-md)",
+                            border: "none",
+                            background: active() ? "var(--palm-soft)" : "transparent",
+                            color: active() ? "var(--palm)" : "var(--text-secondary)",
+                            "font-size": "var(--text-caption)",
+                            "font-weight": active() ? "750" : "600",
+                            cursor: "pointer",
+                            "text-align": "left",
+                          }}
+                        >
+                          <span
+                            style={{
+                              flex: 1,
+                              overflow: "hidden",
+                              "text-overflow": "ellipsis",
+                              "white-space": "nowrap",
+                            }}
+                          >
+                            {navDisplayLabel(route)}
+                          </span>
+                          <Show when={count() > 0}>
+                            <span
+                              data-nav-count={route}
+                              style={{
+                                "font-size": "10px",
+                                "font-weight": "700",
+                                "font-variant-numeric": "tabular-nums",
+                                color:
+                                  route === "screener"
+                                    ? "var(--palm)"
+                                    : "var(--text-muted)",
+                              }}
+                            >
+                              {route === "screener"
+                                ? formatGateCount(count())
+                                : count() > 99
+                                  ? "99+"
+                                  : count()}
+                            </span>
+                          </Show>
+                        </button>
+                      );
+                    }}
+                  </For>
+                </div>
+              </Show>
+            </div>
+          );
+        }}
+      </For>
+    </div>
   );
 }
 

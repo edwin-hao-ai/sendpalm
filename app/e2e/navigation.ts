@@ -4,6 +4,9 @@ import { NAV_GROUPS } from "../src/utils/labels";
 /** Navigate via the same visible workspace controls as a user, including mobile. */
 export async function navigateToView(page: Page, view: string): Promise<void> {
   await page.locator("body.app-ready").waitFor();
+  // ≥1024 the sidebar is a permanent two-level list: the child row is already
+  // there, so a single click reaches any mail page (and the active group is
+  // auto-expanded, so most other routes are one click too).
   const direct = page.locator(`#sidebar [data-nav-view="${view}"]`);
   if (await direct.isVisible()) {
     await direct.click();

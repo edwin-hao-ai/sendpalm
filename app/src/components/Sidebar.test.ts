@@ -10,8 +10,20 @@ import { setView, view } from "../stores/ui";
 
 vi.mock("../stores/data", () => ({
   countGateCandidates: () => Promise.resolve(3),
+  countUnreadByBucket: () =>
+    Promise.resolve({ imbox: 7, feed: 3, spam: 5 }),
 }));
 afterEach(cleanup);
+
+/** These cases exercise the icon rail + flyout (tablet shape). jsdom defaults
+ *  to a 1024px window, which is exactly the wide-sidebar breakpoint, so pin a
+ *  tablet width here; the wide layout has its own describe below. */
+function useRailWidth() {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    value: 900,
+  });
+}
 
 describe("workspace metadata", () => {
   it("keeps the six approved defaults and assigns each existing route exactly once", () => {
@@ -47,6 +59,7 @@ describe("workspace metadata", () => {
 });
 
 describe("workspace navigation", () => {
+  beforeEach(useRailWidth);
   beforeEach(() => setView("imbox"));
   it("renders six workspaces with one-click default routes", () => {
     const { container } = render(() => createComponent(Sidebar, {}));
@@ -218,5 +231,64 @@ describe("navTooltipLabel", () => {
   it("omits the parenthesised hint when there is none", () => {
     const drafts = NAV_SECTIONS.find((s) => s.view === "drafts")!;
     expect(navTooltipLabel(drafts)).toBe("草稿");
+  });
+});
+
+describe("wide sidebar (≥1024)", () => {
+  /** Pin a desktop width so the two-level list renders instead of the rail. */
+  function useDesktopWidth() {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1440,
+    });
+  }
+  beforeEach(useDesktopWidth);
+
+  it("keeps the Mail group open so every mail page is one click", () => {
+    const { container } = render(() => createComponent(Sidebar, {}));
+    // Mail's children are in the DOM without any hover or disclosure click.
+    for (const route of ["screener", "imbox", "feed", "paperTrail", "drafts", "spam", "trash"]) {
+      expect(
+        container.querySelector(`#workspace-mail [data-nav-view="${route}"]`),
+        `mail route ${route} must be reachable without expanding anything`,
+      ).not.toBeNull();
+    }
+  });
+
+  it("puts the count on the right of the row it belongs to", async () => {
+    const { container } = render(() => createComponent(Sidebar, {}));
+    await new Promise((r) => setTimeout(r, 0));
+    // 筛选台 gets the Gate count (3 in the mock), 收件箱 / 报刊 / 垃圾邮件 get
+    // their unread counts.
+    expect(
+      container.querySelector('[data-nav-count="screener"]')?.textContent,
+    ).toBe("3");
+    expect(
+      container.querySelector('[data-nav-count="imbox"]')?.textContent,
+    ).toBe("7");
+    expect(
+      container.querySelector('[data-nav-count="feed"]')?.textContent,
+    ).toBe("3");
+    expect(
+      container.querySelector('[data-nav-count="spam"]')?.textContent,
+    ).toBe("5");
+  });
+
+  it("navigates straight to a mail route from its row", () => {
+    const { container } = render(() => createComponent(Sidebar, {}));
+    const row = container.querySelector(
+      '#workspace-mail [data-nav-view="screener"]',
+    ) as HTMLButtonElement;
+    fireEvent.click(row);
+    expect(view()).toBe("screener");
+  });
+
+  it("opens the group that contains the current view", () => {
+    setView("files");
+    const { container } = render(() => createComponent(Sidebar, {}));
+    expect(
+      container.querySelector('[data-nav-view="files"]'),
+      "the active group must be expanded so the user can see where they are",
+    ).not.toBeNull();
   });
 });

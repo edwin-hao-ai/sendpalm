@@ -820,6 +820,36 @@ export async function countRecentUnreadImbox(
   return rows.length;
 }
 
+/** Unread mail per bucket, for the sidebar's right-aligned counts.
+ *
+ *  Three narrow id-only selects instead of one GROUP BY: the browser MockDb
+ *  understands simple WHERE clauses, and the number only needs to answer
+ *  "which group has something waiting" — the list views carry the exact
+ *  totals. Capped so a 10k mailbox cannot flood the bridge.
+ */
+export interface UnreadByBucket {
+  imbox: number;
+  feed: number;
+  spam: number;
+}
+
+export async function countUnreadByBucket(): Promise<UnreadByBucket> {
+  const db = await getDb();
+  const countFor = async (bucket: string) => {
+    const rows = await db.select<Array<{ id: ID }>>(
+      `SELECT id FROM messages
+        WHERE bucket = $1 AND direction = 'in' AND unread = 1 AND deleted_at IS NULL
+        LIMIT 999`,
+      [bucket],
+    );
+    return rows.length;
+  };
+  const imbox = await countFor("imbox");
+  const feed = await countFor("feed");
+  const spam = await countFor("spam");
+  return { imbox, feed, spam };
+}
+
 /** One card’s worth of data for the Gate screener. */
 export interface GateQueueItem {
   contact: Contact;

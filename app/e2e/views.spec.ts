@@ -78,21 +78,21 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
 
   test("Contacts view empty state", async ({ page }) => {
     await page.goto("/");
-    await page.locator('[data-nav-view="contacts"]').click();
+    await navigateToView(page, "contacts");
     await expect(page.getByText("没有联系人")).toBeVisible();
     await shoot(page, "05-contacts-empty");
   });
 
   test("Calendar view empty state", async ({ page }) => {
     await page.goto("/");
-    await page.locator('[data-nav-view="calendar"]').click();
+    await navigateToView(page, "calendar");
     await expect(page.getByText("这段时间还没有安排")).toBeVisible();
     await shoot(page, "06-calendar");
   });
 
   test("Files view empty state", async ({ page }) => {
     await page.goto("/");
-    await page.locator('[data-nav-view="files"]').click();
+    await navigateToView(page, "files");
     await expect(page.getByText("没有文件")).toBeVisible();
     await shoot(page, "07-files");
   });
@@ -130,7 +130,7 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
 
   test("Insights view empty state", async ({ page }) => {
     await page.goto("/");
-    await page.locator('[data-nav-view="insights"]').click();
+    await navigateToView(page, "insights");
     await page.waitForTimeout(300);
     await shoot(page, "11-insights");
   });
@@ -260,12 +260,16 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
       };
       await expect(page.locator("#topbar")).toContainText(titles[section.view]);
       if (group.views.length > 1) {
-        await page.locator(`[data-nav-disclosure="${group.id}"]`).click();
-        await expect(
-          page.locator(
-            `#workspace-${group.id} [data-nav-view="${section.view}"]`,
-          ),
-        ).toHaveAttribute("aria-current", "page");
+        // ≥1024 the group is a permanent list; below that it is a flyout.
+        // Open it if the child row is not visible yet, then assert the row
+        // marks itself current.
+        const child = page.locator(
+          `#workspace-${group.id} [data-nav-view="${section.view}"]`,
+        );
+        if (!(await child.isVisible())) {
+          await page.locator(`[data-nav-disclosure="${group.id}"]`).click();
+        }
+        await expect(child).toHaveAttribute("aria-current", "page");
         await page.keyboard.press("Escape");
       }
     }
@@ -561,12 +565,14 @@ test.describe("Responsive layout — iPad landscape", () => {
     );
     expect(flexDir).toBe("column");
 
-    // iPad landscape uses the desktop 64 px rail per the prototype.
+    // iPad landscape is 1024px, i.e. the desktop breakpoint: the sidebar is
+    // the permanent two-level list (the 212px rail), not the 64px icon rail
+    // that tablet portrait (768–1023) still uses.
     expect(
       await page
         .locator("#sidebar")
         .evaluate((el) => el.getBoundingClientRect().width),
-    ).toBe(64);
+    ).toBe(212);
 
     await shoot(page, "21-ipad-landscape");
   });

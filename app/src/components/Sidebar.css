@@ -51,6 +51,15 @@
   transform: rotate(90deg);
 }
 
+/* The wide sidebar's group caret is a permanent affordance, not a hover
+   reveal: the whole point of the redesign is that nothing hides behind the
+   pointer. */
+.sidebar-disclosure--static {
+  position: static;
+  transform: none;
+  opacity: 1;
+}
+
 /* Touch screens have no hover — keep the caret visible. */
 @media (hover: none) {
   .sidebar-disclosure {
