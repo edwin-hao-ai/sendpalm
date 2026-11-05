@@ -10,13 +10,16 @@ import { setView, view } from "../stores/ui";
 
 vi.mock("../stores/data", () => ({
   countGateCandidates: () => Promise.resolve(3),
+  countPileMessages: () =>
+    Promise.resolve({ replyLater: 1, setAside: 1, bubbleUp: 1 }),
 }));
 afterEach(cleanup);
 
 describe("workspace metadata", () => {
-  it("keeps the six approved defaults and assigns each existing route exactly once", () => {
+  it("keeps the approved defaults and assigns each existing route exactly once", () => {
     expect(NAV_GROUPS.map((g) => [g.id, g.defaultView])).toEqual([
       ["mail", "imbox"],
+      ["piles", "replyLater"],
       ["calendar", "calendar"],
       ["contacts", "contacts"],
       ["tasks", "tasks"],
@@ -35,6 +38,7 @@ describe("workspace metadata", () => {
     }
     expect(NAV_GROUPS.map((g) => g.views)).toEqual([
       ["screener", "imbox", "feed", "paperTrail", "drafts", "spam", "trash"],
+      ["replyLater", "setAside", "bubbleUp"],
       ["calendar"],
       ["contacts", "companies"],
       ["tasks", "followUps"],
@@ -48,9 +52,9 @@ describe("workspace metadata", () => {
 
 describe("workspace navigation", () => {
   beforeEach(() => setView("imbox"));
-  it("renders six workspaces with one-click default routes", () => {
+  it("renders seven workspaces with one-click default routes", () => {
     const { container } = render(() => createComponent(Sidebar, {}));
-    expect(container.querySelectorAll("[data-nav-group]")).toHaveLength(6);
+    expect(container.querySelectorAll("[data-nav-group]")).toHaveLength(7);
     for (const group of NAV_GROUPS) {
       fireEvent.click(
         container.querySelector<HTMLButtonElement>(
@@ -79,7 +83,8 @@ describe("workspace navigation", () => {
         .getByRole("button", { name: "报刊 (⌘3)" })
         .getAttribute("aria-current"),
     ).toBe("page");
-    expect(await screen.findByLabelText("3 项待处理")).toBeTruthy();
+    // Two rails carry a count now: 邮件 (Gate queue) and 待处理 (piles).
+    expect((await screen.findAllByLabelText("3 项待处理")).length).toBeGreaterThan(0);
     expect(document.querySelector('[data-nav-badge="Gate"]')).not.toBeNull();
     expect(document.querySelector('[data-nav-badge="邮件"]')).not.toBeNull();
   });

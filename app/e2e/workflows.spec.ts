@@ -504,20 +504,20 @@ test.describe("Email workflows", () => {
       timeout: 5_000,
     });
 
-    await expect(page.locator('[data-testid="piles"]')).toBeVisible({
-      timeout: 5_000,
-    });
-    await expect(page.locator('[data-testid="pile-replyLater"]')).toContainText(
+    // The piles are destinations now: the rail carries the count and the
+    // board is one click away (the floating bar over the list is gone).
+    await expect(page.locator('[data-nav-badge="待处理"]')).toHaveAttribute(
+      "data-count",
       "1",
+      { timeout: 5_000 },
     );
-
-    await page.locator('[data-testid="pile-replyLater"]').click();
-    await expect(page.locator('[data-pile-item="msg-e2e-001"]')).toBeVisible();
+    await page.locator('[data-nav-group="piles"]').click();
+    await expect(page.locator('[data-pile-row="msg-e2e-001"]')).toBeVisible();
 
     // Undo the action from the toast.
     await page.getByTestId("toast-action").click();
     await expect(page.getByText("已撤销")).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator('[data-testid="piles"]')).not.toBeVisible({
+    await expect(page.locator('[data-nav-badge="待处理"]')).toHaveCount(0, {
       timeout: 5_000,
     });
   });
@@ -542,20 +542,19 @@ test.describe("Email workflows", () => {
       timeout: 5_000,
     });
 
-    await expect(page.locator('[data-testid="piles"]')).toBeVisible({
-      timeout: 5_000,
-    });
-    await expect(page.locator('[data-testid="pile-setAside"]')).toContainText(
+    await expect(page.locator('[data-nav-badge="待处理"]')).toHaveAttribute(
+      "data-count",
       "1",
+      { timeout: 5_000 },
     );
-
-    await page.locator('[data-testid="pile-setAside"]').click();
-    await expect(page.locator('[data-pile-item="msg-e2e-001"]')).toBeVisible();
+    await page.locator('[data-nav-disclosure="piles"]').click();
+    await page.getByRole("button", { name: "已搁置" }).click();
+    await expect(page.locator('[data-pile-row="msg-e2e-001"]')).toBeVisible();
 
     // Undo the action from the toast.
     await page.getByTestId("toast-action").click();
     await expect(page.getByText("已撤销")).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator('[data-testid="piles"]')).not.toBeVisible({
+    await expect(page.locator('[data-nav-badge="待处理"]')).toHaveCount(0, {
       timeout: 5_000,
     });
   });

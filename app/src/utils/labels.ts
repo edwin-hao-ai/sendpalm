@@ -195,6 +195,26 @@ export const NAV_SECTIONS: NavSection[] = [
   { id: "trash", label: "Trash", icon: "ph-trash", view: "trash" },
   { id: "spam", label: "Spam", icon: "ph-warning-circle", view: "spam" },
   { id: "settings", label: "Settings", icon: "ph-gear", view: "settings" },
+  /* The three workflow piles are destinations, not floating buttons:
+   * each one is a real list with its own header and bulk actions. */
+  {
+    id: "replyLater",
+    label: "Reply later",
+    icon: "ph-clock",
+    view: "replyLater",
+  },
+  {
+    id: "setAside",
+    label: "Set aside",
+    icon: "ph-push-pin",
+    view: "setAside",
+  },
+  {
+    id: "bubbleUp",
+    label: "Remind",
+    icon: "ph-arrow-fat-line-up",
+    view: "bubbleUp",
+  },
 ];
 
 /** Workspace metadata is additive; NAV_SECTIONS remains the route/shortcut source. */
@@ -204,6 +224,10 @@ export interface NavGroup {
   icon: string;
   defaultView: ViewName;
   views: ViewName[];
+  /** Hidden from the mobile bottom tab bar (still reachable from the
+   *  "更多" sheet and from each view's own entry point). The tab bar
+   *  caps out at six items — a seventh crushes the 44px touch targets. */
+  mobileRail?: boolean;
 }
 
 export const NAV_GROUPS: NavGroup[] = [
@@ -213,6 +237,14 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: "ph-tray",
     defaultView: "imbox",
     views: ["screener", "imbox", "feed", "paperTrail", "drafts", "spam", "trash"],
+  },
+  {
+    id: "piles",
+    label: "待处理",
+    icon: "ph-clock",
+    defaultView: "replyLater",
+    views: ["replyLater", "setAside", "bubbleUp"],
+    mobileRail: true,
   },
   {
     id: "calendar",

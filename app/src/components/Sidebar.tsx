@@ -20,8 +20,12 @@ import {
   type NavGroup,
   type NavSection,
 } from "../utils/labels";
-import { useLongPress, useViewport } from "../utils/gestures";
-import { countGateCandidates } from "../stores/data";
+import {
+  useLongPress,
+  useRefreshEffect,
+  useViewport,
+} from "../utils/gestures";
+import { countGateCandidates, countPileMessages } from "../stores/data";
 import { useSoftRefreshEffect } from "../utils/gestures";
 import "./Sidebar.css";
 
@@ -68,9 +72,35 @@ export function Sidebar() {
   // from the IMAP sync shows up without a full app reload.
   const [gateCount, { refetch: refetchGateCount }] =
     createResource(countGateCandidates);
+  // Pile counts: the three workflow piles are routes now, so the rail
+  // carries their counts instead of a floating bar over the Inbox list.
+  const [pileCounts, { refetch: refetchPileCounts }] =
+    createResource(countPileMessages);
+  // Counts must survive both channels: a hard refresh (boot / explicit
+  // pull) and a soft tick (a sync chunk landed). Without the hard tick the
+  // rail shows 0 until the next sync event.
+  useRefreshEffect(() => {
+    void refetchGateCount();
+    void refetchPileCounts();
+  });
   useSoftRefreshEffect(() => {
     void refetchGateCount();
+    void refetchPileCounts();
   });
+
+  const badgeFor = (route: ViewName): number => {
+    if (route === "screener") return gateCount() ?? 0;
+    const c = pileCounts();
+    if (!c) return 0;
+    if (route === "replyLater") return c.replyLater;
+    if (route === "setAside") return c.setAside;
+    if (route === "bubbleUp") return c.bubbleUp;
+    return 0;
+  };
+  const pileTotal = () => {
+    const c = pileCounts();
+    return c ? c.replyLater + c.setAside + c.bubbleUp : 0;
+  };
 
   const navigate = (v: ViewName) => {
     setView(v);
@@ -109,7 +139,13 @@ export function Sidebar() {
           "z-index": "var(--z-sticky)",
         }}
       >
-        <For each={NAV_GROUPS}>
+        <For
+          each={
+            isMobile()
+              ? NAV_GROUPS.filter((g) => !g.mobileRail)
+              : NAV_GROUPS
+          }
+        >
           {(group) => (
             <div class="sidebar-workspace">
               <NavItem
@@ -131,7 +167,11 @@ export function Sidebar() {
                     : navigate(group.defaultView)
                 }
                 badgeCount={
-                  group.id === "mail" ? () => gateCount() ?? 0 : undefined
+                  group.id === "mail"
+                    ? () => gateCount() ?? 0
+                    : group.id === "piles"
+                      ? pileTotal
+                      : undefined
                 }
               />
               <Show when={!isMobile() && group.views.length > 1}>
@@ -168,7 +208,7 @@ export function Sidebar() {
               navigate(route);
               open.trigger.focus();
             }}
-            gateCount={() => gateCount() ?? 0}
+            badgeFor={badgeFor}
           />
         )}
       </Show>
@@ -179,7 +219,7 @@ export function Sidebar() {
             moreTrigger?.focus();
           }}
           onClose={closeMore}
-          gateCount={() => gateCount() ?? 0}
+          badgeFor={badgeFor}
         />
       </Show>
     </>
@@ -374,7 +414,7 @@ function NavItem(props: {
 function WorkspaceRoutes(props: {
   group: NavGroup;
   onNavigate: (view: ViewName) => void;
-  gateCount: () => number;
+  badgeFor: (view: ViewName) => number;
 }) {
   return (
     <section class="sidebar-route-group" aria-label={props.group.label}>
@@ -394,13 +434,13 @@ function WorkspaceRoutes(props: {
               >
                 <Icon name={section.icon} size={20} />
                 <span>{navDisplayLabel(route)}</span>
-                <Show when={route === "screener" && props.gateCount() > 0}>
+                <Show when={props.badgeFor(route) > 0}>
                   <span
                     class="sidebar-route-badge"
                     data-nav-badge={section.label}
-                    data-count={props.gateCount()}
+                    data-count={props.badgeFor(route)}
                   >
-                    {props.gateCount() > 99 ? "99+" : props.gateCount()}
+                    {props.badgeFor(route) > 99 ? "99+" : props.badgeFor(route)}
                   </span>
                 </Show>
               </button>
@@ -417,7 +457,7 @@ function WorkspaceFlyout(props: {
   trigger: HTMLButtonElement;
   onClose: () => void;
   onNavigate: (view: ViewName) => void;
-  gateCount: () => number;
+  badgeFor: (view: ViewName) => number;
 }) {
   let flyout: HTMLDivElement | undefined;
   const anchor = props.trigger.getBoundingClientRect();
@@ -468,7 +508,7 @@ function WorkspaceFlyout(props: {
         <WorkspaceRoutes
           group={props.group}
           onNavigate={props.onNavigate}
-          gateCount={props.gateCount}
+          badgeFor={props.badgeFor}
         />
       </div>
     </Portal>
@@ -478,7 +518,7 @@ function WorkspaceFlyout(props: {
 function MobileMoreSheet(props: {
   onNavigate: (view: ViewName) => void;
   onClose: () => void;
-  gateCount: () => number;
+  badgeFor: (view: ViewName) => number;
 }) {
   // Drag-to-dismiss: track a downward swipe starting anywhere on the sheet
   // chrome (grabber / title row), translate the sheet 1:1, and dismiss past
@@ -658,7 +698,7 @@ function MobileMoreSheet(props: {
                 <WorkspaceRoutes
                   group={group}
                   onNavigate={props.onNavigate}
-                  gateCount={props.gateCount}
+                  badgeFor={props.badgeFor}
                 />
               )}
             </For>
