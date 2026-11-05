@@ -37,8 +37,10 @@ import {
   setMessagePileFlags,
   listFocusReplyMessages,
   upsertSticky,
+  countGateCandidates,
 } from "./data";
-import { resetMockDb } from "../services/mock-db";
+import { formatGateCount, GATE_COUNT_LIMIT } from "../utils/counts";
+import { resetMockDb, MockDb } from "../services/mock-db";
 import type { Contact, Message, FileItem, CalendarEvent, Task, FollowUp, Clip } from "../types";
 
 const isoNow = () => new Date().toISOString();
@@ -855,5 +857,34 @@ describe("folder (label) membership", () => {
 
     await removeLabelFromMessage("m-labeled", "lbl_x");
     expect(await listMessagesByLabel("lbl_x")).toEqual([]);
+  });
+});
+
+describe("countGateCandidates — bounded screener count", () => {
+  it("caps the query with LIMIT so a 10k-contact mailbox never crosses IPC", async () => {
+    const spy = vi.spyOn(MockDb.prototype, "select");
+    try {
+      await countGateCandidates();
+      const sql = spy.mock.calls.map((c) => String(c[0])).join(" ");
+      expect(sql.toUpperCase()).toContain("LIMIT");
+      expect(sql).toContain(String(GATE_COUNT_LIMIT));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("returns at most GATE_COUNT_LIMIT even when more senders are waiting", async () => {
+    // 10 more than the cap: without the LIMIT this would return every id.
+    for (let i = 0; i < GATE_COUNT_LIMIT + 10; i++) {
+      await upsertContact(makeContact(`gate${i}`));
+    }
+    expect(await countGateCandidates()).toBe(GATE_COUNT_LIMIT);
+  });
+
+  it("formats a capped count as `500+` and a small count verbatim", () => {
+    expect(formatGateCount(3)).toBe("3");
+    expect(formatGateCount(GATE_COUNT_LIMIT - 1)).toBe("499");
+    expect(formatGateCount(GATE_COUNT_LIMIT)).toBe(`${GATE_COUNT_LIMIT}+`);
+    expect(formatGateCount(GATE_COUNT_LIMIT + 200)).toBe(`${GATE_COUNT_LIMIT}+`);
   });
 });

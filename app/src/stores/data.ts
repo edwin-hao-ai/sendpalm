@@ -46,6 +46,7 @@ import type {
   TaskExtractionRun,
   TaskSuggestion,
 } from "../types";
+import { GATE_COUNT_LIMIT } from "../utils/counts";
 import { safeParse, safeStringify } from "../utils/id";
 import { DEFAULT_SHORTCUTS } from "../utils/shortcut-defaults";
 
@@ -777,8 +778,9 @@ export async function countGateCandidates(): Promise<number> {
   // recognize `SELECT COUNT(*) AS cnt` (its tokenizer splits `(` so the
   // column is just `count` and the rows return `{ cnt: undefined }`).
   // Counting the returned ids is cheap and works on both SQLite and MockDb.
+  // LIMIT keeps the payload bounded; see GATE_COUNT_LIMIT.
   const rows = await db.select<Array<{ id: ID }>>(
-    "SELECT id FROM contacts WHERE first_seen = 1 AND screened = 0",
+    `SELECT id FROM contacts WHERE first_seen = 1 AND screened = 0 LIMIT ${GATE_COUNT_LIMIT}`,
   );
   return rows.length;
 }

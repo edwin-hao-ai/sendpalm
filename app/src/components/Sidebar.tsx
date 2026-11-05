@@ -26,6 +26,7 @@ import {
   useViewport,
 } from "../utils/gestures";
 import { countGateCandidates, countPileMessages } from "../stores/data";
+import { formatGateCount } from "../utils/counts";
 import { useSoftRefreshEffect } from "../utils/gestures";
 import "./Sidebar.css";
 
@@ -173,6 +174,11 @@ export function Sidebar() {
                       ? pileTotal
                       : undefined
                 }
+                badgeLabel={
+                  group.id === "mail"
+                    ? () => formatGateCount(gateCount() ?? 0)
+                    : undefined
+                }
               />
               <Show when={!isMobile() && group.views.length > 1}>
                 <button
@@ -239,6 +245,9 @@ function NavItem(props: {
   onClick: () => void;
   /** Optional badge count to render in the top-right corner. */
   badgeCount?: () => number;
+  /** Optional pre-formatted badge text (e.g. `500+`). Overrides the default
+   *  numeric formatting for routes whose count is capped by its query. */
+  badgeLabel?: () => string;
 }) {
   const { isMobile, isTablet } = useViewport();
   let buttonRef: HTMLButtonElement | undefined;
@@ -378,7 +387,11 @@ function NavItem(props: {
               "box-shadow": "0 0 0 2px var(--paper-mid)",
             }}
           >
-            {props.badgeCount!() > 99 ? "99+" : props.badgeCount!()}
+            {props.badgeLabel
+              ? props.badgeLabel()
+              : props.badgeCount!() > 99
+                ? "99+"
+                : props.badgeCount!()}
           </span>
         </Show>
         {/* Label under the icon. Hidden on the tablet narrow rail only
