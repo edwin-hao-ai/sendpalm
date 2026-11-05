@@ -37,6 +37,7 @@ import {
   setMessagePileFlags,
 } from "../stores/data";
 import { usePaginatedMessages } from "../utils/paginated-messages";
+import { useViewport } from "../utils/gestures";
 import type { Contact, Message, MessageBucket } from "../types";
 import { startDrag, endDrag, type DragTarget } from "../utils/drag";
 import { PileSheet } from "../components/PileSheet";
@@ -1564,6 +1565,9 @@ function ImboxHeader(props: {
   pendingCount: number;
   onFocusReply: () => void;
 }) {
+  // On the phone the 专注回复 entry lives inside the 待处理 sheet — keeping
+  // a third header button there squeezed the counts onto a second line.
+  const { isMobile } = useViewport();
   return (
     <>
       {/* Scoped keyframes — animations.css is owned by the styles group;
@@ -1601,7 +1605,7 @@ function ImboxHeader(props: {
         }
         actions={
           <>
-            <Show when={props.pendingCount > 0}>
+            <Show when={props.pendingCount > 0 && !isMobile()}>
               <button
                 onClick={() => props.onFocusReply()}
                 data-focus-reply-entry
@@ -2091,12 +2095,10 @@ function MessageCard(props: MessageCardProps) {
             </span>
           </Show>
           <span class="feed-spacer" />
-          {/* Time hides on hover so it doesn't collide with the action
-              toolbar that slides in from the right. */}
-          <span
-            class="feed-time"
-            style={{ visibility: hovered() ? "hidden" : "visible" }}
-          >
+          {/* The time stays put: the hover toolbar now parks to its left
+              (imbox.css .feed-card-actions right:84px), so hiding it just
+              removed the column users scan first. */}
+          <span class="feed-time">
             {formatMessageDate(props.m, profileTz(), "list").primary.value}
           </span>
         </div>
