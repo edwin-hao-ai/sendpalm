@@ -3457,3 +3457,19 @@ received_at 全量修复、归档持续回填。
 - 回复 In-Reply-To：迁移 0030 + lettre header + Compose 携带
   （reply/replyAll）；smtp 层往返测试。
 - 验证：Rust 31 套件全绿、TS 642、Playwright 139、build/lint/diff-check 干净。
+
+## 2026-11-05 — UI 体检第一轮（面板占位 / 命名 / 待处理目的地）
+
+按 `qa-tmp/ui-review-2026-11-05/index.html` 的对照稿落地，原则是「只改坐标，
+不改材质」，避免把 HEY 的安静感换成 Gmail 的密度。
+
+- **面板占位**：`#app[data-detail=open] #main { margin-right: var(--detail-panel-width) }`，
+  列表让位而不是被盖；桌面遮罩删除（面板自带返回 + Esc）；桌面淡入。
+- **命名唯一来源**：`VIEW_LABEL`/`BUCKET_LABEL` 进 `utils/labels.ts`，
+  9 处重复 map 合并；界面统一为 收件箱 / 报刊 / 单据 / 筛选台 / 片段。
+- **待处理目的地**：侧栏新增 piles 组（3 个 board + 计数，`mobileRail` 在手机隐藏）；
+  删掉 Imbox 浮层 pile 条与 PileCard（含 261 行死 CSS）；手机新增圆钮 + PileSheet；
+  列表底部 inset。`countPileMessages()` 走三条窄查询（MockDb 不认 OR/COUNT）。
+- **hover 工具条**：右移 84px，时间戳不再被覆盖也不再隐藏。
+- **联系人/文件**：容器 1200，联系人 4 列；去掉重复的健康度文字。
+- 验证：TS 642 绿、typecheck/lint 干净、Playwright 141 用例通过（1 skipped）。
