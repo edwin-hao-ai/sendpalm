@@ -32,21 +32,6 @@ export function DetailPanel() {
 
   return (
     <Show when={detailOpen()}>
-      {/* Scrim — click outside the panel to close. Mobile uses a
-          full-screen sheet, so the scrim is tablet/desktop only. */}
-      <Show when={!isMobile()}>
-        <div
-          aria-hidden="true"
-          onClick={close}
-          style={{
-            position: "fixed",
-            inset: "0",
-            background: "rgba(35,28,51,0.12)",
-            "z-index": "calc(var(--z-detail) - 1)",
-            animation: "backdrop-fade-in 0.2s var(--ease-out) both",
-          }}
-        />
-      </Show>
       <aside
         id="detail-panel"
         classList={{

@@ -177,6 +177,24 @@ hr {
   overflow-x: hidden;
 }
 
+/* Detail panel — tablet/desktop reserve the panel's width on the main
+ * column instead of covering the list. The panel stays `position: fixed`
+ * so it can keep its own width variable (drag-resize) without touching
+ * the grid tracks; `#main` simply gives up the same amount of space.
+ * This is a one-off reflow on open/close — never animated (animating a
+ * layout track would relayout the whole list every frame, see AGENTS
+ * §11.2). Mobile keeps the full-screen sheet: no reserve, no margin. */
+@media (min-width: 768px) {
+  #app[data-detail="open"] #main {
+    margin-right: var(--detail-panel-width);
+  }
+  /* A slide-in over reserved space reads as a glitch (it slides into a
+   * hole that is already empty). Fade instead. */
+  #app[data-detail="open"] #detail-panel {
+    animation: panel-fade 0.18s var(--ease-out) both;
+  }
+}
+
 #detail-panel {
   position: fixed;
   top: calc(var(--topbar-height) + env(safe-area-inset-top));
@@ -214,6 +232,9 @@ hr {
   }
   #detail-panel {
     width: min(420px, 60vw);
+  }
+  #app[data-detail="open"] #main {
+    margin-right: min(420px, 60vw);
   }
 }
 

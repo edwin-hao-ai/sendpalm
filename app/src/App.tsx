@@ -34,6 +34,7 @@ import { initApp } from "./bootstrap";
 import {
   agentPanelOpen,
   commandPaletteOpen,
+  detailOpen,
   searchOpen,
   onboardingStep,
   onboardingCompleted,
@@ -41,6 +42,7 @@ import {
 } from "./stores/ui";
 
 import { useGlobalShortcuts } from "./utils/shortcuts";
+import { useViewport } from "./utils/gestures";
 
 export default function App() {
   // Track the init error separately. The shell renders as soon as the
@@ -50,6 +52,7 @@ export default function App() {
   // freeze). Every component handles its own data via createResource, so
   // unsetting `loading` no longer has to gate the whole UI.
   const [initError, setInitError] = createSignal<string | null>(null);
+  const viewport = useViewport();
 
   useGlobalShortcuts();
   onCleanup(startSyncEventBridge());
@@ -88,7 +91,12 @@ export default function App() {
   return (
     <>
       <Show when={!initError()}>
-        <div id="app">
+        <div
+          id="app"
+          data-detail={
+            detailOpen() && !viewport.isMobile() ? "open" : undefined
+          }
+        >
           <Sidebar />
           <Topbar />
           <Main />

@@ -33,6 +33,17 @@
   }
 }
 
+/* Reserved-space detail panel: the column is already there, so sliding
+ * would look like the panel is filling a hole. Pure fade. */
+@keyframes panel-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @keyframes modal-enter {
   from {
     opacity: 0;
