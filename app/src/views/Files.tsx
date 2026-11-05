@@ -161,7 +161,7 @@ export function Files() {
   return (
     <div style={{ animation: "view-enter 0.3s var(--ease-out) both" }}>
       <style>{FILES_CSS}</style>
-      <div style={{ "max-width": "920px", margin: "0 auto" }}>
+      <div style={{ "max-width": "1200px", margin: "0 auto" }}>
         <PageHeader
           title="文件"
           description={<p>附件管理 · {items().length} 项</p>}

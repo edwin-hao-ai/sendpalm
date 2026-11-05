@@ -192,7 +192,7 @@ export function Contacts() {
     <div style={{ animation: "view-enter 0.3s var(--ease-out) both" }}>
       <div
         style={{
-          "max-width": "840px",
+          "max-width": "1200px",
           margin: "0 auto",
           padding: "0 var(--space-5) var(--space-5)",
         }}
@@ -390,7 +390,7 @@ export function Contacts() {
                       style={{
                         display: "grid",
                         "grid-template-columns":
-                          "repeat(auto-fill, minmax(220px, 1fr))",
+                          "repeat(auto-fill, minmax(280px, 1fr))",
                         gap: "var(--space-3)",
                       }}
                     >
@@ -507,7 +507,6 @@ export function Contacts() {
                                       }}
                                     />
                                   </span>
-                                  {healthLabel(c.health)}
                                 </span>
                               </div>
                             </div>
