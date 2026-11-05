@@ -1043,6 +1043,7 @@ export function Imbox() {
         activeSort={getSortMode("imbox")}
         pendingCount={pendingCount()}
         onFocusReply={() => setView("focusReply")}
+        activeFilterCount={quickFilter() === "all" ? 0 : 1}
       />
 
       <Show when={mailSyncIssue()}>
@@ -1493,6 +1494,8 @@ function ImboxHeader(props: {
    *  floating pile bar is gone. */
   pendingCount: number;
   onFocusReply: () => void;
+  /** How many quick filters are on (订阅 / 新面孔 / 一起读 …). */
+  activeFilterCount: number;
 }) {
   // On the phone the 专注回复 entry lives inside the 待处理 sheet — keeping
   // a third header button there squeezed the counts onto a second line.
@@ -1558,27 +1561,28 @@ function ImboxHeader(props: {
                 专注回复 {props.pendingCount}
               </button>
             </Show>
+            {/* Icon-only: the header keeps one primary action + one status,
+                everything else is a glyph (HEY ships two controls here). */}
             <button
               onClick={() => props.onOpenFilters()}
               data-open-filters
-              title="更多筛选"
+              title={props.activeFilterCount > 0 ? "更多筛选（已启用 1 项）" : "更多筛选"}
               aria-label="更多筛选"
               style={{
                 display: "inline-flex",
                 "align-items": "center",
-                gap: "4px",
-                padding: "4px 10px",
-                background: "transparent",
-                color: "var(--text-secondary)",
+                "justify-content": "center",
+                position: "relative",
+                width: "30px",
+                height: "30px",
+                background: props.activeFilterCount > 0 ? "var(--palm-soft)" : "transparent",
+                color: props.activeFilterCount > 0 ? "var(--palm)" : "var(--text-secondary)",
                 "border-radius": "var(--radius-pill)",
-                "font-size": "var(--text-micro)",
-                "font-weight": "700",
                 border: "0.5px solid var(--border)",
                 cursor: "pointer",
-                "white-space": "nowrap",
               }}
             >
-              <Icon name="ph-sliders-horizontal" size={12} /> 筛选
+              <Icon name="ph-sliders-horizontal" size={14} />
             </button>
             <button
               onClick={() => void props.onSync()}
