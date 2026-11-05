@@ -242,6 +242,20 @@ async fn run_loop(app: AppHandle) -> Result<(), String> {
     // account sync so it keeps working even when no email accounts exist.
     spawn_purge_loop(pool.clone());
 
+    // One-shot repair for bodies written before HTML-only mail was stripped
+    // (they hold raw markup, which every text preview then showed verbatim).
+    // Chunked and idempotent; a failure only costs the next boot retrying.
+    {
+        let pool = pool.clone();
+        spawn(async move {
+            match crate::services::html_text::backfill_markup_bodies(&pool).await {
+                Ok(0) => {}
+                Ok(n) => eprintln!("[sync] repaired {n} markup-only message bodies"),
+                Err(e) => eprintln!("[sync] markup body backfill failed: {e}"),
+            }
+        });
+    }
+
     // Per-account stop flags and join handles. The reload loop reconciles the
     // DB account list against this map: starts missing accounts and signals
     // removed/disabled accounts to stop.

@@ -7,6 +7,7 @@ pub mod agent_clients;
 pub mod date_backfill;
 pub mod db;
 pub mod desktop_notifier;
+pub mod html_text;
 pub mod ical;
 pub mod image_proxy;
 pub mod imap;

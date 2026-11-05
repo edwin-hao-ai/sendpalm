@@ -202,12 +202,18 @@ fn extract_text(parsed: &ParsedMail<'_>) -> Option<String> {
         }
     }
     // Fall back to the message's own HTML body if no text/plain was found.
+    //
+    // The HTML must be STRIPPED, never returned as-is: `body_text` feeds list
+    // previews, the Screener card, the Records card, search hints, the
+    // copy/download actions and every plain-text fallback. Returning markup
+    // here printed `<!DOCTYPE html><style>…` at the reader (ChatGPT and most
+    // ESP mail is HTML-only).
     if own == "text/html" {
         if let Ok(decoded) = parsed.get_body() {
-            return Some(decoded);
+            return Some(crate::services::html_text::html_to_text(&decoded));
         }
     }
-    best
+    best.map(|html| crate::services::html_text::html_to_text(&html))
 }
 
 fn extract_html(parsed: &ParsedMail<'_>) -> Option<String> {
