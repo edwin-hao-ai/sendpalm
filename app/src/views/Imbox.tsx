@@ -1122,7 +1122,13 @@ export function Imbox() {
 
       <ImboxTabs
         active={activeTab()}
-        newCount={recentUnread() ?? 0}
+        // The badge must describe what the tab CONTAINS. Real data made the
+        // recent-only badge a lie: a mailbox whose newest mail is two months
+        // old has 0 unread in the last 30 days and 3,762 unread overall, so
+        // the tab showed no number above a list of 3,762. The header carries
+        // the "最近 30 天 N 封待读 · 更早 M 封未读" framing instead; the badge
+        // just agrees with the list under it.
+        newCount={newPaged.total()}
         seenCount={seenPaged.total()}
         onChange={setActiveTab}
       />
