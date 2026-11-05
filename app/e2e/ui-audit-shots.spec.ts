@@ -913,10 +913,11 @@ test.describe("UI audit shots — desktop 1440x900", () => {
   test("pile board (replyLater) via imbox pile card", async ({ page }) => {
     await bootSeeded(page);
     await navTo(page, "imbox");
-    // The pile boards live in the sidebar now (待处理 group).
-    await page.locator('[data-nav-disclosure="piles"]').click();
+    const pile = page.locator('[data-testid="pile-replyLater"]');
+    await pile.waitFor({ timeout: 8_000 });
+    await pile.click(); // expands the drawer
     await page
-      .locator('#workspace-piles [data-nav-view="replyLater"]')
+      .locator('[data-testid="pile-replyLater"] [data-pile-open-board]')
       .click();
     await shoot(page, "desktop", "pileboard-reply-later", 600);
   });

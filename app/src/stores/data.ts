@@ -1180,39 +1180,8 @@ export interface PileMessage {
   bubbleUpAt: boolean;
 }
 
-export interface PileCounts {
-  replyLater: number;
-  setAside: number;
-  bubbleUp: number;
-}
-
-/** Sidebar badge counts for the three piles.
- *
- *  `listPileMessages` returns every pile row; the sidebar only needs the
- *  three numbers, so this selects the flag columns and nothing else.
- *  `COUNT(*)` is avoided on purpose — the browser MockDb tokenizer splits
- *  `(` and returns `{ count: undefined }` (same constraint as
- *  countGateCandidates). */
-export async function countPileMessages(): Promise<PileCounts> {
+export async function listPileMessages(): Promise<PileMessage[]> {
   const db = await getDb();
-  // Three narrow selects instead of one OR-ed count: the browser MockDb
-  // only understands simple WHERE clauses, and COUNT(*) trips its
-  // tokenizer (same constraint as countGateCandidates).
-  const ids = async (where: string) =>
-    (
-      await db.select<Array<{ id: ID }>>(
-        `SELECT id FROM messages WHERE ${where}`,
-      )
-    ).length;
-  const [replyLater, setAside, bubbleUp] = await Promise.all([
-    ids("reply_later = 1"),
-    ids("set_aside = 1"),
-    ids("bubble_up_at IS NOT NULL"),
-  ]);
-  return { replyLater, setAside, bubbleUp };
-}
-
-export async function listPileMessages(): Promise<PileMessage[]> {  const db = await getDb();
   const rows = await db.select<
     Array<{
       id: string;

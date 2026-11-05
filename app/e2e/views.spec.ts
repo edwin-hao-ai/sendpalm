@@ -226,18 +226,16 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
     await shoot(page, "14-command-palette");
   });
 
-  test("Sidebar exposes seven workspaces and all stable routes", async ({
+  test("Sidebar exposes six workspaces and all 16 stable routes", async ({
     page,
   }) => {
     await page.goto("/");
-    await expect(page.locator("#sidebar [data-nav-group]")).toHaveCount(7);
+    await expect(page.locator("#sidebar [data-nav-group]")).toHaveCount(6);
     for (const section of NAV_SECTIONS) {
       await navigateToView(page, section.view);
       const group = NAV_GROUPS.find((g) =>
         g.views.some((v) => v === section.view),
       )!;
-      // The 待处理 group is part of the desktop rail like any other
-      // workspace, so the highlight assertion applies here too.
       await expect(
         page.locator(`[data-nav-group="${group.id}"]`),
       ).toHaveAttribute("data-active", "true");
@@ -259,9 +257,6 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
         trash: "回收站",
         spam: "垃圾邮件",
         settings: "设置",
-        replyLater: "稍后回复",
-        setAside: "已搁置",
-        bubbleUp: "提醒",
       };
       await expect(page.locator("#topbar")).toContainText(titles[section.view]);
       if (group.views.length > 1) {
@@ -484,15 +479,9 @@ test.describe("Responsive layout", () => {
       const group = NAV_GROUPS.find((g) =>
         g.views.some((v) => v === section.view),
       )!;
-      if (group.mobileRail) {
-        // 待处理 is phone-hidden (the tab bar caps at six items); it is
-        // reached from the 更多 sheet or the Inbox pill.
-        await expect(page.locator("#sidebar [data-nav-group]")).toHaveCount(6);
-      } else {
-        await expect(
-          page.locator(`[data-nav-group="${group.id}"]`),
-        ).toHaveAttribute("data-active", "true");
-      }
+      await expect(
+        page.locator(`[data-nav-group="${group.id}"]`),
+      ).toHaveAttribute("data-active", "true");
       await expect(page.getByTestId("mobile-more-sheet")).not.toBeVisible();
     }
     const more = page.locator('#sidebar [data-nav-view="more"]');
@@ -524,7 +513,7 @@ test.describe("Responsive layout", () => {
 test.describe("Responsive layout — iPad portrait", () => {
   test.use({ viewport: { width: 820, height: 1180 } });
 
-  test("iPad shows sidebar icons vertically and reserves space for the detail panel", async ({
+  test("iPad shows sidebar icons vertically and overlays the detail panel", async ({
     page,
   }) => {
     await page.goto("/");
@@ -537,9 +526,9 @@ test.describe("Responsive layout — iPad portrait", () => {
     );
     expect(flexDir).toBe("column");
 
-    // Seven workspace defaults; secondary routes stay in disclosures.
+    // Six workspace defaults; secondary routes stay in disclosures.
     const buttons = sidebar.locator("[data-nav-view]");
-    await expect(buttons).toHaveCount(7);
+    await expect(buttons).toHaveCount(6);
 
     await shoot(page, "19-ipad-portrait");
   });

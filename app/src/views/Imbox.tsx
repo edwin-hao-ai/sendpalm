@@ -36,11 +36,11 @@ import {
   markMessageUnread,
   setMessagePileFlags,
 } from "../stores/data";
+import { type PileMessage } from "../stores/data";
 import { usePaginatedMessages } from "../utils/paginated-messages";
 import { useViewport } from "../utils/gestures";
 import type { Contact, Message } from "../types";
 import { startDrag, endDrag, type DragTarget } from "../utils/drag";
-import { PileSheet } from "../components/PileSheet";
 import {
   setDetailOpen,
   setSelectedMessageId,
@@ -50,7 +50,6 @@ import {
   setSelectedIds,
   showToast,
   refreshTick,
-  bumpSoftRefreshTick,
   softRefreshTick,
   setView,
   getSortMode,
@@ -64,6 +63,7 @@ import {
   mailSyncIssue,
   setSettingsTab,
   type MailSyncIssue,
+  type ViewName,
 } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
 import { Icon } from "../components/Icon";
@@ -96,6 +96,15 @@ interface Bundle {
 
 type Item = Message | Bundle;
 type ItemList = Item[];
+
+interface Pile {
+  id: "pending" | "saved" | "remind";
+  icon: string;
+  title: string;
+  messages: PileMessage[];
+  /** View name to navigate to from the drawer's "查看全部" button. */
+  openBoardView: ViewName;
+}
 
 /** Sync-issue banner copy per error code — a missing password, a changed
  *  password, and a dead network are different problems with different
@@ -188,12 +197,6 @@ export function Imbox() {
   // have thousands of rows with large HTML bodies, and pulling them all on
   // every refresh tick or tab return is the main source of scroll jank.
   const [pileMessages, { refetch: refetchPiles }] = createResource(listPileMessages);
-  /** Refetch the local pile slice AND nudge the global soft tick, so the
-   *  sidebar's 待处理 counts update without waiting for a sync event. */
-  const refreshPiles = async () => {
-    await refetchPiles();
-    bumpSoftRefreshTick();
-  };
   const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
 
   // Live-prepend on sync:new-messages — the event reports all UIDs, but
@@ -379,25 +382,48 @@ export function Imbox() {
   // identical from a consumer's perspective.
   const activeList = renderList;
 
-  /* ── Piles (稍后回复 / 已搁置 / 提醒) ─────────────────────────────────
-   *  The piles are destinations now, not a floating bar: the counts feed
-   *  the phone pill + sheet and the 专注回复 header button; the sidebar
-   *  reads the same numbers from countPileMessages(). */
+  /* ── Piles (Pending / Saved / Remind) ─────────────────────────────── */
 
-  const pileRows = createMemo(() => pileMessages() ?? []);
+  const piles = createMemo((): Pile[] => {
+    const all = pileMessages() ?? [];
+    const all_piles: Pile[] = [
+      {
+        id: "pending",
+        icon: "ph-clock",
+        title: "稍后回复",
+        messages: all.filter((m) => m.replyLater),
+        // The pile board for Pending is the plain list; the focused
+        // reply flow lives on the standalone 专注回复 button next to
+        // the piles row (see the render below).
+        openBoardView: "replyLater",
+      },
+      {
+        id: "saved",
+        icon: "ph-push-pin",
+        title: "已搁置",
+        messages: all.filter((m) => m.setAside),
+        openBoardView: "setAside",
+      },
+      {
+        id: "remind",
+        icon: "ph-arrow-fat-line-up",
+        title: "提醒",
+        messages: all.filter((m) => m.bubbleUpAt),
+        openBoardView: "bubbleUp",
+      },
+    ];
+    return all_piles.filter((p) => p.messages.length > 0);
+  });
+
+  // Count for the standalone 专注回复 button (shown when the Pending
+  // pile is non-empty).
   const pendingCount = createMemo(
-    () => pileRows().filter((m) => m.replyLater).length,
+    () => (pileMessages() ?? []).filter((m) => m.replyLater).length,
   );
-  const savedCount = createMemo(
-    () => pileRows().filter((m) => m.setAside).length,
-  );
+
   const remindedCount = createMemo(
-    () => pileRows().filter((m) => m.bubbleUpAt).length,
+    () => (pileMessages() ?? []).filter((m) => m.bubbleUpAt).length,
   );
-  const pileTotal = createMemo(
-    () => pendingCount() + savedCount() + remindedCount(),
-  );
-  const [pileSheetOpen, setPileSheetOpen] = createSignal(false);
 
   /* ── Bundle drawer state ─────────────────────────────────────────── */
 
@@ -588,7 +614,7 @@ export function Imbox() {
   const refreshAll = async () => {
     await newPaged.refresh();
     await seenPaged.refresh();
-    await refreshPiles();
+    await refetchPiles();
   };
 
   const replyLater = async (m: Message) => {
@@ -603,7 +629,7 @@ export function Imbox() {
         setAside: false,
         bubbleUpAt: null,
       });
-      await refreshPiles();
+      await refetchPiles();
       showToast({
         message: "已加入稍后回复",
         kind: "success",
@@ -635,7 +661,7 @@ export function Imbox() {
         setAside: true,
         bubbleUpAt: null,
       });
-      await refreshPiles();
+      await refetchPiles();
       showToast({
         message: "已搁置",
         kind: "success",
@@ -669,7 +695,7 @@ export function Imbox() {
         setAside: false,
         bubbleUpAt: whenIso,
       });
-      await refreshPiles();
+      await refetchPiles();
       showToast({
         message: `已设为${label}提醒`,
         kind: "success",
@@ -704,7 +730,7 @@ export function Imbox() {
     removeFromBoth(m.id);
     try {
       await moveMessageToBucket(m.id, "paperTrail");
-      await refreshPiles();
+      await refetchPiles();
       showToast({
         message: "已归档到 Records",
         kind: "success",
@@ -728,7 +754,7 @@ export function Imbox() {
     removeFromBoth(m.id);
     try {
       await moveMessageToBucket(m.id, "trash");
-      await refreshPiles();
+      await refetchPiles();
       showToast({
         message: "已移到回收站",
         kind: "info",
@@ -752,7 +778,7 @@ export function Imbox() {
     removeFromBoth(m.id);
     try {
       await moveMessageToBucket(m.id, "spam");
-      await refreshPiles();
+      await refetchPiles();
       showToast({
         message: "已移到垃圾邮件",
         kind: "info",
@@ -787,7 +813,7 @@ export function Imbox() {
         newPaged.removeByIds([m.id]);
         await seenPaged.prependByIds([m.id]);
       }
-      await refreshPiles();
+      await refetchPiles();
     } catch (err) {
       console.error("[imbox] toggleUnread failed:", err);
       await refreshAll();
@@ -868,7 +894,7 @@ export function Imbox() {
           removeFromBoth(m.id);
           try {
             await moveMessageToBucket(m.id, target);
-            await refreshPiles();
+            await refetchPiles();
             const label = target === "imbox" ? "Inbox" : "Stream";
             showToast({ message: `已移到 ${label}`, kind: "info" });
           } catch (err) {
@@ -1016,7 +1042,7 @@ export function Imbox() {
     () =>
       newPaged.total() > 0 ||
       seenPaged.total() > 0 ||
-      pileTotal() > 0,
+      piles().length > 0,
   );
 
   // Sync-in-progress flag for the header button (spinner + disabled so
@@ -1060,8 +1086,6 @@ export function Imbox() {
         onSync={syncNow}
         onOpenFilters={() => setFilterOpen(true)}
         activeSort={getSortMode("imbox")}
-        pendingCount={pendingCount()}
-        onFocusReply={() => setView("focusReply")}
         activeFilterCount={quickFilter() === "all" ? 0 : 1}
       />
 
@@ -1179,7 +1203,7 @@ export function Imbox() {
               class="feed-list"
               data-feed-list
               style={
-                isMobileLayout() && (pileTotal() > 0 || showBulkBar())
+                isMobileLayout() && (piles().length > 0 || showBulkBar())
                   ? { "padding-bottom": "120px" }
                   : undefined
               }
@@ -1329,48 +1353,80 @@ export function Imbox() {
               </Show>
             </div>
 
-            {/* 待处理 pill — one floating control on the phone, above the
-                tab bar. It opens the three piles; the desktop equivalent is
-                the sidebar's 待处理 group. */}
-            <Show when={isMobileLayout() && pileTotal() > 0}>
-              <button
-                type="button"
-                data-pile-pill
-                title="待处理"
-                aria-label={`待处理 ${pileTotal()} 封`}
-                onClick={() => setPileSheetOpen(true)}
-                style={{
-                  position: "fixed",
-                  right: "12px",
-                  bottom: "calc(64px + env(safe-area-inset-bottom, 0px) + 12px)",
-                  height: "40px",
-                  padding: "0 14px",
-                  "border-radius": "var(--radius-pill)",
-                  background: "var(--palm)",
-                  color: "white",
-                  border: "none",
-                  display: "flex",
-                  "align-items": "center",
-                  gap: "7px",
-                  "font-size": "var(--text-caption)",
-                  "font-weight": "800",
-                  "box-shadow": "0 8px 20px rgba(10,143,99,0.28)",
-                  "z-index": "var(--z-sticky)",
-                }}
+            <Show when={piles().length > 0}>
+              <div
+                class="imbox-piles"
+                data-imbox-piles
+                data-testid="piles"
+                style={
+                  isMobileLayout()
+                    ? {
+                        position: "fixed",
+                        left: "8px",
+                        right: "8px",
+                        bottom:
+                          "calc(64px + env(safe-area-inset-bottom, 0px))",
+                        width: "auto",
+                        "max-width": "none",
+                        margin: "0",
+                        padding: "6px",
+                        gap: "6px",
+                        "flex-direction": "row",
+                        background: "var(--glass-bg)",
+                        "backdrop-filter": "var(--glass-blur)",
+                        "-webkit-backdrop-filter": "var(--glass-blur)",
+                        border: "0.5px solid var(--glass-border)",
+                        "border-radius": "var(--radius-xl)",
+                        "box-shadow": "var(--glass-shadow)",
+                      }
+                    : undefined
+                }
               >
-                <Icon name="ph-clock" size={15} color="white" />
-                待处理
-                <span
-                  style={{
-                    background: "rgba(255,255,255,0.24)",
-                    "border-radius": "var(--radius-pill)",
-                    padding: "1px 6px",
-                    "font-size": "var(--text-micro)",
-                  }}
-                >
-                  {pileTotal()}
-                </span>
-              </button>
+                <For each={piles()}>
+                  {(p) => (
+                    <PileCard
+                      pile={p}
+                      contacts={contacts() ?? []}
+                      compact={isMobileLayout()}
+                      onOpen={(id) => open(id)}
+                    />
+                  )}
+                </For>
+                {/* Standalone 专注回复 main button — pulled out of the
+                    Pending pile card so the focused reply flow is one
+                    tap away and reads as a primary action. */}
+                <Show when={pendingCount() > 0}>
+                  <button
+                    type="button"
+                    data-focus-reply-entry
+                    title="专注回复：逐封处理待回复邮件"
+                    onClick={() => setView("focusReply")}
+                    style={{
+                      display: "inline-flex",
+                      "flex-direction": isMobileLayout()
+                        ? "row"
+                        : "column",
+                      "align-items": "center",
+                      "justify-content": "center",
+                      gap: "4px",
+                      padding: isMobileLayout() ? "0 12px" : "10px 16px",
+                      "min-height": "44px",
+                      background: "var(--palm)",
+                      color: "white",
+                      border: "none",
+                      "border-radius": "var(--radius-lg)",
+                      "font-size": "var(--text-caption)",
+                      "font-weight": "700",
+                      cursor: "pointer",
+                      "white-space": "nowrap",
+                      "box-shadow": "var(--shadow-md)",
+                    }}
+                  >
+                    <Icon name="ph-target" size={14} color="white" />
+                    <span>专注回复</span>
+                  </button>
+                </Show>
+              </div>
             </Show>
 
             {/* Bulk action bar — floats in when the user has selected
@@ -1431,16 +1487,6 @@ export function Imbox() {
           </Show>
         </Show>
       </Show>
-
-      <PileSheet
-        open={pileSheetOpen()}
-        counts={{
-          replyLater: pendingCount(),
-          setAside: savedCount(),
-          bubbleUp: remindedCount(),
-        }}
-        onClose={() => setPileSheetOpen(false)}
-      />
     </div>
   );
 }
@@ -1518,10 +1564,6 @@ function ImboxHeader(props: {
   onSync: () => void | Promise<void>;
   onOpenFilters: () => void;
   activeSort: SortMode;
-  /** 稍后回复 count — the focused-reply entry lives here now that the
-   *  floating pile bar is gone. */
-  pendingCount: number;
-  onFocusReply: () => void;
   /** How many quick filters are on (订阅 / 新面孔 / 一起读 …). */
   activeFilterCount: number;
 }) {
@@ -1614,30 +1656,6 @@ function ImboxHeader(props: {
         }
         actions={
           <>
-            <Show when={props.pendingCount > 0 && !isMobile()}>
-              <button
-                onClick={() => props.onFocusReply()}
-                data-focus-reply-entry
-                title={`专注回复：逐封处理 ${props.pendingCount} 封待回复邮件`}
-                style={{
-                  display: "inline-flex",
-                  "align-items": "center",
-                  gap: "5px",
-                  padding: "4px 12px",
-                  background: "var(--palm)",
-                  color: "var(--text-on-palm, #fff)",
-                  "border-radius": "var(--radius-pill)",
-                  "font-size": "var(--text-micro)",
-                  "font-weight": "700",
-                  border: "0",
-                  cursor: "pointer",
-                  "white-space": "nowrap",
-                }}
-              >
-                <Icon name="ph-target" size={12} color="currentColor" />
-                专注回复 {props.pendingCount}
-              </button>
-            </Show>
             {/* Icon-only: the header keeps one primary action + one status,
                 everything else is a glyph (HEY ships two controls here). */}
             <button
@@ -2369,6 +2387,112 @@ function bundleDrawerGroups(messages: Message[]): {
     out[out.length - 1]!.messages.push(m);
   }
   return out;
+}
+
+/* ── Pile card ──────────────────────────────────────────────────────── */
+
+function PileCard(props: {
+  pile: Pile;
+  contacts: Contact[];
+  /** Compact mode (mobile): the pile row is a fixed bottom strip, so
+      the header must stay within one 44px-tall tap target. */
+  compact: boolean;
+  onOpen: (id: string) => void;
+}) {
+  // Default collapsed — matches prototype §renderImboxPile (line 2993:
+  // `state.expandedPile === pileId` is false on first render).
+  const [expanded, setExpanded] = createSignal(false);
+  const toggle = (ev: MouseEvent) => {
+    const target = ev.target as HTMLElement;
+    if (target.closest(".pile-drawer-row, .pile-drawer-action, button")) return;
+    setExpanded((v) => !v);
+  };
+
+  const contactMap = createMemo<Map<string, Contact>>(() => {
+    const map = new Map<string, Contact>();
+    for (const c of props.contacts) map.set(c.id, c);
+    return map;
+  });
+
+  const previewRows = createMemo(() => props.pile.messages.slice(0, 5));
+
+  return (
+    <div
+      class={
+        "imbox-pile" +
+        (expanded() ? " expanded" : "") +
+        (props.compact ? " compact" : "")
+      }
+      data-pile={props.pile.id}
+      data-pile-id={props.pile.id}
+      data-testid={`pile-${props.pile.openBoardView}`}
+      data-expanded={expanded() ? "true" : "false"}
+      onClick={toggle}
+    >
+      <div class="imbox-pile-header">
+        <Icon name={props.pile.icon} size={12} />
+        <span class="imbox-pile-title">{props.pile.title}</span>
+        <span class="imbox-pile-count">{props.pile.messages.length}</span>
+      </div>
+
+      <Show when={expanded()}>
+        <div class="pile-drawer" data-pile-drawer>
+          <For each={previewRows()}>
+            {(m) => {
+              const c = contactMap().get(m.pid);
+              return (
+                <div
+                  class="pile-drawer-row"
+                  data-pile-drawer-row={m.id}
+                  data-pile-item={m.id}
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    props.onOpen(m.id);
+                  }}
+                >
+                  <div class="pile-drawer-avatar">
+                    {(c?.name ?? "?").charAt(0).toUpperCase()}
+                  </div>
+                  <div class="pile-drawer-body">
+                    <div class="pile-drawer-subj">
+                      {m.subj || "(无主题)"}
+                    </div>
+                    <div class="pile-drawer-from">
+                      {c?.name ?? m.pid}
+                    </div>
+                  </div>
+                  <span class="pile-drawer-time">
+                    {formatMessageDate(m, profileTz(), "list").primary.value}
+                  </span>
+                </div>
+              );
+            }}
+          </For>
+          <Show when={props.pile.messages.length > 5}>
+            <div
+              class="pile-drawer-more"
+              data-pile-drawer-more
+            >
+              还有 {props.pile.messages.length - 5} 封
+            </div>
+          </Show>
+          <div class="pile-drawer-actions">
+            <button
+              type="button"
+              class="pile-drawer-action pile-board-btn"
+              data-pile-open-board
+              onClick={(ev) => {
+                ev.stopPropagation();
+                setView(props.pile.openBoardView);
+              }}
+            >
+              查看全部
+            </button>
+          </div>
+        </div>
+      </Show>
+    </div>
+  );
 }
 
 /* ── ImboxTabs ───────────────────────────────────────────────────── */

@@ -507,16 +507,12 @@ test.describe("Imbox — single view focus", () => {
     // Optimistic remove: row should be gone immediately (≤ 100 ms).
     await expect(card).toHaveCount(0, { timeout: 1_000 });
 
-    // The 待处理 rail (sidebar destination) now carries the count.
-    await expect(page.locator('[data-nav-badge="待处理"]')).toHaveAttribute(
-      "data-count",
-      "1",
-      { timeout: 5_000 },
-    );
+    // The replyLater pile should now show the message.
+    await expect(page.locator("[data-pile='pending']")).toBeVisible();
     await shoot(page, "10-reply-later-optimistic");
   });
 
-  test("piles: 待处理 group carries per-pile counts and opens each board", async ({
+  test("piles: Pending / Saved / Remind render at bottom with counts", async ({
     page,
   }) => {
     const contacts = [APPLE_DEV];
@@ -554,26 +550,17 @@ test.describe("Imbox — single view focus", () => {
     ];
     await seedAndOpen(page, contacts, messages);
 
-    // The rail carries the total; the flyout carries each pile's count.
-    await expect(page.locator('[data-nav-badge="待处理"]')).toHaveAttribute(
-      "data-count",
-      "3",
-      { timeout: 10_000 },
-    );
-    await page.locator('[data-nav-disclosure="piles"]').click();
-    for (const label of ["Reply later", "Set aside", "Remind"] as const) {
-      await expect(page.locator(`[data-nav-badge="${label}"]`)).toHaveAttribute(
-        "data-count",
-        "1",
-        { timeout: 5_000 },
-      );
-    }
-    await page.keyboard.press("Escape");
-    await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+    await expect(page.locator("[data-pile='pending']")).toBeVisible();
+    await expect(page.locator("[data-pile='saved']")).toBeVisible();
+    await expect(page.locator("[data-pile='remind']")).toBeVisible();
 
-    // Each pile is a real destination with its own list.
-    await page.locator('[data-nav-group="piles"]').click();
-    await expect(page.locator('[data-pile-row="m_pile_pending"]')).toBeVisible();
+    // Counts in the pile chips should match the seeded rows.
+    const pending = page.locator("[data-pile='pending'] .imbox-pile-count");
+    await expect(pending).toHaveText("1");
+    const saved = page.locator("[data-pile='saved'] .imbox-pile-count");
+    await expect(saved).toHaveText("1");
+    const remind = page.locator("[data-pile='remind'] .imbox-pile-count");
+    await expect(remind).toHaveText("1");
 
     await shoot(page, "11-piles");
   });
