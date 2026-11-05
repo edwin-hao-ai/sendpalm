@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn detects_vercel_gateway_key() {
-        match ProviderCatalog::detect_by_prefix("vck_33HLabc") {
+        match ProviderCatalog::detect_by_prefix("vck_test_abc") {
             PrefixMatch::Single(p) => assert_eq!(p.id, "vercel"),
             other => panic!("expected Single(vercel), got {:?}", other.is_single_id()),
         }
