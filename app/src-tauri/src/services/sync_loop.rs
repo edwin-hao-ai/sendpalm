@@ -45,11 +45,18 @@ fn detect_uid_validity_change(stored: u32, current: u32) -> Option<u32> {
 #[derive(Debug, Clone, Copy)]
 pub struct ImportPhase {
     /// Highest INBOX UID before this pass. 0 means the account has never
-    /// completed a sync, i.e. this pass is the import.
+    /// completed a sync.
     pub previous_last_uid: u32,
-    /// Snapshot of "this is the first pass", taken **before** the first
-    /// message is written (the cursor advances during the pass, so reading
-    /// it later would always say "not the first").
+    /// Is this pass still importing history?
+    ///
+    /// **Not** inferable from the cursor alone. A pass can end early — a
+    /// single message fails to persist, a chunk comes back short, IMAP drops
+    /// — and the per-chunk cursor is saved anyway so the next tick resumes
+    /// where it left off. If "first pass" were `cursor == 0`, that resumption
+    /// would look like ordinary mail and dump the remaining 9,900 historical
+    /// senders into the Screener: the exact failure the import exists to
+    /// prevent. So the answer is a persisted "import finished" marker, and
+    /// the cursor only serves as the fast answer for a brand-new account.
     pub initial: bool,
     /// True while the account is inside the post-import quiet window: OS
     /// notifications are suppressed except for senders the user explicitly
@@ -58,10 +65,26 @@ pub struct ImportPhase {
 }
 
 impl ImportPhase {
-    pub fn new(previous_last_uid: u32) -> Self {
+    /// Three signals, because two are not enough:
+    ///
+    /// * `import_completed` — the persisted "history is in" marker;
+    /// * `import_in_progress` — an `import_progress` record exists, i.e. an
+    ///   earlier pass started the import and did not finish it;
+    /// * `previous_last_uid` — a brand-new account has never fetched anything.
+    ///
+    /// A resumed import has a non-zero cursor and no completion marker, and an
+    /// install that predates this feature has a non-zero cursor and no
+    /// progress record. Only the progress record tells them apart: treating
+    /// the upgrade case as an import would silently re-screen senders the
+    /// user already decided about.
+    pub fn new(
+        previous_last_uid: u32,
+        import_completed: bool,
+        import_in_progress: bool,
+    ) -> Self {
         Self {
             previous_last_uid,
-            initial: previous_last_uid == 0,
+            initial: !import_completed && (previous_last_uid == 0 || import_in_progress),
             os_quiet: false,
         }
     }
@@ -70,6 +93,24 @@ impl ImportPhase {
         self.os_quiet = os_quiet;
         self
     }
+}
+
+/// Is this message genuinely new mail for the user?
+///
+/// **Only INBOX counts.** Every folder has its own UID namespace, so feeding
+/// a Sent/Trash/Archive UID through the INBOX cursor declares years of the
+/// user's own mail "new": the bell fills up, desktop notifications fire for
+/// messages the user wrote, and the vacation responder offers to reply to
+/// their own sent folder. The pre-import behaviour was silence for non-INBOX
+/// folders; this keeps that explicit instead of implicit.
+///
+/// Nothing is "new" during the import either — it is all history by
+/// definition.
+pub fn is_new_arrival(folder: &str, uid: u32, phase: ImportPhase) -> bool {
+    folder.eq_ignore_ascii_case("INBOX")
+        && !phase.initial
+        && phase.previous_last_uid > 0
+        && uid > phase.previous_last_uid
 }
 
 /// How long after a finished import OS notifications stay suppressed.
@@ -111,26 +152,30 @@ pub fn should_ping_os(
     notify || (screened && !is_newsletter)
 }
 
-/// Running tally of a first import, so the UI can report what happened
-/// instead of silently rewriting the user's mailbox organisation.
-#[derive(Debug, Default, Clone)]
-pub struct ImportSummary {
-    pub messages: u32,
-    /// Contact ids of the senders encountered. Only senders created by the
-    /// import can be counted here — on a first pass every sender is new, and
-    /// every new sender is auto-screened, so the set size *is* the number of
-    /// senders the user never had to decide about.
-    pub senders: HashSet<String>,
+/// How many senders did the import quietly approve?
+///
+/// Counted from the contacts the import actually created (`first_contact` is
+/// set on insert), not from a set of every sender id seen in the batch — a
+/// sender who appears in two resumed passes would otherwise be counted
+/// twice, and a contact that already existed would be counted as if the
+/// import were responsible for it.
+pub async fn count_imported_senders(
+    pool: &SqlitePool,
+    import_started_at: &str,
+) -> Result<u32, String> {
+    let (n,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM contacts          WHERE first_seen = 1 AND screened = 1 AND blocked = 0 AND first_contact >= $1",
+    )
+    .bind(import_started_at)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| format!("count imported senders: {e}"))?;
+    Ok(n as u32)
 }
 
-impl ImportSummary {
-    pub fn report(&self) -> crate::services::ImportSummaryReport {
-        crate::services::ImportSummaryReport {
-            messages: self.messages,
-            senders: self.senders.len() as u32,
-            completed_at: chrono::Utc::now().to_rfc3339(),
-        }
-    }
+/// Timestamp format `contacts.first_contact` is written in (`datetime('now')`).
+fn sql_now() -> String {
+    chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 /// When IDLE fails (server doesn't support it, connection drop, etc.), wait
@@ -726,7 +771,7 @@ async fn sync_and_notify(
     // The import summary is carried on the `sync:new-messages` event and
     // persisted under `import_summary::<account>` for Settings; nothing in
     // the loop's own state needs it.
-    let (n, new_last_uid, new_uv, _import_summary) = match result {
+    let (n, new_last_uid, new_uv) = match result {
         Ok(r) => r,
         Err(e) => {
             store.put(
@@ -798,7 +843,7 @@ async fn sync_one(
     client: &ImapClient,
     account: &SyncAccount,
     previous_last_uid: u32,
-) -> Result<(u32, u32, u32, Option<ImportSummary>), String> {
+) -> Result<(u32, u32, u32), String> {
     // Snapshot the import phase BEFORE the first message is written: the
     // cursor advances during the pass, so asking later always answers
     // "not the first one".
@@ -815,8 +860,22 @@ async fn sync_one(
             false
         }
     };
-    let phase = ImportPhase::new(previous_last_uid).with_quiet(os_quiet);
-    let mut import = ImportSummary::default();
+    // The persisted marker, not the cursor, decides whether this pass is
+    // still importing (see ImportPhase::initial).
+    let import_completed = load_import_completed(pool, &account.account_id)
+        .await
+        .unwrap_or(false);
+    let mut progress = load_import_progress(pool, &account.account_id)
+        .await
+        .ok()
+        .flatten();
+    let phase = ImportPhase::new(
+        previous_last_uid,
+        import_completed,
+        progress.is_some(),
+    )
+    .with_quiet(os_quiet);
+    let mut all_folders_complete = true;
 
     // Ensure the account row exists in the accounts table so the foreign
     // key on messages.ac is satisfied. For DB-configured accounts this is a
@@ -851,7 +910,7 @@ async fn sync_one(
             folder_last_uid
         };
 
-        let (inserted, cursor, uid_validity, mut folder_new_ids) = match sync_folder(
+        let (inserted, cursor, uid_validity, mut folder_new_ids, folder_complete) = match sync_folder(
             app,
             data_dir,
             pool,
@@ -861,7 +920,6 @@ async fn sync_one(
             &rules,
             start_uid,
             phase,
-            &mut import,
             &state_key,
         )
         .await
@@ -875,9 +933,13 @@ async fn sync_one(
                 // sync_folder persists the cursor after every successful chunk,
                 // so on error the highest successfully-inserted UID is already
                 // saved and the next tick resumes from there. Nothing to do.
+                all_folders_complete = false;
                 continue;
             }
         };
+        if !folder_complete {
+            all_folders_complete = false;
+        }
         total_inserted += inserted;
         new_message_ids.append(&mut folder_new_ids);
 
@@ -934,18 +996,47 @@ async fn sync_one(
         }
     }
 
-    // Only report an import when this pass actually wrote history. A first
-    // pass that found an empty mailbox is not an import the user needs told
-    // about.
-    let summary = if phase.initial && total_inserted > 0 {
-        import.messages = total_inserted;
-        Some(import)
-    } else {
-        None
-    };
-    let summary_report = summary.as_ref().map(ImportSummary::report);
-    if let Some(s) = &summary_report {
-        persist_import_summary(pool, &account.account_id, s).await;
+    // ── Import bookkeeping ────────────────────────────────────────────
+    //
+    // The import is "done" only when a pass walked every folder to its end
+    // without a partial chunk or a folder failure. Until then the marker
+    // stays unset, so the next tick keeps treating what it fetches as
+    // history instead of handing the Gate the remainder of a five-year
+    // mailbox.
+    let mut summary_report: Option<crate::services::ImportSummaryReport> = None;
+    if phase.initial {
+        // Progress is persisted because the import can span several passes
+        // (a chunk fails, IMAP drops, the app quits mid-backfill). A resumed
+        // pass fetches only UIDs the cursor has not passed, so summing the
+        // per-pass insert counts is exact — unlike recomputing from the
+        // cursor, which would lose every earlier pass.
+        let mut progress = progress.take().unwrap_or_else(|| ImportProgress {
+            // The window `first_contact` is compared against starts with the
+            // first pass, not the last one.
+            started_at: sql_now(),
+            messages: 0,
+        });
+        progress.messages = progress.messages.saturating_add(total_inserted);
+
+        if all_folders_complete {
+            let senders = count_imported_senders(pool, &progress.started_at)
+                .await
+                .unwrap_or(0);
+            let report = crate::services::ImportSummaryReport {
+                messages: progress.messages,
+                senders,
+                completed_at: chrono::Utc::now().to_rfc3339(),
+            };
+            persist_import_summary(pool, &account.account_id, &report).await;
+            mark_import_completed(pool, &account.account_id).await;
+            // Nothing to announce if history never actually landed.
+            if report.messages > 0 {
+                summary_report = Some(report);
+            }
+        } else {
+            // Keep the running total for the pass that finishes the job.
+            let _ = save_import_progress(pool, &account.account_id, &progress).await;
+        }
     }
 
     // Notify the frontend so it can refresh Imbox / Notifications in real time.
@@ -962,7 +1053,7 @@ async fn sync_one(
     };
     let _ = app.emit("sync:new-messages", report);
 
-    Ok((total_inserted, inbox_cursor, inbox_uid_validity, summary))
+    Ok((total_inserted, inbox_cursor, inbox_uid_validity))
 }
 
 async fn load_folder_sync_state(pool: &SqlitePool, key: &str) -> Result<(u32, u32), String> {
@@ -987,6 +1078,87 @@ async fn load_folder_sync_state(pool: &SqlitePool, key: &str) -> Result<(u32, u3
 /// `app_kv` key holding an account's first-import tally.
 fn import_summary_key(account_id: &str) -> String {
     format!("import_summary::{account_id}")
+}
+
+/// `app_kv` key: "1" once the account's history import finished.
+fn import_completed_key(account_id: &str) -> String {
+    format!("import_completed::{account_id}")
+}
+
+/// `app_kv` key: in-flight tally for an import that spans several passes.
+fn import_progress_key(account_id: &str) -> String {
+    format!("import_progress::{account_id}")
+}
+
+/// In-flight import tally. Persisted because an import can be interrupted
+/// between passes and must not restart (or, worse, be mistaken for
+/// ordinary new mail).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ImportProgress {
+    /// `datetime('now')` format — compared against `contacts.first_contact`.
+    pub started_at: String,
+    pub messages: u32,
+}
+
+async fn kv_get(pool: &SqlitePool, key: &str) -> Result<Option<String>, String> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT value FROM app_kv WHERE key = $1")
+        .bind(key)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("kv get {key}: {e}"))?;
+    Ok(row.map(|(v,)| v))
+}
+
+async fn kv_put(pool: &SqlitePool, key: &str, value: &str) -> Result<(), String> {
+    sqlx::query(
+        "INSERT INTO app_kv (key, value, updated_at) VALUES ($1, $2, datetime('now')) \
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+    )
+    .bind(key)
+    .bind(value)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("kv put {key}: {e}"))?;
+    Ok(())
+}
+
+pub async fn import_completed(pool: &SqlitePool, account_id: &str) -> Result<bool, String> {
+    Ok(kv_get(pool, &import_completed_key(account_id))
+        .await?
+        .as_deref()
+        == Some("1"))
+}
+
+async fn load_import_completed(pool: &SqlitePool, account_id: &str) -> Result<bool, String> {
+    import_completed(pool, account_id).await
+}
+
+async fn mark_import_completed(pool: &SqlitePool, account_id: &str) {
+    if let Err(e) = kv_put(pool, &import_completed_key(account_id), "1").await {
+        // Worst case the next pass keeps treating arrivals as history for a
+        // while — never lose the import over this.
+        eprintln!("[sync] import marker save failed for {account_id}: {e}");
+    }
+}
+
+async fn load_import_progress(
+    pool: &SqlitePool,
+    account_id: &str,
+) -> Result<Option<ImportProgress>, String> {
+    let Some(raw) = kv_get(pool, &import_progress_key(account_id)).await? else {
+        return Ok(None);
+    };
+    Ok(serde_json::from_str(&raw).ok())
+}
+
+async fn save_import_progress(
+    pool: &SqlitePool,
+    account_id: &str,
+    progress: &ImportProgress,
+) -> Result<(), String> {
+    let json = serde_json::to_string(progress)
+        .map_err(|e| format!("import progress encode: {e}"))?;
+    kv_put(pool, &import_progress_key(account_id), &json).await
 }
 
 /// Persist what the first import did so Settings → Accounts can keep showing
@@ -1132,9 +1304,8 @@ async fn sync_folder(
     rules: &[crate::services::rules::MailRule],
     start_uid: u32,
     phase: ImportPhase,
-    import: &mut ImportSummary,
     state_key: &str,
-) -> Result<(u32, u32, u32, Vec<String>), String> {
+) -> Result<(u32, u32, u32, Vec<String>, bool), String> {
     let folder_kind = crate::services::mailbox_resolver::folder_kind_for_name(folder);
     let mut inserted = 0u32;
     #[allow(unused_assignments)]
@@ -1142,6 +1313,10 @@ async fn sync_folder(
     let mut cursor = start_uid;
     let mut new_ids: Vec<String> = Vec::new();
     let mut consecutive_empty_chunks = 0u32;
+    // True only when the loop ran out of UIDs to fetch. A partial chunk, a
+    // legacy-budget stop, or an error leaves it false so the caller knows the
+    // folder still has history waiting.
+    let mut complete = true;
 
     loop {
         let bundle = client.sync(folder, cursor).await?;
@@ -1171,6 +1346,7 @@ async fn sync_folder(
                         eprintln!(
                             "[sync] folder={folder} legacy empty-chunk budget reached at cursor={cursor}; resuming next pass"
                         );
+                        complete = false;
                         break;
                     }
                 }
@@ -1192,7 +1368,6 @@ async fn sync_folder(
                 &fetched.parsed,
                 fetched.received_at,
                 phase,
-                import,
             )
             .await
             {
@@ -1219,6 +1394,10 @@ async fn sync_folder(
         if !chunk_outcomes.iter().all(|(_, ok)| *ok) {
             // Short-circuit: don't fetch another chunk after a partial failure
             // (the cursor is already pinned to the last successful UID above).
+            // The folder is NOT done — the import bookkeeping depends on
+            // knowing that, or a five-year backfill would be declared
+            // finished after its first hiccup.
+            complete = false;
             break;
         }
         if !should_continue_after_chunk(cursor, bundle.uid_next, bundle.messages.len() as u32) {
@@ -1230,7 +1409,7 @@ async fn sync_folder(
         "[sync] folder={folder} inserted={inserted} cursor={cursor} new_ids={}",
         new_ids.len()
     );
-    Ok((inserted, cursor, uid_validity, new_ids))
+    Ok((inserted, cursor, uid_validity, new_ids, complete))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1246,7 +1425,6 @@ async fn insert_message(
     parsed: &crate::services::parser::ParsedMessage,
     received_at: Option<chrono::DateTime<chrono::Utc>>,
     phase: ImportPhase,
-    import: &mut ImportSummary,
 ) -> Result<Option<String>, String> {
     let is_self = parsed
         .sender_email
@@ -1259,12 +1437,6 @@ async fn insert_message(
         phase.initial,
     )
     .await?;
-    // A sender's own message (our Sent copy) must never count towards
-    // "N senders were auto-screened" — the user is not a stranger to
-    // themselves.
-    if phase.initial && !is_self {
-        import.senders.insert(route.id.clone());
-    }
     let bucket: &str = if phase.initial {
         bucket_for_import(&route, parsed.is_newsletter)
     } else {
@@ -1427,7 +1599,7 @@ async fn insert_message(
     // Only notify for genuinely new mail (skip the historic backlog on
     // the first sync). previous_last_uid == 0 means this is the initial
     // backfill.
-    if phase.previous_last_uid > 0 && uid > phase.previous_last_uid {
+    if is_new_arrival(folder, uid, phase) {
         let sender = parsed
             .sender_name
             .as_deref()

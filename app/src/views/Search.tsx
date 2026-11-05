@@ -334,7 +334,7 @@ export function Search() {
     <div style={{ animation: "view-enter 0.3s var(--ease-out) both" }}>
       <style>{SEARCH_CSS}</style>
       <div style={{ "max-width": "720px", margin: "0 auto" }}>
-        <PageHeader title="搜索" />
+        <PageHeader titleOnMobile title="搜索" />
       </div>
 
       <div

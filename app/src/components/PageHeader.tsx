@@ -20,12 +20,23 @@ export interface PageHeaderProps {
   actions?: JSX.Element;
   /** Extra class forwarded to the root <header>. */
   class?: string;
+  /** Keep the H1 visible on phones.
+   *
+   *  Default is `false`: below 768px the title is visually hidden because the
+   *  topbar already prints the same word, and the phone's first screen is
+   *  worth more than the repetition (the H1 stays in the DOM for screen
+   *  readers). Views the topbar cannot name — 一起读 / 专注回复 / Agent /
+   *  搜索 / 待处理 board, none of which are in NAV_SECTIONS — must opt in,
+   *  or they lose their only visible heading. */
+  titleOnMobile?: boolean;
 }
 
 export function PageHeader(props: PageHeaderProps) {
   return (
     <header
-      class={`page-header${props.class ? ` ${props.class}` : ""}`}
+      class={`page-header${props.class ? ` ${props.class}` : ""}${
+        props.titleOnMobile ? " page-header--titled-mobile" : ""
+      }`}
     >
       <div class="page-header-main">
         <h1 class="page-header-title">{props.title}</h1>

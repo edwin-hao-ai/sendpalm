@@ -104,6 +104,7 @@ export function FocusReply() {
     >
       <div style={{ "border-bottom": "0.5px solid var(--border)" }}>
         <PageHeader
+          titleOnMobile
           title="专注回复"
           description={<p>{pendingCount()} 封待回复</p>}
           actions={

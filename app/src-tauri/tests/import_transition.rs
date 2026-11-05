@@ -11,14 +11,14 @@
 //!     (newsletter → Feed). Receipts are NOT auto-filed: silently hiding a
 //!     bill costs more trust than it saves taps.
 //!
-//! `tests/import_transition_gate_count` mirrors the predicate the frontend's
-//! `countGateCandidates()` sends (`first_seen = 1 AND screened = 0`); the
-//! frontend side of the contract is covered by
-//! `src/stores/data.test.ts` (LIMIT) and `e2e/scenarios.spec.ts`.
+//! The Gate predicate asserted below (`first_seen = 1 AND screened = 0`) is
+//! the one the frontend's `countGateCandidates()` sends; the frontend side of
+//! the contract is covered by `src/stores/data.test.ts` (LIMIT) and
+//! `e2e/scenarios.spec.ts`.
 
 use sendpalm_app_lib::services::sync_loop::{
-    bucket_for_import, load_import_summary, persist_import_summary, upsert_contact,
-    ContactRouteInfo,
+    bucket_for_import, count_imported_senders, import_completed, is_new_arrival,
+    load_import_summary, persist_import_summary, upsert_contact, ContactRouteInfo, ImportPhase,
 };
 use sqlx::sqlite::SqlitePool;
 
@@ -171,7 +171,8 @@ async fn the_import_reports_what_it_did() {
     // stay silent rather than print "0 封".
     assert_eq!(load_import_summary(&pool, "acct_2").await.unwrap(), None);
 
-    // Writing twice keeps the latest tally (a resumed import rewrites it).
+    // The write is an upsert: the caller persists once, at completion, but a
+    // later import (second account, reset) must be able to replace the tally.
     persist_import_summary(
         &pool,
         "acct_1",
@@ -285,4 +286,107 @@ fn a_corrupt_or_future_timestamp_never_silences_the_user() {
     // A clock that jumped backwards must not mute notifications forever.
     let future = now + chrono::Duration::hours(24);
     assert!(!inside_import_quiet_window(&future.to_rfc3339(), now));
+}
+
+/* ── Import phase + arrival gate ──────────────────────────────────── */
+
+#[test]
+fn a_brand_new_account_is_importing() {
+    assert!(ImportPhase::new(0, false, false).initial);
+}
+
+#[test]
+fn a_completed_import_is_never_reopened() {
+    // The marker wins over the cursor: once history is in, an arrival is an
+    // arrival even if some other signal still looks "fresh".
+    assert!(!ImportPhase::new(0, true, false).initial);
+    assert!(!ImportPhase::new(500, true, false).initial);
+}
+
+#[test]
+fn an_account_that_already_has_mail_is_not_importing() {
+    // Upgrading an existing install must not retroactively re-screen anyone:
+    // no completion marker, non-zero cursor, and no progress record.
+    assert!(!ImportPhase::new(500, false, false).initial);
+}
+
+#[test]
+fn only_inbox_arrivals_are_new_mail() {
+    let steady = ImportPhase::new(100, true, false);
+    assert!(is_new_arrival("INBOX", 101, steady));
+    assert!(is_new_arrival("inbox", 101, steady));
+
+    // Every folder has its own UID namespace: a Sent UID compared against the
+    // INBOX cursor is not new mail, it is the user's own old mail. This is the
+    // regression that filled the bell with sent items after the import
+    // refactor dropped the per-folder guard.
+    for folder in ["Sent", "Trash", "Spam", "Archive", "Drafts", "[Gmail]/All Mail"] {
+        assert!(
+            !is_new_arrival(folder, 9999, steady),
+            "{folder} must never raise a new-mail notification"
+        );
+    }
+}
+
+#[test]
+fn nothing_is_new_during_the_import() {
+    let importing = ImportPhase::new(0, false, false);
+    assert!(!is_new_arrival("INBOX", 1, importing));
+    // A resumed import (cursor advanced, progress record present, no marker)
+    // stays quiet: the backlog is history, not a delivery.
+    let resumed = ImportPhase::new(900, false, true);
+    assert!(resumed.initial);
+    assert!(!is_new_arrival("INBOX", 901, resumed));
+}
+
+#[test]
+fn a_uid_at_or_below_the_cursor_is_not_new() {
+    let steady = ImportPhase::new(100, true, false);
+    assert!(!is_new_arrival("INBOX", 100, steady));
+    assert!(!is_new_arrival("INBOX", 42, steady));
+}
+
+#[tokio::test]
+async fn imported_sender_count_only_counts_contacts_the_import_made() {
+    let pool = fresh_pool().await;
+    let started_at = "2026-01-01 00:00:00";
+
+    // Sender the import created.
+    upsert_contact(&pool, "imported@example.com", Some("Old"), false, true)
+        .await
+        .unwrap();
+    // Sender that was already in the book (first_contact predates the import).
+    upsert_contact(&pool, "already@example.com", Some("Known"), false, false)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE contacts SET first_contact = '2025-06-01 00:00:00' WHERE id LIKE 'c_already%'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    // A stranger waiting at the Gate is not "auto-approved".
+    upsert_contact(&pool, "stranger@example.com", Some("New"), false, false)
+        .await
+        .unwrap();
+
+    assert_eq!(count_imported_senders(&pool, started_at).await.unwrap(), 1);
+}
+
+#[tokio::test]
+async fn the_import_marker_is_per_account() {
+    let pool = fresh_pool().await;
+    assert!(!import_completed(&pool, "acct_a").await.unwrap());
+    persist_import_summary(
+        &pool,
+        "acct_a",
+        &sendpalm_app_lib::services::ImportSummaryReport {
+            messages: 1,
+            senders: 1,
+            completed_at: chrono::Utc::now().to_rfc3339(),
+        },
+    )
+    .await;
+    // A summary alone must not mark the import finished — only the completion
+    // marker does, and only for that account.
+    assert!(!import_completed(&pool, "acct_a").await.unwrap());
+    assert!(!import_completed(&pool, "acct_b").await.unwrap());
 }

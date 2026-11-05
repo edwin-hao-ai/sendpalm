@@ -795,8 +795,9 @@ export async function countGateCandidates(): Promise<number> {
 export const RECENT_UNREAD_DAYS = 30;
 
 /** Ceiling on the recent-unread scan. 2,000 unread messages in 30 days is
- *  already far past the point where a precise number helps. */
-const RECENT_UNREAD_CAP = 2000;
+ *  already far past the point where a precise number helps — and past it the
+ *  UI must render `2000+`, not a number the query cannot vouch for. */
+export const RECENT_UNREAD_CAP = 2000;
 
 /** Unread Imbox mail received in the last `days` days. */
 export async function countRecentUnreadImbox(

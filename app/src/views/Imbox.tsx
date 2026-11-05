@@ -28,6 +28,7 @@ import {
 import {
   countGatePending,
   countRecentUnreadImbox,
+  RECENT_UNREAD_CAP,
   countUnreadNewsletters,
   listContacts,
   listPileMessages,
@@ -151,19 +152,12 @@ export function Imbox() {
   // putting that on the badge would give the user a number they can never
   // clear. Older unread mail stays in the list — the header states both
   // numbers so the difference is explicit rather than mysterious.
+  // Refetched from the two existing refresh effects below (hard + soft), not
+  // from an effect of its own: three tick handlers for one counter is how
+  // this view grew duplicated refresh logic before.
   const [recentUnread, { refetch: refetchRecentUnread }] = createResource(() =>
     countRecentUnreadImbox(new Date().toISOString()),
   );
-  let _recentSkipMount = true;
-  createEffect(() => {
-    refreshTick();
-    softRefreshTick();
-    if (_recentSkipMount) {
-      _recentSkipMount = false;
-      return;
-    }
-    void refetchRecentUnread();
-  });
 
   // Bucket-changing actions (trash, archive, spam, …) call
   // bumpRefreshTick() in MessagePanel. The high-frequency sync ticks
@@ -225,6 +219,7 @@ export function Imbox() {
     void seenPaged.refresh();
     void refetchPiles();
     void refetchContacts();
+    void refetchRecentUnread();
   });
 
   // Soft refresh: sync events and single-row actions only need counters and
@@ -237,6 +232,9 @@ export function Imbox() {
     }
     void refetchPiles();
     void refetchContacts();
+    // The 30-day window slides: a message that crossed out of it must stop
+    // counting even when no new mail arrived.
+    void refetchRecentUnread();
   });
 
   /* ── Contact map (for first-time badge + inline approve) ───────── */
@@ -1524,6 +1522,22 @@ function ImboxHeader(props: {
   // On the phone the 专注回复 entry lives inside the 待处理 sheet — keeping
   // a third header button there squeezed the counts onto a second line.
   const { isMobile } = useViewport();
+
+  /** `2000+` once the recent-unread query hit its cap — the query cannot
+   *  vouch for a precise number past it, and printing one would be a guess
+   *  dressed as a fact. */
+  const recentLabel = () =>
+    props.recentUnread >= RECENT_UNREAD_CAP
+      ? `${RECENT_UNREAD_CAP}+`
+      : String(props.recentUnread);
+
+  /** Unread mail older than the window. Unknown when the recent count is
+   *  capped (the remainder may all be inside the window), so we say nothing
+   *  rather than subtract two numbers that do not correspond. */
+  const olderUnread = () => {
+    if (props.recentUnread >= RECENT_UNREAD_CAP) return 0;
+    return Math.max(0, props.newCount - props.recentUnread);
+  };
   return (
     <>
       {/* Scoped keyframes — animations.css is owned by the styles group;
@@ -1548,28 +1562,28 @@ function ImboxHeader(props: {
                 when={!isMobile()}
                 fallback={
                   <>
-                    {props.recentUnread} 封待读
-                    <Show when={props.newCount > props.recentUnread}>
+                    {recentLabel()} 封待读
+                    <Show when={olderUnread() > 0}>
                       <span
                         data-imbox-older-unread
                         style={{ color: "var(--text-muted)" }}
                       >
                         {" "}
-                        · 更早 {props.newCount - props.recentUnread} 封未读
+                        · 更早 {olderUnread()} 封未读
                       </span>
                     </Show>
                   </>
                 }
               >
-                最近 30 天 {props.recentUnread} 封待读 ·{" "}
+                最近 30 天 {recentLabel()} 封待读 ·{" "}
                 {props.previouslySeenCount} 已读 · {props.total} 总数
-                <Show when={props.newCount > props.recentUnread}>
+                <Show when={olderUnread() > 0}>
                   <span
                     data-imbox-older-unread
                     style={{ color: "var(--text-muted)" }}
                   >
                     {" "}
-                    · 更早 {props.newCount - props.recentUnread} 封未读
+                    · 更早 {olderUnread()} 封未读
                   </span>
                 </Show>
               </Show>

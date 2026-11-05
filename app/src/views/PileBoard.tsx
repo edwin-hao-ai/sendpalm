@@ -261,6 +261,7 @@ export function PileBoard(props: { pileId: PileId }) {
     >
       <div style={{ "max-width": "720px", margin: "0 auto" }}>
         <PageHeader
+          titleOnMobile
           title={meta().title}
           description={<p>{meta().subtitle}</p>}
           actions={

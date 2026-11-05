@@ -101,4 +101,18 @@ describe("first-import toast", () => {
     fire({ new_messages: 2, new_message_ids: ["m1", "m2"] });
     expect(messages() ?? []).toEqual([]);
   });
+
+  it("does not also fire the catch-up surge toast during an import", () => {
+    // The import toast says "none of these will ask you for a decision"; a
+    // second "3,120 封新邮件 · 去批量整理" pointing at an empty Screener
+    // contradicts it.
+    fire({ new_messages: 3120, import_summary: { messages: 3120, senders: 214 } });
+    expect(messages()).toHaveLength(1);
+    expect(messages()[0]).toContain("已静默导入");
+  });
+
+  it("still fires the surge toast when a big batch is ordinary mail", () => {
+    fire({ new_messages: 120, new_message_ids: ["a", "b"] });
+    expect(messages()[0]).toContain("同步收到 120 封新邮件");
+  });
 });

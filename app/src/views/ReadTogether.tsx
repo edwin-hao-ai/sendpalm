@@ -94,7 +94,7 @@ export function ReadTogether() {
   });
   const [index, setIndex] = createSignal(0);
 
-  // `auto` follows the queue size; the user can override either way.
+  // `auto` follows the queue size; 逐封读 / 批量读 switch it explicitly.
   const [mode, setMode] = createSignal<"auto" | "single" | "batch">("auto");
   const [batchBusy, setBatchBusy] = createSignal(false);
 
@@ -145,7 +145,9 @@ export function ReadTogether() {
   const currentId = createMemo(() => unread()[index()]?.id);
   const [currentFull] = createResource(
     currentId,
-    async (id) => (id ? await getMessage(id) : null),
+    // Batch mode never shows a body, so fetching one would undo the reason
+    // the mode exists.
+    async (id) => (id && !batch() ? await getMessage(id) : null),
   );
 
   // `.latest` keeps the previous message on screen while the next one
@@ -159,6 +161,7 @@ export function ReadTogether() {
   // Prefetch the next full body in the background so advancing is
   // instant once the current one is resolved.
   createEffect(() => {
+    if (batch()) return;
     const nextId = unread()[index() + 1]?.id;
     if (nextId) void getMessage(nextId).catch(() => {});
   });
@@ -269,18 +272,6 @@ export function ReadTogether() {
     await refetchAndAdvance("已移到回收站，全部读完了");
   };
 
-  // When the user advances past the current message, prefetch the next
-  // one's full body in the background. Cuts the perceived wait for
-  // body_html to appear on the next click.
-  createEffect(() => {
-    const list = unread();
-    const nextIdx = index() + 1;
-    const nextId = list[nextIdx]?.id;
-    if (nextId) {
-      void getMessage(nextId).catch(() => undefined);
-    }
-  });
-
   // Deferred iframe src: htmlEmailSrcdoc runs DOMPurify synchronously,
   // blocking the main thread for 200-600ms on an 80KB HTML body. Defer
   // the sanitize so the next-card click path (Next / n / space) doesn't
@@ -290,7 +281,7 @@ export function ReadTogether() {
   const [iframeSrc, setIframeSrc] = createSignal("");
   let pendingSanitize = 0;
   createEffect(() => {
-    const html = current()?.bodyHtml;
+    const html = batch() ? undefined : current()?.bodyHtml;
     if (!html || !html.trim()) {
       setIframeSrc("");
       return;
@@ -371,6 +362,7 @@ export function ReadTogether() {
           >
             <div style={{ "border-bottom": "0.5px solid var(--border)" }}>
               <PageHeader
+                titleOnMobile
                 title="一起读"
                 description={
                   <span
@@ -421,6 +413,26 @@ export function ReadTogether() {
                 }
                 actions={
                   <>
+                  <Show when={!batch() && unreadTotal() > READ_TOGETHER_BATCH_THRESHOLD}>
+                    <button
+                      data-batch-enter
+                      onClick={() => setMode("batch")}
+                      title="一次一屏地读"
+                      style={{
+                        padding: "6px 14px",
+                        "border-radius": "var(--radius-pill)",
+                        border: "0.5px solid var(--border)",
+                        background: "var(--paper-mid)",
+                        color: "var(--text-secondary)",
+                        "font-size": "var(--text-caption)",
+                        "font-weight": 700,
+                        "min-height": "36px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      批量读
+                    </button>
+                  </Show>
                   <Show when={batch()}>
                     <button
                       data-batch-single

@@ -164,10 +164,15 @@ export function startSyncEventBridge(): () => void {
       notifyBucket("trash", ids);
       notifyBucket("spam", ids);
     }
+    // The import tells its own story below; a "3,120 封新邮件 · 去批量整理"
+    // toast on top of it points at a Screener the import deliberately left
+    // empty.
+    const importing = Boolean(event.payload.import_summary);
+
     // Catch-up surge (e.g. sync resumed after weeks): a single cycle
     // delivering a big batch would otherwise land silently — offer the
     // bulk triage entry point right away.
-    if (event.payload.new_messages >= 50) {
+    if (event.payload.new_messages >= 50 && !importing) {
       showToast({
         message: `同步收到 ${event.payload.new_messages} 封新邮件`,
         kind: "info",

@@ -134,6 +134,7 @@ export function Agent() {
       {/* Header — prototype renders no inline mini-title; the page title
           is a real block-level H1 and the controls live on a second row. */}
       <PageHeader
+        titleOnMobile
         title="Agent"
         description={
           <span
