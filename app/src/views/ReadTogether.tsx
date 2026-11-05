@@ -57,12 +57,29 @@ import type { Contact, Message } from "../types";
 
 const READ_TOGETHER_PAGE = 200;
 
+/** Above this many unread cards, one-at-a-time reading stops being a
+ *  kindness. A freshly imported mailbox can hold thousands of unread
+ *  messages; clicking 「下一封」 through them is not "reading together", it's
+ *  a treadmill. Batch mode is the honest default past this size.
+ *
+ *  500 is the point where even a fast reader at 10s/message is facing an
+ *  hour-plus of clicking. */
+const READ_TOGETHER_BATCH_THRESHOLD = 500;
+
+/** Rows a batch screen renders (and flips to read) at a time. Bounded so the
+ *  list stays instant and the undo payload stays small. */
+const READ_TOGETHER_BATCH_PAGE = 50;
+
 export function ReadTogether() {
   const [contacts] = createResource(listContacts);
   // Lightweight list (no body) — fast page load even for a busy mailbox.
   // The page is re-fetched after every action, so a mailbox with more
   // than READ_TOGETHER_PAGE unread messages simply keeps feeding new
   // cards into the flow; there is no silent truncation.
+  // `total` is the real queue size. The loaded page is capped at
+  // READ_TOGETHER_PAGE, so the batch-mode threshold must look at the total —
+  // comparing against the page length would silently cap the decision at 200.
+  const [unreadTotal, setUnreadTotal] = createSignal(0);
   const [unreadRaw, { refetch: refetchUnread }] = createResource(async () => {
     const page = await listMessagesPaged({
       bucket: "imbox",
@@ -72,9 +89,14 @@ export function ReadTogether() {
       limit: READ_TOGETHER_PAGE,
       offset: 0,
     });
+    setUnreadTotal(page.total);
     return page.items;
   });
   const [index, setIndex] = createSignal(0);
+
+  // `auto` follows the queue size; the user can override either way.
+  const [mode, setMode] = createSignal<"auto" | "single" | "batch">("auto");
+  const [batchBusy, setBatchBusy] = createSignal(false);
 
   // Apply the same workflow / Gate filters the prototype uses so a
   // message the user has set aside, marked reply-later, or bubble-up'd
@@ -91,6 +113,31 @@ export function ReadTogether() {
       ? candidates.filter((m) => !m.isNewsletter)
       : candidates;
   });
+
+  /** Batch mode: forced by the user, or automatic past the threshold. */
+  const batch = createMemo(
+    () =>
+      mode() === "batch" ||
+      (mode() === "auto" && unreadTotal() > READ_TOGETHER_BATCH_THRESHOLD),
+  );
+
+  /** Flip a screenful of cards to read, with one undo for the batch. */
+  const markBatchRead = async () => {
+    const ids = unread()
+      .slice(0, READ_TOGETHER_BATCH_PAGE)
+      .map((m) => m.id);
+    if (ids.length === 0) return;
+    setBatchBusy(true);
+    try {
+      for (const id of ids) await markMessageUnread(id, false);
+      undoToast(`已把 ${ids.length} 封标为已读`, async () => {
+        for (const id of ids) await markMessageUnread(id, true);
+      });
+      await refetchAndAdvance();
+    } finally {
+      setBatchBusy(false);
+    }
+  };
 
   // The current card. The lightweight row is enough for the index/cursor
   // + sender info; we re-fetch the full row (with body/body_html) so the
@@ -333,9 +380,18 @@ export function ReadTogether() {
                       gap: "var(--space-2)",
                     }}
                   >
-                    <span>
-                      第 {index() + 1} / {unread().length} 封
-                    </span>
+                    <Show
+                      when={batch()}
+                      fallback={
+                        <span>
+                          第 {index() + 1} / {unread().length} 封
+                        </span>
+                      }
+                    >
+                      <span data-batch-copy>
+                        待读 {unreadTotal()} 封 · 一次一封读不完
+                      </span>
+                    </Show>
                     <button
                       type="button"
                       data-skip-newsletter
@@ -364,6 +420,27 @@ export function ReadTogether() {
                   </span>
                 }
                 actions={
+                  <>
+                  <Show when={batch()}>
+                    <button
+                      data-batch-single
+                      onClick={() => setMode("single")}
+                      title="改为逐封读"
+                      style={{
+                        padding: "6px 14px",
+                        "border-radius": "var(--radius-pill)",
+                        border: "0.5px solid var(--border)",
+                        background: "var(--paper-mid)",
+                        color: "var(--text-secondary)",
+                        "font-size": "var(--text-caption)",
+                        "font-weight": 700,
+                        "min-height": "36px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      逐封读
+                    </button>
+                  </Show>
                   <button
                     onClick={close}
                     title="关闭一起读"
@@ -383,6 +460,7 @@ export function ReadTogether() {
                   >
                     <Icon name="ph-x" size={18} />
                   </button>
+                  </>
                 }
               />
             </div>
@@ -396,6 +474,15 @@ export function ReadTogether() {
                 "flex-direction": "column",
               }}
             >
+              <Show when={batch()}>
+                <BatchTriage
+                  items={unread()}
+                  contactOf={(m) => contactMap().get(m.pid)}
+                  busy={batchBusy()}
+                  onMarkRead={() => void markBatchRead()}
+                />
+              </Show>
+              <Show when={!batch()}>
               <div
                 style={{
                   // Wide reading column: emails at 680px waste half of a
@@ -571,8 +658,10 @@ export function ReadTogether() {
                   </Show>
                 </Show>
               </div>
+              </Show>
             </div>
 
+            <Show when={!batch()}>
             <div
               style={{
                 display: "flex",
@@ -619,9 +708,140 @@ export function ReadTogether() {
                 onClick={() => void trash()}
               />
             </div>
+            </Show>
           </Show>
         </Show>
       </Show>
+    </div>
+  );
+}
+
+/** Batch mode — a screenful of one-line cards instead of one card at a time.
+ *
+ *  Reading 3,000 messages one by one is not a feature, it's a treadmill. This
+ *  keeps the same single-column sheet and the same 「标为已读」 mental model,
+ *  just with fifty rows per screen and one undo for the batch. Bodies are
+ *  never fetched here: that is the entire point of the mode. */
+function BatchTriage(props: {
+  items: Message[];
+  contactOf: (m: Message) => Contact | undefined;
+  busy: boolean;
+  onMarkRead: () => void;
+}) {
+  const rows = () => props.items.slice(0, READ_TOGETHER_BATCH_PAGE);
+  return (
+    <div
+      data-batch-triage
+      style={{
+        flex: 1,
+        display: "flex",
+        "flex-direction": "column",
+        "min-height": 0,
+      }}
+    >
+      <div style={{ flex: 1, overflow: "auto", padding: "var(--space-3)" }}>
+        <div
+          style={{
+            "max-width": "960px",
+            margin: "0 auto",
+            background: "var(--paper-light)",
+            border: "0.5px solid var(--border)",
+            "border-radius": "var(--radius-lg)",
+            overflow: "hidden",
+          }}
+        >
+          <For each={rows()}>
+            {(m) => (
+              <div
+                data-batch-row={m.id}
+                style={{
+                  display: "flex",
+                  "align-items": "center",
+                  gap: "var(--space-3)",
+                  padding: "var(--space-3) var(--space-4)",
+                  "border-bottom": "0.5px solid var(--border)",
+                }}
+              >
+                <Avatar name={props.contactOf(m)?.name ?? "?"} size={32} />
+                <div style={{ flex: 1, "min-width": 0 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      "align-items": "center",
+                      gap: "var(--space-2)",
+                    }}
+                  >
+                    <strong
+                      style={{
+                        "font-size": "var(--text-body-sm)",
+                        overflow: "hidden",
+                        "text-overflow": "ellipsis",
+                        "white-space": "nowrap",
+                      }}
+                    >
+                      {props.contactOf(m)?.name ?? m.pid}
+                    </strong>
+                    <span
+                      style={{
+                        "font-size": "var(--text-micro)",
+                        color: "var(--text-muted)",
+                        "white-space": "nowrap",
+                      }}
+                    >
+                      {formatMessageDate(m, profileTz(), "list").primary.value}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      "font-size": "var(--text-caption)",
+                      color: "var(--text-secondary)",
+                      overflow: "hidden",
+                      "text-overflow": "ellipsis",
+                      "white-space": "nowrap",
+                    }}
+                  >
+                    {m.subj || "(无主题)"}
+                  </div>
+                </div>
+              </div>
+            )}
+          </For>
+        </div>
+      </div>
+      <div
+        style={{
+          display: "flex",
+          "align-items": "center",
+          "justify-content": "center",
+          gap: "var(--space-3)",
+          padding: "var(--space-4) var(--space-5)",
+          "border-top": "0.5px solid var(--glass-border)",
+          background: "var(--glass-bg)",
+        }}
+      >
+        <button
+          data-batch-mark-read
+          onClick={props.onMarkRead}
+          disabled={props.busy || rows().length === 0}
+          style={{
+            display: "inline-flex",
+            "align-items": "center",
+            gap: "6px",
+            padding: "12px 18px",
+            "min-height": "44px",
+            "border-radius": "var(--radius-md)",
+            border: "none",
+            background: "var(--palm)",
+            color: "#fff",
+            "font-size": "var(--text-caption)",
+            "font-weight": "700",
+            cursor: props.busy ? "default" : "pointer",
+            opacity: props.busy ? 0.6 : 1,
+          }}
+        >
+          <Icon name="ph-check" size={16} />这 {rows().length} 封标为已读
+        </button>
+      </div>
     </div>
   );
 }

@@ -333,3 +333,40 @@ test("场景：历史未读不计入红点，但仍可在列表里找到", async
   await page.locator("[data-feed-card='bundle']").click();
   await expect(page.getByText("历史邮件 1")).toBeVisible();
 });
+
+/* ── 8. 一起读的批量模式 ──────────────────────────────────────────── */
+
+/**
+ * 导入之后待读可能是几千封。逐封读在这种规模下不是功能，是跑步机：一次
+ * 点一封要一个多小时。超过 500 封时一起读自动切成批量模式——同样是「标
+ * 为已读」，一次一屏，带一次撤销。
+ */
+test("场景：待读超过 500 封时一起读自动进批量模式", async ({ page }) => {
+  const messages = Array.from({ length: 520 }, (_, i) =>
+    seedMessage({
+      id: `bulk${i}`,
+      pid: "c_pal",
+      subj: `待读邮件 ${i + 1}`,
+      sentAt: new Date(Date.now() - i * 60_000).toISOString(),
+      st: new Date(Date.now() - i * 60_000).toISOString(),
+    }),
+  );
+  await boot(page, [seedContact("c_pal", "老朋友")], messages);
+
+  await page.getByRole("button", { name: "一起读" }).click();
+
+  // 自动进入批量模式：不再有单封卡片和「下一封」。
+  await expect(page.locator("[data-batch-triage]")).toBeVisible({
+    timeout: 10_000,
+  });
+  await expect(page.locator("[data-batch-copy]")).toContainText("一次一封读不完");
+  await expect(
+    page.getByRole("button", { name: /这 50 封标为已读/ }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: /下一封/ })).toHaveCount(0);
+
+  // 想一封一封读的人可以切回去（选择权在用户手里，不是我们替他决定）。
+  await page.locator("[data-batch-single]").click();
+  await expect(page.getByRole("button", { name: /下一封/ })).toBeVisible();
+  await expect(page.locator("[data-batch-triage]")).toHaveCount(0);
+});
