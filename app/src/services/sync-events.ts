@@ -26,6 +26,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { IS_BROWSER } from "./tauri-shim";
 import { bumpSoftRefreshTick, showToast, setView } from "../stores/ui";
+import { formatThousands } from "../utils/counts";
 import type { Message } from "../types";
 
 export interface SyncReport {
@@ -39,6 +40,8 @@ export interface SyncReport {
    *  Empty when new_messages == 0. Frontend prepends these to paginated
    *  lists instead of triggering a full LIMIT 100 refetch. */
   new_message_ids?: string[];
+  /** Present only on the pass that imported the account's history. */
+  import_summary?: { messages: number; senders: number } | null;
   error?: string | null;
 }
 
@@ -143,6 +146,10 @@ export function startSyncEventBridge(): () => void {
   }
 
   let unlisten: (() => void) | undefined;
+  // One import per account per session. A resumed import (network drop
+  // mid-backfill) re-reports a *larger* tally, and saying "imported 900
+  // messages" twice reads as a bug rather than progress.
+  const reportedImports = new Set<string>();
 
   listen<SyncReport>("sync:new-messages", (event) => {
     const ids = event.payload.new_message_ids ?? [];
@@ -169,6 +176,27 @@ export function startSyncEventBridge(): () => void {
           label: "去批量整理",
           run: () => {
             setView("screener");
+          },
+        },
+      });
+    }
+
+    // First import finished. Say what happened instead of letting the mailbox
+    // silently reorganise itself: "3,120 messages are in, 214 senders were
+    // approved for you, none of them will ask you for a decision."
+    const imp = event.payload.import_summary;
+    if (imp && imp.messages > 0 && !reportedImports.has(event.payload.account_id)) {
+      reportedImports.add(event.payload.account_id);
+      showToast({
+        message: imp.senders
+          ? `已静默导入 ${formatThousands(imp.messages)} 封历史邮件 · 其中 ${formatThousands(imp.senders)} 位发件人已自动通过，不会进入筛选台`
+          : `已静默导入 ${formatThousands(imp.messages)} 封历史邮件`,
+        kind: "info",
+        ttlMs: 15_000,
+        action: {
+          label: "查看历史发件人",
+          run: () => {
+            setView("contacts");
           },
         },
       });

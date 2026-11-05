@@ -124,6 +124,23 @@ export async function getSyncState(accountId: string): Promise<SyncStateDto> {
   );
 }
 
+/** What the account's first sync imported (Settings → Accounts).
+ *
+ *  Returns `null` when the account has never imported, so the row stays
+ *  silent instead of printing "0 封". */
+export interface ImportSummaryDto {
+  /** Messages written to the local store during the import. */
+  messages: number;
+  /** Distinct senders auto-screened by the import (they never reach the Gate). */
+  senders: number;
+}
+
+export async function getImportSummary(
+  accountId: string,
+): Promise<ImportSummaryDto | null> {
+  return safeInvoke<ImportSummaryDto>("get_import_summary", { accountId });
+}
+
 export async function listProviders(): Promise<EmailProvider[]> {
   const r = await safeInvoke<EmailProvider[]>("list_email_providers");
   return r ?? [];

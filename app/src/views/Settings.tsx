@@ -71,9 +71,11 @@ import {
   listProviders as fetchProviders,
   vaultSave,
   vaultDelete,
+  getImportSummary,
   getSyncState,
   syncNow,
 } from "../services/backend";
+import { formatThousands } from "../utils/counts";
 import { ensureNotificationPermission } from "../services/notifications";
 import { setLocale, type Locale } from "../i18n";
 import {
@@ -694,6 +696,33 @@ function SyncStatus(props: { accountId: string }) {
   );
 }
 
+/** One line of "what the first import did", so the numbers survive long
+ *  after the one-shot toast is gone. Renders nothing in browser mode (no
+ *  IMAP import) and for accounts that have never imported. */
+function ImportStatus(props: { accountId: string }) {
+  const [summary] = createResource(
+    () => props.accountId,
+    (id) => getImportSummary(id),
+  );
+  return (
+    <Show when={summary()}>
+      {(s) => (
+        <p
+          data-import-status=""
+          style={{
+            margin: "2px 0 0",
+            "font-size": "var(--text-micro)",
+            color: "var(--text-muted)",
+          }}
+        >
+          历史导入 {formatThousands(s().messages)} 封 ·{" "}
+          {formatThousands(s().senders)} 位发件人已通过
+        </p>
+      )}
+    </Show>
+  );
+}
+
 function formatRelative(iso: string): string {
   if (!iso) return "—";
   const t = Date.parse(iso);
@@ -948,6 +977,7 @@ function AccountsTab() {
                     {ACCOUNT_STATUS_LABELS[a.status] ?? a.status}
                     <SyncStatus accountId={a.id} />
                   </p>
+                  <ImportStatus accountId={a.id} />
                 </div>
                 <button
                   onClick={() => void syncAccount(a)}

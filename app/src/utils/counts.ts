@@ -18,3 +18,20 @@ export const GATE_COUNT_LIMIT = 500;
 export function formatGateCount(count: number): string {
   return count >= GATE_COUNT_LIMIT ? `${GATE_COUNT_LIMIT}+` : String(count);
 }
+
+/** Thousands separators, locale-independent.
+ *
+ *  `toLocaleString()` follows the OS locale, so the same build would render
+ *  `3,120` on one machine and `3120` on another. User-facing counts in this
+ *  app are fixed to the comma form. */
+export function formatThousands(n: number): string {
+  const whole = Math.trunc(n);
+  const sign = whole < 0 ? "-" : "";
+  const digits = Math.abs(whole).toString();
+  let out = "";
+  for (let i = 0; i < digits.length; i++) {
+    if (i > 0 && (digits.length - i) % 3 === 0) out += ",";
+    out += digits[i];
+  }
+  return sign + out;
+}

@@ -191,6 +191,10 @@ if (!IS_TAURI && typeof window !== "undefined") {
             last_synced_at: "未连接（浏览器模式）",
           };
           break;
+        case "get_import_summary":
+          // Browser mode has no IMAP import; the Settings row hides itself.
+          result = null;
+          break;
         default:
           result = null;
       }
