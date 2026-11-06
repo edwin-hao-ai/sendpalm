@@ -24,6 +24,68 @@ pub fn install_crypto_provider() {
     }
 }
 
+/// Autostart plugin — desktop only. iOS has no "open at login" concept, and
+/// `tauri_plugin_autostart` does not even expose `MacosLauncher` there, so the
+/// call has to disappear from the mobile build rather than be a no-op.
+#[cfg(desktop)]
+fn desktop_autostart() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri_plugin_autostart::init(
+        tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+        Some(vec!["--tray"]),
+    )
+}
+
+/// Mobile counterpart: iOS has no autostart, but the builder chain is shared,
+/// so hand it a no-op plugin instead of branching the whole chain.
+#[cfg(not(desktop))]
+fn desktop_autostart() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri::plugin::Builder::new("sendpalm-no-autostart").build()
+}
+
+/// Is the MCP gateway allowed to run at boot?
+///
+/// The preference lives in the desktop tray module; on iOS there is no tray,
+/// and the gateway is localhost tooling the phone never serves.
+#[cfg(desktop)]
+fn background_prefs_keep_gateway(app: &tauri::AppHandle) -> bool {
+    crate::services::tray::read_background_prefs(app).keep_gateway
+}
+
+#[cfg(not(desktop))]
+fn background_prefs_keep_gateway(_app: &tauri::AppHandle) -> bool {
+    false
+}
+
+/// System tray + close-to-tray behaviour. Compiles out on mobile: `tauri`
+/// omits `menu` and `tray` for iOS/Android targets.
+#[cfg(desktop)]
+fn setup_tray_for_desktop(app: &tauri::App) {
+    use tauri::Manager;
+    if let Some(window) = app.get_webview_window("main") {
+        let handle = app.handle().clone();
+        window.on_window_event(move |event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if crate::services::tray::intercept_close(&handle) {
+                    api.prevent_close();
+                }
+            }
+        });
+    }
+    tauri::async_runtime::spawn({
+        let handle = app.handle().clone();
+        async move {
+            match crate::services::sync_loop::open_pool().await {
+                Ok(pool) => {
+                    if let Err(e) = crate::services::tray::setup_tray(&handle, pool) {
+                        eprintln!("[tray] setup failed: {e}");
+                    }
+                }
+                Err(e) => eprintln!("[tray] no db pool: {e}"),
+            }
+        }
+    });
+}
+
 pub fn run() {
     install_crypto_provider();
 
@@ -249,8 +311,7 @@ pub fn run() {
             {
                 let mcp_state = services::mcp::McpGatewayState::default();
                 app.manage(mcp_state.clone());
-                let gateway_enabled =
-                    services::tray::read_background_prefs(app.handle()).keep_gateway;
+                let gateway_enabled = background_prefs_keep_gateway(app.handle());
                 if !gateway_enabled {
                     eprintln!("[mcp] gateway disabled by preferences.background.keepGateway");
                 }
@@ -275,37 +336,8 @@ pub fn run() {
                 });
             }
             // System tray + close-to-tray (design: docs/design/tray-mockup.html).
-            // The gateway start above already ran; if keepGateway is off the
-            // MCP block still started it — tray prefs only gate *future*
-            // behavior at boot, so nothing to undo here for v1.
-            {
-                use tauri::Manager;
-                if let Some(window) = app.get_webview_window("main") {
-                    let handle = app.handle().clone();
-                    window.on_window_event(move |event| {
-                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                            if crate::services::tray::intercept_close(&handle) {
-                                api.prevent_close();
-                            }
-                        }
-                    });
-                }
-                tauri::async_runtime::spawn({
-                    let handle = app.handle().clone();
-                    async move {
-                        match crate::services::sync_loop::open_pool().await {
-                            Ok(pool) => {
-                                if let Err(e) =
-                                    crate::services::tray::setup_tray(&handle, pool)
-                                {
-                                    eprintln!("[tray] setup failed: {e}");
-                                }
-                            }
-                            Err(e) => eprintln!("[tray] no db pool: {e}"),
-                        }
-                    }
-                });
-            }
+            #[cfg(desktop)]
+            setup_tray_for_desktop(&app);
             eprintln!("[sendpalm] setup done");
             Ok(())
         })
@@ -321,10 +353,9 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec!["--tray"]),
-        ))
+        // Desktop-only: iOS has no autostart concept and the plugin does not
+        // expose `MacosLauncher` there.
+        .plugin(desktop_autostart())
         .invoke_handler(tauri::generate_handler![
             commands::sync_now,
             commands::list_mailboxes,

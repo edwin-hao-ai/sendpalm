@@ -22,6 +22,10 @@ pub mod scheduled_send;
 pub mod smtp;
 pub mod state;
 pub mod sync_loop;
+// Tray + menu + autostart are desktop-only APIs; `tauri` compiles them out on
+// iOS/Android, so the module must be compiled out too (it did not, and the iOS
+// build failed with "could not find `tray` in `tauri`").
+#[cfg(desktop)]
 pub mod tray;
 pub mod vault;
 
