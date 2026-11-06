@@ -5,7 +5,7 @@
 
 ## 状态
 
-- **分支**：`feat/ui-polish-round`，比 main 多 **20 个提交**，工作树干净
+- **分支**：`feat/ui-polish-round`（本轮新增 11 个提交；`git rev-list --count main..HEAD` 查总数），工作树干净
   （只剩仓库里本来就有的未跟踪文件：`.superpowers/.superpowers/`、`dist/.mddock/`、
   `kimi-export-session_*.md`、`prototypes/`）。
 - **测试**：typecheck / lint 干净；vitest 663；Playwright 145 通过 / 1 skipped；
