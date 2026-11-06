@@ -3635,3 +3635,23 @@ hover 小三角是「两个相邻热区、语义相反、一个 64px 一个 20px
 顺带留下两个门控 IMAP 诊断（`probe_envelope_date_for_uid` /
 `probe_newest_uids_in_inbox`，可选 folder）——「服务器说的」和「库里存的」
 对不上时，靠它们一次定位。
+
+### 2026-11-06 iOS 构建打通（首帧仍是黑屏）
+
+之前 iOS 从来构建不过去，一路修掉了四道门：
+
+1. **缺 27.2 模拟器 runtime**：Xcode 是 27.2，本机只有 26.5 / 27.1，cargo-mobile2
+   在 Rust 编译前就退出。清盘（DeviceSupport 20G + DerivedData 6G + 26.5 runtime）
+   腾出 40G 后装了 27.2。
+2. **部署目标 14.0**：Xcode 27 最低 15.0。`bundle.iOS.minimumSystemVersion` 设 15.0。
+3. **`pnpm-native: command not found`**：2.11 版 CLI 生成的构建阶段用这个 shim，
+   2.12 的 crate 已经不用了。`@tauri-apps/cli` 升到 2.12.4 后重新生成工程。
+4. **`cargo metadata` 失败**：Xcode 的构建阶段读不到 `RUSTUP_TOOLCHAIN`，而这台
+   机器 rustup 没有默认 toolchain —— `rustup default stable`（机器级设置）。
+
+另外 iOS 侧的 Rust 之前就是坏的：托盘 / 开机自启用了 iOS 上没有的
+`tauri::menu` / `tauri::tray`，9 个错误。已按平台切开。
+
+现在 `scripts/verify-ios.sh` 能 archive → install → launch（截图在
+`docs/ios-screenshots/`）。**但首帧是黑屏**，`simctl launch` 返回了 PID、进程
+活着、没有崩溃报告 —— 下一个要查的是 WKWebView 没有加载到内置前端资源。
