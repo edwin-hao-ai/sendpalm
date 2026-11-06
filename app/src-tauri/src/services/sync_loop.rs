@@ -1070,6 +1070,28 @@ async fn sync_one(
     Ok((total_inserted, inbox_cursor, inbox_uid_validity))
 }
 
+/// Highest IMAP UID actually persisted for a folder, or 0 when the folder has
+/// no identified rows yet.
+///
+/// This is the honest resume point when a cursor turns out to be out of
+/// range: everything above it is mail we never imported.
+async fn highest_stored_uid(
+    pool: &SqlitePool,
+    account_id: &str,
+    folder: &str,
+) -> Result<u32, String> {
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT COALESCE(MAX(imap_uid), 0) FROM messages \
+          WHERE ac = $1 AND imap_folder = $2",
+    )
+    .bind(account_id)
+    .bind(folder)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("highest stored uid for {folder}: {e}"))?;
+    Ok(row.map(|(n,)| n.max(0) as u32).unwrap_or(0))
+}
+
 async fn load_folder_sync_state(pool: &SqlitePool, key: &str) -> Result<(u32, u32), String> {
     let row: Option<(String,)> = sqlx::query_as("SELECT value FROM app_kv WHERE key = $1")
         .bind(key)
@@ -1273,6 +1295,27 @@ pub fn should_continue_after_chunk(
     chunk_size >= crate::services::imap::MAX_PER_TICK
 }
 
+/// Is the persisted cursor beyond the end of the mailbox?
+///
+/// IMAP says UIDs only ever grow — but that is per UIDVALIDITY, and servers
+/// do recreate a mailbox underneath you while keeping UIDVALIDITY the same
+/// (Feishu re-indexed this account: the cursor had walked to 201,683 against
+/// a UIDNEXT that is now 7,724). Once that happens the cursor is past every
+/// message that will ever exist, `should_continue_after_chunk` immediately
+/// says "done", and the sync reports success while importing nothing — new
+/// mail silently stops arriving and the list freezes at the last imported
+/// day.
+///
+/// Returns the cursor to restart from (`uid_next - 1`) when the stored one is
+/// out of range, `None` when it is fine.
+pub fn recover_cursor_if_past_end(cursor: u32, uid_next: Option<u32>) -> Option<u32> {
+    let un = uid_next?;
+    if cursor > 0 && cursor >= un {
+        return Some(un.saturating_sub(1));
+    }
+    None
+}
+
 /// Without UIDNEXT, a folder whose lowest UIDs were all expunged would
 /// loop forever on chunk 1: every pass refetches the same empty range and
 /// the legacy "partial chunk" heuristic stops after one chunk. Allow a
@@ -1332,9 +1375,36 @@ async fn sync_folder(
     // folder still has history waiting.
     let mut complete = true;
 
+    let mut first_bundle = true;
+    let mut tried_recovery = false;
     loop {
         let bundle = client.sync(folder, cursor).await?;
         uid_validity = bundle.uid_validity;
+
+        // The stored cursor is past the end of this mailbox. Trust the server,
+        // rewind to the highest message we actually hold, and walk forward
+        // again. Guarded so a pathological server cannot loop us here.
+        if first_bundle {
+            first_bundle = false;
+            if !tried_recovery {
+                if let Some(restart) = recover_cursor_if_past_end(cursor, bundle.uid_next) {
+                    tried_recovery = true;
+                    let highest = highest_stored_uid(pool, &account.account_id, folder)
+                        .await
+                        .unwrap_or(0);
+                    let target = highest.min(restart);
+                    eprintln!(
+                        "[sync] folder={folder} cursor={cursor} is past uid_next={:?}; \
+                         rewinding to {target} (highest stored UID {highest})",
+                        bundle.uid_next
+                    );
+                    cursor = target;
+                    let _ =
+                        save_folder_sync_state(pool, state_key, cursor, uid_validity).await;
+                    continue;
+                }
+            }
+        }
         // Empty chunk means every UID in the requested range was deleted/expired
         // — skip past it and try the next range. The previous implementation
         // broke here, which is what left ~3500 messages unbackfilled on the
@@ -1343,6 +1413,11 @@ async fn sync_folder(
             consecutive_empty_chunks += 1;
             cursor = cursor
                 .saturating_add(crate::services::imap::MAX_PER_TICK);
+            // Do not creep past the end: a sparse mailbox walked in 200-UID
+            // steps can otherwise overshoot UIDNEXT and never look back.
+            if let Some(un) = bundle.uid_next {
+                cursor = cursor.min(un.saturating_sub(1));
+            }
             // Persist so we resume from the new cursor even if a later chunk
             // fails.
             let _ = save_folder_sync_state(pool, state_key, cursor, uid_validity).await;

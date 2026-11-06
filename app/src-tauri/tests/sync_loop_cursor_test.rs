@@ -21,3 +21,38 @@ fn cursor_advances_past_full_chunk() {
     assert_eq!(inserted, 3);
     assert_eq!(cursor, 202);
 }
+/* ── Cursor past the end of the mailbox ─────────────────────────────── */
+
+use sendpalm_app_lib::services::sync_loop::recover_cursor_if_past_end;
+
+#[test]
+fn a_normal_cursor_is_left_alone() {
+    // Caught up or mid-mailbox: nothing to recover.
+    assert_eq!(recover_cursor_if_past_end(7000, Some(7724)), None);
+    assert_eq!(recover_cursor_if_past_end(0, Some(7724)), None);
+    // Servers without UIDNEXT keep the legacy walk.
+    assert_eq!(recover_cursor_if_past_end(7000, None), None);
+}
+
+#[test]
+fn a_cursor_at_the_end_is_left_alone() {
+    // cursor == uid_next - 1 is exactly "caught up".
+    assert_eq!(recover_cursor_if_past_end(7723, Some(7724)), None);
+}
+
+#[test]
+fn a_cursor_past_the_end_rewinds_to_the_last_real_uid() {
+    // The Feishu case: the mailbox was re-indexed under the same UIDVALIDITY,
+    // so the stored cursor (201,683) sits past every message that will ever
+    // exist (uid_next 7,724). Before this, sync reported success and imported
+    // nothing — new mail silently stopped arriving.
+    assert_eq!(recover_cursor_if_past_end(201_683, Some(7_724)), Some(7_723));
+    assert_eq!(recover_cursor_if_past_end(7_724, Some(7_724)), Some(7_723));
+}
+
+#[test]
+fn recovery_never_underflows_an_empty_mailbox() {
+    // uid_next == 1 means an empty mailbox; -1 must clamp to 0, not wrap.
+    assert_eq!(recover_cursor_if_past_end(500, Some(1)), Some(0));
+    assert_eq!(recover_cursor_if_past_end(500, Some(0)), Some(0));
+}
