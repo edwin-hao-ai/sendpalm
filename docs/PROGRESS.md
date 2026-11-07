@@ -3700,3 +3700,22 @@ hover 小三角是「两个相邻热区、语义相反、一个 64px 一个 20px
 验证：TS 718（+21 应用锁用例）、Playwright 150 通过（新增 3 条：锁住 shell、
 错 PIN 不放开、恢复码可解锁；2 条失败仍是 base commit 上的既存问题）、
 typecheck / lint / build 干净。
+
+### 2026-11-08（续 2）两个「整个界面变黑」的真 bug
+
+跑全量 e2e 时那两条长期被判为"既存失败"的用例，其实都是真问题：
+
+- **缺失头像名字 = 黑屏**：`Avatar` 直接吃数据行，某个联系人没有 `name` 时
+  `hashHue(undefined)` 抛 `Cannot read properties of undefined (reading 'length')`。
+  `name` 改成可选，`hashHue` / `initials` 给出占位。
+- **良性警告 = 黑屏**：`index.html` 的全局 `error` 处理器把**任何** error 渲染成
+  `z-index:99999` 的全屏黑块。启动失败时这是对的，但浏览器的
+  `ResizeObserver loop completed with undelivered notifications`（规范允许的警告）
+  也被当成致命错误，3x 数据滚动时必现，整块盖住界面、所有点击被吞。现在只过滤这类
+  良性消息，其余照旧上报。
+- **测试自己也骗人**：`page.evaluate(import('/src/stores/ui.ts'))` 在 dev 下可能拿到
+  与 App 不同的模块实例，`setDetailOpen(false)` / `bumpSoftRefreshTick()` 都是空操作。
+  "375px 详情面板挡导航"这条长期失败就是这么来的——改成点真实的返回按钮后三个宽度全绿。
+
+结果：`pnpm exec playwright test` **153 passed / 0 failed / 1 skipped**，4.9 分钟
+（原先那条 6.7 分钟跑不完的压测现在 19 秒通过）。
