@@ -6,16 +6,24 @@
 
 import { For, Show, createResource, createSignal } from "solid-js";
 import { listLabels, listMessagesByLabel, removeLabelFromMessage } from "../stores/data";
-import type { ID, Label } from "../types";
+import type { ID, Label, Message } from "../types";
 import { PageHeader } from "../components/PageHeader";
 import { Icon } from "../components/Icon";
-import { Empty } from "../components/Empty";
+import { Empty, ErrorState } from "../components/Empty";
+import { ResourceGate } from "../components/ResourceGate";
+import { SkeletonList } from "../components/Skeleton";
 import { emailPreviewText } from "../components/EmailBody";
-import { appSettings, setView, showToast } from "../stores/ui";
+import {
+  appSettings,
+  setDetailOpen,
+  setSelectedMessageId,
+  setView,
+  showToast,
+} from "../stores/ui";
 import { formatMessageDate } from "../utils/message-dates";
 
 export function Folders() {
-  const [labels] = createResource(listLabels);
+  const [labels, { refetch: refetchLabels }] = createResource(listLabels);
   const [openId, setOpenId] = createSignal<ID | null>(null);
 
   const open = (id: ID) => setOpenId(openId() === id ? null : id);
@@ -38,9 +46,19 @@ export function Folders() {
           </p>
         }
       />
-      <Show
-        when={(labels() ?? []).length > 0}
-        fallback={
+      {/* A failed label query used to render the "还没有文件夹" empty state,
+          which reads as "you have none" when the truth is "we couldn't ask". */}
+      <ResourceGate
+        resource={labels}
+        loading={<SkeletonList count={3} height={48} />}
+        errorView={() => (
+          <ErrorState
+            title="文件夹加载失败"
+            message="读取标签时出错，请重试。"
+            retry={() => void refetchLabels()}
+          />
+        )}
+        empty={
           <Empty
             icon="ph-folder"
             title="还没有文件夹"
@@ -49,18 +67,27 @@ export function Folders() {
           />
         }
       >
-        <For each={labels()}>
-          {(label: Label) => (
-            <FolderRow
-              label={label}
-              open={openId() === label.id}
-              onToggle={() => open(label.id)}
-            />
-          )}
-        </For>
-      </Show>
+        {(list) => (
+          <For each={list}>
+            {(label) => (
+              <FolderRow
+                label={label}
+                open={openId() === label.id}
+                onToggle={() => open(label.id)}
+              />
+            )}
+          </For>
+        )}
+      </ResourceGate>
     </div>
   );
+}
+
+/** Open a message from inside a folder in the shared detail panel. The
+ *  panel is a global overlay, so this works without switching views. */
+function openMessage(m: Message) {
+  setSelectedMessageId(m.id);
+  setDetailOpen(true);
 }
 
 function FolderRow(props: {
@@ -87,6 +114,7 @@ function FolderRow(props: {
       <button
         type="button"
         onClick={props.onToggle}
+        aria-expanded={props.open}
         style={{
           display: "flex",
           "align-items": "center",
@@ -112,93 +140,176 @@ function FolderRow(props: {
         <span style={{ "font-weight": 600, color: "var(--text-primary)", flex: 1 }}>
           {props.label.name}
         </span>
-        <Icon name="ph-caret-right" size={12} />
+        <Icon name={props.open ? "ph-caret-down" : "ph-caret-right"} size={12} />
       </button>
       <Show when={props.open}>
         <div style={{ "border-top": "0.5px solid var(--border)" }}>
-          <Show
-            when={(items() ?? []).length > 0}
-            fallback={
-              <p
-                style={{
-                  margin: 0,
-                  padding: "var(--space-3)",
-                  "font-size": "var(--text-caption)",
-                  color: "var(--text-muted)",
-                }}
-              >
-                这个文件夹是空的。
-              </p>
-            }
-          >
-            <For each={items()}>
-              {(m) => (
-                <div
-                  data-folder-row={m.id}
-                  style={{
-                    display: "flex",
-                    gap: "var(--space-3)",
-                    "align-items": "center",
-                    padding: "10px var(--space-3)",
-                    "border-bottom": "0.5px solid var(--border)",
-                  }}
-                >
-                  <div style={{ flex: 1, "min-width": 0 }}>
-                    <div
-                      style={{
-                        "font-size": "var(--text-body-sm)",
-                        "font-weight": 600,
-                        color: "var(--text-primary)",
-                        "white-space": "nowrap",
-                        overflow: "hidden",
-                        "text-overflow": "ellipsis",
-                      }}
-                    >
-                      {m.subj || "(无主题)"}
-                    </div>
-                    <div
-                      style={{
-                        "font-size": "var(--text-caption)",
-                        color: "var(--text-muted)",
-                        "white-space": "nowrap",
-                        overflow: "hidden",
-                        "text-overflow": "ellipsis",
-                      }}
-                    >
-                      {emailPreviewText(m).slice(0, 80)}
-                    </div>
-                  </div>
-                  <span style={{ "font-size": "var(--text-micro)", color: "var(--text-muted)" }}>
-                    {formatMessageDate(m, appSettings.profile.timezone, "list").primary.value}
-                  </span>
-                  <button
-                    type="button"
-                    title="移出文件夹"
-                    aria-label="移出文件夹"
-                    onClick={async () => {
-                      await removeLabelFromMessage(m.id, props.label.id);
-                      await refetch();
-                      showToast({ message: "已移出文件夹", kind: "info", ttlMs: 1500 });
-                    }}
+          <Show when={!items.error} fallback={<FolderRowError onRetry={() => void refetch()} />}>
+            <Show when={!items.loading} fallback={<FolderRowsSkeleton />}>
+              <Show
+                when={(items() ?? []).length > 0}
+                fallback={
+                  <p
                     style={{
-                      width: "32px",
-                      height: "32px",
-                      "border-radius": "var(--radius-pill)",
-                      border: "none",
-                      background: "var(--paper-mid)",
-                      color: "var(--text-secondary)",
-                      cursor: "pointer",
-                      "flex-shrink": 0,
+                      margin: 0,
+                      padding: "var(--space-3)",
+                      "font-size": "var(--text-caption)",
+                      color: "var(--text-muted)",
                     }}
                   >
-                    <Icon name="ph-x" size={13} />
-                  </button>
-                </div>
-              )}
-            </For>
+                    这个文件夹是空的。
+                  </p>
+                }
+              >
+                <For each={items()}>
+                  {(m) => (
+                    <div
+                      data-folder-row={m.id}
+                      style={{
+                        display: "flex",
+                        gap: "var(--space-2)",
+                        "align-items": "center",
+                        "border-bottom": "0.5px solid var(--border)",
+                      }}
+                    >
+                      {/* The row itself is the open affordance. It used to be
+                          a plain <div>: the message was listed and could only
+                          be un-filed, never read. */}
+                      <button
+                        type="button"
+                        data-folder-open={m.id}
+                        title="打开这封邮件"
+                        onClick={() => openMessage(m)}
+                        style={{
+                          flex: 1,
+                          "min-width": 0,
+                          display: "flex",
+                          gap: "var(--space-3)",
+                          "align-items": "center",
+                          padding: "10px var(--space-3)",
+                          background: "transparent",
+                          border: "none",
+                          cursor: "pointer",
+                          "text-align": "left",
+                          "min-height": "44px",
+                        }}
+                      >
+                        <span style={{ flex: 1, "min-width": 0 }}>
+                          <span
+                            style={{
+                              display: "block",
+                              "font-size": "var(--text-body-sm)",
+                              "font-weight": 600,
+                              color: "var(--text-primary)",
+                              "white-space": "nowrap",
+                              overflow: "hidden",
+                              "text-overflow": "ellipsis",
+                            }}
+                          >
+                            {m.subj || "(无主题)"}
+                          </span>
+                          <span
+                            style={{
+                              display: "block",
+                              "font-size": "var(--text-caption)",
+                              color: "var(--text-muted)",
+                              "white-space": "nowrap",
+                              overflow: "hidden",
+                              "text-overflow": "ellipsis",
+                            }}
+                          >
+                            {emailPreviewText(m).slice(0, 80)}
+                          </span>
+                        </span>
+                        <span
+                          style={{
+                            "font-size": "var(--text-micro)",
+                            color: "var(--text-muted)",
+                            "flex-shrink": 0,
+                          }}
+                        >
+                          {
+                            formatMessageDate(
+                              m,
+                              appSettings.profile.timezone,
+                              "list",
+                            ).primary.value
+                          }
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        title="移出文件夹"
+                        aria-label="移出文件夹"
+                        onClick={async () => {
+                          await removeLabelFromMessage(m.id, props.label.id);
+                          await refetch();
+                          showToast({
+                            message: "已移出文件夹",
+                            kind: "info",
+                            ttlMs: 1500,
+                          });
+                        }}
+                        style={{
+                          width: "32px",
+                          height: "32px",
+                          "border-radius": "var(--radius-pill)",
+                          border: "none",
+                          background: "var(--paper-mid)",
+                          color: "var(--text-secondary)",
+                          cursor: "pointer",
+                          "flex-shrink": 0,
+                          "margin-right": "var(--space-3)",
+                        }}
+                      >
+                        <Icon name="ph-x" size={13} />
+                      </button>
+                    </div>
+                  )}
+                </For>
+              </Show>
+            </Show>
           </Show>
         </div>
       </Show>
     </div>
+  );
+}
+
+function FolderRowsSkeleton() {
+  return (
+    <div style={{ padding: "var(--space-2) var(--space-3)" }}>
+      <SkeletonList count={2} height={40} />
+    </div>
+  );
+}
+
+function FolderRowError(props: { onRetry: () => void }) {
+  return (
+    <p
+      style={{
+        margin: 0,
+        padding: "var(--space-3)",
+        "font-size": "var(--text-caption)",
+        color: "var(--status-danger)",
+        display: "flex",
+        gap: "var(--space-2)",
+        "align-items": "center",
+      }}
+    >
+      <Icon name="ph-warning-circle" size={13} />
+      <span style={{ flex: 1 }}>这个文件夹里的邮件读取失败。</span>
+      <button
+        type="button"
+        onClick={props.onRetry}
+        style={{
+          color: "var(--palm)",
+          "font-weight": 700,
+          "font-size": "var(--text-caption)",
+        }}
+      >
+        重试
+      </button>
+    </p>
   );
 }
