@@ -39,7 +39,16 @@ import {
 import { type PileMessage } from "../stores/data";
 import { usePaginatedMessages } from "../utils/paginated-messages";
 import { useViewport } from "../utils/gestures";
-import type { Contact, Message } from "../types";
+import type { Account, Contact, Message } from "../types";
+import {
+  accountById,
+  accountInitial,
+  ALL_ACCOUNTS,
+  emailAccounts,
+  resolveAccountFilter,
+} from "../utils/accounts";
+import { AccountTabs } from "../components/AccountTabs";
+import { useAccountScope } from "../utils/use-account-scope";
 import { startDrag, endDrag, type DragTarget } from "../utils/drag";
 import {
   setDetailOpen,
@@ -62,6 +71,7 @@ import {
   agentPanelOpen,
   mailSyncIssue,
   setSettingsTab,
+  activeAccountId,
   type MailSyncIssue,
   type ViewName,
 } from "../stores/ui";
@@ -129,6 +139,24 @@ const PAGE_SIZE = 100;
 type ImboxTabId = "new" | "seen";
 
 export function Imbox() {
+  /* ── Account scope ────────────────────────────────────────────────
+   *
+   *  Every mailbox lands in one `messages` table, so the default view is
+   *  already the merged one. Switching is a filter, not a second query
+   *  shape: `resolveAccountFilter` turns the tab selection into the
+   *  `accountIds` predicate (undefined = merged, no predicate at all).
+   *
+   *  The hook takes an accessor so flipping accounts re-pages in place
+   *  instead of remounting the view — remounting would throw away the
+   *  tab's scroll position and both resources' loaded windows.
+   */
+  const accountScope = useAccountScope();
+  const accounts = accountScope.accounts;
+
+  const accountFilter = () =>
+    resolveAccountFilter(accounts(), activeAccountId());
+  const queryScope = () => ({ accountIds: accountFilter() });
+
   // Two separate paginated resources so "New for you" and "Previously
   // seen" each have their own scroll position and bundle window.
   // Previously this view used one paged query and split the loaded
@@ -137,21 +165,23 @@ export function Imbox() {
   // "Previously seen" section, so users couldn't find what they'd
   // already read (the original bug report).
   const newPaged = usePaginatedMessages(
-    {
-      bucket: "imbox",
-      direction: "in",
+    () => ({
+      bucket: "imbox" as const,
+      direction: "in" as const,
       unreadOnly: true,
       lightweight: true,
-    },
+      ...queryScope(),
+    }),
     PAGE_SIZE,
   );
   const seenPaged = usePaginatedMessages(
-    {
-      bucket: "imbox",
-      direction: "in",
+    () => ({
+      bucket: "imbox" as const,
+      direction: "in" as const,
       readOnly: true,
       lightweight: true,
-    },
+      ...queryScope(),
+    }),
     PAGE_SIZE,
   );
   const [activeTab, setActiveTab] = createSignal<ImboxTabId>("new");
@@ -1089,6 +1119,15 @@ export function Imbox() {
         activeFilterCount={quickFilter() === "all" ? 0 : 1}
       />
 
+      {/* Account switcher. Hidden for single-mailbox setups; when several
+          mailboxes merge into one list this is the only way to scope. */}
+      <AccountTabs
+        bucket="imbox"
+        mode={activeTab() === "seen" ? "read" : "unread"}
+        total={() => newPaged.total() + seenPaged.total()}
+        accounts={accounts()}
+      />
+
       <Show when={mailSyncIssue()}>
         <div
           data-sync-paused-banner
@@ -1339,6 +1378,12 @@ export function Imbox() {
                       onDragStart={onDragStart}
                       onDragEnd={onDragEnd}
                       itemKey={itemKey}
+                      accountFor={
+                        activeAccountId() === ALL_ACCOUNTS &&
+                        emailAccounts(accounts() ?? []).length > 1
+                          ? (m) => accountById(accounts() ?? [], m.ac)
+                          : undefined
+                      }
                     />
                   )}
                 </DateGroupedList>
@@ -1877,6 +1922,9 @@ interface RowProps {
   onDragStart: (m: Message, ev: DragEvent) => void;
   onDragEnd: (ev: DragEvent) => void;
   itemKey: (item: Item) => string;
+  /** Resolve the mailbox a message came from. Only passed when the list
+   *  merges more than one mailbox — the dot is noise otherwise. */
+  accountFor?: (m: Message) => Account | undefined;
 }
 
 function ItemRow(props: RowProps) {
@@ -1921,6 +1969,7 @@ function ItemRow(props: RowProps) {
       onDragStart={props.onDragStart}
       onDragEnd={props.onDragEnd}
       draggable={true}
+      account={props.accountFor?.(props.item)}
     />
   );
 }
@@ -1940,6 +1989,8 @@ interface MessageCardProps {
   contact: Contact | undefined;
   scoreFor: (m: Message) => number;
   firstTimeSender?: boolean;
+  /** Mailbox the message came from, when the list merges several. */
+  account?: Account;
   onOpen: (m: Message) => void;
   onToggleSelect: (id: string) => void;
   onSelectRange: (a: string, b: string) => void;
@@ -2128,6 +2179,36 @@ function MessageCard(props: MessageCardProps) {
             </button>
           </Show>
           <span class="feed-spacer" />
+          {/* Which mailbox this row came from. Coloured dot + initial,
+              only rendered when the list actually merges several accounts
+              (`account` is undefined otherwise). */}
+          <Show when={props.account}>
+            {(a) => (
+              <span
+                class="feed-account-dot"
+                data-account-dot={a().id}
+                title={`${a().label}${a().email ? ` · ${a().email}` : ""}`}
+                aria-label={`来自 ${a().label}`}
+                style={{
+                  "flex-shrink": 0,
+                  display: "inline-flex",
+                  "align-items": "center",
+                  "justify-content": "center",
+                  width: "16px",
+                  height: "16px",
+                  "border-radius": "50%",
+                  background: a().color,
+                  color: "#fff",
+                  "font-size": "9px",
+                  "font-weight": "800",
+                  "line-height": 1,
+                  "margin-right": "2px",
+                }}
+              >
+                {accountInitial(a())}
+              </span>
+            )}
+          </Show>
           {/* The time stays put: the hover toolbar now parks to its left
               (imbox.css .feed-card-actions right:84px), so hiding it just
               removed the column users scan first. */}

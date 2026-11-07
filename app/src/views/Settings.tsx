@@ -15,6 +15,7 @@ import {
   useContext,
 } from "solid-js";
 import { useViewport } from "../utils/gestures";
+import { ACCOUNT_COLORS, nextAccountColor } from "../utils/accounts";
 import {
   listAccounts,
   upsertAccount,
@@ -204,8 +205,28 @@ const FOLDER_LABELS: Record<string, string> = {
   Important: "重要",
 };
 
-/** Stored as data (SQLite / color input), not a style — mirrors --palm. */
-const DEFAULT_ACCOUNT_COLOR = "#0a8f63";
+/** Merged-inbox choices for `accounts.privacy`. The field existed in the
+ *  schema from migration 0001 and had no UI until multi-account scoping
+ *  landed — an isolated mailbox is exactly "switch to see it". */
+const ACCOUNT_PRIVACY_CHOICES: Array<{
+  value: Account["privacy"];
+  label: string;
+  hint: string;
+  icon: string;
+}> = [
+  {
+    value: "unified",
+    label: "并入全部账户",
+    hint: "默认。和其他邮箱一起显示。",
+    icon: "ph-arrows-merge",
+  },
+  {
+    value: "isolated",
+    label: "单独查看",
+    hint: "只有切到这个账户时才显示。",
+    icon: "ph-lock-simple",
+  },
+];
 /** Mirrors --blurple; color inputs require a hex value. */
 const DEFAULT_LABEL_COLOR = "#5522fa";
 
@@ -1039,6 +1060,7 @@ function AccountsTab() {
           existingEmails={(accounts() ?? [])
             .map((a) => a.email?.toLowerCase())
             .filter((e): e is string => !!e)}
+          existingAccounts={accounts() ?? []}
         />
       </Show>
     </div>
@@ -1062,6 +1084,9 @@ function AddAccountModal(props: {
   onClose: () => void;
   onAdded: () => void;
   existingEmails: string[];
+  /** Used to hand out a distinct colour so a merged inbox can tell
+   *  mailboxes apart. */
+  existingAccounts: Account[];
 }) {
   const [providerList] = createResource(fetchProviders);
   const [selectedProviderId, setSelectedProviderId] = createSignal("");
@@ -1111,7 +1136,7 @@ function AddAccountModal(props: {
       synced: 0,
       total: 0,
       privacy: "unified" as const,
-      color: DEFAULT_ACCOUNT_COLOR,
+      color: nextAccountColor(props.existingAccounts),
       avatar: prov.label[0] ?? "M",
       lastSync: "刚刚",
       settings: {
@@ -1353,6 +1378,85 @@ function AccountEditModal(props: {
           }
           style={inputStyle}
         />
+      </Field>
+      <Field
+        label="收件箱归属"
+        hint="「并入全部账户」：和其他邮箱的邮件一起出现在收件箱里。「单独查看」：只在切到这个账户时才出现，适合不希望工作邮件混进私人收件箱的场景。"
+      >
+        <div style={{ display: "flex", gap: "var(--space-2)" }}>
+          <For each={ACCOUNT_PRIVACY_CHOICES}>
+            {(choice) => (
+              <button
+                type="button"
+                data-privacy={choice.value}
+                aria-pressed={d().privacy === choice.value}
+                onClick={() => setDraft({ ...d(), privacy: choice.value })}
+                style={{
+                  flex: 1,
+                  padding: "10px 12px",
+                  "border-radius": "var(--radius-md)",
+                  border: "0.5px solid",
+                  "border-color":
+                    d().privacy === choice.value
+                      ? "var(--palm)"
+                      : "var(--border)",
+                  background:
+                    d().privacy === choice.value
+                      ? "var(--palm-soft)"
+                      : "var(--paper-light)",
+                  color:
+                    d().privacy === choice.value
+                      ? "var(--palm)"
+                      : "var(--text-secondary)",
+                  "font-size": "var(--text-caption)",
+                  "font-weight": 700,
+                  cursor: "pointer",
+                  "text-align": "left",
+                }}
+              >
+                <div style={{ display: "flex", "align-items": "center", gap: "6px" }}>
+                  <Icon name={choice.icon} size={13} />
+                  {choice.label}
+                </div>
+                <div
+                  style={{
+                    "font-weight": 500,
+                    "margin-top": "2px",
+                    color: "var(--text-muted)",
+                    "font-size": "var(--text-micro)",
+                  }}
+                >
+                  {choice.hint}
+                </div>
+              </button>
+            )}
+          </For>
+        </div>
+      </Field>
+      <Field label="账户颜色" hint="多个邮箱合并显示时，每封邮件前面的圆点用这个颜色区分来源。">
+        <div style={{ display: "flex", gap: "var(--space-2)" }}>
+          <For each={ACCOUNT_COLORS}>
+            {(color) => (
+              <button
+                type="button"
+                aria-label={`选择颜色 ${color}`}
+                aria-pressed={d().color === color}
+                onClick={() => setDraft({ ...d(), color })}
+                style={{
+                  width: "28px",
+                  height: "28px",
+                  "border-radius": "50%",
+                  background: color,
+                  border:
+                    d().color === color
+                      ? "2px solid var(--text-primary)"
+                      : "2px solid transparent",
+                  cursor: "pointer",
+                }}
+              />
+            )}
+          </For>
+        </div>
       </Field>
       <Field label="签名">
         <textarea

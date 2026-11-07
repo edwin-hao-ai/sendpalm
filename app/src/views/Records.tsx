@@ -4,6 +4,8 @@ import { For, Show, createResource, createSignal, onCleanup } from "solid-js";
 import { VList, type VListHandle } from "virtua/solid";
 import { listContacts, listFiles, upsertMessage } from "../stores/data";
 import { usePaginatedMessages } from "../utils/paginated-messages";
+import { useAccountScope } from "../utils/use-account-scope";
+import { AccountTabs } from "../components/AccountTabs";
 import { Avatar } from "../components/Avatar";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
@@ -25,8 +27,12 @@ export function Records() {
   const [contacts] = createResource(listContacts);
   const [files, { refetch: refetchFiles }] = createResource(listFiles);
   const { isMobile } = useViewport();
+  const accountScope = useAccountScope();
 
-  const paged = usePaginatedMessages({ bucket: "paperTrail" });
+  const paged = usePaginatedMessages(() => ({
+    bucket: "paperTrail" as const,
+    ...accountScope.scope(),
+  }));
   const items = paged.items;
   const refresh = paged.refresh;
 
@@ -124,6 +130,12 @@ export function Records() {
               {paged.hasMore() ? ` · ${items().length}/${paged.total()}` : ""}
             </p>
           }
+        />
+
+        <AccountTabs
+          bucket="paperTrail"
+          total={() => paged.total()}
+          accounts={accountScope.accounts()}
         />
 
         <Show

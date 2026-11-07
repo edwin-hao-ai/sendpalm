@@ -9,6 +9,8 @@ import {
   emptyTrash,
 } from "../stores/data";
 import { usePaginatedMessages } from "../utils/paginated-messages";
+import { useAccountScope } from "../utils/use-account-scope";
+import { AccountTabs } from "../components/AccountTabs";
 import { Avatar } from "../components/Avatar";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
@@ -43,8 +45,12 @@ export function purgeCountdown(
 
 export function Trash() {
   const [contacts] = createResource(listContacts);
+  const accountScope = useAccountScope();
 
-  const paged = usePaginatedMessages({ bucket: "trash" });
+  const paged = usePaginatedMessages(() => ({
+    bucket: "trash" as const,
+    ...accountScope.scope(),
+  }));
   const items = paged.items;
   const refresh = paged.refresh;
 
@@ -186,6 +192,12 @@ export function Trash() {
                 </button>
               </Show>
             }
+          />
+
+          <AccountTabs
+            bucket="trash"
+            total={() => paged.total()}
+            accounts={accountScope.accounts()}
           />
         </div>
 

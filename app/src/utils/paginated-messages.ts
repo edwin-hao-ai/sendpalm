@@ -62,7 +62,9 @@ export interface PaginatedMessagesHandle {
 }
 
 export function usePaginatedMessages(
-  options: Omit<ListMessagesOptions, "limit" | "offset">,
+  options:
+    | Omit<ListMessagesOptions, "limit" | "offset">
+    | (() => Omit<ListMessagesOptions, "limit" | "offset">),
   pageSize: number = DEFAULT_PAGE_SIZE,
 ): PaginatedMessagesHandle {
   const [pages, setPages] = createSignal<Message[]>([]);
@@ -70,15 +72,31 @@ export function usePaginatedMessages(
   const [total, setTotal] = createSignal(0);
   const [loadingMore, setLoadingMore] = createSignal(false);
 
+  /* The options may be a plain object (most views) or an accessor (views
+   * that scope by account, where the filter has to change without the
+   * component remounting). Loading the accessor through one place keeps
+   * `loadMore` and the resource source in agreement — the earlier shape
+   * captured the object once, so a reactive filter would have re-queried
+   * page 1 with the new scope but appended page 2 with the old one. */
+  const readOptions = () =>
+    typeof options === "function" ? options() : options;
+
+  /* Monotonic request id. An account switch can leave two `listMessagesPaged`
+   * calls in flight; without this guard the slower one wins and the list
+   * shows the mailbox the user just left. */
+  let requestSeq = 0;
+
   const [resource, { refetch }] = createResource<
     ListMessagesPage,
     Omit<ListMessagesOptions, "limit" | "offset">
-  >(options, async (opts) => {
+  >(readOptions, async (opts) => {
+    const seq = ++requestSeq;
     const page = await listMessagesPaged({
       ...opts,
       limit: pageSize,
       offset: 0,
     });
+    if (seq !== requestSeq) return page;
     setPages(page.items);
     setOffset(page.items.length);
     setTotal(page.total);
@@ -98,12 +116,16 @@ export function usePaginatedMessages(
   const loadMore = async () => {
     if (loadingMore() || !hasMore()) return;
     setLoadingMore(true);
+    const seq = requestSeq;
     try {
       const next = await listMessagesPaged({
-        ...options,
+        ...readOptions(),
         limit: pageSize,
         offset: offset(),
       });
+      // The scope changed while page N+1 was in flight — dropping the
+      // result is what stops two mailboxes being concatenated.
+      if (seq !== requestSeq) return;
       setPages([...pages(), ...next.items]);
       setOffset(offset() + next.items.length);
       setTotal(next.total);

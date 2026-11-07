@@ -9,6 +9,8 @@ import {
   upsertContact,
 } from "../stores/data";
 import { usePaginatedMessages } from "../utils/paginated-messages";
+import { useAccountScope } from "../utils/use-account-scope";
+import { AccountTabs } from "../components/AccountTabs";
 import { Avatar } from "../components/Avatar";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
@@ -31,8 +33,12 @@ function spamCountdown(deletedAt: string): string {
 
 export function Spam() {
   const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
+  const accountScope = useAccountScope();
 
-  const paged = usePaginatedMessages({ bucket: "spam" });
+  const paged = usePaginatedMessages(() => ({
+    bucket: "spam" as const,
+    ...accountScope.scope(),
+  }));
   const items = paged.items;
   const refresh = paged.refresh;
 
@@ -193,6 +199,12 @@ export function Spam() {
                 </button>
               </Show>
             }
+          />
+
+          <AccountTabs
+            bucket="spam"
+            total={() => paged.total()}
+            accounts={accountScope.accounts()}
           />
         </div>
 

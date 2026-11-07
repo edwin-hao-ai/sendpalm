@@ -23,6 +23,8 @@ import { listContacts } from "../stores/data";
 import type { Contact, Message } from "../types";
 import { listFiles, upsertMessage } from "../stores/data";
 import { usePaginatedMessages } from "../utils/paginated-messages";
+import { useAccountScope } from "../utils/use-account-scope";
+import { AccountTabs } from "../components/AccountTabs";
 import { Avatar } from "../components/Avatar";
 import { Empty } from "../components/Empty";
 import { ErrorState } from "../components/Empty";
@@ -51,8 +53,12 @@ export function Stream() {
   const [contacts] = createResource(listContacts);
   const [files] = createResource(listFiles);
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set());
+  const accountScope = useAccountScope();
 
-  const paged = usePaginatedMessages({ bucket: "feed" });
+  const paged = usePaginatedMessages(() => ({
+    bucket: "feed" as const,
+    ...accountScope.scope(),
+  }));
   const items = paged.items;
 
   // Live-prepend on sync:new-messages so a freshly delivered newsletter
@@ -181,6 +187,11 @@ export function Stream() {
           subtitle={`订阅邮件、长文慢慢看。点击卡片展开全文，可同时展开多篇。${
             paged.hasMore() ? ` 已加载 ${items().length}/${paged.total()}` : ""
           }`}
+        />
+        <AccountTabs
+          bucket="feed"
+          total={() => paged.total()}
+          accounts={accountScope.accounts()}
         />
         <Show
           when={paged.resource.state !== "pending"}

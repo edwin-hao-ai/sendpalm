@@ -850,6 +850,37 @@ export async function countUnreadByBucket(): Promise<UnreadByBucket> {
   return { imbox, feed, spam };
 }
 
+/** Per-account row counts for one bucket — the numbers on the account
+ *  tabs. One `COUNT(*)` per account instead of a `GROUP BY`, because a
+ *  grouped aggregate would have to pull every row's `ac` across the IPC
+ *  bridge on a 4,000-message mailbox, which is exactly the pattern that
+ *  caused the 8 GB boot OOM (AGENTS §11.7). The account list is tiny
+ *  (typically 1–3 rows), so N queries stay cheap and bounded. */
+export async function countMessagesByAccount(
+  bucket: MessageBucket,
+  accountIds: string[],
+  options: { unreadOnly?: boolean; readOnly?: boolean } = {},
+): Promise<Record<string, number>> {
+  const db = await getDb();
+  const out: Record<string, number> = {};
+  const unreadClause = options.unreadOnly
+    ? " AND unread = 1"
+    : options.readOnly
+      ? " AND unread = 0"
+      : "";
+  await Promise.all(
+    accountIds.map(async (id) => {
+      const rows = await db.select<Array<{ total: number }>>(
+        `SELECT COUNT(*) AS total FROM messages
+          WHERE bucket = ? AND ac = ?${unreadClause}`,
+        [bucket, id],
+      );
+      out[id] = rows[0]?.total ?? 0;
+    }),
+  );
+  return out;
+}
+
 /** One card’s worth of data for the Gate screener. */
 export interface GateQueueItem {
   contact: Contact;
@@ -1036,6 +1067,11 @@ export interface ListMessagesOptions {
   replyLaterOnly?: boolean;
   setAsideOnly?: boolean;
   bubbleUpOnly?: boolean;
+  /** Restrict to these account ids (`messages.ac`). `undefined` means "no
+   *  account filter" and is the hot path when the user has one account or
+   *  every account is merged. An empty array means "no account can match"
+   *  and short-circuits to an empty page — SQLite has no valid `IN ()`. */
+  accountIds?: string[];
   /** When true, the SELECT omits the `body` and `body_html` columns — list
    *  views don't render either. Excluding them shrinks the IPC payload by
    *  ~85 KB per row (the Feishu account averages 80 KB body_html per email
@@ -1167,6 +1203,15 @@ export async function listMessagesPaged(
   }
   if (options.bubbleUpOnly) {
     where.push("bubble_up_at IS NOT NULL");
+  }
+  if (options.accountIds && options.accountIds.length === 0) {
+    // Nothing can match. Returning early avoids building `IN ()`, which
+    // SQLite rejects as a syntax error.
+    return { items: [], total: 0, limit, offset };
+  }
+  if (options.accountIds) {
+    where.push(`ac IN (${options.accountIds.map(() => "?").join(", ")})`);
+    params.push(...options.accountIds);
   }
   const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
   const db = await getDb();

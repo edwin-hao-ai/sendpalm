@@ -6,6 +6,7 @@
 
 import { createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
+import { ALL_ACCOUNTS } from "../utils/accounts";
 import type { AgentMemory, AppSettings, Draft, ID, Message } from "../types";
 
 export type ViewName =
@@ -95,6 +96,19 @@ export function getSortMode(viewName: ViewName): SortMode {
 export function updateSortMode(viewName: ViewName, mode: SortMode): void {
   setSortMode((prev) => ({ ...prev, [viewName]: mode }));
 }
+
+/** Which mailbox the mail views are scoped to. `ALL_ACCOUNTS` ("all") is the
+ *  merged inbox, which is the default and the hot path. Session-scoped on
+ *  purpose, matching `sortMode`: switching accounts is a reading decision,
+ *  not a preference worth persisting, and a persisted value would strand a
+ *  user in one mailbox after they delete it.
+ *
+ *  The value is an account id or `ALL_ACCOUNTS`; `resolveAccountFilter`
+ *  degrades unknown ids back to the merged view. */
+export const [activeAccountId, setActiveAccountId] = createSignal<string>(
+  ALL_ACCOUNTS,
+);
+
 
 export const [selectedContactId, setSelectedContactId] =
   createSignal<ID | null>(null);

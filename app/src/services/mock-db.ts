@@ -402,7 +402,28 @@ function parseWhere(
       continue;
     }
     // IS NULL / IS NOT NULL
-    if (normalizeId(tokens[i]) === "is") {
+    // IN (a, b, …) — the keyword tokenizes as an `id`, so the generic
+    // operator branch below (which only accepts op/sym tokens) would break
+    // out before reaching it. Multi-account scoping emits `ac IN (?, ?)`,
+    // so the double has to model it or every account-filter test would
+    // silently match the whole table.
+    if (normalizeId(tokens[i]) === "in") {
+      i++;
+      const open = tokens[i];
+      if (!open || open.kind !== "sym" || open.value !== "(") break;
+      const close = findClosingParen(tokens, i);
+      const vals: unknown[] = [];
+      let j = i + 1;
+      while (j < close) {
+        const { value, next } = resolveValue(tokens, j, bindValues);
+        vals.push(value);
+        j = next;
+        const comma = tokens[j];
+        if (comma?.kind === "sym" && comma.value === ",") j++;
+      }
+      conditions.push({ col, op: "in", value: vals });
+      i = close + 1;
+    } else if (normalizeId(tokens[i]) === "is") {
       i++;
       let op = "is null";
       if (normalizeId(tokens[i]) === "not") {
