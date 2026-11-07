@@ -2925,13 +2925,12 @@ export async function loadAppSettings(
           quietHoursStart: "22:00",
           quietHoursEnd: "08:00",
         },
-        security: {
-          appLock: false,
-          screenshotAllowed: true,
-          clipboardSync: true,
-        },
+        // `security` and `autoDownloadAttachments` were removed on purpose:
+        // the app cannot honour them (app lock needs a recovery design,
+        // screenshot blocking is a native NSWindow call, clipboard sync
+        // implies multi-device). Dead toggles lie to the user — see
+        // docs/TODOS.md "未实装（有意为之）".
         syncAndStorage: {
-          autoDownloadAttachments: true,
           maxAttachmentMb: 25,
         },
         background: {

@@ -3655,3 +3655,30 @@ hover 小三角是「两个相邻热区、语义相反、一个 64px 一个 20px
 现在 `scripts/verify-ios.sh` 能 archive → install → launch（截图在
 `docs/ios-screenshots/`）。**但首帧是黑屏**，`simctl launch` 返回了 PID、进程
 活着、没有崩溃报告 —— 下一个要查的是 WKWebView 没有加载到内置前端资源。
+
+### 2026-11-08 多账户合并 / 切换 + 功能性缺口审计
+
+用户问的是三件事：多账户的邮件怎么合并、怎么切换、还有哪些功能其实没做完。
+
+**多账户**：后端一直是完整的（每账户一个同步任务、每文件夹一个 UID 游标），缺的
+全在展示层——`messages.ac` 没有任何读方，所以只有「合并」没有「切换」。现在：
+
+- `listMessagesPaged({ accountIds })` 按 `messages.ac` 过滤；空数组直接返回空页，
+  避免生成 SQLite 不接受的 `IN ()`。
+- `usePaginatedMessages` 接受 options 访问器，切账户就地重新分页而不是重挂视图
+  （重挂会丢掉滚动位置和两个 tab 已加载的窗口），并有请求序号防止慢请求回填到
+  切换后的列表。
+- `<AccountTabs>`：全部账户 + 每个邮箱一枚带计数的 pill，出现在收件箱 / 报刊 /
+  单据 / 回收站 / 垃圾邮件；单邮箱不显示。
+- `accounts.privacy` 终于有意义：`unified` 并入全部账户，`isolated` 只有切过去才
+  可见；账户编辑器里可切换，并可改账户颜色（新账户从调色板轮流取色）。
+- 合并视图里每行带彩色首字母圆点。
+
+**顺带修掉的确定性缺口**（详见 `docs/TODOS.md` 同日条目）：文件夹邮件不可点、文件夹
+「空」和「读失败」不分、`b`/`v` 把用户拽回收件箱、⌘K 三个「新建」只导航、定时发送
+丢 `In-Reply-To` 与 HTML、`syncFrequency: manual` 仍然每小时轮询、通知「摘要」模式
+不存在、附件上限写死。「安全 / 自动下载附件」四项按「宁可删除也不留死开关」处理，
+理由写进 TODOS。
+
+**验证**：TS 697 通过（新增 32 条：账户作用域规则 21 + 查询 11），Rust `sync_loop`
+11 条 + `desktop_notifier` 3 条，typecheck / lint / `pnpm build` 干净。

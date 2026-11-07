@@ -593,13 +593,9 @@ export interface AppSettings {
     };
     /** True once the Gate how-to banner has been dismissed. */
     gateGuideSeen?: boolean;
-    security: {
-      appLock: boolean;
-      screenshotAllowed: boolean;
-      clipboardSync: boolean;
-    };
     syncAndStorage: {
-      autoDownloadAttachments: boolean;
+      /** Per-file attachment cap for outbound mail. Providers commonly
+       *  reject messages past ~25MB. */
       maxAttachmentMb: number;
     };
     /** Background & launch behavior (tray). Always present after

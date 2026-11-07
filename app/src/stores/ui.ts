@@ -296,13 +296,7 @@ export const [appSettings, setAppSettings] = createStore<AppSettings>({
       permissionPrompted: false,
     },
     gateGuideSeen: false,
-    security: {
-      appLock: false,
-      screenshotAllowed: true,
-      clipboardSync: true,
-    },
     syncAndStorage: {
-      autoDownloadAttachments: true,
       maxAttachmentMb: 25,
     },
     background: {

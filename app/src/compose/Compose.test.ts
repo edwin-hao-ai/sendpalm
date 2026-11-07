@@ -8,6 +8,7 @@ import {
   combineCustomSchedule,
   schedulePresets,
   MAX_ATTACHMENT_BYTES,
+  attachmentLimitBytes,
 } from "./Compose";
 
 describe("EMAIL_RE / firstInvalidAddress", () => {
@@ -81,5 +82,18 @@ describe("schedulePresets", () => {
 describe("MAX_ATTACHMENT_BYTES", () => {
   it("is the common 25MB SMTP ceiling", () => {
     expect(MAX_ATTACHMENT_BYTES).toBe(25 * 1024 * 1024);
+  });
+});
+
+describe("attachmentLimitBytes", () => {
+  it("honours the configured cap", () => {
+    expect(attachmentLimitBytes(10)).toBe(10 * 1024 * 1024);
+  });
+
+  it("falls back to the default for missing or nonsense values", () => {
+    // A zero would otherwise mean "no file may ever be attached".
+    expect(attachmentLimitBytes(undefined)).toBe(MAX_ATTACHMENT_BYTES);
+    expect(attachmentLimitBytes(0)).toBe(MAX_ATTACHMENT_BYTES);
+    expect(attachmentLimitBytes(-5)).toBe(MAX_ATTACHMENT_BYTES);
   });
 });

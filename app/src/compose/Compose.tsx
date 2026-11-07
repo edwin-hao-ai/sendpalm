@@ -81,8 +81,20 @@ const palmFocusHandlers = {
 };
 
 /** SMTP providers commonly reject messages over ~25MB; warn early
- *  instead of letting a giant base64 blob ride the autosave loop. */
+ *  instead of letting a giant base64 blob ride the autosave loop.
+ *  This is the default — the user can raise or lower it in
+ *  设置 → 同步与存储 (`syncAndStorage.maxAttachmentMb`). */
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+/** Effective per-file cap, honouring the preference. Falls back to the
+ *  default when the setting is missing or nonsensical so a corrupt store
+ *  cannot make every attach fail. */
+export function attachmentLimitBytes(
+  maxAttachmentMb: number | undefined,
+): number {
+  if (!maxAttachmentMb || maxAttachmentMb <= 0) return MAX_ATTACHMENT_BYTES;
+  return maxAttachmentMb * 1024 * 1024;
+}
 
 interface DraftAttachment {
   id: string;
@@ -303,11 +315,15 @@ export function Compose() {
 
   const attachFiles = async (files: FileList | null) => {
     if (!files) return;
+    const limit = attachmentLimitBytes(
+      appSettings.preferences.syncAndStorage?.maxAttachmentMb,
+    );
+    const limitMb = Math.round(limit / (1024 * 1024));
     const next = [...draft().attachments];
     for (const file of Array.from(files)) {
-      if (file.size > MAX_ATTACHMENT_BYTES) {
+      if (file.size > limit) {
         showToast({
-          message: `「${file.name}」超过 25MB，建议改用文件链接发送`,
+          message: `「${file.name}」超过 ${limitMb}MB 的单个附件上限（可在 设置 → 同步与存储 调整），建议改用文件链接发送`,
           kind: "warning",
         });
         continue;

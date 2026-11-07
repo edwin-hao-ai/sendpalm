@@ -77,7 +77,10 @@ import {
   syncNow,
 } from "../services/backend";
 import { formatThousands } from "../utils/counts";
-import { ensureNotificationPermission } from "../services/notifications";
+import {
+  ensureNotificationPermission,
+  notifySettingsChanged,
+} from "../services/notifications";
 import { setLocale, type Locale } from "../i18n";
 import {
   onboardingResumeStep,
@@ -1955,6 +1958,44 @@ function PreferencesTab() {
       <SectionTitle>邮件规则</SectionTitle>
       <RulesSettings />
 
+      <SectionTitle>同步与存储</SectionTitle>
+      <div style={{ display: "grid", gap: "var(--space-2)", "max-width": "520px" }}>
+        <label style={{ display: "grid", gap: "4px" }}>
+          <span style={{ "font-size": "var(--text-body-sm)", "font-weight": 600 }}>
+            单个附件上限
+          </span>
+          <span style={{ "font-size": "var(--text-caption)", color: "var(--text-muted)" }}>
+            超过这个大小的文件在写信时会被拦下并提示改用链接分享。多数邮箱服务商在 25MB
+            左右开始拒收。
+          </span>
+          <div style={{ display: "flex", "align-items": "center", gap: "var(--space-2)" }}>
+            <input
+              type="number"
+              min="1"
+              max="100"
+              step="1"
+              data-max-attachment-mb
+              value={s.preferences.syncAndStorage.maxAttachmentMb}
+              onInput={(e) => {
+                const raw = Number(e.currentTarget.value);
+                // Clamp on write so a stray "0" cannot make every attach
+                // fail (0 means "no file may be sent").
+                const next = Number.isFinite(raw)
+                  ? Math.min(100, Math.max(1, Math.round(raw)))
+                  : 25;
+                setAppSettings("preferences", "syncAndStorage", {
+                  maxAttachmentMb: next,
+                });
+              }}
+              style={{ ...inputStyle, width: "120px" }}
+            />
+            <span style={{ "font-size": "var(--text-caption)", color: "var(--text-muted)" }}>
+              MB
+            </span>
+          </div>
+        </label>
+      </div>
+
       <SectionTitle>后台与启动</SectionTitle>
       <BackgroundSettingsTab />
       <SectionTitle>通知</SectionTitle>
@@ -3267,6 +3308,18 @@ function PreferencesNotificationsTab() {
             desktop: v,
           });
           await ensureNotificationPermission();
+        }}
+      />
+      <ToggleRow
+        label="摘要模式"
+        description="不再每封邮件弹一次通知，改为每轮同步结束后汇总成一条（例如「3 封新邮件」）。静默时段仍然生效。"
+        checked={prefs().digest}
+        onChange={async (v) => {
+          setAppSettings("preferences", "notifications", {
+            ...prefs(),
+            digest: v,
+          });
+          await notifySettingsChanged({ ...prefs(), digest: v });
         }}
       />
       <ToggleRow
