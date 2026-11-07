@@ -2906,6 +2906,22 @@ export async function loadAppSettings(
       ...backgroundDefaults,
       ...(v.preferences.background ?? {}),
     };
+    // App lock landed after the first prefs files were written, so fill in
+    // the defaults field-by-field rather than trusting the file (or a
+    // `{ ...defaults, ...file }` spread, which TypeScript rightly flags as
+    // "specified more than once" for required keys).
+    if (!v.preferences.security) {
+      v.preferences.security = { appLock: false };
+    } else if (typeof v.preferences.security.appLock !== "boolean") {
+      v.preferences.security.appLock = false;
+    }
+    if (!v.preferences.syncAndStorage) {
+      v.preferences.syncAndStorage = { maxAttachmentMb: 25 };
+    } else if (
+      typeof v.preferences.syncAndStorage.maxAttachmentMb !== "number"
+    ) {
+      v.preferences.syncAndStorage.maxAttachmentMb = 25;
+    }
   }
   return (
     v ?? {
@@ -2925,11 +2941,12 @@ export async function loadAppSettings(
           quietHoursStart: "22:00",
           quietHoursEnd: "08:00",
         },
-        // `security` and `autoDownloadAttachments` were removed on purpose:
-        // the app cannot honour them (app lock needs a recovery design,
-        // screenshot blocking is a native NSWindow call, clipboard sync
-        // implies multi-device). Dead toggles lie to the user — see
-        // docs/TODOS.md "未实装（有意为之）".
+        // App lock ships with a real recovery path (one-time code shown at
+        // setup, plus a documented reset), so it is a working feature now.
+        // `screenshotAllowed` / `clipboardSync` / `autoDownloadAttachments`
+        // stay removed — the app cannot honour them; see docs/TODOS.md
+        // "未实装（有意为之）".
+        security: { appLock: false },
         syncAndStorage: {
           maxAttachmentMb: 25,
         },

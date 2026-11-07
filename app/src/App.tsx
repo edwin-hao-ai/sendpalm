@@ -30,6 +30,7 @@ import { startSyncEventBridge } from "./services/sync-events";
 import { startTaskExtractionService } from "./services/task-extraction";
 import { ShortcutHelp } from "./components/ShortcutHelp";
 import { BulkActionMenu } from "./components/BulkActionMenu";
+import { LockScreen } from "./components/LockScreen";
 import { initApp } from "./bootstrap";
 import {
   agentPanelOpen,
@@ -40,6 +41,7 @@ import {
   onboardingCompleted,
   notificationsOpen,
 } from "./stores/ui";
+import { appLocked } from "./services/app-lock";
 
 import { useGlobalShortcuts } from "./utils/shortcuts";
 import { useViewport } from "./utils/gestures";
@@ -123,6 +125,13 @@ export default function App() {
         <Show when={!onboardingCompleted() && onboardingStep() !== null}>
           <Onboarding />
         </Show>
+      </Show>
+
+      {/* Above everything, inside and outside the shell: a locked app must
+          not leak the compose window, a toast, or the command palette
+          behind it. */}
+      <Show when={appLocked()}>
+        <LockScreen />
       </Show>
 
       <Show when={initError()}>

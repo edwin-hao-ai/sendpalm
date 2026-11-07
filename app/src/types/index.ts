@@ -593,6 +593,15 @@ export interface AppSettings {
     };
     /** True once the Gate how-to banner has been dismissed. */
     gateGuideSeen?: boolean;
+    security: {
+      /** Lock the UI on launch until the PIN is entered. */
+      appLock: boolean;
+      /** Salt + obfuscated PIN/recovery digests. A local access barrier,
+       *  not disk encryption — see services/app-lock.ts. */
+      pinSalt?: string;
+      pinHash?: string;
+      recoveryHash?: string;
+    };
     syncAndStorage: {
       /** Per-file attachment cap for outbound mail. Providers commonly
        *  reject messages past ~25MB. */

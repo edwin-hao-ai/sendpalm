@@ -296,6 +296,7 @@ export const [appSettings, setAppSettings] = createStore<AppSettings>({
       permissionPrompted: false,
     },
     gateGuideSeen: false,
+    security: { appLock: false },
     syncAndStorage: {
       maxAttachmentMb: 25,
     },

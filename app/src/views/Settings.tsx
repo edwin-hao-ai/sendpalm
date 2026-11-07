@@ -51,6 +51,7 @@ import { Modal } from "../components/Modal";
 import { PageHeader } from "../components/PageHeader";
 import { LlmProviderSettings } from "../components/LlmProviderSettings";
 import { AgentConnectionPanel } from "../components/AgentConnectionPanel";
+import { AppLockSettings } from "../components/AppLockSettings";
 import { RulesSettings } from "../components/RulesSettings";
 import { Icon } from "../components/Icon";
 import { Avatar } from "../components/Avatar";
@@ -1966,6 +1967,9 @@ function PreferencesTab() {
 
       <SectionTitle>邮件规则</SectionTitle>
       <RulesSettings />
+
+      <SectionTitle>安全</SectionTitle>
+      <AppLockSettings enabled={s.preferences.security.appLock} />
 
       <SectionTitle>同步与存储</SectionTitle>
       <div style={{ display: "grid", gap: "var(--space-2)", "max-width": "520px" }}>

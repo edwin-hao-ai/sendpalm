@@ -24,6 +24,7 @@ import {
   setMailSyncIssue,
   type MailSyncIssue,
 } from "../stores/ui";
+import { lockNow } from "../services/app-lock";
 import { NAV_SECTIONS } from "../utils/labels";
 import { navDisplayLabel } from "./Sidebar";
 import { Avatar } from "./Avatar";
@@ -286,6 +287,12 @@ function AvatarMenu() {
             {displayName()}
           </p>
           {item("ph-gear", "设置", () => setView("settings"))}
+          <Show when={appSettings.preferences.security.appLock}>
+            {item("ph-lock-simple", "立即锁定", () => {
+              lockNow();
+              showToast({ message: "已锁定", kind: "info", ttlMs: 1500 });
+            })}
+          </Show>
           {item("ph-keyboard", "键盘快捷键", () => setHelpOpen(true))}
           {item("ph-warning-circle", "错误日志", () => {
             setErrorLogOpened(Date.now());

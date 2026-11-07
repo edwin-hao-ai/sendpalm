@@ -8,6 +8,7 @@
 import { load } from "@tauri-apps/plugin-store";
 import { IS_BROWSER } from "./services/tauri-shim";
 import { maybePromptNotificationPermission } from "./services/notifications";
+import { applyLockOnBoot } from "./services/app-lock";
 import { vaultGetSecret, LLM_API_KEY_VAULT_KEY } from "./services/backend";
 import { setLocale, type Locale } from "./i18n";
 import {
@@ -59,6 +60,11 @@ export async function initApp() {
 
         const settings = await loadAppSettings(store);
         setAppSettings(settings);
+
+        // Cover the shell immediately if the user turned the app lock on.
+        // Done right after the settings hydrate (not in App.tsx) so the
+        // decision reads the persisted value rather than the defaults.
+        applyLockOnBoot();
 
         // SEC-2: the LLM API key never lives in the prefs file.
         // Load it from the OS keychain at boot so Settings →
