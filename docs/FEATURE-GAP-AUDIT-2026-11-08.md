@@ -1,0 +1,103 @@
+# SendPalm 功能缺口审计 — 2026-11-08
+
+> 触发：用户问"还有哪些功能性的东西是没做完的？比如多邮件账户怎么合并、怎么切换"，
+> 并要求"审计一下……然后把它一起完成"。
+>
+> 范围：`app/src/**`、`app/src-tauri/src/**`、`app/e2e/**`，对照 `docs/PRD-v1.md` §3.19
+> 与 `prototypes/sendpalm-suite.html`。本文是**审计记录 + 完成状态**，不是计划。
+
+严重度：**H** = 用户可感知的主功能缺失/错误；**M** = 局部功能不可用或说错话；
+**L** = 体验/一致性。
+
+---
+
+## 1. 多邮件账户（用户点名的部分）
+
+| # | 缺口 | 严重度 | 证据（改前） | 状态 |
+|---|---|---|---|---|
+| A1 | 邮件只能全部混在一起，无法按账户查看 | H | `stores/data.ts` `ListMessagesOptions` 无账户字段；`listMessagesPaged` 的 WHERE 从不引用 `messages.ac` | ✅ 已修 |
+| A2 | 没有账户切换入口 | H | `Sidebar.tsx` 只渲染 `NAV_GROUPS`；`Topbar.tsx` 账户菜单只有设置/快捷键/错误日志 | ✅ 已修 |
+| A3 | `accounts.privacy`（`unified`/`isolated`）是死字段 | H | 唯一写入点是 `Settings.tsx:1113` 硬编码 `"unified"`，全仓无读取方 | ✅ 已修 |
+| A4 | 合并后分不清邮件来自哪个账户 | H | 所有账户的 `color` 都写死 `#0a8f63`；行内无账户标识 | ✅ 已修 |
+| A5 | 侧栏未读徽章与当前账户无关 | M | `countUnreadByBucket()` 全表计数，不接账户过滤 | ✅ 已修 |
+| A6 | 中途新增账户要重启才出现在 tab 条 | H | `createResource(listAccounts)` 只订阅 soft tick，而账户增删不 bump 任何 tick（e2e 测出） | ✅ 已修 |
+
+**设计取舍**（写在代码里）：合并是默认，因为合并零成本（同一张表）；切换是过滤。
+「隔离」用已有的 `privacy` 字段而不是新字段。判据统一为"徽章必须描述它下面那个列表"。
+
+## 2. 其他功能缺口
+
+| # | 缺口 | 严重度 | 证据（改前） | 状态 |
+|---|---|---|---|---|
+| B1 | 文件夹里的邮件打不开 | H | `views/Folders.tsx` 展开后的行是 `<div>`，只有"移出文件夹"按钮 | ✅ 已修 |
+| B2 | 文件夹分不清"空"和"读失败" | M | `listLabels` 失败时落到"还没有文件夹"空态 | ✅ 已修 |
+| B3 | `b`/`v` 把用户从 Stream/Records/Trash 拽回收件箱 | M | `utils/shortcuts.ts` 的 `message:label` / `message:move` 无条件 `setView("imbox")` | ✅ 已修 |
+| B4 | ⌘K「新建联系人/任务/日程」只导航不新建 | M | `search/CommandPalette.tsx` 三个命令只 `setView`；"新建任务"还跳去 `followUps` | ✅ 已修 |
+| B5 | 定时发送丢线程与 HTML | M | `services/scheduled_send.rs` 给 `smtp.send` 传 `None`(html)/`None`(in-reply-to)；草稿表无对应列 | ✅ 已修（迁移 0031） |
+| B6 | `syncFrequency: "manual"` 仍每小时轮询 | M | `sync_loop.rs` 把 `manual` 映射成 1 小时 IDLE 超时 | ✅ 已修 |
+| B7 | 通知「摘要」模式不存在 | M | `preferences.notifications.digest` 无任何读取方；Rust `NotificationPrefs` 无该字段 | ✅ 已修 |
+| B8 | 单个附件上限写死 25MB | L | `Compose.tsx` `MAX_ATTACHMENT_BYTES` 常量，`maxAttachmentMb` 无读取方 | ✅ 已修 |
+| B9 | 回信失败被文案说成"功能没做" | M | `panels/MeetingPanel.tsx` 对 `safeInvoke` 的 null 统一提示"当前环境暂不支持回信" | ✅ 已修 |
+| B10 | 一起读（ReadTogether）不跟随账户 | M | 直接 `listMessagesPaged({bucket:"imbox"})`，无账户过滤 | ✅ 已修 |
+
+## 3. PRD §3.19「安全」
+
+| # | 项 | 严重度 | 处理 | 说明 |
+|---|---|---|---|---|
+| C1 | 应用锁 `appLock` | H | ✅ 实装 | 4–8 位 PIN（加盐拉伸摘要）、一次性恢复码、忘记两者的手动重置路径写在锁屏上；启动套锁 + 手动锁定；锁屏 z-index 高于 toast。**威胁模型在 UI 里写明：不加密磁盘。** |
+| C2 | 禁止截图 `screenshotAllowed` | L | ❌ 删除 | macOS 需 `NSWindow.sharingType` 原生调用 + 新增 objc2 直接依赖（AGENTS §3.1 要求先做选型检索）。 |
+| C3 | 剪贴板同步 `clipboardSync` | L | ❌ 删除 | 语义依赖多设备同步，当前无后端。 |
+| C4 | 自动下载附件 `autoDownloadAttachments` | L | ❌ 删除 | 应用里没有"自动下载"路径（附件字节始终按需取）；补预取反而违反 §11.7 的省内存方向。 |
+
+删除理由与恢复路径同时记录在 `docs/TODOS.md`「未实装（有意为之）」。
+
+## 4. 明确不在本次范围
+
+| 项 | 原因 |
+|---|---|
+| Gmail / Outlook 的 OAuth | `docs/OAUTH-DECISION.md` 定为 v4 范围；v3 用应用专用密码/授权码覆盖 ≥90% 用户 |
+| iOS 首帧黑屏 | 既存问题，记录在 `docs/PROGRESS.md` 2026-11-06 条目；属于构建/WKWebView 资源加载 |
+| `x` 多选只在收件箱可用 | 提示语如实告知（"多选暂只在 Inbox 可用"），不是假装可用 |
+| 筛选面板的日期/联系人/附件维度 | `FilterPanel.tsx` 头注释已注明需要查询支持；未做但不撒谎 |
+
+## 5. 验证
+
+| 层 | 命令 | 结果 |
+|---|---|---|
+| TS 单测 | `pnpm exec vitest run` | **721 passed / 79 files**（起点 663） |
+| Rust 单测 | `cargo test --lib` | **157 passed** |
+| 类型 | `pnpm exec tsc --noEmit` | 干净 |
+| Lint | `pnpm exec eslint . --max-warnings=0` | 干净 |
+| 构建 | `pnpm build` | 成功 |
+| 端到端 | `pnpm exec playwright test` | **150 passed**，2 failed，1 skipped |
+
+两个失败在改动前的 `43527a0` 上单独复现，属既存问题：
+
+1. `e2e/workflows.spec.ts:209` @375px —— 详情面板挡住底部导航栏导致点击被拦截。
+2. `e2e/perf-2-pass.spec.ts` 3x 压测 —— `Avatar.hashHue` 收到 `undefined` 名字抛
+   `TypeError`，页面被 `#sendpalm-boot-errors` 覆盖。
+
+新增端到端覆盖：
+
+- `e2e/accounts.spec.ts`（4 条）：合并视图列出两个邮箱；tab 收窄到单个邮箱；
+  隔离邮箱不进「全部账户」但可从自己的 tab 进入；单邮箱不渲染 tab 条。
+- `e2e/app-lock.spec.ts`（3 条）：锁屏盖住 shell、错 PIN 不放行、恢复码可解锁。
+
+## 6. 相关提交
+
+```
+d9f5988 fix(sidebar): the unread badge describes the mailbox you're in
+170444b docs(progress): record the app lock landing
+bd80472 feat(security): ship app lock instead of deleting it
+8b8768e feat(read-together): follow the selected mailbox
+2f51464 fix(accounts): a mailbox added mid-session appears without a restart
+af7845c feat(notify): digest mode plumbing on the Rust side
+37c6cb2 feat(settings): 通知摘要、可配附件上限，并删掉四个死开关
+563c055 fix(meeting): describe a failed RSVP honestly
+ffe742b fix(palette): "新建联系人 / 任务 / 日程" now creates
+7d7e557 fix(sync): "手动" finally means no background sync
+573dcfd fix(compose): scheduled replies keep their thread and formatting
+9d73e08 fix(shortcuts): label/move no longer drag you out of the current view
+25218fb fix(folders): messages in a folder can be opened again
+9ee7525 feat(accounts): merge every mailbox, and let the user switch between them
+```
