@@ -62,7 +62,16 @@
 
     <script>
       window.__sendpalmBootErrors = [];
+      // Browser noise that is not a failure and must never cover the app.
+      // "ResizeObserver loop completed with undelivered notifications" is a
+      // spec-blessed warning browsers emit when an observer re-enters; it
+      // fired under the 3x-data scroll test and the overlay below turned it
+      // into a full-screen black panel that swallowed every click.
+      function isBenignError(message) {
+        return /ResizeObserver loop/i.test(String(message || ""));
+      }
       window.addEventListener("error", function (e) {
+        if (isBenignError(e.message)) return;
         window.__sendpalmBootErrors.push(
           e.message + " @ " + (e.filename || "") + ":" + (e.lineno || "")
         );
@@ -79,6 +88,7 @@
         } catch (_) {}
       });
       window.addEventListener("unhandledrejection", function (e) {
+        if (isBenignError(e.reason)) return;
         window.__sendpalmBootErrors.push("Unhandled: " + String(e.reason));
       });
     </script>

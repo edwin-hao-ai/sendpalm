@@ -40,6 +40,9 @@
 | B9 | 回信失败被文案说成"功能没做" | M | `panels/MeetingPanel.tsx` 对 `safeInvoke` 的 null 统一提示"当前环境暂不支持回信" | ✅ 已修 |
 | B10 | 一起读（ReadTogether）不跟随账户 | M | 直接 `listMessagesPaged({bucket:"imbox"})`，无账户过滤 | ✅ 已修 |
 | B11 | Agent 草稿"批准"后哪里都不出现 | H | `agent/useAgent.ts` `approveDraft` 只改 `agent_drafts.status` 并提示"可在草稿箱中发送"；草稿箱读的是另一张 `drafts` 表，所以批准=石沉大海 | ✅ 已修（批准时物化一行 `drafts`） |
+| B13 | 缺失头像名字会让整个 App 变黑屏 | H | `components/Avatar.tsx` `hashHue(undefined)` 抛 `Cannot read properties of undefined (reading 'length')`；`index.html` 的全局错误处理器把任意 `error` 事件渲染成 `z-index:99999` 的全屏黑块，于是"某个联系人没有名字"= 整个界面点不动 | ✅ 已修（`hashHue`/`initials` 容忍空名字 + 渲染占位） |
+| B14 | 浏览器的无害警告也会让整个 App 变黑屏 | H | 同上处理器接住了 `ResizeObserver loop completed with undelivered notifications`（规范允许的良性警告），3x 数据滚动时必现，把界面整个盖住 | ✅ 已修（过滤良性消息，其余照旧） |
+| B15 | e2e 里 `page.evaluate(import('/src/stores/ui.ts'))` 是空操作 | M | dev 下动态 `import()` 可能拿到与 App 不同的模块实例，信号改了界面不动；`workflows.spec.ts` 的 `setDetailOpen(false)` 与 `bumpSoftRefreshTick()` 都无效，"375px 详情面板挡导航"这条长期失败其实源于此 | ✅ 已修（改走真实返回按钮；删掉冗余 poke） |
 | B12 | 「自动起草回复」「自动生成简报」是死开关 | M | `agent.autoDraft` / `agent.autoSummarize` 只被自己的开关读取，无任何消费方；`autoSummarize` 默认还是 `true` | ❌ 删除（无消费场景，不留在界面上撒谎） |
 
 ## 3. PRD §3.19「安全」
@@ -67,18 +70,21 @@
 
 | 层 | 命令 | 结果 |
 |---|---|---|
-| TS 单测 | `pnpm exec vitest run` | **721 passed / 79 files**（起点 663） |
+| TS 单测 | `pnpm exec vitest run` | **723 passed / 79 files**（起点 663） |
 | Rust 单测 | `cargo test --lib` | **157 passed** |
 | 类型 | `pnpm exec tsc --noEmit` | 干净 |
 | Lint | `pnpm exec eslint . --max-warnings=0` | 干净 |
 | 构建 | `pnpm build` | 成功 |
-| 端到端 | `pnpm exec playwright test` | **151 passed**，2 failed，1 skipped |
+| 端到端 | `pnpm exec playwright test` | **153 passed，0 failed，1 skipped**（4.9 分钟） |
 
-两个失败在改动前的 `43527a0` 上单独复现，属既存问题：
+两条长期失败的用例原本在 base commit `43527a0` 上也能复现，本轮查明都是**真 bug** 并修掉：
 
-1. `e2e/workflows.spec.ts:209` @375px —— 详情面板挡住底部导航栏导致点击被拦截。
-2. `e2e/perf-2-pass.spec.ts` 3x 压测 —— `Avatar.hashHue` 收到 `undefined` 名字抛
-   `TypeError`，页面被 `#sendpalm-boot-errors` 覆盖。
+1. `workflows.spec.ts` @375px —— 不是面板挡导航，而是测试里的
+   `page.evaluate(import(...).setDetailOpen(false))` 根本没生效（B15）。改成点真实的
+   返回按钮后三个宽度全绿。
+2. `perf-2-pass.spec.ts` 3x 压测 —— `Avatar.hashHue` 收到 `undefined` 名字抛
+   `TypeError`（B13）；修掉后暴露第二层：良性的 `ResizeObserver loop` 警告同样会被
+   渲染成全屏黑块（B14）。两个都修完，这条 6.7 分钟跑不完的用例现在 19 秒通过。
 
 新增端到端覆盖：
 

@@ -3,7 +3,12 @@
 import { Show, createMemo } from "solid-js";
 
 interface AvatarProps {
-  name: string;
+  /** Optional on purpose: this primitive is fed straight from data rows, and
+   *  a missing contact/sender used to crash the whole app with
+   *  "Cannot read properties of undefined (reading 'length')" inside
+   *  `hashHue`. A UI primitive must render a placeholder for bad data, not
+   *  take the page down. */
+  name?: string;
   src?: string;
   size?: number;
   color?: string;
@@ -19,8 +24,8 @@ const CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
  *  reads wrong ("李小明" → "李小"). Take the surname for 1-2 char names
  *  and the given name (last 2 chars) for 3+ char names, which is what
  *  people actually go by. */
-export function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
+export function initials(name: string | undefined): string {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
   if (parts.length === 1) {
     const token = parts[0]!;
@@ -34,9 +39,11 @@ export function initials(name: string): string {
   return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
 }
 
-export function hashHue(s: string): number {
+export function hashHue(s: string | undefined): number {
+  const text = s ?? "";
+  if (text.length === 0) return 210; // neutral blue for "no name"
   let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0;
   return Math.abs(h) % 360;
 }
 
@@ -69,7 +76,7 @@ export function Avatar(props: AvatarProps) {
       <Show when={props.src} fallback={<span>{initials(props.name)}</span>}>
         <img
           src={props.src}
-          alt={props.name}
+          alt={props.name ?? ""}
           style={{
             width: "100%",
             height: "100%",

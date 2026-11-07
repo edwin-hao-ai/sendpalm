@@ -204,6 +204,23 @@ async function openFirstMessage(page: Page): Promise<void> {
   });
 }
 
+/** Close the detail panel with the button a user would press.
+ *
+ *  The old version poked `setDetailOpen(false)` through
+ *  `page.evaluate(import(...))`. In a dev server that dynamic import can
+ *  resolve to a different module instance than the one the app mounted, so
+ *  the signal was set on an object nobody read: the panel stayed open, the
+ *  375px bottom tab bar stayed covered, and the navigation click timed out.
+ *  It passed at 820/1440 only because the panel is an overlay there rather
+ *  than a full-screen sheet. */
+async function closeDetailPanel(page: Page): Promise<void> {
+  const back = page.locator('#detail-panel [aria-label="返回"], #detail-panel [aria-label="返回列表"]');
+  if (await back.count()) {
+    await back.first().click();
+  }
+  await expect(page.locator("#detail-panel")).toHaveCount(0, { timeout: 5_000 });
+}
+
 test.describe("Email workflows", () => {
   for (const width of [375, 820, 1440]) {
     test(`Tasks review, source link and historical manual action at ${width}px`, async ({ page }, testInfo) => {
@@ -220,7 +237,7 @@ test.describe("Email workflows", () => {
         await db.execute("INSERT INTO task_extraction_runs (source_message_id,state,mode,created_at,updated_at) VALUES ($1,$2,$3,$4,$5)", [messageId, "pending_review", "manual", "2026-11-02", "2026-11-02"]);
         for (const id of ["confirm-s", "dismiss-s"]) await db.execute("INSERT INTO task_suggestions (id,source_message_id,title,notes,due,priority,direction,status,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)", [id, messageId, id === "confirm-s" ? "Send report" : "Ignore this", "Explicit commitment", null, "normal", "unclear", "pending", "2026-11-02"]);
       }, { messageId: MESSAGE_ID });
-      await page.evaluate("import('/src/stores/ui.ts').then(ui => ui.setDetailOpen(false))");
+      await closeDetailPanel(page);
       await navigateTo(page, "tasks");
       await expect(page.getByRole("heading", { name: "AI 建议 · 待确认" })).toBeVisible();
       const first = page.locator(".task-suggestion").first();
@@ -235,7 +252,7 @@ test.describe("Email workflows", () => {
       await page.getByRole("button", { name: /Edited report/ }).click();
       await page.locator("#detail-panel").getByRole("button", { name: "来源邮件" }).click();
       await expect(page.locator("#detail-panel")).toContainText("E2E test subject");
-      await page.evaluate("import('/src/stores/ui.ts').then(ui => ui.setDetailOpen(false))");
+      await closeDetailPanel(page);
       await navigateTo(page, "followUps");
       await expect(page.getByRole("heading", { name: "跟进提醒", exact: true })).toBeVisible();
     });
@@ -244,11 +261,12 @@ test.describe("Email workflows", () => {
     page,
   }) => {
     await resetAndSeed(page, makeContact(), makeMessage({ bucket: "imbox" }));
-    // Fixtures bump only the hard tick; badge counts use the real sync soft tick.
+    // Wait for the fixture to land. `applySeed` bumps the hard tick, and the
+    // Sidebar subscribes to both ticks, so no extra poke is needed — the
+    // previous `page.evaluate(import(...).bumpSoftRefreshTick())` was a no-op
+    // (same module-instance problem as closeDetailPanel) and only looked
+    // load-bearing.
     await page.evaluate(() => window.__sendpalmE2E?.__seedReady);
-    await page.evaluate(
-      "import('/src/stores/ui.ts').then(ui => ui.bumpSoftRefreshTick())",
-    );
     // The Gate count is the wide sidebar's 筛选台 row at ≥1024 and the rail
     // corner badge below that; both must agree it is 1.
     await expect(

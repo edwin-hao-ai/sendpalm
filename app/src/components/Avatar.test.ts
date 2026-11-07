@@ -30,6 +30,14 @@ describe("initials", () => {
     expect(initials("")).toBe("?");
     expect(initials("   ")).toBe("?");
   });
+
+  it("undefined name falls back to ? instead of throwing", () => {
+    // Regression: a seeded perf run passed a missing contact name into
+    // Avatar and `hashHue` threw "Cannot read properties of undefined
+    // (reading 'length')", which the boot-error overlay turned into a
+    // full-screen block over the whole app.
+    expect(initials(undefined)).toBe("?");
+  });
 });
 
 describe("hashHue", () => {
@@ -38,5 +46,11 @@ describe("hashHue", () => {
     const h = hashHue("王小明");
     expect(h).toBeGreaterThanOrEqual(0);
     expect(h).toBeLessThan(360);
+  });
+
+  it("tolerates a missing name", () => {
+    expect(() => hashHue(undefined)).not.toThrow();
+    expect(hashHue(undefined)).toBeGreaterThanOrEqual(0);
+    expect(hashHue(undefined)).toBeLessThan(360);
   });
 });
