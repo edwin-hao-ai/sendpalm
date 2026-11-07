@@ -1,6 +1,6 @@
-import { For, Show, createResource, createSignal, onCleanup } from "solid-js";
+import { For, Show, createEffect, createResource, createSignal, onCleanup } from "solid-js";
 import { confirmTaskSuggestion, dismissTaskSuggestion, listPendingTaskSuggestions, listTasksPage, upsertTask } from "../stores/data";
-import { setDetailOpen, setSelectedTaskId, setSelectedMessageId, setSelectedContactId, setSelectedCompanyName, setSelectedFileId, setSelectedMeetingId, setSelectedDraftId, setView, showToast } from "../stores/ui";
+import { setDetailOpen, setSelectedTaskId, setSelectedMessageId, setSelectedContactId, setSelectedCompanyName, setSelectedFileId, setSelectedMeetingId, setSelectedDraftId, setView, showToast, consumeCreateIntent } from "../stores/ui";
 import { ResourceGate } from "../components/ResourceGate";
 import { PageHeader } from "../components/PageHeader";
 import { ErrorState } from "../components/Empty";
@@ -30,6 +30,12 @@ export function Tasks() {
     } catch { showToast({ message: "创建失败，请重试", kind: "error" }); }
     finally { setBusy(false); }
   };
+  // ⌘K → 新建任务 lands here. Declared after `createTask` on purpose: the
+  // effect body runs immediately on mount, and a `const` referenced before
+  // its initializer would throw.
+  createEffect(() => {
+    if (consumeCreateIntent("task")) void createTask();
+  });
   return <div class="tasks-view" data-testid="tasks-view">
     <PageHeader
       title="Tasks"

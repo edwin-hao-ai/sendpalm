@@ -25,6 +25,7 @@ import {
   setComposeOpen,
   setSelectedDraftId,
   setHelpOpen,
+  requestCreate,
 } from "../stores/ui";
 import { Icon } from "../components/Icon";
 import { Avatar } from "../components/Avatar";
@@ -221,27 +222,24 @@ const ACTION_COMMANDS: Command[] = [
     label: "新建联系人",
     icon: "ph-user-plus",
     group: "Actions",
-    run: () => {
-      setView("contacts");
-    },
+    // Navigate AND open the contact editor. These three used to only
+    // navigate, so the palette promised a create and delivered a page you
+    // then had to click again on.
+    run: () => requestCreate("contact", "contacts"),
   },
   {
     id: "a.task",
     label: "新建任务",
     icon: "ph-check-square",
     group: "Actions",
-    run: () => {
-      setView("followUps");
-    },
+    run: () => requestCreate("task", "tasks"),
   },
   {
     id: "a.event",
     label: "新建日程",
     icon: "ph-calendar-plus",
     group: "Actions",
-    run: () => {
-      setView("calendar");
-    },
+    run: () => requestCreate("event", "calendar"),
   },
   {
     id: "a.help",

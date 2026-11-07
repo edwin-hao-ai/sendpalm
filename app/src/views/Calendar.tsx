@@ -49,6 +49,7 @@ import {
   setCalendarSelected as setCursor,
   calendarFilter as filter,
   setCalendarFilter as setFilter,
+  consumeCreateIntent,
 } from "../stores/ui";
 import { useRefreshEffect } from "../utils/gestures";
 import {
@@ -193,6 +194,11 @@ export function Calendar() {
     tm?: string;
     dur?: number;
   } | null>(null);
+
+  // ⌘K → 新建日程 lands here.
+  createEffect(() => {
+    if (consumeCreateIntent("event")) setCreating({});
+  });
 
   useRefreshEffect(() => {
     void refetch();

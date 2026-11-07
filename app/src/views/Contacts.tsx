@@ -2,7 +2,7 @@
  * Spec: prototype-v11 §3.4.
  */
 
-import { For, Show, createMemo, createResource, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createResource, createSignal } from "solid-js";
 import {
   listContacts,
   listTasks,
@@ -25,6 +25,7 @@ import {
   setSelectedContactId,
   showToast,
   openCompanyDetail,
+  consumeCreateIntent,
 } from "../stores/ui";
 import { useRefreshEffect } from "../utils/gestures";
 import type { Contact } from "../types";
@@ -89,6 +90,13 @@ export function Contacts() {
   const [creating, setCreating] = createSignal(false);
   const [deleteTarget, setDeleteTarget] = createSignal<Contact | null>(null);
   const [deleting, setDeleting] = createSignal(false);
+
+  // ⌘K → 新建联系人 lands here. The palette cannot reach the local modal
+  // signal, so it queues an intent that we consume on mount (or right away
+  // when this view is already showing).
+  createEffect(() => {
+    if (consumeCreateIntent("contact")) setCreating(true);
+  });
 
   const filtered = createMemo<Contact[]>(() =>
     filterContacts(contacts() ?? [], filter(), search()),

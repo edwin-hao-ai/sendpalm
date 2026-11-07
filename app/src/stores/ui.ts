@@ -110,6 +110,32 @@ export const [activeAccountId, setActiveAccountId] = createSignal<string>(
 );
 
 
+/** A "create new <thing>" request that survives the navigation that has to
+ *  happen first. The ⌘K palette cannot open a view's creation modal directly:
+ *  views are lazy-loaded and their modals are local signals, so the palette
+ *  records the intent here and the target view consumes it the moment it
+ *  mounts (or immediately, if it is already mounted). Cleared by the
+ *  consumer so a second visit doesn't re-open the modal. */
+export type CreateIntent = "contact" | "task" | "event";
+
+export const [pendingCreate, setPendingCreate] = createSignal<CreateIntent | null>(
+  null,
+);
+
+/** Queue a create intent and navigate. Returns nothing — the view opens its
+ *  own modal. */
+export function requestCreate(kind: CreateIntent, route: ViewName): void {
+  setPendingCreate(kind);
+  setView(route);
+}
+
+/** Consumer side: run `open` once for the matching intent, then clear it. */
+export function consumeCreateIntent(kind: CreateIntent): boolean {
+  if (pendingCreate() !== kind) return false;
+  setPendingCreate(null);
+  return true;
+}
+
 export const [selectedContactId, setSelectedContactId] =
   createSignal<ID | null>(null);
 export const [selectedMessageId, setSelectedMessageId] =
