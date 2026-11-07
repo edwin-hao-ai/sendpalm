@@ -14,6 +14,7 @@ vi.mock("../services/tauri-shim", () => ({ IS_BROWSER: () => true }));
 
 import {
   countMessagesByAccount,
+  countUnreadByBucket,
   listMessagesPaged,
   upsertMessage,
 } from "./data";
@@ -136,5 +137,27 @@ describe("countMessagesByAccount", () => {
 
   it("returns {} for no accounts without querying", async () => {
     expect(await countMessagesByAccount("imbox", [])).toEqual({});
+  });
+});
+
+describe("countUnreadByBucket — account scope", () => {
+  it("counts every mailbox when no filter is given", async () => {
+    // w1 + p1 are unread imbox rows in this fixture.
+    expect((await countUnreadByBucket()).imbox).toBe(2);
+  });
+
+  it("counts only the selected mailbox so the sidebar badge matches the list", async () => {
+    expect((await countUnreadByBucket({ accountIds: ["work"] })).imbox).toBe(1);
+    expect((await countUnreadByBucket({ accountIds: ["private"] })).imbox).toBe(
+      1,
+    );
+  });
+
+  it("returns zeroes for an empty selection instead of `IN ()`", async () => {
+    expect(await countUnreadByBucket({ accountIds: [] })).toEqual({
+      imbox: 0,
+      feed: 0,
+      spam: 0,
+    });
   });
 });

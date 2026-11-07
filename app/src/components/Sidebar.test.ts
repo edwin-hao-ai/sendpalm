@@ -9,6 +9,9 @@ import { NAV_GROUPS, NAV_SECTIONS } from "../utils/labels";
 import { setView, view } from "../stores/ui";
 
 vi.mock("../stores/data", () => ({
+  // `useAccountScope` reads the account list; an empty one means "merged
+  // view, no predicate", which is what these nav assertions expect.
+  listAccounts: () => Promise.resolve([]),
   countGateCandidates: () => Promise.resolve(3),
   countUnreadByBucket: () =>
     Promise.resolve({ imbox: 7, feed: 3, spam: 5 }),

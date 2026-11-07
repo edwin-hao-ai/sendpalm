@@ -23,6 +23,7 @@ import {
 import { useLongPress, useRefreshEffect, useViewport } from "../utils/gestures";
 import { countGateCandidates, countUnreadByBucket } from "../stores/data";
 import { formatGateCount } from "../utils/counts";
+import { useAccountScope } from "../utils/use-account-scope";
 import { useSoftRefreshEffect } from "../utils/gestures";
 import "./Sidebar.css";
 
@@ -71,8 +72,16 @@ export function Sidebar() {
     createResource(countGateCandidates);
   // Right-aligned counts for the wide sidebar's mail rows. Same soft tick as
   // the Gate badge — a sync chunk can land on any of them.
-  const [unread, { refetch: refetchUnread }] =
-    createResource(countUnreadByBucket);
+  //
+  // These follow the account selection: the number next to 收件箱 has to
+  // describe the list you get when you click it, and that list is scoped to
+  // whichever mailbox tab is active. A global count next to a scoped list is
+  // a number the user cannot reconcile.
+  const sidebarScope = useAccountScope();
+  const [unread, { refetch: refetchUnread }] = createResource(
+    () => sidebarScope.scope(),
+    (scope) => countUnreadByBucket(scope),
+  );
   // Both ticks, not just the soft one: the soft tick is what a sync chunk
   // fires, but the initial data load bumps the HARD tick — subscribing only to
   // soft leaves both counters at 0 until the next sync (the exact bug this

@@ -835,14 +835,24 @@ export interface UnreadByBucket {
   spam: number;
 }
 
-export async function countUnreadByBucket(): Promise<UnreadByBucket> {
+export async function countUnreadByBucket(
+  options: { accountIds?: string[] } = {},
+): Promise<UnreadByBucket> {
+  // Mirrors `listMessagesPaged`: an empty selection can match nothing, and
+  // `undefined` means "the merged view" with no predicate at all.
+  if (options.accountIds && options.accountIds.length === 0) {
+    return { imbox: 0, feed: 0, spam: 0 };
+  }
   const db = await getDb();
+  const accountWhere = options.accountIds
+    ? ` AND ac IN (${options.accountIds.map(() => "?").join(", ")})`
+    : "";
   const countFor = async (bucket: string) => {
     const rows = await db.select<Array<{ id: ID }>>(
       `SELECT id FROM messages
-        WHERE bucket = $1 AND direction = 'in' AND unread = 1 AND deleted_at IS NULL
+        WHERE bucket = ? AND direction = 'in' AND unread = 1 AND deleted_at IS NULL${accountWhere}
         LIMIT 999`,
-      [bucket],
+      [bucket, ...(options.accountIds ?? [])],
     );
     return rows.length;
   };
