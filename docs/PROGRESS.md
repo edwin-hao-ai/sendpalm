@@ -3682,3 +3682,21 @@ hover 小三角是「两个相邻热区、语义相反、一个 64px 一个 20px
 
 **验证**：TS 697 通过（新增 32 条：账户作用域规则 21 + 查询 11），Rust `sync_loop`
 11 条 + `desktop_notifier` 3 条，typecheck / lint / `pnpm build` 干净。
+
+### 2026-11-08（续）应用锁落地
+
+上一轮把 `security.appLock` 直接删了，理由是「本地 PIN 需要一个找回设计」。这个理由
+只对了一半：确实需要一个设计，但设计是有的。
+
+- 4–8 位 PIN，用加盐 + 拉伸的 FNV-1a 摘要校验。摘要不是 KDF，代码和界面都这么说
+  ——4 位 PIN 当加密秘密卖是骗人。它拦的是顺手翻看和投屏。
+- 开启时给一次性恢复码；改 PIN 会轮换恢复码，旧码立刻失效，所以改完必须当场亮出来。
+- 两个都丢了：锁屏界面直接写清楚——删偏好文件里的 `preferences.security`，邮件不丢。
+- 锁屏 `z-index` 压在 toast 之上，锁着的时候通知条也不能漏出邮件标题。
+- 设置 → 偏好 → 安全：开启 / 改 PIN / 新的恢复码 / 关闭 / 立即锁定；顶栏账户菜单
+  也有「立即锁定」。
+- `loadAppSettings` 对老偏好文件逐字段补 `security` 与 `syncAndStorage` 默认值。
+
+验证：TS 718（+21 应用锁用例）、Playwright 150 通过（新增 3 条：锁住 shell、
+错 PIN 不放开、恢复码可解锁；2 条失败仍是 base commit 上的既存问题）、
+typecheck / lint / build 干净。
