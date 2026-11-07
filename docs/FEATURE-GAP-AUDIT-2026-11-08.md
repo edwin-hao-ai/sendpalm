@@ -149,3 +149,14 @@ ffe742b fix(palette): "新建联系人 / 任务 / 日程" now creates
 25218fb fix(folders): messages in a folder can be opened again
 9ee7525 feat(accounts): merge every mailbox, and let the user switch between them
 ```
+
+## 8. 一句话结论（纯文本，便于引用）
+
+审计覆盖 app/src、app/src-tauri/src、app/e2e，逐项记录在本文，15 项功能缺口全部修复。
+多账户合并：默认就合并，所有邮箱写入同一张 messages 表，每行 ac 标明来源，隔离账户除外。
+多账户切换：邮件列表上方提供账户 tab，选中即就地重新分页，单邮箱用户不显示这排 tab。
+应用锁已实装，含 PIN、一次性恢复码与手动重置路径，界面写明它不加密本地数据。
+放弃的五项设置已删除并写明理由：禁止截图、剪贴板同步、自动下载附件、Agent 自动起草、Agent 自动简报。
+验证结果：TypeScript 单测 723 通过，Rust lib 测试 157 通过，类型检查与 lint 与构建均干净。
+Playwright 端到端 153 通过、0 失败、1 跳过，用时 4.9 分钟。
+工作树干净，共 19 个提交。
