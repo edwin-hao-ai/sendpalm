@@ -367,12 +367,18 @@ fn spawn_account_loop(
         );
 
         let client = ImapClient::new(account.creds.clone());
-        let idle_timeout = account
+        let parsed_settings = account
             .settings_json
             .as_deref()
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-            .map(|v| sync_frequency_from_json(&v))
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+        let idle_timeout = parsed_settings
+            .as_ref()
+            .map(sync_frequency_from_json)
             .unwrap_or(IDLE_TIMEOUT);
+        let manual_only = parsed_settings
+            .as_ref()
+            .map(is_manual_sync)
+            .unwrap_or(false);
 
         // Resolve server-side folder names once per account boot, before the
         // first sync. The result is persisted into accounts.settings_json.syncFolders
@@ -418,6 +424,22 @@ fn spawn_account_loop(
                 eprintln!("[sync] initial sync failed for {}: {e}", account.account_id);
                 tokio::time::sleep(IDLE_ERROR_BACKOFF).await;
             }
+        }
+
+        // "手动" = no timer-driven sync. Park here (polling `stop` so a
+        // settings change or account removal still tears the task down)
+        // instead of entering the IDLE loop. Explicit 立即同步 goes through
+        // `commands::sync_now`, which opens its own session.
+        if manual_only {
+            eprintln!(
+                "[sync] account {} set to manual sync; background timer disabled",
+                account.account_id
+            );
+            while !stop.load(Ordering::Relaxed) {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
+            eprintln!("[sync] stopping account loop for {}", account.account_id);
+            return;
         }
 
         loop {
@@ -2417,7 +2439,8 @@ pub fn sync_folders_from_json(settings: &serde_json::Value) -> Vec<String> {
 }
 
 /// Convert the account `syncFrequency` setting into a poll/IDLE timeout.
-/// Defaults to 60 seconds for real-time behavior.
+/// Defaults to one hour. `manual` is handled by `is_manual_sync` — it has no
+/// timeout because it must never fire on a timer.
 pub fn sync_frequency_from_json(settings: &serde_json::Value) -> Duration {
     let value = settings
         .get("syncFrequency")
@@ -2427,10 +2450,22 @@ pub fn sync_frequency_from_json(settings: &serde_json::Value) -> Duration {
         "5min" => Duration::from_secs(5 * 60),
         "15min" => Duration::from_secs(15 * 60),
         "30min" => Duration::from_secs(30 * 60),
-        "1h" => Duration::from_secs(60 * 60),
-        "manual" => Duration::from_secs(60 * 60),
         _ => Duration::from_secs(60 * 60),
     }
+}
+
+/// True when the account opted out of timer-driven sync.
+///
+/// `manual` used to map to a one-hour IDLE timeout, so "手动" quietly polled
+/// once an hour — the setting did nothing. Manual accounts now sync on
+/// connect and then wait for an explicit 立即同步 (`sync_now`), which runs on
+/// its own session and does not depend on the background loop.
+pub fn is_manual_sync(settings: &serde_json::Value) -> bool {
+    settings
+        .get("syncFrequency")
+        .and_then(|v| v.as_str())
+        .map(|v| v == "manual")
+        .unwrap_or(false)
 }
 
 /// Extract outgoing-mail settings from the account's `settings_json` value.
@@ -2654,6 +2689,35 @@ mod tests {
         assert!(should_continue_after_chunk(1152, None, 200));
         assert!(!should_continue_after_chunk(1152, None, 158));
         assert!(!should_continue_after_chunk(0, None, 0));
+    }
+
+    #[test]
+    fn sync_frequency_maps_each_option_to_a_timeout() {
+        let d = |v: &str| {
+            let settings = serde_json::json!({ "syncFrequency": v });
+            sync_frequency_from_json(&settings)
+        };
+        assert_eq!(d("5min"), Duration::from_secs(300));
+        assert_eq!(d("15min"), Duration::from_secs(900));
+        assert_eq!(d("30min"), Duration::from_secs(1800));
+        assert_eq!(d("1h"), Duration::from_secs(3600));
+        // Unknown / missing values fall back to hourly rather than a busy loop.
+        assert_eq!(d("nonsense"), Duration::from_secs(3600));
+        assert_eq!(
+            sync_frequency_from_json(&serde_json::json!({})),
+            Duration::from_secs(3600)
+        );
+    }
+
+    #[test]
+    fn manual_sync_disables_the_background_timer() {
+        // "手动" used to map to a one-hour IDLE timeout, so the account kept
+        // polling hourly and the setting did nothing visible.
+        assert!(is_manual_sync(
+            &serde_json::json!({ "syncFrequency": "manual" })
+        ));
+        assert!(!is_manual_sync(&serde_json::json!({ "syncFrequency": "1h" })));
+        assert!(!is_manual_sync(&serde_json::json!({})));
     }
 }
 
