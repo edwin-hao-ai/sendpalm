@@ -44,6 +44,7 @@ import {
   setSettingsTab,
   showToast,
   setOnboardingStep,
+  bumpSoftRefreshTick,
   type SettingsTab,
 } from "../stores/ui";
 import { Modal } from "../components/Modal";
@@ -777,6 +778,10 @@ function AccountsTab() {
   const onSave = async (a: Account) => {
     await upsertAccount(a);
     await refetch();
+    // The Imbox tab strip and its counts live on their own account
+    // resource; a soft tick tells them to re-read without clearing any
+    // paginated mail list.
+    bumpSoftRefreshTick();
     setEditing(null);
     showToast({ message: "已保存", kind: "success" });
   };
@@ -1047,6 +1052,7 @@ function AccountsTab() {
               await deleteAccount(deleted.id);
               await vaultDelete(deleted.id).catch(() => undefined);
               await refetch();
+              bumpSoftRefreshTick();
               setEditing(null);
               showToast({
                 message: `已删除账户 ${deleted.label}`,
@@ -1059,7 +1065,10 @@ function AccountsTab() {
       <Show when={adding()}>
         <AddAccountModal
           onClose={() => setAdding(false)}
-          onAdded={() => void refetch()}
+          onAdded={() => {
+            void refetch();
+            bumpSoftRefreshTick();
+          }}
           existingEmails={(accounts() ?? [])
             .map((a) => a.email?.toLowerCase())
             .filter((e): e is string => !!e)}

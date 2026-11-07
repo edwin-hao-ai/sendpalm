@@ -21,7 +21,7 @@ import {
   shouldShowAccountTabs,
 } from "../utils/accounts";
 import { activeAccountId, setActiveAccountId } from "../stores/ui";
-import { useSoftRefreshEffect } from "../utils/gestures";
+import { useRefreshEffect, useSoftRefreshEffect } from "../utils/gestures";
 import type { Account, MessageBucket } from "../types";
 
 export interface AccountTabsProps {
@@ -59,6 +59,14 @@ export function AccountTabs(props: AccountTabsProps) {
   useSoftRefreshEffect(() => {
     if (firstTick) {
       firstTick = false;
+      return;
+    }
+    if (!props.accounts) void refetchAccounts();
+  });
+  let firstHardTick = true;
+  useRefreshEffect(() => {
+    if (firstHardTick) {
+      firstHardTick = false;
       return;
     }
     if (!props.accounts) void refetchAccounts();

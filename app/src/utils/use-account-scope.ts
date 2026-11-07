@@ -13,7 +13,7 @@ import { createResource } from "solid-js";
 import { listAccounts } from "../stores/data";
 import { activeAccountId } from "../stores/ui";
 import { resolveAccountFilter } from "./accounts";
-import { useSoftRefreshEffect } from "./gestures";
+import { useRefreshEffect, useSoftRefreshEffect } from "./gestures";
 import type { Account } from "../types";
 import type { ListMessagesOptions } from "../stores/data";
 
@@ -28,13 +28,22 @@ export interface AccountScope {
 export function useAccountScope(): AccountScope {
   const [accounts, { refetch }] = createResource(listAccounts);
 
-  // New mailboxes appear from Settings while a list view is mounted. Re-pull
-  // on the soft tick, but not on the very first one — `createResource`
-  // already fetched on mount.
-  let firstTick = true;
+  // A mailbox added or removed in Settings (or a test fixture seeded after
+  // the first query landed) must show up in the scope. `createResource`
+  // never refetches on its own, so without these two the tab strip and the
+  // account filter would stay stuck on whatever the first read saw.
+  let firstHard = true;
+  useRefreshEffect(() => {
+    if (firstHard) {
+      firstHard = false;
+      return;
+    }
+    void refetch();
+  });
+  let firstSoft = true;
   useSoftRefreshEffect(() => {
-    if (firstTick) {
-      firstTick = false;
+    if (firstSoft) {
+      firstSoft = false;
       return;
     }
     void refetch();
