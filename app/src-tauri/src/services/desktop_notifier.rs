@@ -4,10 +4,13 @@
 
 use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationPrefs {
     pub desktop_enabled: bool,
+    /// Coalesce per-message notifications into one summary per sync pass.
+    pub digest: bool,
     pub quiet_hours_enabled: bool,
     pub quiet_hours_start: String, // "HH:MM" 24h
     pub quiet_hours_end: String,
@@ -17,6 +20,9 @@ impl Default for NotificationPrefs {
     fn default() -> Self {
         Self {
             desktop_enabled: true,
+            // Default off: one banner per message is the behaviour every
+            // other client has, and digest is the opt-in noise reduction.
+            digest: false,
             quiet_hours_enabled: false,
             quiet_hours_start: "22:00".to_string(),
             quiet_hours_end: "08:00".to_string(),
@@ -74,6 +80,13 @@ pub async fn notify_new_mail(
     if !should_notify(prefs, &now) {
         return Ok(());
     }
+    if prefs.digest {
+        // Hold the ping until the sync pass ends; `flush_digest` turns the
+        // batch into one banner. Without this, "摘要" would be identical to
+        // the default behaviour.
+        DIGEST_PENDING.fetch_add(1, Ordering::Relaxed);
+        return Ok(());
+    }
     let title = if subject.is_empty() {
         format!("New message from {sender}")
     } else {
@@ -87,4 +100,68 @@ pub async fn notify_new_mail(
         .show()
         .map_err(|e| format!("notification: {e}"))?;
     Ok(())
+}
+
+/// Mail held back during the current sync pass while digest mode is on.
+static DIGEST_PENDING: AtomicUsize = AtomicUsize::new(0);
+
+/// Wording for the coalesced banner. Pure so the copy can be tested without
+/// an `AppHandle`.
+pub fn digest_copy(n: usize) -> (String, String) {
+    let title = format!("{n} 封新邮件");
+    let body = format!("有 {n} 封新的邮件（摘要模式，不逐封提醒）");
+    (title, body)
+}
+
+/// Emit the coalesced banner for the sync pass that just finished and reset
+/// the counter. Called from `sync_and_notify` after every account pass, so a
+/// pass that found no notifiable mail is a cheap no-op.
+pub fn flush_digest(app: &AppHandle, prefs: &NotificationPrefs) {
+    let n = DIGEST_PENDING.swap(0, Ordering::Relaxed);
+    if n == 0 || !prefs.digest {
+        return;
+    }
+    let now = chrono::Local::now().format("%H:%M").to_string();
+    if !should_notify(prefs, &now) {
+        // Quiet hours swallowed the batch too — held mail is simply dropped;
+        // the in-app notification centre still has every row.
+        return;
+    }
+    let (title, body) = digest_copy(n);
+    let _ = app.notification().builder().title(title).body(body).show();
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prefs(digest: bool) -> NotificationPrefs {
+        NotificationPrefs {
+            digest,
+            ..NotificationPrefs::default()
+        }
+    }
+
+    #[test]
+    fn digest_copy_reports_the_batch_size() {
+        assert_eq!(digest_copy(1).0, "1 封新邮件");
+        let (title, body) = digest_copy(7);
+        assert_eq!(title, "7 封新邮件");
+        assert!(body.contains('7'));
+    }
+
+    #[test]
+    fn digest_is_off_by_default() {
+        assert!(!NotificationPrefs::default().digest);
+        assert!(prefs(true).digest);
+    }
+
+    #[test]
+    fn quiet_hours_still_gate_the_digest() {
+        let mut p = prefs(true);
+        p.quiet_hours_enabled = true;
+        p.quiet_hours_start = "22:00".into();
+        p.quiet_hours_end = "08:00".into();
+        assert!(!should_notify(&p, "23:30"));
+        assert!(should_notify(&p, "12:00"));
+    }
 }

@@ -848,6 +848,11 @@ async fn sync_and_notify(
             n, account.account_id
         );
     }
+
+    // Digest mode holds per-message pings during the pass; emit the single
+    // summary banner here, once the whole pass is done.
+    crate::services::desktop_notifier::flush_digest(app, &store.notification_prefs());
+
     Ok(())
 }
 
