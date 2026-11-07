@@ -28,6 +28,7 @@ import {
   showToast,
 } from "../stores/ui";
 import { contactsList, refetchContacts } from "../stores/contacts";
+import { IS_BROWSER } from "../services/tauri-shim";
 import { Icon } from "../components/Icon";
 import { ErrorState } from "../components/Empty";
 import { Skeleton } from "../components/Skeleton";
@@ -107,9 +108,15 @@ export function MeetingPanel(props: { meetingId: string }) {
         showToast({ message: `${label} · 已回信给组织者`, kind: "success" });
         await refetchEvent();
       } else {
+        // `safeInvoke` returns null both in the browser preview and when the
+        // Rust command genuinely fails, so the old "当前环境暂不支持回信"
+        // copy was wrong on a real build — it read as a missing feature
+        // rather than a failed send.
         showToast({
-          message: "当前环境暂不支持回信",
-          kind: "info",
+          message: IS_BROWSER()
+            ? "浏览器预览模式不能发送回信，请在桌面 App 里操作"
+            : "回信没有发出去，请检查账户连接，或直接在邮件里回复组织者",
+          kind: "warning",
         });
       }
     } catch (e) {
