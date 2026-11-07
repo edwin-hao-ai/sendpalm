@@ -249,7 +249,9 @@ export function useGlobalShortcuts() {
       const id = selectedMessageId();
       if (!id) return;
       e.preventDefault();
-      setView("imbox");
+      // Do NOT jump to the Imbox: the detail panel is a global overlay and
+      // is already showing this message wherever the user is. Forcing the
+      // view tore readers out of Stream / Records / Trash mid-read.
       setDetailOpen(true);
       window.dispatchEvent(
         new CustomEvent("sp:message:label", { detail: { messageId: id } }),
@@ -259,7 +261,6 @@ export function useGlobalShortcuts() {
       const id = selectedMessageId();
       if (!id) return;
       e.preventDefault();
-      setView("imbox");
       setDetailOpen(true);
       window.dispatchEvent(
         new CustomEvent("sp:message:move", { detail: { messageId: id } }),
