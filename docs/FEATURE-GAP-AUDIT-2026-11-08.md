@@ -72,7 +72,7 @@
 | 类型 | `pnpm exec tsc --noEmit` | 干净 |
 | Lint | `pnpm exec eslint . --max-warnings=0` | 干净 |
 | 构建 | `pnpm build` | 成功 |
-| 端到端 | `pnpm exec playwright test` | **150 passed**，2 failed，1 skipped |
+| 端到端 | `pnpm exec playwright test` | **151 passed**，2 failed，1 skipped |
 
 两个失败在改动前的 `43527a0` 上单独复现，属既存问题：
 
@@ -84,7 +84,9 @@
 
 - `e2e/accounts.spec.ts`（4 条）：合并视图列出两个邮箱；tab 收窄到单个邮箱；
   隔离邮箱不进「全部账户」但可从自己的 tab 进入；单邮箱不渲染 tab 条。
-- `e2e/app-lock.spec.ts`（3 条）：锁屏盖住 shell、错 PIN 不放行、恢复码可解锁。
+- `e2e/app-lock.spec.ts`（3 条）：从设置页开启应用锁、立即锁定后锁屏盖住 shell、
+  错 PIN 不放行、恢复码可解锁。全部走真实点击，不用 `page.evaluate` 戳 store
+  （dev 下 `import()` 可能拿到与 App 不同的模块实例，信号改了但界面无反应）。
 - `e2e/agent-drafts.spec.ts`（1 条）：批准 Agent 草稿后它真的出现在草稿箱。
   该用例在去掉修复后**确认失败**（`git stash` 复跑验证），是真正的回归守卫。
 

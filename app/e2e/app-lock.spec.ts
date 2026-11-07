@@ -1,29 +1,56 @@
-/** App lock E2E — the lock actually covers the app and the PIN opens it. */
+/** App lock E2E — driven entirely through the real UI.
+ *
+ *  Deliberately no `page.evaluate(import(...))` store pokes: in dev the module
+ *  graph can hand `import()` a different instance than the one the app
+ *  mounted, which made store-driven setup silently do nothing. Everything
+ *  here clicks what a user would click.
+ */
 
 import { test, expect, type Page } from "@playwright/test";
+
+const PIN = "2468";
 
 async function boot(page: Page) {
   await page.goto("/");
   await page.locator("body.app-ready").waitFor({ timeout: 10_000 });
 }
 
-async function enableAndLock(page: Page, pin: string) {
-  await page.evaluate(async (p) => {
-    const mod = await import("/src/services/app-lock.ts");
-    mod.enableLock(p);
-    mod.lockNow();
-  }, pin);
+async function openSecuritySettings(page: Page) {
+  await page.getByRole("button", { name: "账户与设置" }).click();
+  await page.locator('[role="menu"]').getByRole("button", { name: "设置" }).click();
+  await page.getByRole("button", { name: "偏好" }).first().click();
+  await expect(page.locator("[data-app-lock-enable]")).toBeVisible({
+    timeout: 5_000,
+  });
+}
+
+/** Enables the lock through Settings and returns the recovery code from the
+ *  toast it shows (that toast is the only place the code ever exists). */
+async function enableLockViaUi(page: Page, pin: string): Promise<string> {
+  await openSecuritySettings(page);
+  await page.locator("[data-app-lock-enable]").click();
+  await page.locator("[data-pin-new]").fill(pin);
+  await page.locator("[data-pin-confirm]").fill(pin);
+  await page.locator("[data-pin-submit]").click();
+
+  const toast = page.getByText(/恢复码：[A-Z0-9]{4}-[A-Z0-9]{4}/);
+  await expect(toast).toBeVisible({ timeout: 5_000 });
+  const text = (await toast.textContent()) ?? "";
+  const match = text.match(/([A-Z0-9]{4}-[A-Z0-9]{4})/);
+  if (!match) throw new Error(`no recovery code in toast: ${text}`);
+  return match[1]!;
 }
 
 test.describe("App lock", () => {
-  test("covers the shell and unlocks with the right PIN", async ({ page }) => {
+  test("enabling from Settings, then the PIN opens it", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await boot(page);
-    await enableAndLock(page, "2468");
+    await enableLockViaUi(page, PIN);
 
+    // The section now offers the locked-state actions.
+    await page.locator("[data-app-lock-now]").click();
     const lock = page.locator("[data-lock-screen]");
     await expect(lock).toBeVisible();
-    // The shell is behind it, not interactive.
     await expect(lock.getByRole("heading", { name: "已锁定" })).toBeVisible();
 
     await lock.locator("[data-lock-pin]").fill("0000");
@@ -31,7 +58,7 @@ test.describe("App lock", () => {
     await expect(lock.getByRole("alert")).toHaveText("PIN 不正确");
     await expect(lock).toBeVisible();
 
-    await lock.locator("[data-lock-pin]").fill("2468");
+    await lock.locator("[data-lock-pin]").fill(PIN);
     await lock.locator("[data-lock-submit]").click();
     await expect(lock).toHaveCount(0);
   });
@@ -41,13 +68,9 @@ test.describe("App lock", () => {
   }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await boot(page);
-    const code = await page.evaluate(async () => {
-      const mod = await import("/src/services/app-lock.ts");
-      const { recoveryCode } = mod.enableLock("1357");
-      mod.lockNow();
-      return recoveryCode;
-    });
+    const code = await enableLockViaUi(page, "1357");
 
+    await page.locator("[data-app-lock-now]").click();
     const lock = page.locator("[data-lock-screen]");
     await expect(lock).toBeVisible();
 
