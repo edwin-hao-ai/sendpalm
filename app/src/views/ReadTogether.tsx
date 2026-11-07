@@ -42,6 +42,7 @@ import {
   appSettings,
 } from "../stores/ui";
 import { formatMessageDate } from "../utils/message-dates";
+import { useAccountScope } from "../utils/use-account-scope";
 
 /** Profile timezone for mail date labels (falls back to OS zone in helpers). */
 const profileTz = () => appSettings.profile.timezone;
@@ -80,18 +81,26 @@ export function ReadTogether() {
   // READ_TOGETHER_PAGE, so the batch-mode threshold must look at the total —
   // comparing against the page length would silently cap the decision at 200.
   const [unreadTotal, setUnreadTotal] = createSignal(0);
-  const [unreadRaw, { refetch: refetchUnread }] = createResource(async () => {
-    const page = await listMessagesPaged({
-      bucket: "imbox",
-      direction: "in",
-      unreadOnly: true,
-      lightweight: true,
-      limit: READ_TOGETHER_PAGE,
-      offset: 0,
-    });
-    setUnreadTotal(page.total);
-    return page.items;
-  });
+  // Scoped to the mailbox the user is reading. "一起读" is a mail queue, so
+  // it follows the same 全部账户 / per-account selection as the Imbox — the
+  // resource's source is the filter, which re-runs it when the tab changes.
+  const accountScope = useAccountScope();
+  const [unreadRaw, { refetch: refetchUnread }] = createResource(
+    () => accountScope.scope(),
+    async (scope): Promise<Message[]> => {
+      const page = await listMessagesPaged({
+        bucket: "imbox",
+        direction: "in",
+        unreadOnly: true,
+        lightweight: true,
+        limit: READ_TOGETHER_PAGE,
+        offset: 0,
+        ...scope,
+      });
+      setUnreadTotal(page.total);
+      return page.items;
+    },
+  );
   const [index, setIndex] = createSignal(0);
 
   // `auto` follows the queue size; 逐封读 / 批量读 switch it explicitly.
