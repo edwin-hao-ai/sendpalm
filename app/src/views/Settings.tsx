@@ -2033,16 +2033,6 @@ function AgentTab() {
       />
       <p style={{ color: "var(--text-muted)", "font-size": "var(--text-caption)" }}>默认关闭。启用后，仅将通过筛选台的新收件箱邮件发送至已配置模型；不会扫描历史邮件。建议需确认才成为任务。</p>
       <Toggle
-        label="自动起草回复"
-        checked={s.agent.autoDraft}
-        onChange={(v) => setAppSettings("agent", "autoDraft", v)}
-      />
-      <Toggle
-        label="自动生成简报"
-        checked={s.agent.autoSummarize}
-        onChange={(v) => setAppSettings("agent", "autoSummarize", v)}
-      />
-      <Toggle
         label="记忆可编辑"
         checked={s.agent.memoryEditable}
         onChange={(v) => setAppSettings("agent", "memoryEditable", v)}

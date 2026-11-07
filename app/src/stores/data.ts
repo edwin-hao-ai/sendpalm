@@ -2970,8 +2970,6 @@ export async function loadAppSettings(
       agent: {
         autoExtractTasks: false,
         taskExtractionEnabledAt: null,
-        autoDraft: false,
-        autoSummarize: true,
         memoryEditable: true,
         llm: {
           baseUrl: "",

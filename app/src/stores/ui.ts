@@ -310,8 +310,6 @@ export const [appSettings, setAppSettings] = createStore<AppSettings>({
   agent: {
     autoExtractTasks: false,
     taskExtractionEnabledAt: null,
-    autoDraft: false,
-    autoSummarize: true,
     memoryEditable: true,
     llm: {
       baseUrl: "",

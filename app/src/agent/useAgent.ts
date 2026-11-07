@@ -13,6 +13,8 @@ import {
   upsertAgentDraft,
   upsertAgentAudit,
   deleteAgentSession,
+  listAccounts,
+  upsertDraft,
 } from "../stores/data";
 import {
   setAgentPanelOpen,
@@ -20,12 +22,14 @@ import {
   setSelectedDraftId,
   showToast,
   appSettings,
+  bumpSoftRefreshTick,
 } from "../stores/ui";
 import { contactsList, refetchContacts } from "../stores/contacts";
 import { agentChat, DEFAULT_LLM_BASE_URL } from "../services/backend";
 import { IS_BROWSER } from "../services/tauri-shim";
 import { uid } from "../utils/id";
 import { isoNow } from "../utils/date";
+import { plainTextToHtml } from "../utils/html";
 import { useRefreshEffect } from "../utils/gestures";
 import type {
   AgentSession,
@@ -34,6 +38,7 @@ import type {
   AgentTaskStatus,
   AgentDraft,
   AgentAuditEntry,
+  Draft,
   DraftStatus,
 } from "../types";
 
@@ -364,8 +369,28 @@ export function useAgent() {
 
   const approveDraft = async (d: AgentDraft) => {
     if (d.status !== "approved") {
+      // Approving used to only flip a status on `agent_drafts` and then tell
+      // the user "可在草稿箱中发送" — but 草稿箱 reads the separate `drafts`
+      // table, so nothing ever appeared there and the message could not be
+      // sent. Materialise a real draft row so the promise is true.
+      const accountId = (await listAccounts())[0]?.id ?? "";
+      const row: Draft = {
+        id: d.id,
+        recipient: d.recipient,
+        subject: d.subject,
+        body: d.body,
+        lastEdited: isoNow(),
+        status: "approved",
+        accountId,
+        cc: [],
+        bcc: [],
+        attachments: [],
+        htmlBody: plainTextToHtml(d.body),
+      };
+      await upsertDraft(row);
       await upsertAgentDraft({ ...d, status: "approved" });
       await refetchDrafts();
+      bumpSoftRefreshTick();
     }
     await appendAudit("draft_approved", `草稿已批准 · ${d.subject}`);
     showToast({ message: "草稿已批准，可在草稿箱中发送", kind: "success" });

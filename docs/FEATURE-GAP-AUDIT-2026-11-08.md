@@ -39,6 +39,8 @@
 | B8 | 单个附件上限写死 25MB | L | `Compose.tsx` `MAX_ATTACHMENT_BYTES` 常量，`maxAttachmentMb` 无读取方 | ✅ 已修 |
 | B9 | 回信失败被文案说成"功能没做" | M | `panels/MeetingPanel.tsx` 对 `safeInvoke` 的 null 统一提示"当前环境暂不支持回信" | ✅ 已修 |
 | B10 | 一起读（ReadTogether）不跟随账户 | M | 直接 `listMessagesPaged({bucket:"imbox"})`，无账户过滤 | ✅ 已修 |
+| B11 | Agent 草稿"批准"后哪里都不出现 | H | `agent/useAgent.ts` `approveDraft` 只改 `agent_drafts.status` 并提示"可在草稿箱中发送"；草稿箱读的是另一张 `drafts` 表，所以批准=石沉大海 | ✅ 已修（批准时物化一行 `drafts`） |
+| B12 | 「自动起草回复」「自动生成简报」是死开关 | M | `agent.autoDraft` / `agent.autoSummarize` 只被自己的开关读取，无任何消费方；`autoSummarize` 默认还是 `true` | ❌ 删除（无消费场景，不留在界面上撒谎） |
 
 ## 3. PRD §3.19「安全」
 
@@ -48,6 +50,7 @@
 | C2 | 禁止截图 `screenshotAllowed` | L | ❌ 删除 | macOS 需 `NSWindow.sharingType` 原生调用 + 新增 objc2 直接依赖（AGENTS §3.1 要求先做选型检索）。 |
 | C3 | 剪贴板同步 `clipboardSync` | L | ❌ 删除 | 语义依赖多设备同步，当前无后端。 |
 | C4 | 自动下载附件 `autoDownloadAttachments` | L | ❌ 删除 | 应用里没有"自动下载"路径（附件字节始终按需取）；补预取反而违反 §11.7 的省内存方向。 |
+| C5 | Agent「自动起草 / 自动简报」 | M | ❌ 删除 | 见 B12：两个开关没有任何读取方，简报连展示位置都没有定义。 |
 
 删除理由与恢复路径同时记录在 `docs/TODOS.md`「未实装（有意为之）」。
 
@@ -82,6 +85,8 @@
 - `e2e/accounts.spec.ts`（4 条）：合并视图列出两个邮箱；tab 收窄到单个邮箱；
   隔离邮箱不进「全部账户」但可从自己的 tab 进入；单邮箱不渲染 tab 条。
 - `e2e/app-lock.spec.ts`（3 条）：锁屏盖住 shell、错 PIN 不放行、恢复码可解锁。
+- `e2e/agent-drafts.spec.ts`（1 条）：批准 Agent 草稿后它真的出现在草稿箱。
+  该用例在去掉修复后**确认失败**（`git stash` 复跑验证），是真正的回归守卫。
 
 ## 6. 相关提交
 

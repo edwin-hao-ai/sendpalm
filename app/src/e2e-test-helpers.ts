@@ -8,6 +8,8 @@
 import { IS_BROWSER } from "./services/tauri-shim";
 import type {
   Account,
+  AgentDraft,
+  AgentSession,
   CalendarEvent,
   Contact,
   FileItem,
@@ -24,6 +26,8 @@ import {
   listEvents,
   resetAllData,
   getDb,
+  upsertAgentSession,
+  upsertAgentDraft,
 } from "./stores/data";
 import { bumpRefreshTick } from "./stores/ui";
 
@@ -33,6 +37,11 @@ interface SeedPayload {
   messages?: Message[];
   events?: CalendarEvent[];
   files?: FileItem[];
+  /** Agent conversations. Needed because `agent_drafts` is a separate table
+   *  from `drafts`, and the approve→草稿箱 path has to be exercised end to
+   *  end. */
+  agentSessions?: AgentSession[];
+  agentDrafts?: AgentDraft[];
 }
 
 interface E2EHelpers {
@@ -42,6 +51,8 @@ interface E2EHelpers {
   seedMessage: (m: Message) => Promise<void>;
   seedEvent: (e: CalendarEvent) => Promise<void>;
   seedFile: (f: FileItem) => Promise<void>;
+  seedAgentSession: (x: AgentSession) => Promise<void>;
+  seedAgentDraft: (x: AgentDraft) => Promise<void>;
   listContacts: () => Promise<Contact[]>;
   listMessages: () => Promise<Message[]>;
   listEvents: () => Promise<CalendarEvent[]>;
@@ -75,6 +86,8 @@ async function applySeed(payload: SeedPayload): Promise<void> {
   for (const m of payload.messages ?? []) await upsertMessage(m);
   for (const e of payload.events ?? []) await upsertEvent(e);
   for (const f of payload.files ?? []) await upsertFile(f);
+  for (const s of payload.agentSessions ?? []) await upsertAgentSession(s);
+  for (const d of payload.agentDrafts ?? []) await upsertAgentDraft(d);
   // Bump the global refresh tick so any createResource that already
   // fired with empty data refetches now that the seed has landed.
   // Without this, view state and resource cache race the seed.
@@ -104,6 +117,8 @@ if (IS_BROWSER() && typeof window !== "undefined") {
     seedMessage: upsertMessage,
     seedEvent: upsertEvent,
     seedFile: upsertFile,
+    seedAgentSession: upsertAgentSession,
+    seedAgentDraft: upsertAgentDraft,
     listContacts,
     listMessages,
     listEvents,

@@ -622,8 +622,6 @@ export interface AppSettings {
   agent: {
     autoExtractTasks: boolean;
     taskExtractionEnabledAt: ISODate | null;
-    autoDraft: boolean;
-    autoSummarize: boolean;
     memoryEditable: boolean;
     /** OpenAI-compatible LLM config. Empty strings mean "use
      *  default provider" — the user can leave apiKey blank for
