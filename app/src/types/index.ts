@@ -385,6 +385,12 @@ export interface Draft {
   cc?: string[];
   bcc?: string[];
   attachments?: DraftAttachment[];
+  /** Rendered HTML body. Captured at save time so a scheduled send keeps
+   *  formatting without re-deriving it in Rust. */
+  htmlBody?: string;
+  /** RFC Message-ID this draft replies to. Kept on the draft so a reply
+   *  scheduled (or reopened and then scheduled) still threads. */
+  inReplyTo?: string;
 }
 
 /* ── Agent ──────────────────────────────────────────── */

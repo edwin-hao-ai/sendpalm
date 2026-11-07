@@ -105,10 +105,10 @@ async fn dispatch_one(
             &cc,
             &bcc,
             Some(&outgoing.reply_to),
-            None,
+            draft.in_reply_to.as_deref(),
             &draft.subject,
             &body,
-            None,
+            draft.html_body.clone(),
             attachments,
         )
         .await?;
@@ -157,13 +157,29 @@ struct DraftRow {
     bcc: String,
     attachments: Vec<String>,
     from_alias: Option<String>,
+    /// Rendered HTML body, captured by Compose when the draft was saved.
+    /// Absent for drafts created before migration 0031.
+    html_body: Option<String>,
+    /// RFC Message-ID this draft replies to, so the scheduled send can
+    /// carry `In-Reply-To` and thread in the recipient's client.
+    in_reply_to: Option<String>,
 }
 
 async fn load_draft(pool: &SqlitePool, draft_id: &str) -> Result<DraftRow, String> {
     let row = sqlx::query_as::<
         _,
-        (String, String, String, String, String, String, Option<String>),
-    >("SELECT recipient, subject, body, cc_json, bcc_json, attachments_json, from_alias FROM drafts WHERE id = $1")
+        (
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ),
+    >("SELECT recipient, subject, body, cc_json, bcc_json, attachments_json, from_alias, html_body, in_reply_to FROM drafts WHERE id = $1")
     .bind(draft_id)
     .fetch_one(pool)
     .await
@@ -180,6 +196,8 @@ async fn load_draft(pool: &SqlitePool, draft_id: &str) -> Result<DraftRow, Strin
         bcc: join_addrs(&row.4),
         attachments,
         from_alias: row.6,
+        html_body: row.7,
+        in_reply_to: row.8,
     })
 }
 

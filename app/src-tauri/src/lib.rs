@@ -250,6 +250,12 @@ pub fn run() {
             kind: MigrationKind::Up,
         },
         Migration {
+            version: 31,
+            description: "draft reply context for scheduled sends",
+            sql: include_str!("../migrations/0031_draft_reply_context.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
             version: 29,
             description: "imap folder/uid identity for flag sync",
             sql: include_str!("../migrations/0029_imap_identity.sql"),

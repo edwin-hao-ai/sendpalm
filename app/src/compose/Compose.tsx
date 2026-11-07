@@ -104,6 +104,10 @@ interface DraftState {
   savingState: "idle" | "saving" | "saved";
   lastSaved: number;
   attachments: DraftAttachment[];
+  /** RFC Message-ID of the message being replied to. Carried in state (and
+   *  persisted) so a reply made, saved, and later scheduled still threads in
+   *  the recipient's client. */
+  inReplyTo?: string;
 }
 
 export function Compose() {
@@ -201,6 +205,7 @@ export function Compose() {
         recipient: senderEmail,
         subject: m.subj.startsWith("Re: ") ? m.subj : `Re: ${m.subj}`,
         body: quote,
+        inReplyTo: m.rfcMessageId,
       };
     }
     if (ctx.mode === "replyAll") {
@@ -231,6 +236,7 @@ export function Compose() {
         cc: others.join(", "),
         subject: m.subj.startsWith("Re: ") ? m.subj : `Re: ${m.subj}`,
         body: quote,
+        inReplyTo: m.rfcMessageId,
       };
     }
     // forward
@@ -338,6 +344,7 @@ export function Compose() {
     savingState: "saved",
     lastSaved: new Date(d.lastEdited).getTime(),
     attachments: d.attachments?.map((a) => ({ ...a })) ?? [],
+    inReplyTo: d.inReplyTo,
   });
 
   /* Reset draft when modal opens */
@@ -464,6 +471,38 @@ export function Compose() {
       // the binary content shifted. Re-saving the same attachments
       // is still wasteful but harmless.
     });
+  /** DraftState → persisted draft row. Single source so the autosave and
+   *  the scheduled-send path can never drift (they used to be two
+   *  hand-maintained copies, which is how scheduled replies lost their
+   *  HTML body and `In-Reply-To`). */
+  const toDraftRow = (d: DraftState, status: Draft["status"]): Draft => ({
+    id: d.id,
+    recipient: d.recipient,
+    subject: d.subject,
+    body: d.body,
+    lastEdited: isoNow(),
+    status,
+    accountId: d.accountId,
+    fromAlias: d.fromAlias,
+    cc: d.cc
+      ? d.cc
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [],
+    bcc: d.bcc
+      ? d.bcc
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [],
+    attachments: d.attachments,
+    // Same transform `sendNow` uses, so a scheduled message renders exactly
+    // like an immediate one.
+    htmlBody: plainTextToHtml(d.body),
+    inReplyTo: d.inReplyTo,
+  });
+
   const persistDraft = async (status: Draft["status"] = "edited") => {
     const d = draft();
     if (!d.recipient && !d.subject && !d.body) return;
@@ -473,30 +512,7 @@ export function Compose() {
       return;
     }
     setDraft({ ...d, savingState: "saving" });
-    const draftRow: Draft = {
-      id: d.id,
-      recipient: d.recipient,
-      subject: d.subject,
-      body: d.body,
-      lastEdited: isoNow(),
-      status,
-      accountId: d.accountId,
-      fromAlias: d.fromAlias,
-      cc: d.cc
-        ? d.cc
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-        : [],
-      bcc: d.bcc
-        ? d.bcc
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-        : [],
-      attachments: d.attachments,
-    };
-    await upsertDraft(draftRow);
+    await upsertDraft(toDraftRow(d, status));
     lastSavedSnapshot = snapshot;
     setDraft({ ...d, savingState: "saved", lastSaved: Date.now() });
   };
@@ -572,12 +588,14 @@ export function Compose() {
       const htmlBody = plainTextToHtml(d.body);
       // Replies/Reply-All carry In-Reply-To so recipients' clients can
       // thread the conversation (Gmail threads on References/In-Reply-To,
-      // not on subject). Forward intentionally doesn't.
+      // not on subject). Forward intentionally doesn't. A draft reopened
+      // from disk carries the id in `d.inReplyTo`.
       const ctx = composeContext();
       const inReplyTo =
-        (ctx.mode === "reply" || ctx.mode === "replyAll")
+        d.inReplyTo ??
+        ((ctx.mode === "reply" || ctx.mode === "replyAll")
           ? ctx.originalMsg?.rfcMessageId
-          : undefined;
+          : undefined);
       const result = await sendEmailViaBackend(
         recipient,
         subject,
@@ -649,30 +667,7 @@ export function Compose() {
 
   const scheduleSend = async (when: Date) => {
     const d = draft();
-    const draftRow: Draft = {
-      id: d.id,
-      recipient: d.recipient,
-      subject: d.subject,
-      body: d.body,
-      lastEdited: isoNow(),
-      status: "pending",
-      accountId: d.accountId,
-      fromAlias: d.fromAlias,
-      cc: d.cc
-        ? d.cc
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-        : [],
-      bcc: d.bcc
-        ? d.bcc
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-        : [],
-      attachments: d.attachments,
-    };
-    await upsertDraft(draftRow);
+    await upsertDraft(toDraftRow(d, "pending"));
     const sched: ScheduledSend = {
       id: uid("ss"),
       draftId: d.id,

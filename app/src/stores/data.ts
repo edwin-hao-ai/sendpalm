@@ -387,6 +387,8 @@ function rowToDraft(r: Record<string, unknown>): Draft {
       r.attachments_json as string,
       [],
     ),
+    htmlBody: (r.html_body as string | null) ?? undefined,
+    inReplyTo: (r.in_reply_to as string | null) ?? undefined,
   };
 }
 
@@ -2246,14 +2248,15 @@ export async function listDrafts(): Promise<Draft[]> {
 export async function upsertDraft(d: Draft): Promise<void> {
   const db = await getDb();
   await db.execute(
-    `INSERT INTO drafts (id,recipient,subject,body,last_edited,status,account_id,from_alias,cc_json,bcc_json,attachments_json)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    `INSERT INTO drafts (id,recipient,subject,body,last_edited,status,account_id,from_alias,cc_json,bcc_json,attachments_json,html_body,in_reply_to)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
      ON CONFLICT(id) DO UPDATE SET
        recipient=excluded.recipient, subject=excluded.subject, body=excluded.body,
        last_edited=excluded.last_edited, status=excluded.status,
        account_id=excluded.account_id, from_alias=excluded.from_alias,
        cc_json=excluded.cc_json, bcc_json=excluded.bcc_json,
-       attachments_json=excluded.attachments_json`,
+       attachments_json=excluded.attachments_json,
+       html_body=excluded.html_body, in_reply_to=excluded.in_reply_to`,
     [
       d.id,
       d.recipient,
@@ -2266,6 +2269,8 @@ export async function upsertDraft(d: Draft): Promise<void> {
       safeStringify(d.cc ?? []),
       safeStringify(d.bcc ?? []),
       safeStringify(d.attachments ?? []),
+      d.htmlBody ?? null,
+      d.inReplyTo ?? null,
     ],
   );
 }
