@@ -1,5 +1,13 @@
 # SendPalm 功能缺口审计 — 2026-11-08
 
+## 0. 要回答的原话
+
+> 还有什么功能性的东西我们是没做完的？比如说多邮件账户。多邮件账户的话，我们怎么
+> 合并这些邮件？以及怎么切换这些邮件的账户？这些都是我们要思考的问题。
+>
+> 然后你也审计一下，看看还有哪些功能性的东西我们是没有完成好的。然后把它一起完成
+> 了吧。
+
 > 触发：用户问"还有哪些功能性的东西是没做完的？比如多邮件账户怎么合并、怎么切换"，
 > 并要求"审计一下……然后把它一起完成"。
 >
@@ -96,9 +104,36 @@
 - `e2e/agent-drafts.spec.ts`（1 条）：批准 Agent 草稿后它真的出现在草稿箱。
   该用例在去掉修复后**确认失败**（`git stash` 复跑验证），是真正的回归守卫。
 
-## 6. 相关提交
+## 6. 完成状态（结论）
+
+**所有检查全绿。**
+
+- TypeScript 单测：**723 passed**（起点 663，新增 60 条）
+- Rust lib 测试：**157 passed**
+- `tsc --noEmit` / `eslint . --max-warnings=0` / `pnpm build`：干净，无警告
+- Playwright 端到端：**153 passed / 0 failed / 1 skipped**，4.9 分钟
+- 上一轮被判"既存失败"的两条用例已查明是**真 bug**（B13/B14/B15）并修掉，
+  3x 压测从 6.7 分钟超时变成 19 秒通过
+
+**用户问的两个问题都有可运行的答案：**
+
+1. 「怎么合并」—— 默认就合并：所有邮箱写进同一张 `messages` 表，每行 `ac` 标明来源；
+   同一发件人跨账户仍聚合为一个会话组；`accounts.privacy = isolated` 的邮箱不进合并。
+2. 「怎么切换」—— 邮件列表上方的账户 tab（收件箱/报刊/单据/回收站/垃圾邮件/一起读），
+   选中即就地重新分页；单邮箱用户不显示这排 tab。
+
+**没有遗留的待办功能**：审计出的 15 项全部修完；PRD §3.19 里 5 项（禁止截图 /
+剪贴板同步 / 自动下载附件 / Agent 自动起草 / Agent 自动简报）是**明确删除**而非遗漏，
+理由与恢复路径见第 3 节和 `docs/TODOS.md`「未实装（有意为之）」。OAuth 按
+`docs/OAUTH-DECISION.md` 属 v4 范围。
+
+## 7. 相关提交
 
 ```
+72c9e2b fix(ui): a missing avatar name must not blank the whole app
+d7185a2 test(lock): drive the app lock through the real settings UI
+4902f90 fix(agent): an approved draft actually reaches 草稿箱
+d1557f6 docs(audit): write down the 2026-11-08 functional gap audit
 d9f5988 fix(sidebar): the unread badge describes the mailbox you're in
 170444b docs(progress): record the app lock landing
 bd80472 feat(security): ship app lock instead of deleting it
