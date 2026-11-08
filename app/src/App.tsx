@@ -12,19 +12,24 @@
  * shell, NOT after `initApp()` resolves.
  */
 
-import { Show, createSignal, onMount, onCleanup } from "solid-js";
+import {
+  Show,
+  Suspense,
+  createSignal,
+  lazy,
+  onMount,
+  onCleanup,
+} from "solid-js";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { Main } from "./components/Main";
-import { DetailPanel } from "./components/DetailPanel";
-import { AgentPanel } from "./components/AgentPanel";
+
 import { ToastStack } from "./components/ToastStack";
-import { Onboarding } from "./views/Onboarding";
-import { CommandPalette } from "./search/CommandPalette";
-import { LiveSearch } from "./search/LiveSearch";
+
+
 import { NotificationPanel } from "./notifications/NotificationPanel";
 import { DropBar } from "./components/DropBar";
-import { Compose } from "./compose/Compose";
+
 import { ResurfaceLoop } from "./services/reminder";
 import { startSyncEventBridge } from "./services/sync-events";
 import { startTaskExtractionService } from "./services/task-extraction";
@@ -41,11 +46,45 @@ import {
   onboardingStep,
   onboardingCompleted,
   notificationsOpen,
+  composeOpen,
 } from "./stores/ui";
 import { appLocked } from "./services/app-lock";
 
 import { useGlobalShortcuts } from "./utils/shortcuts";
 import { useViewport } from "./utils/gestures";
+
+/** Overlays load on demand.
+ *
+ *  The shell (sidebar / topbar / main) is what has to paint first, and none
+ *  of these are on that path: the detail panel drags in all seven panels —
+ *  MessagePanel alone is 2,000 lines plus DOMPurify — Compose is its own
+ *  screen, the command palette pulls Fuse, and the wizard only exists on a
+ *  first run. Bundling them into the entry chunk meant every cold start
+ *  parsed ~180 KB gzip of code the user might never open.
+ */
+const DetailPanel = lazy(() =>
+  import("./components/DetailPanel").then((m) => ({
+    default: m.DetailPanel,
+  })),
+);
+const AgentPanel = lazy(() =>
+  import("./components/AgentPanel").then((m) => ({ default: m.AgentPanel })),
+);
+const CommandPalette = lazy(() =>
+  import("./search/CommandPalette").then((m) => ({
+    default: m.CommandPalette,
+  })),
+);
+const LiveSearch = lazy(() =>
+  import("./search/LiveSearch").then((m) => ({ default: m.LiveSearch })),
+);
+const Compose = lazy(() =>
+  import("./compose/Compose").then((m) => ({ default: m.Compose })),
+);
+const Onboarding = lazy(() =>
+  import("./views/Onboarding").then((m) => ({ default: m.Onboarding })),
+);
+
 
 export default function App() {
   // Track the init error separately. The shell renders as soon as the
@@ -106,9 +145,15 @@ export default function App() {
           <Sidebar />
           <Topbar />
           <Main />
-          <DetailPanel />
+          <Show when={detailOpen()}>
+            <Suspense fallback={null}>
+              <DetailPanel />
+            </Suspense>
+          </Show>
           <Show when={agentPanelOpen()}>
-            <AgentPanel />
+            <Suspense fallback={null}>
+              <AgentPanel />
+            </Suspense>
           </Show>
           <DropBar />
         </div>
@@ -116,18 +161,28 @@ export default function App() {
           <NotificationPanel />
         </Show>
         <Show when={commandPaletteOpen()}>
-          <CommandPalette />
+          <Suspense fallback={null}>
+            <CommandPalette />
+          </Suspense>
         </Show>
         <Show when={searchOpen()}>
-          <LiveSearch />
+          <Suspense fallback={null}>
+            <LiveSearch />
+          </Suspense>
         </Show>
         <ToastStack />
-        <Compose />
+        <Show when={composeOpen()}>
+          <Suspense fallback={null}>
+            <Compose />
+          </Suspense>
+        </Show>
         <ResurfaceLoop />
         <ShortcutHelp />
         <BulkActionMenu />
         <Show when={!onboardingCompleted() && onboardingStep() !== null}>
-          <Onboarding />
+          <Suspense fallback={null}>
+            <Onboarding />
+          </Suspense>
         </Show>
       </Show>
 
