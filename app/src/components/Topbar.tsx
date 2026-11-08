@@ -186,7 +186,14 @@ const iconButtonStyle = (mobile: boolean) => ({
  *  settings — never hard-coded. */
 function AvatarMenu() {
   const { isMobile } = useViewport();
-  const [accounts] = createResource(listAccounts);
+  const [accounts, { refetch: refetchAccounts }] =
+    createResource(listAccounts);
+
+  // Same staleness as SyncBadge: the avatar label is the first account's
+  // name, which must follow account edits.
+  useSoftRefreshEffect(() => {
+    void refetchAccounts();
+  });
   const [open, setOpen] = createSignal(false);
 
   const displayName = () =>
@@ -371,7 +378,8 @@ function NotificationBell(props: { onClick: () => void }) {
 
 export function SyncBadge() {
   const { isMobile } = useViewport();
-  const [accounts] = createResource(listAccounts);
+  const [accounts, { refetch: refetchAccounts }] =
+    createResource(listAccounts);
   const [open, setOpen] = createSignal(false);
   const [busyIds, setBusyIds] = createSignal<Set<string>>(new Set());
   const [states, setStates] = createSignal<Record<string, SyncStateDto>>({});
@@ -423,6 +431,11 @@ export function SyncBadge() {
     void refreshAll();
   });
   useSoftRefreshEffect(() => {
+    // The account list itself can change (added in Settings, removed, or a
+    // sync that just finished) — without this the badge kept rendering the
+    // state it saw on first mount, e.g. "添加邮箱账户 →" while two accounts
+    // were already connected.
+    void refetchAccounts();
     void refreshAll();
   });
 
@@ -473,7 +486,10 @@ export function SyncBadge() {
   };
 
   const label = () =>
-    accounts.loading
+    // Only the *first* load counts as "loading". Refetches happen on every
+    // sync tick and flipping the badge to "加载中…" each time made the
+    // topbar blink.
+    accounts.loading && accounts() === undefined
       ? "加载中…"
       : emailAccounts().length === 0
         ? "添加邮箱账户 →"
@@ -485,7 +501,8 @@ export function SyncBadge() {
     <div style={{ position: "relative", "-webkit-app-region": "no-drag" }}>
       <button
         onClick={() =>
-          emailAccounts().length === 0 && !accounts.loading
+          emailAccounts().length === 0 &&
+          !(accounts.loading && accounts() === undefined)
             ? goToAccounts()
             : setOpen(!open())
         }
@@ -517,7 +534,13 @@ export function SyncBadge() {
           name={aggregateBusy() ? "spinner" : "arrows-clockwise"}
           size={11}
         />
-        <Show when={!isMobile()}>
+        {/* Phones show a bare count instead of nothing: an unlabelled green
+          blob next to the bell read as a mystery button. */}
+        <Show when={!isMobile()} fallback={
+          <Show when={emailAccounts().length > 0}>
+            <span data-sync-count>{emailAccounts().length}</span>
+          </Show>
+        }>
           <span>{label()}</span>
         </Show>
         <Show when={emailAccounts().length > 0}>

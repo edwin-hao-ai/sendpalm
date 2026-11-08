@@ -166,3 +166,67 @@ describe("prependByIds ordering", () => {
     }
   });
 });
+
+describe("removeByIds keeps total and offset honest", () => {
+  it("decrements total by the number of loaded rows removed", async () => {
+    const handle = mount([makeMessage("m1"), makeMessage("m2")]);
+    await vi.waitFor(() => expect(handle.items().length).toBe(2));
+    expect(handle.total()).toBe(2);
+
+    handle.removeByIds(["m1"]);
+
+    // Regression: the old code read `pages()` after `setPages()`, so the
+    // subtraction was always zero and the header total drifted upward with
+    // every archive/trash.
+    expect(handle.items().map((m) => m.id)).toEqual(["m2"]);
+    expect(handle.total()).toBe(1);
+  });
+
+  it("pulls the offset back so loadMore cannot skip rows", async () => {
+    // 100 loaded of 200 total; removing one loaded row must leave offset 99,
+    // not 100 — otherwise the next page starts one row too far and that
+    // message is never shown.
+    const rows = Array.from({ length: 100 }, (_, i) => makeMessage(`m${i}`));
+    vi.mocked(listMessagesPaged).mockResolvedValueOnce({
+      items: rows,
+      total: 200,
+      limit: 100,
+      offset: 0,
+    });
+    let handle!: PaginatedMessagesHandle;
+    createRoot((fn) => {
+      handle = usePaginatedMessages({ bucket: "imbox", direction: "in" }, 100);
+      rootDispose = fn;
+    });
+    await vi.waitFor(() => expect(handle.items().length).toBe(100));
+    expect(handle.total()).toBe(200);
+
+    handle.removeByIds(["m0"]);
+    expect(handle.total()).toBe(199);
+
+    vi.mocked(listMessagesPaged).mockResolvedValueOnce({
+      items: [makeMessage("tail")],
+      total: 199,
+      limit: 100,
+      offset: 99,
+    });
+    await handle.loadMore();
+
+    expect(
+      vi.mocked(listMessagesPaged).mock.calls[
+        vi.mocked(listMessagesPaged).mock.calls.length - 1
+      ]?.[0],
+    ).toMatchObject({ offset: 99 });
+    expect(handle.items()[handle.items().length - 1]?.id).toBe("tail");
+  });
+
+  it("ignores ids that are not in the loaded window", async () => {
+    const handle = mount([makeMessage("m1")]);
+    await vi.waitFor(() => expect(handle.items().length).toBe(1));
+
+    handle.removeByIds(["not-loaded"]);
+
+    expect(handle.items()).toHaveLength(1);
+    expect(handle.total()).toBe(1);
+  });
+});

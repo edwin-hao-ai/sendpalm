@@ -173,14 +173,18 @@ export function usePaginatedMessages(
   const removeByIds = (ids: string[]) => {
     if (ids.length === 0) return;
     const drop = new Set(ids);
-    const next = pages().filter((m) => !drop.has(m.id));
-    if (next.length === pages().length) return;
+    // Snapshot BEFORE setPages(): Solid signals are synchronous, so reading
+    // `pages()` after the write returned the already-filtered array and the
+    // subtraction was always 0. Total drifted up with every archive/trash,
+    // and — worse — the offset stayed high, so `loadMore` skipped exactly as
+    // many real rows as had been removed.
+    const before = pages();
+    const next = before.filter((m) => !drop.has(m.id));
+    const removed = before.length - next.length;
+    if (removed === 0) return;
     setPages(next);
-    setTotal(Math.max(0, total() - (pages().length - next.length)));
-    // Cursor offset: only count removals that came from within the loaded
-    // window. If we removed 2 of the 100 loaded rows the offset shrinks
-    // by 2; if we removed a row beyond the cursor it doesn't matter.
-    setOffset(Math.max(0, offset() - (pages().length - next.length)));
+    setTotal((t) => Math.max(0, t - removed));
+    setOffset((o) => Math.max(0, o - removed));
   };
 
   const patchMessage = (id: string, patch: Partial<Message>) => {

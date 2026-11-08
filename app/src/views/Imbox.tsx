@@ -72,6 +72,7 @@ import {
   mailSyncIssue,
   setSettingsTab,
   activeAccountId,
+  bumpSoftRefreshTick,
   type MailSyncIssue,
   type ViewName,
 } from "../stores/ui";
@@ -647,6 +648,15 @@ export function Imbox() {
     await refetchPiles();
   };
 
+  /** Reading a message moves it between tabs, which our in-memory patches
+   *  handle — but the header's 30-day unread count, the account-tab badges
+   *  and the sidebar badge are SQL counts that only refresh on a tick.
+   *  Without this the header said "3 封待读" above a list of 2. */
+  const refreshUnreadCounts = () => {
+    void refetchRecentUnread();
+    bumpSoftRefreshTick();
+  };
+
   const replyLater = async (m: Message) => {
     removeFromBoth(m.id);
     try {
@@ -844,6 +854,7 @@ export function Imbox() {
         await seenPaged.prependByIds([m.id]);
       }
       await refetchPiles();
+      refreshUnreadCounts();
     } catch (err) {
       console.error("[imbox] toggleUnread failed:", err);
       await refreshAll();
@@ -867,6 +878,7 @@ export function Imbox() {
         // (no body / bodyHtml), so a full upsertMessage here would
         // wipe the body in the DB.
         await markMessageUnread(m.id, false);
+        refreshUnreadCounts();
       } catch {
         // Restore on failure — re-prepend to newPaged and refetch
         // seenPaged so we don't keep a phantom.
@@ -2589,7 +2601,7 @@ function ImboxTabs(props: {
       class="imbox-tabs"
       data-imbox-tabs
       role="tablist"
-      aria-label="Inbox sections"
+      aria-label="收件箱分区"
       style={{
         display: "flex",
         gap: "0",
