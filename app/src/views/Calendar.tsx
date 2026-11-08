@@ -2497,14 +2497,22 @@ function MonthMiniCalendar(props: {
 
 /* ── Layout helpers ─────────────────────────────────────── */
 
-function textColorForBg(hex: string): string {
+function textColorForBg(hex: string | undefined | null): string {
   const rgb = hexToRgb(hex);
   if (!rgb) return "var(--cal-ink)";
   const luminance = (0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b) / 255;
   return luminance > 0.6 ? "var(--cal-ink)" : "white";
 }
 
-function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+function hexToRgb(
+  hex: string | undefined | null,
+): { r: number; g: number; b: number } | null {
+  // Events imported from an .ics (or rows written before `color` existed)
+  // have no colour at all. `hex.replace(...)` on undefined threw
+  // "Cannot read properties of undefined (reading 'replace')" and took the
+  // whole Calendar view down — one bad row, an error screen instead of a
+  // month.
+  if (typeof hex !== "string" || hex.length === 0) return null;
   const clean = hex.replace("#", "");
   if (clean.length !== 3 && clean.length !== 6) return null;
   const full =
