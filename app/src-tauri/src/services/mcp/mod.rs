@@ -25,10 +25,10 @@ pub struct McpGatewayState {
 
 impl McpGatewayState {
     pub fn set(&self, ep: McpEndpoint) {
-        *self.endpoint.lock().unwrap() = Some(ep);
+        *self.endpoint.lock().unwrap_or_else(|e| e.into_inner()) = Some(ep);
     }
 
     pub fn get(&self) -> Option<McpEndpoint> {
-        self.endpoint.lock().unwrap().clone()
+        self.endpoint.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }

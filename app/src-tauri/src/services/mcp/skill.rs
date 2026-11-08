@@ -94,7 +94,7 @@ pub fn uninstall_skill(target: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     fn with_home<T>(f: impl FnOnce() -> T) -> T {
-        let _g = crate::services::HOME_TEST_LOCK.lock().unwrap();
+        let _g = crate::services::HOME_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!(
             "sendpalm-skill-test-{}",
             uuid::Uuid::new_v4().simple()

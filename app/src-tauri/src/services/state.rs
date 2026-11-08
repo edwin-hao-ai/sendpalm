@@ -92,11 +92,11 @@ impl SyncStateStore {
     }
 
     pub fn notification_prefs(&self) -> NotificationPrefs {
-        self.notif.lock().unwrap().clone()
+        self.notif.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn set_notification_prefs(&self, prefs: NotificationPrefs) {
-        *self.notif.lock().unwrap() = prefs;
+        *self.notif.lock().unwrap_or_else(|e| e.into_inner()) = prefs;
     }
 }
 

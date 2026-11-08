@@ -78,11 +78,11 @@ impl CredentialCache {
     }
 
     pub fn get(&self, account_id: &str) -> Option<String> {
-        self.inner.lock().unwrap().get(account_id).cloned()
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).get(account_id).cloned()
     }
 
     pub fn clear(&self) {
-        self.inner.lock().unwrap().clear();
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 }
 

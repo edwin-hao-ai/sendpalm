@@ -389,7 +389,7 @@ mod tests {
     // flip HOME in parallel and the *live* env is read inside
     // connect/disconnect via home_dir()).
     pub(super) fn with_fixture_home<T>(f: impl FnOnce(&Path) -> T) -> T {
-        let _guard = crate::services::HOME_TEST_LOCK.lock().unwrap();
+        let _guard = crate::services::HOME_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!(
             "sendpalm-agent-clients-test-{}",
             uuid::Uuid::new_v4().simple()
