@@ -61,6 +61,7 @@ import type { Clip, Contact, FollowUp, Message, Sticky } from "../types";
 import { useAgent } from "../agent/useAgent";
 import { addCalendarEvent } from "../services/backend";
 import { saveAttachment } from "../utils/save-attachment";
+import { Modal } from "../components/Modal";
 import { useRefreshEffect, useViewport } from "../utils/gestures";
 import { notifyMessageUpdated } from "../services/sync-events";
 import { formatMessageSource, messagePreview } from "./message-source";
@@ -676,9 +677,18 @@ export function MessagePanel(props: { messageId: string }) {
     (stickies() ?? []).filter((s) => s.msgId === props.messageId),
   );
 
-  const addSticky = async () => {
-    const body = prompt("写一条便签…");
-    if (!body || !body.trim()) return;
+  // `window.prompt` does not exist inside a WKWebView (the Tauri macOS/iOS
+  // webview never implements the JS text-input panel), so the 便签 button was
+  // a silent no-op in the shipped app. Compose the note in-app instead.
+  const [stickyDraft, setStickyDraft] = createSignal<string | null>(null);
+
+  const addSticky = () => {
+    setStickyDraft("");
+  };
+
+  const saveSticky = async () => {
+    const body = (stickyDraft() ?? "").trim();
+    if (!body) return;
     const s: Sticky = {
       id: uid("st"),
       msgId: props.messageId,
@@ -687,6 +697,7 @@ export function MessagePanel(props: { messageId: string }) {
     };
     await upsertSticky(s);
     await refetchStickies();
+    setStickyDraft(null);
   };
 
   const removeSticky = async (id: string) => {
@@ -847,7 +858,11 @@ export function MessagePanel(props: { messageId: string }) {
         <ViewModeToggle
           mode={viewMode()}
           onChange={setViewMode}
-          narrow={panelNarrow()}
+          // The ResizeObserver only reports on *size changes*; a panel that
+          // mounts already inside a phone-width sheet can miss it and keep
+          // the wide three-way pill, which then overflows 375px and clips
+          // 源码 off the right edge. The breakpoint is authoritative.
+          narrow={panelNarrow() || isMobile()}
         />
       </div>
 
@@ -1653,18 +1668,19 @@ export function MessagePanel(props: { messageId: string }) {
             background: "var(--glass-bg-strong)",
           }}
         >
+          {/* Labels stay on phones: the bar only holds three actions, so
+              hiding two of the three captions (while 更多 kept its own) read
+              as two mystery icons next to one labelled one. */}
           <ActionBtn
             icon="ph-arrow-u-up-left"
             label="回复"
             onClick={reply}
-            compact={isMobile()}
           />
           <ActionBtn
             icon="ph-clock"
             label={message()!.replyLater ? "取消稍后" : "稍后"}
             active={!!message()!.replyLater}
             onClick={toggleReplyLater}
-            compact={isMobile()}
           />
           <MoreMenu
             bucket={message()!.bucket}
@@ -1719,6 +1735,66 @@ export function MessagePanel(props: { messageId: string }) {
         onClose={() => setRemindPickerOpen(false)}
         msgId={props.messageId}
       />
+      <Modal
+        open={stickyDraft() !== null}
+        onClose={() => setStickyDraft(null)}
+        title="贴一条便签"
+        width="440px"
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setStickyDraft(null)}
+              style={{
+                padding: "8px 16px",
+                "font-size": "var(--text-caption)",
+                color: "var(--text-secondary)",
+              }}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              data-sticky-save
+              onClick={() => void saveSticky()}
+              disabled={!(stickyDraft() ?? "").trim()}
+              style={{
+                padding: "8px 18px",
+                "border-radius": "var(--radius-pill)",
+                background: "var(--yellow, #f5c542)",
+                color: "#3d3208",
+                "font-size": "var(--text-caption)",
+                "font-weight": 700,
+                opacity: (stickyDraft() ?? "").trim() ? 1 : 0.5,
+              }}
+            >
+              贴上
+            </button>
+          </>
+        }
+      >
+        <textarea
+          data-sticky-input
+          autofocus
+          rows={4}
+          value={stickyDraft() ?? ""}
+          onInput={(e) => setStickyDraft(e.currentTarget.value)}
+          placeholder="这条邮件要记住什么？"
+          style={{
+            width: "100%",
+            padding: "10px 12px",
+            "border-radius": "var(--radius-md)",
+            border: "0.5px solid var(--border)",
+            background: "var(--paper-light)",
+            color: "var(--text-primary)",
+            "font-size": "var(--text-body)",
+            resize: "vertical",
+            "min-height": "96px",
+            "box-sizing": "border-box",
+          }}
+        />
+      </Modal>
+
       <Show when={message()}>
         {(m) => (
           <>

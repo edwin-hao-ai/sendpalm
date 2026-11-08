@@ -5,6 +5,7 @@ import { getTask, upsertTask, deleteTask } from "../stores/data";
 import { setDetailOpen, setSelectedTaskId, showToast, bumpSoftRefreshTick } from "../stores/ui";
 import { Icon } from "../components/Icon";
 import { PanelState } from "../components/PanelState";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Empty } from "../components/Empty";
 import type { Task } from "../types";
 import { relativeTime } from "../utils/date";
@@ -14,6 +15,9 @@ import { openTaskSource } from "../services/task-extraction";
 export function TaskPanel(props: { taskId: string }) {
   const [task, { refetch }] = createResource(() => props.taskId, getTask);
   const [draft, setDraft] = createSignal<Task | null>(null);
+  // Native `window.confirm` is unreliable inside a WKWebView (and unstyled
+  // everywhere), so destructive actions go through the in-app dialog.
+  const [confirmDelete, setConfirmDelete] = createSignal(false);
 
   useRefreshEffect(() => {
     void refetch();
@@ -34,7 +38,6 @@ export function TaskPanel(props: { taskId: string }) {
   };
 
   const remove = async () => {
-    if (!confirm("确定要删除这个任务？")) return;
     await deleteTask(props.taskId);
     bumpSoftRefreshTick();
     setSelectedTaskId(null);
@@ -61,7 +64,7 @@ export function TaskPanel(props: { taskId: string }) {
             setSelectedTaskId(null);
             setDetailOpen(false);
           }}
-          aria-label="Close"
+          aria-label="返回"
           style={{ color: "var(--text-muted)" }}
         >
           <Icon name="ph-arrow-left" size={18} />
@@ -69,12 +72,12 @@ export function TaskPanel(props: { taskId: string }) {
         <strong
           style={{ "font-size": "var(--text-body-sm)", "font-weight": "700" }}
         >
-          Task
+          任务
         </strong>
         <div style={{ "margin-left": "auto" }}>
           <button
-            onClick={remove}
-            aria-label="Delete"
+            onClick={() => setConfirmDelete(true)}
+            aria-label="删除任务"
             style={{ color: "var(--text-muted)", padding: "4px" }}
           >
             <Icon name="ph-trash" size={14} />
@@ -131,7 +134,7 @@ export function TaskPanel(props: { taskId: string }) {
                   "margin-bottom": "var(--space-3)",
                 }}
               >
-                <Field label="Status">
+                <Field label="状态">
                   <select
                     value={t.status}
                     onChange={(e) =>
@@ -142,12 +145,12 @@ export function TaskPanel(props: { taskId: string }) {
                     }
                     style={inputStyle}
                   >
-                    <option value="todo">Todo</option>
-                    <option value="doing">Doing</option>
-                    <option value="done">Done</option>
+                    <option value="todo">待办</option>
+                    <option value="doing">进行中</option>
+                    <option value="done">已完成</option>
                   </select>
                 </Field>
-                <Field label="Priority">
+                <Field label="优先级">
                   <select
                     value={t.priority}
                     onChange={(e) =>
@@ -158,12 +161,12 @@ export function TaskPanel(props: { taskId: string }) {
                     }
                     style={inputStyle}
                   >
-                    <option value="low">Low</option>
-                    <option value="normal">Normal</option>
-                    <option value="high">High</option>
+                    <option value="low">低</option>
+                    <option value="normal">普通</option>
+                    <option value="high">高</option>
                   </select>
                 </Field>
-                <Field label="Due">
+                <Field label="截止时间">
                   <input
                     type="datetime-local"
                     value={t.due ? t.due.slice(0, 16) : ""}
@@ -179,7 +182,7 @@ export function TaskPanel(props: { taskId: string }) {
                   />
                 </Field>
               </div>
-              <Field label="Notes">
+              <Field label="备注">
                 <textarea
                   value={t.notes}
                   onInput={(e) =>
@@ -230,6 +233,14 @@ export function TaskPanel(props: { taskId: string }) {
         }}
       </Show>
       </PanelState>
+      <ConfirmDialog
+        open={confirmDelete()}
+        title="删除这个任务？"
+        body="删除后无法恢复。"
+        confirmLabel="删除"
+        onConfirm={() => void remove()}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </div>
   );
 }
