@@ -47,9 +47,9 @@ const BUCKETS: {
   icon: string;
   hint: string;
 }[] = [
-  { id: "imbox", label: "Inbox", icon: "ph-tray", hint: "重要邮件" },
-  { id: "feed", label: "Stream", icon: "ph-newspaper", hint: "资讯与 newsletter" },
-  { id: "paperTrail", label: "Records", icon: "ph-receipt", hint: "收据与账单" },
+  { id: "imbox", label: "收件箱", icon: "ph-tray", hint: "重要邮件" },
+  { id: "feed", label: "报刊", icon: "ph-newspaper", hint: "资讯与 newsletter" },
+  { id: "paperTrail", label: "单据", icon: "ph-receipt", hint: "收据与账单" },
 ];
 
 export function Gate() {
@@ -1155,7 +1155,7 @@ export function ScreenerHistory() {
         }
       >
         <PageHeader
-          title="Gate 历史"
+          title="筛选历史"
           actions={
             <button
               onClick={() => setView("screener")}

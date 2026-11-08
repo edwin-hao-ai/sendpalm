@@ -65,7 +65,7 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
   test("Stream view empty state", async ({ page }) => {
     await page.goto("/");
     await navigateToView(page, "feed");
-    await expect(page.getByText("Stream 是空的")).toBeVisible();
+    await expect(page.getByText("报刊是空的")).toBeVisible();
     await shoot(page, "03-stream");
   });
 

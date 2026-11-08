@@ -1029,7 +1029,11 @@ export function Compose() {
                       {(a) => (
                         <>
                           <option value={`${a.id}:`}>
-                            {a.label} &lt;{a.email}&gt;
+                            {/* Added accounts default to label === email, and
+                                "me@gmail.com <me@gmail.com>" reads like a bug. */}
+                            {a.label === a.email
+                              ? a.email
+                              : `${a.label} <${a.email}>`}
                           </option>
                           <For each={a.settings?.aliases ?? []}>
                             {(alias) => (

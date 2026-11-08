@@ -199,12 +199,12 @@ export function LiveSearch() {
           }}
         >
           {searchQuery().trim()
-            ? `Results for “${searchQuery()}”`
-            : "Type to search… ⏎ select · ↑↓ navigate · Esc close"}
+            ? `“${searchQuery()}” 的结果`
+            : "输入开始搜索 · ⏎ 打开 · ↑↓ 切换 · Esc 关闭"}
         </span>
         <button
           onClick={close}
-          aria-label="Close search"
+          aria-label="关闭搜索"
           style={{ color: "var(--text-muted)" }}
         >
           <Icon name="ph-x" size={16} />
@@ -212,7 +212,7 @@ export function LiveSearch() {
       </div>
 
       <Show when={grouped().contacts.length > 0}>
-        <Group title="People">
+        <Group title="联系人">
           <For each={grouped().contacts}>
             {(c, i) => (
               <Result
@@ -233,7 +233,7 @@ export function LiveSearch() {
       </Show>
 
       <Show when={grouped().messages.length > 0}>
-        <Group title="Messages">
+        <Group title="邮件">
           <For each={grouped().messages}>
             {(m, i) => (
               <Result
@@ -253,7 +253,7 @@ export function LiveSearch() {
       </Show>
 
       <Show when={grouped().files.length > 0}>
-        <Group title="Files">
+        <Group title="文件">
           <For each={grouped().files}>
             {(f, i) => (
               <Result
@@ -276,7 +276,7 @@ export function LiveSearch() {
       </Show>
 
       <Show when={grouped().events.length > 0}>
-        <Group title="Events">
+        <Group title="日程">
           <For each={grouped().events}>
             {(e, i) => {
               const startAt = e.body.split("\n")[0];

@@ -621,7 +621,7 @@ function EmptyState() {
   return (
     <Empty
       icon="ph-newspaper"
-      title="Stream 是空的"
+      title="报刊是空的"
       description="订阅邮件和 newsletter 到了会出现在这里。"
     />
   );

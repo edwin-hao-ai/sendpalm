@@ -728,7 +728,7 @@ test.describe("Email workflows", () => {
 
     await page.getByPlaceholder(/搜索邮件、联系人/).fill("Offsite");
     const dropdown = page.getByTestId("live-search-dropdown");
-    await expect(dropdown.getByText("Events")).toBeVisible({ timeout: 5_000 });
+    await expect(dropdown.getByText("日程")).toBeVisible({ timeout: 5_000 });
     await expect(dropdown.getByText("Q3 Planning Offsite")).toBeVisible();
 
     await dropdown.getByText("Q3 Planning Offsite").click();

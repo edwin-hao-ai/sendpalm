@@ -106,7 +106,7 @@ export function NotificationPanel() {
         }}
       >
         <strong style={{ flex: 1, "font-size": "var(--text-body-sm)" }}>
-          Notifications
+          通知
         </strong>
         <button
           onClick={async () => {
@@ -119,11 +119,11 @@ export function NotificationPanel() {
             "font-weight": "700",
           }}
         >
-          Mark all read
+          全部标为已读
         </button>
         <button
           onClick={() => setNotificationsOpen(false)}
-          aria-label="Close"
+          aria-label="关闭通知"
           style={{
             "margin-left": "var(--space-3)",
             color: "var(--text-muted)",
@@ -188,17 +188,17 @@ export function NotificationPanel() {
         </Show>
         <Show when={!list.error && !list.loading}>
         <Show when={grouped().today.length > 0}>
-          <Group title="Today">
+          <Group title="今天">
             <For each={grouped().today}>{(n) => <Row n={n} />}</For>
           </Group>
         </Show>
         <Show when={grouped().yesterday.length > 0}>
-          <Group title="Yesterday">
+          <Group title="昨天">
             <For each={grouped().yesterday}>{(n) => <Row n={n} />}</For>
           </Group>
         </Show>
         <Show when={grouped().earlier.length > 0}>
-          <Group title="Earlier">
+          <Group title="更早">
             <For each={grouped().earlier}>{(n) => <Row n={n} />}</For>
           </Group>
         </Show>

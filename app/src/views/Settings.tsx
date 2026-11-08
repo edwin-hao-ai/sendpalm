@@ -1101,7 +1101,8 @@ function AddAccountModal(props: {
    *  mailboxes apart. */
   existingAccounts: Account[];
 }) {
-  const [providerList] = createResource(fetchProviders);
+  const [providerList, { refetch: refetchProviders }] =
+    createResource(fetchProviders);
   const [selectedProviderId, setSelectedProviderId] = createSignal("");
   const [accountEmail, setAccountEmail] = createSignal("");
   const [accountPassword, setAccountPassword] = createSignal("");
@@ -1123,7 +1124,18 @@ function AddAccountModal(props: {
 
   const onSubmit = async () => {
     const prov = providerOptions().find((p) => p.id === selectedProviderId());
-    if (!prov) return;
+    if (!prov) {
+      // This used to be a bare `return`: the primary button did nothing at
+      // all when the provider list had not loaded (or failed to), which read
+      // as a broken app on the very first screen a new user sees.
+      showToast({
+        message: providerList.error
+          ? "邮箱服务商列表加载失败，请重试"
+          : "请选择邮箱服务商",
+        kind: "warning",
+      });
+      return;
+    }
     const e = accountEmail().trim();
     if (!e || !accountPassword()) {
       showToast({ message: "请填入邮箱地址和密码", kind: "warning" });
@@ -1215,7 +1227,7 @@ function AddAccountModal(props: {
           </button>
           <button
             onClick={onSubmit}
-            disabled={saving()}
+            disabled={saving() || providerOptions().length === 0}
             style={{
               padding: "10px 20px",
               background: "var(--palm)",
@@ -1223,8 +1235,12 @@ function AddAccountModal(props: {
               "border-radius": "var(--radius-pill)",
               "font-weight": "700",
               "font-size": "var(--text-caption)",
-              opacity: saving() ? 0.5 : 1,
-              cursor: saving() ? "not-allowed" : "pointer",
+              opacity:
+                saving() || providerOptions().length === 0 ? 0.5 : 1,
+              cursor:
+                saving() || providerOptions().length === 0
+                  ? "not-allowed"
+                  : "pointer",
             }}
           >
             {saving() ? "添加中…" : "添加并连接"}
@@ -1236,14 +1252,35 @@ function AddAccountModal(props: {
         <Show
           when={providerOptions().length > 0}
           fallback={
-            <p
+            <div
+              data-provider-list-state
               style={{
+                display: "flex",
+                "align-items": "center",
+                gap: "var(--space-2)",
                 "font-size": "var(--text-caption)",
-                color: "var(--text-muted)",
+                color: "var(--text-secondary)",
               }}
             >
-              服务商列表加载失败，请关闭后重试。
-            </p>
+              <Show
+                when={providerList.error}
+                fallback={
+                  <span aria-busy="true">正在读取邮箱服务商…</span>
+                }
+              >
+                <Icon name="ph-warning-circle" size={14} />
+                <span style={{ flex: 1 }}>
+                  读取邮箱服务商列表失败，暂时无法添加账户。
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void refetchProviders()}
+                  style={{ color: "var(--palm)", "font-weight": 700 }}
+                >
+                  重试
+                </button>
+              </Show>
+            </div>
           }
         >
           <select
@@ -2498,7 +2535,7 @@ function SnippetEditModal(props: {
           onInput={(e) =>
             setDraft({ ...draft(), shortcut: e.currentTarget.value })
           }
-          placeholder="greeting"
+          placeholder="问候"
           style={inputStyle}
         />
       </Field>

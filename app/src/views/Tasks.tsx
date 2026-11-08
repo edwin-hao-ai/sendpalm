@@ -38,7 +38,7 @@ export function Tasks() {
   });
   return <div class="tasks-view" data-testid="tasks-view">
     <PageHeader
-      title="Tasks"
+      title="任务"
       actions={
         <>
           <button class="tasks-button" onClick={() => setView("followUps")}>跟进提醒</button>
