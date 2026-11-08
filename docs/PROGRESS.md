@@ -3745,3 +3745,24 @@ loading 与 error 标记。
 
 验证：TS **774** 通过（+51）、Playwright **155 passed / 0 failed / 1 skipped**、
 typecheck / lint / build 干净。
+
+### 2026-11-08（续 4）发布前用户体验审计
+
+用户要求按「会不会把新用户劝退」的标准再审一遍。审计记录见
+`docs/UX-AUDIT-2026-11-08.md`（两处致命 / 五处高 / 两处中 / 四处低，全部已修）。
+
+最要紧的三条：
+
+- **首屏是死胡同**：没连邮箱时的空态写着「新邮件到了会自动出现在这里」——
+  假的，且没有任何按钮。现在明确说「还没有连接邮箱」并给主按钮。
+- **便签在桌面 App 里完全没反应**：`window.prompt` 在 WKWebView 未实现。改成应用内
+  Modal；顺手把任务删除的 `window.confirm` 也换成 ConfirmDialog。
+- **计数越用越错，还会吞邮件**：`removeByIds` 在 `setPages` 之后又读 `pages()`，
+  减法恒为 0 —— 总数只增不减，`offset` 不退回导致 `loadMore` 跳过真实邮件。
+
+另外：错误 toast 合并去重 + 上限 4 条（后台循环失败不再糊屏）、中英混排收尾
+（通知面板 / 任务面板 / 全局搜索 / 筛选台分桶 / 归档提示…）、375px 邮件头部被裁、
+手机操作条只有一个按钮有文字、顶栏账户徽章陈旧。
+
+验证：TS **781**、Playwright **157 passed / 0 failed / 1 skipped**、typecheck / lint /
+build 干净；新增 `first-run.spec.ts` 锁住冷启动 CTA。
