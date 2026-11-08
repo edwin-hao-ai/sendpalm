@@ -62,34 +62,119 @@
 
     <script>
       window.__sendpalmBootErrors = [];
+
       // Browser noise that is not a failure and must never cover the app.
       // "ResizeObserver loop completed with undelivered notifications" is a
-      // spec-blessed warning browsers emit when an observer re-enters; it
-      // fired under the 3x-data scroll test and the overlay below turned it
-      // into a full-screen black panel that swallowed every click.
+      // spec-blessed warning browsers emit routinely.
       function isBenignError(message) {
         return /ResizeObserver loop/i.test(String(message || ""));
       }
+
+      // Before the shell paints there is nothing to salvage, so a boot
+      // failure still gets the full-screen diagnostic panel. Once the app is
+      // up, covering it would be exactly the 黑屏 the user complained about:
+      // one bad component would take the whole window. Ready-state errors
+      // surface as a dismissible bar with a reload action instead.
+      function isReady() {
+        return document.body && document.body.classList.contains("app-ready");
+      }
+
+      function renderBootPanel() {
+        var box = document.getElementById("sendpalm-boot-errors");
+        if (!box) {
+          box = document.createElement("div");
+          box.id = "sendpalm-boot-errors";
+          box.style.cssText =
+            "position:fixed;inset:0;z-index:99999;background:#000;color:#0f0;font:14px/1.5 monospace;padding:20px;white-space:pre-wrap;overflow:auto;";
+          document.body.appendChild(box);
+        }
+        box.textContent = window.__sendpalmBootErrors.join("\n");
+      }
+
+      function renderRuntimeBar() {
+        var bar = document.getElementById("sendpalm-runtime-errors");
+        if (!bar) {
+          bar = document.createElement("div");
+          bar.id = "sendpalm-runtime-errors";
+          bar.setAttribute("role", "status");
+          bar.style.cssText = [
+            "position:fixed",
+            "right:16px",
+            "bottom:calc(16px + env(safe-area-inset-bottom, 0px))",
+            "z-index:9999",
+            "max-width:min(420px, calc(100vw - 32px))",
+            "display:flex",
+            "align-items:center",
+            "gap:10px",
+            "padding:10px 12px",
+            "border-radius:12px",
+            "background:var(--paper-light, #fffdf7)",
+            "border:0.5px solid var(--border, rgba(0,0,0,0.12))",
+            "box-shadow:0 8px 28px rgba(0,0,0,0.14)",
+            "font:12px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            "color:var(--text-primary, #2b2b28)",
+          ].join(";");
+
+          var text = document.createElement("span");
+          text.id = "sendpalm-runtime-errors-text";
+          text.style.cssText = "flex:1;min-width:0;";
+
+          var reload = document.createElement("button");
+          reload.type = "button";
+          reload.textContent = "重新载入";
+          reload.style.cssText =
+            "min-height:28px;padding:4px 10px;border-radius:999px;border:none;background:var(--palm, #0a8f63);color:#fff;font:600 11px/1 -apple-system, sans-serif;cursor:pointer;white-space:nowrap;";
+          reload.onclick = function () {
+            window.location.reload();
+          };
+
+          var dismiss = document.createElement("button");
+          dismiss.type = "button";
+          dismiss.setAttribute("aria-label", "关闭");
+          dismiss.textContent = "×";
+          dismiss.style.cssText =
+            "width:24px;height:24px;border-radius:50%;border:none;background:transparent;color:inherit;font-size:16px;line-height:1;cursor:pointer;opacity:0.6;";
+          dismiss.onclick = function () {
+            bar.remove();
+          };
+
+          bar.appendChild(text);
+          bar.appendChild(reload);
+          bar.appendChild(dismiss);
+          document.body.appendChild(bar);
+        }
+        var label = document.getElementById("sendpalm-runtime-errors-text");
+        if (label) {
+          var last = window.__sendpalmBootErrors[
+            window.__sendpalmBootErrors.length - 1
+          ];
+          label.textContent =
+            "运行中遇到问题：" +
+            last +
+            (window.__sendpalmBootErrors.length > 1
+              ? "（共 " + window.__sendpalmBootErrors.length + " 条，详见错误日志）"
+              : "（详见错误日志）");
+          label.title = window.__sendpalmBootErrors.join("\n");
+        }
+      }
+
+      function reportError(message) {
+        window.__sendpalmBootErrors.push(message);
+        try {
+          if (isReady()) renderRuntimeBar();
+          else renderBootPanel();
+        } catch (_) {}
+      }
+
       window.addEventListener("error", function (e) {
         if (isBenignError(e.message)) return;
-        window.__sendpalmBootErrors.push(
+        reportError(
           e.message + " @ " + (e.filename || "") + ":" + (e.lineno || "")
         );
-        try {
-          var box = document.getElementById("sendpalm-boot-errors");
-          if (!box) {
-            box = document.createElement("div");
-            box.id = "sendpalm-boot-errors";
-            box.style.cssText =
-              "position:fixed;inset:0;z-index:99999;background:#000;color:#0f0;font:14px/1.5 monospace;padding:20px;white-space:pre-wrap;overflow:auto;";
-            document.body.appendChild(box);
-          }
-          box.textContent = window.__sendpalmBootErrors.join("\n");
-        } catch (_) {}
       });
       window.addEventListener("unhandledrejection", function (e) {
         if (isBenignError(e.reason)) return;
-        window.__sendpalmBootErrors.push("Unhandled: " + String(e.reason));
+        reportError("Unhandled: " + String(e.reason));
       });
     </script>
   </head>
