@@ -32,6 +32,7 @@ import { view, bumpRefreshTick } from "../stores/ui";
 import { PullToRefresh } from "./PullToRefresh";
 import { useViewport } from "../utils/gestures";
 import { Skeleton } from "./Skeleton";
+import { AppErrorBoundary } from "./AppErrorBoundary";
 
 // Dynamic imports → one chunk per view. Vite/Rollup tree-shakes unused
 // exports and emits each view as its own file. The named function is the
@@ -153,7 +154,13 @@ function KeepAlive(props: { active: boolean; children: JSX.Element }) {
 
 function ViewSwitch() {
   return (
-    <Suspense fallback={<FeedSkeleton />}>
+    // A failed lazy-chunk import (offline first visit) rejects during
+    // render; without a boundary the Suspense fallback would either hang or
+    // the rejection would blank the window. `resetKey` clears the boundary
+    // when the user navigates elsewhere, so one broken view never traps the
+    // whole session.
+    <AppErrorBoundary scope="view" resetKey={view()}>
+      <Suspense fallback={<FeedSkeleton />}>
       <Switch>
         <Match when={view() === "imbox"}>
           <KeepAlive active={view() === "imbox"}>
@@ -274,8 +281,9 @@ function ViewSwitch() {
             <Agent />
           </KeepAlive>
         </Match>
-      </Switch>
-    </Suspense>
+        </Switch>
+      </Suspense>
+    </AppErrorBoundary>
   );
 }
 

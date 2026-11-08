@@ -31,6 +31,7 @@ import { startTaskExtractionService } from "./services/task-extraction";
 import { ShortcutHelp } from "./components/ShortcutHelp";
 import { BulkActionMenu } from "./components/BulkActionMenu";
 import { LockScreen } from "./components/LockScreen";
+import { AppErrorBoundary } from "./components/AppErrorBoundary";
 import { initApp } from "./bootstrap";
 import {
   agentPanelOpen,
@@ -91,7 +92,10 @@ export default function App() {
   });
 
   return (
-    <>
+    // Last line of defence. A render-time exception anywhere in the tree
+    // used to leave the window blank; now it lands here with a recovery
+    // panel and the error goes to the log.
+    <AppErrorBoundary scope="app">
       <Show when={!initError()}>
         <div
           id="app"
@@ -197,6 +201,6 @@ export default function App() {
           </div>
         </div>
       </Show>
-    </>
+    </AppErrorBoundary>
   );
 }
