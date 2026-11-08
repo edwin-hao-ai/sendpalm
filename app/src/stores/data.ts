@@ -55,7 +55,13 @@ const DB_URL = "sqlite:sendpalm.db";
 let dbPromise: Promise<Database> | null = null;
 
 export function getDb(): Promise<Database> {
-  if (IS_BROWSER() && import.meta.env.DEV) {
+  // Browser = in-memory MockDb, in dev AND in a production build. The DEV
+  // guard meant `vite preview` (or any build someone opens in a browser to
+  // look at it) fell through to `Database.load`, which has no Tauri runtime
+  // behind it: `select` returned null, the first `.map()` threw, and the
+  // error boundary replaced the whole app with「界面遇到问题」. The mock is a
+  // dynamic import, so the Tauri bundle never loads the chunk.
+  if (IS_BROWSER()) {
     return loadMockDb();
   }
   if (!dbPromise) dbPromise = Database.load(DB_URL);
@@ -609,6 +615,80 @@ export async function listContacts(): Promise<Contact[]> {
   );
   return rows.map(rowToContact);
 }
+
+/** List-view projection of the contacts table.
+ *
+ *  Imbox builds a contact map for every row it renders (name + avatar on the
+ *  card, `screened`/`firstSeen` for the first-time badge, `sc`/`grp` for the
+ *  priority score) and re-fetches it on **every** soft sync tick. Pulling
+ *  `SELECT *` there meant ~5 JSON.parse calls per contact plus the heavy
+ *  columns (notes / pattern / stage history / topics) crossing the IPC
+ *  bridge on each tick — the same trap as the 8 GB boot OOM (AGENTS §11.7),
+ *  just slower-burning.
+ *
+ *  The full row is still fetched by `getContact(id)` when the user opens a
+ *  contact, so nothing is lost — it is deferred to the point of use. */
+export async function listContactsForList(): Promise<Contact[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    `SELECT id, name, avatar, screened, first_seen, sc, grp
+       FROM contacts
+       ORDER BY name`,
+  );
+  return rows.map((r) => ({
+    ...EMPTY_CONTACT,
+    id: r.id as ID,
+    name: r.name as string,
+    avatar: (r.avatar as string) ?? "",
+    screened: !!r.screened,
+    firstSeen: !!r.first_seen,
+    sc: (r.sc as number) ?? 0,
+    grp: (r.grp as Contact["grp"]) ?? "",
+  }));
+}
+
+/** Shape-complete placeholder for the projections above. Keeping the return
+ *  type `Contact` means call sites (and the components they feed) do not
+ *  need a parallel type; the omitted fields are simply empty until the
+ *  detail panel fetches the real row. */
+const EMPTY_CONTACT: Contact = {
+  id: "",
+  firstName: "",
+  lastName: "",
+  nickname: "",
+  name: "",
+  company: "",
+  title: "",
+  emails: [],
+  phones: [],
+  stage: "explore",
+  labels: [],
+  topics: [],
+  notes: "",
+  avatar: "",
+  photo: "",
+  health: 0,
+  sc: 0,
+  scC: "",
+  scL: "",
+  lc: "",
+  grp: "",
+  trd: "stable",
+  pattern: "",
+  accounts: [],
+  stageHistory: [],
+  firstContact: "",
+  milestones: [],
+  merged: false,
+  blocked: false,
+  notify: false,
+  firstSeen: false,
+  screened: false,
+  defaultBucket: "imbox",
+  autoLabel: [],
+  recycling: false,
+  ch: [],
+};
 
 /** Recipient-picker projection of the contacts table.
  *

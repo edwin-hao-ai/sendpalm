@@ -30,7 +30,7 @@ import {
   countRecentUnreadImbox,
   RECENT_UNREAD_CAP,
   countUnreadNewsletters,
-  listContacts,
+  listContactsForList,
   listPileMessages,
   moveMessageToBucket,
   markMessageUnread,
@@ -228,7 +228,12 @@ export function Imbox() {
   // have thousands of rows with large HTML bodies, and pulling them all on
   // every refresh tick or tab return is the main source of scroll jank.
   const [pileMessages, { refetch: refetchPiles }] = createResource(listPileMessages);
-  const [contacts, { refetch: refetchContacts }] = createResource(listContacts);
+  // List-view projection: id/name/avatar/screened/firstSeen/sc/grp only.
+  // The full contact row (notes, pattern, stage history…) is fetched by the
+  // detail panel when a contact is actually opened, so this stays cheap
+  // enough to re-read on every soft sync tick.
+  const [contacts, { refetch: refetchContacts }] =
+    createResource(listContactsForList);
 
   // Live-prepend on sync:new-messages — the event reports all UIDs, but
   // they always arrive unread so they only belong in newPaged. Filtering
