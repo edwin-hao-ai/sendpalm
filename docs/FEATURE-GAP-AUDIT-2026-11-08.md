@@ -160,3 +160,44 @@ ffe742b fix(palette): "新建联系人 / 任务 / 日程" now creates
 验证结果：TypeScript 单测 723 通过，Rust lib 测试 157 通过，类型检查与 lint 与构建均干净。
 Playwright 端到端 153 通过、0 失败、1 跳过，用时 4.9 分钟。
 工作树干净，共 19 个提交。
+
+---
+
+## 9. 第二轮（同日）：错误状态 / loading 状态 / 黑屏
+
+用户补充："还有我们的错误状态。以及 loading 状态这些东西最好都补全一下，因为之前
+测试我也遇到过黑屏的问题。"
+
+### 9.1 黑屏的三条来路（都堵掉了）
+
+| # | 来路 | 修法 |
+|---|---|---|
+| E1 | 渲染期任何异常直接冲出 Solid 树，窗口留白 | `components/AppErrorBoundary.tsx`：包住 shell 与视图切换，保留侧栏/顶栏，给「重试 / 重新载入 / 技术详情」，异常同时进错误日志。`Main` 传 `resetKey={view()}`，切走视图即清空，不会被一个坏视图钉死 |
+| E2 | `index.html` 把**任何** window error 渲染成 `z-index:99999` 全屏黑块 | 按阶段拆开：`body.app-ready` 之前仍是全屏诊断面板（启动失败没东西可救）；之后就一条可关闭的底部提示条 + 「重新载入」，界面照常可用 |
+| E3 | 惰性加载的视图 chunk 拉取失败（离线首次进入）→ Suspense 永远挂着或抛错 | E1 的边界同时接住 lazy 拒绝，给重试 |
+
+另外把 `ResizeObserver loop…` 这类规范允许的良性警告滤掉——它此前同样会把整个界面糊死。
+
+### 9.2 loading / 错误状态补齐
+
+2026-08-18 那轮只给**视图**加了 `ResourceGate`；面板、浮层、设置分区仍然「加载中什么都没有、失败也什么都没有」。新增面板形制的孪生组件 `components/PanelState.tsx`（紧凑骨架 / 带重试的错误 / 可选的空态），接到：
+
+`TaskPanel`、`DraftPanel`、`NotificationPanel`、`Compose`（账户读取）、`LiveSearch`、`CommandPalette`、`RulesSettings`、`LabelPicker`、`LlmProviderSettings`、`AgentConnectionPanel`。
+
+其中两处是**在说假话**，不只是空白：
+
+- 通知面板在查询进行中/失败时都显示「暂无新通知」。
+- Agent 连接面板在探测过程中显示「没有检测到已安装的 Agent 客户端」——对用户自己的机器给出错误结论。
+
+`components/data-states.test.ts` 是回归守卫：23 个资源消费方必须同时具备 loading 标记与 error 标记。
+
+### 9.3 本轮验证
+
+| 层 | 结果 |
+|---|---|
+| TS 单测 | **774 passed**（新增 51：错误边界 5 + 状态矩阵 46） |
+| Playwright | **155 passed / 0 failed / 1 skipped**，5.3 分钟 |
+| Rust | 157 passed（本轮未改 Rust） |
+| `tsc` / `eslint --max-warnings=0` / `pnpm build` | 干净 |
+
+新增 e2e `error-surface.spec.ts`（2 条）：运行期报错只出提示条、黑块不出现、界面仍可导航；良性 ResizeObserver 警告完全不出现在界面。

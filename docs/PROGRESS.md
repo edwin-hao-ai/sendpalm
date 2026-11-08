@@ -3719,3 +3719,29 @@ typecheck / lint / build 干净。
 
 结果：`pnpm exec playwright test` **153 passed / 0 failed / 1 skipped**，4.9 分钟
 （原先那条 6.7 分钟跑不完的压测现在 19 秒通过）。
+
+### 2026-11-08（续 3）错误状态 / loading 状态 / 黑屏
+
+用户追加：「还有我们的错误状态。以及 loading 状态这些东西最好都补全一下，因为之前
+测试我也遇到过黑屏的问题。」
+
+**黑屏三条来路全部堵掉**：
+
+1. 渲染期异常冲出 Solid 树 → 新增 `AppErrorBoundary` 包住 shell 与视图切换，保留
+   侧栏顶栏，给「重试 / 重新载入 / 技术详情」，异常进错误日志；`resetKey={view()}`
+   让切走视图即恢复，不会被一个坏视图钉死。惰性 chunk 拉取失败也在这里接住。
+2. `index.html` 把任何 window error 渲染成 `z-index:99999` 全屏黑块 → 按阶段拆：
+   启动完成前仍是全屏诊断（没东西可救），之后就一条可关闭的底部提示条 + 重新载入。
+3. 良性 `ResizeObserver loop…` 警告同样能糊死界面 → 过滤。
+
+**loading / 错误状态补齐**：2026-08-18 那轮只给了视图 `ResourceGate`；面板、浮层、
+设置分区仍然「加载中空白、失败也空白」。新增 `PanelState`（紧凑骨架 / 带重试的错误 /
+可选空态），接到 TaskPanel、DraftPanel、NotificationPanel、Compose、LiveSearch、
+CommandPalette、RulesSettings、LabelPicker、LlmProviderSettings、AgentConnectionPanel。
+其中通知面板与 Agent 连接面板此前是在**说假话**（「暂无新通知」「没有检测到客户端」）。
+
+新增 `components/data-states.test.ts` 作为回归守卫：23 个资源消费方必须同时具备
+loading 与 error 标记。
+
+验证：TS **774** 通过（+51）、Playwright **155 passed / 0 failed / 1 skipped**、
+typecheck / lint / build 干净。
