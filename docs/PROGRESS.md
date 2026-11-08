@@ -3766,3 +3766,13 @@ typecheck / lint / build 干净。
 
 验证：TS **781**、Playwright **157 passed / 0 failed / 1 skipped**、typecheck / lint /
 build 干净；新增 `first-run.spec.ts` 锁住冷启动 CTA。
+
+### 2026-11-08（续 5）第二轮 UX 审计：日历崩溃 + Rust 锁中毒
+
+- **一条没有颜色的日程会让整个日历变成错误页**：`textColorForBg(undefined)` 在
+  `hex.replace` 上抛错，四个视图入口共用它。现在缺失颜色回落到 ink token；
+  新增 e2e 种一条无颜色日程并断言日历正常渲染（去掉修复即失败）。
+- **Rust `Mutex::lock().unwrap()` 8 处**：任一持锁线程 panic → 锁中毒 → 之后每次
+  lock 都 panic → 一次后台 panic 扩散成整个应用无响应。改为 `unwrap_or_else(|e| e.into_inner())`。
+
+验证：TS 781、Rust 157、Playwright **158 passed / 0 failed / 1 skipped**。
