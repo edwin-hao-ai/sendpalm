@@ -4,6 +4,8 @@ import { Show, createResource, createSignal, createEffect } from "solid-js";
 import { getTask, upsertTask, deleteTask } from "../stores/data";
 import { setDetailOpen, setSelectedTaskId, showToast, bumpSoftRefreshTick } from "../stores/ui";
 import { Icon } from "../components/Icon";
+import { PanelState } from "../components/PanelState";
+import { Empty } from "../components/Empty";
 import type { Task } from "../types";
 import { relativeTime } from "../utils/date";
 import { useRefreshEffect } from "../utils/gestures";
@@ -80,6 +82,20 @@ export function TaskPanel(props: { taskId: string }) {
         </div>
       </header>
 
+      {/* Loading and failure used to render nothing here, which reads as
+          "this task has no fields" rather than "not loaded yet". */}
+      <PanelState
+        resource={task}
+        errorTitle="任务加载失败"
+        isEmpty={(t) => !t}
+        empty={
+          <Empty
+            icon="ph-check-square"
+            title="任务已不存在"
+            description="它可能已被删除。"
+          />
+        }
+      >
       <Show when={draft()}>
         {(d) => {
           const t = d();
@@ -213,6 +229,7 @@ export function TaskPanel(props: { taskId: string }) {
           );
         }}
       </Show>
+      </PanelState>
     </div>
   );
 }

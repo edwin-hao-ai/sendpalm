@@ -65,12 +65,40 @@ export function AgentConnectionPanel() {
         邮件内容会进入该 Agent 的上下文，并发送到你配置的模型提供商。SendPalm 需要保持运行。
       </p>
 
+      {/* "没有检测到 Agent 客户端" while the probe is still running (or after
+        it failed) tells the user the wrong thing about their machine. */}
+      <Show when={clients.error}>
+        <p
+          data-agent-connections-error
+          style={{ margin: 0, "font-size": "var(--text-caption)", color: "var(--text-secondary)" }}
+        >
+          客户端检测失败 ·{" "}
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            style={{ color: "var(--palm)", "font-weight": 700 }}
+          >
+            重试
+          </button>
+        </p>
+      </Show>
+      <Show when={!clients.error && clients.loading}>
+        <p
+          data-agent-connections-loading
+          aria-busy="true"
+          style={{ margin: 0, "font-size": "var(--text-caption)", color: "var(--text-muted)" }}
+        >
+          正在检测本机 Agent 客户端…
+        </p>
+      </Show>
       <Show
-        when={visible().length > 0}
+        when={!clients.error && !clients.loading && visible().length > 0}
         fallback={
+          <Show when={!clients.error && !clients.loading}>
           <p data-no-clients style={{ margin: 0, "font-size": "var(--text-caption)", color: "var(--text-muted)" }}>
             没有检测到已安装的 Agent 客户端。支持 OpenCode、Claude Code 和 Codex；其他客户端可用下方手动配置。
           </p>
+          </Show>
         }
       >
         <For each={visible()}>

@@ -326,8 +326,40 @@ export function LiveSearch() {
       >
         <div />
       </Show>
+      {/* A failed FTS query used to render "没有匹配的结果", which reads as a
+        correct-but-empty search rather than a broken one. */}
+      <Show when={results.error}>
+        <div
+          data-search-error
+          style={{
+            padding: "var(--space-6) var(--space-5)",
+            "text-align": "center",
+            color: "var(--text-secondary)",
+            "font-size": "var(--text-caption)",
+          }}
+        >
+          <Icon name="ph-warning-circle" size={22} />
+          <p style={{ margin: "var(--space-2) 0 0" }}>搜索暂时不可用，请重试</p>
+        </div>
+      </Show>
+      <Show when={!results.error && results.loading && searchQuery().length > 0}>
+        <div
+          data-search-loading
+          aria-busy="true"
+          aria-label="搜索中"
+          style={{
+            padding: "var(--space-4) var(--space-5)",
+            color: "var(--text-muted)",
+            "font-size": "var(--text-caption)",
+          }}
+        >
+          搜索中…
+        </div>
+      </Show>
       <Show
         when={
+          !results.error &&
+          !results.loading &&
           grouped().contacts.length +
             grouped().messages.length +
             grouped().files.length +

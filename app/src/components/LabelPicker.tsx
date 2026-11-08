@@ -217,7 +217,7 @@ export function LabelPicker(props: {
     >
       <div style={{ padding: "var(--space-4) var(--space-5)" }}>
         <Show
-          when={(labels() ?? []).length > 0}
+          when={!labels.error && !labels.loading && (labels() ?? []).length > 0}
           fallback={
             <p
               style={{
@@ -225,7 +225,17 @@ export function LabelPicker(props: {
                 "font-size": "var(--text-caption)",
               }}
             >
-              还没有标签。在 设置 → 标签 中管理，或点击下方创建。
+              <Show when={labels.error}>
+                <span role="alert">
+                  标签加载失败，请关闭后重试。
+                </span>
+              </Show>
+              <Show when={!labels.error && labels.loading}>
+                <span aria-busy="true">正在读取标签…</span>
+              </Show>
+              <Show when={!labels.error && !labels.loading}>
+                还没有标签。在 设置 → 标签 中管理，或点击下方创建。
+              </Show>
             </p>
           }
         >

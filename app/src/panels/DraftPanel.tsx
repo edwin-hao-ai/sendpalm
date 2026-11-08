@@ -25,6 +25,7 @@ import {
 import { sendEmailViaBackend, getAttachmentContent } from "../services/backend";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Icon } from "../components/Icon";
+import { PanelState } from "../components/PanelState";
 import { Skeleton } from "../components/Skeleton";
 import type { Draft } from "../types";
 import { relativeTime, formatBytes, addDays } from "../utils/date";
@@ -305,9 +306,13 @@ export function DraftPanel(props: { draftId: string }) {
         onCancel={() => setConfirmDiscard(false)}
       />
 
-      <Show
-        when={edit()}
-        fallback={
+      {/* A failed draft query used to leave the skeleton up forever: the
+          `edit()` signal is only set from a successful load, so there was no
+          state that could say "this failed". */}
+      <PanelState
+        resource={draft}
+        errorTitle="草稿加载失败"
+        loading={
           <div
             style={{
               padding: "var(--space-5)",
@@ -322,6 +327,7 @@ export function DraftPanel(props: { draftId: string }) {
           </div>
         }
       >
+      <Show when={edit()}>
         {(d) => {
           const e = d();
           return (
@@ -523,6 +529,7 @@ export function DraftPanel(props: { draftId: string }) {
           );
         }}
       </Show>
+      </PanelState>
     </div>
   );
 }

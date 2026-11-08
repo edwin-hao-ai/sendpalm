@@ -21,6 +21,7 @@ import {
   setCalendarView,
 } from "../stores/ui";
 import { Icon } from "../components/Icon";
+import { Skeleton } from "../components/Skeleton";
 import { isToday, isYesterday, relativeTime } from "../utils/date";
 
 const ICON_BY_TYPE: Record<string, string> = {
@@ -132,6 +133,60 @@ export function NotificationPanel() {
         </button>
       </div>
       <div style={{ "max-height": "60vh", "overflow-y": "auto" }}>
+        {/* Loading and failure were both invisible here: the panel showed the
+          "no notifications" bell while the query was in flight, and kept it
+          when the query failed. */}
+        <Show when={list.error}>
+          <div
+            data-notifications-error
+            style={{
+              padding: "var(--space-6) var(--space-5)",
+              "text-align": "center",
+              color: "var(--text-secondary)",
+            }}
+          >
+            <Icon name="ph-warning-circle" size={26} />
+            <p
+              style={{
+                margin: "var(--space-2) 0 var(--space-3)",
+                "font-size": "var(--text-caption)",
+              }}
+            >
+              通知加载失败
+            </p>
+            <button
+              type="button"
+              onClick={() => void refetch()}
+              style={{
+                "min-height": "32px",
+                padding: "4px 14px",
+                "border-radius": "var(--radius-pill)",
+                background: "var(--palm-soft)",
+                color: "var(--palm)",
+                "font-size": "var(--text-caption)",
+                "font-weight": 700,
+              }}
+            >
+              重试
+            </button>
+          </div>
+        </Show>
+        <Show when={!list.error && list.loading}>
+          <div
+            data-notifications-loading
+            aria-busy="true"
+            aria-label="加载中"
+            style={{
+              padding: "var(--space-3)",
+              display: "flex",
+              "flex-direction": "column",
+              gap: "var(--space-2)",
+            }}
+          >
+            <For each={[0, 1, 2]}>{() => <Skeleton height={44} />}</For>
+          </div>
+        </Show>
+        <Show when={!list.error && !list.loading}>
         <Show when={grouped().today.length > 0}>
           <Group title="Today">
             <For each={grouped().today}>{(n) => <Row n={n} />}</For>
@@ -172,6 +227,7 @@ export function NotificationPanel() {
               暂无新通知。新邮件到达时会出现在这里。
             </p>
           </div>
+        </Show>
         </Show>
       </div>
     </div>

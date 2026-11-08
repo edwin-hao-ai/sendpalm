@@ -88,6 +88,33 @@ export function RulesSettings() {
         发票 → Records"。
       </p>
 
+      {/* A failed or in-flight read used to render "还没有规则" — the one
+        message that makes the user stop looking. */}
+      <Show when={rules.error}>
+        <p
+          data-rules-error
+          style={{ margin: 0, "font-size": "var(--text-caption)", color: "var(--text-secondary)" }}
+        >
+          规则加载失败 ·{" "}
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            style={{ color: "var(--palm)", "font-weight": 700 }}
+          >
+            重试
+          </button>
+        </p>
+      </Show>
+      <Show when={!rules.error && rules.loading}>
+        <p
+          data-rules-loading
+          aria-busy="true"
+          style={{ margin: 0, "font-size": "var(--text-caption)", color: "var(--text-muted)" }}
+        >
+          正在读取规则…
+        </p>
+      </Show>
+      <Show when={!rules.error && !rules.loading}>
       <Show
         when={(rules() ?? []).length > 0}
         fallback={
@@ -152,6 +179,7 @@ export function RulesSettings() {
             </div>
           )}
         </For>
+      </Show>
       </Show>
 
       <div

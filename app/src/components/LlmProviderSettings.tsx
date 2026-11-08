@@ -31,7 +31,8 @@ const KIND_LABEL: Record<LlmProviderDto["kind"], string> = {
 };
 
 export function LlmProviderSettings() {
-  const [providers] = createResource(listLlmProviders);
+  const [providers, { refetch: refetchProviders }] =
+    createResource(listLlmProviders);
   const [selectedId, setSelectedId] = createSignal<string | null>(null);
   const [keyInput, setKeyInput] = createSignal("");
   const [models, setModels] = createSignal<LlmModelInfo[] | null>(null);
@@ -133,6 +134,30 @@ export function LlmProviderSettings() {
         提问内容会直连你选择的提供商，不经过 SendPalm。
       </p>
 
+      <Show when={providers.error}>
+        <p
+          data-llm-providers-error
+          style={{ margin: 0, "font-size": "var(--text-caption)", color: "var(--text-secondary)" }}
+        >
+          模型服务列表加载失败 ·{" "}
+          <button
+            type="button"
+            onClick={() => void refetchProviders()}
+            style={{ color: "var(--palm)", "font-weight": 700 }}
+          >
+            重试
+          </button>
+        </p>
+      </Show>
+      <Show when={!providers.error && providers.loading}>
+        <p
+          data-llm-providers-loading
+          aria-busy="true"
+          style={{ margin: 0, "font-size": "var(--text-caption)", color: "var(--text-muted)" }}
+        >
+          正在读取模型服务…
+        </p>
+      </Show>
       <For each={groups()}>
         {([kind, ps]) => (
           <div>

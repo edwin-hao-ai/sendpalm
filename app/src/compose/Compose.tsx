@@ -905,6 +905,52 @@ export function Compose() {
                 padding: "var(--space-4)",
               }}
             >
+              {/* A failed account read left the From row blank with no
+                explanation, and the eventual send failed with a generic
+                toast. Say what actually happened. */}
+              <Show when={!accounts.error && accounts.loading}>
+                <p
+                  data-compose-accounts-loading
+                  aria-busy="true"
+                  style={{
+                    margin: "0 0 var(--space-3)",
+                    "font-size": "var(--text-caption)",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  正在读取邮箱账户…
+                </p>
+              </Show>
+              <Show when={accounts.error}>
+                <div
+                  data-compose-accounts-error
+                  role="alert"
+                  style={{
+                    display: "flex",
+                    "align-items": "center",
+                    gap: "var(--space-2)",
+                    padding: "8px 12px",
+                    "margin-bottom": "var(--space-3)",
+                    "border-radius": "var(--radius-md)",
+                    background:
+                      "color-mix(in srgb, var(--amber, #B7791F) 12%, var(--paper-light))",
+                    "font-size": "var(--text-caption)",
+                    color: "var(--text-secondary)",
+                  }}
+                >
+                  <Icon name="ph-warning-circle" size={14} />
+                  <span style={{ flex: 1 }}>
+                    读取邮箱账户失败，发件人可能不完整。
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void refetchAccounts()}
+                    style={{ color: "var(--palm)", "font-weight": 700 }}
+                  >
+                    重试
+                  </button>
+                </div>
+              </Show>
               <Show
                 when={!noEmailAccount()}
                 fallback={

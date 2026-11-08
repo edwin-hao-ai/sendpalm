@@ -505,6 +505,35 @@ export function CommandPalette() {
           />
           <kbd style={kbdStyle}>esc</kbd>
         </div>
+        <Show when={!ftsResults.error && ftsResults.loading && debouncedQuery().trim().length > 0}>
+          <p
+            data-palette-loading
+            aria-busy="true"
+            style={{
+              margin: 0,
+              padding: "var(--space-1) var(--space-4)",
+              "font-size": "var(--text-micro)",
+              color: "var(--text-muted)",
+            }}
+          >
+            搜索中…
+          </p>
+        </Show>
+        {/* Commands still work when the index is down — say so instead of
+          pretending the search returned nothing. */}
+        <Show when={ftsResults.error}>
+          <p
+            data-palette-error
+            style={{
+              margin: 0,
+              padding: "var(--space-2) var(--space-4)",
+              "font-size": "var(--text-micro)",
+              color: "var(--text-muted)",
+            }}
+          >
+            搜索结果暂不可用（命令仍可执行）
+          </p>
+        </Show>
         <ul
           style={{
             "list-style": "none",
