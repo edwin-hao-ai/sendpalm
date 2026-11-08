@@ -61,7 +61,14 @@ export async function saveAttachment(
       showToast({ message: `已保存到 ${target}`, kind: "success" });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      showToast({ message: `保存失败：${msg}`, kind: "error" });
+      // Raw filesystem errors ("EACCES: permission denied, open …") mean
+      // nothing to a user; keep them in the error log and say what to do.
+      showToast({
+        message: "保存失败——请换一个位置重试，或检查对该文件夹的写入权限",
+        kind: "error",
+        source: "save-attachment",
+        detail: msg,
+      });
     }
     return;
   }

@@ -73,7 +73,7 @@ const PILE_META: Record<
     subtitle: "这些邮件等着你有空时回复",
     icon: "ph-clock",
     options: { replyLaterOnly: true, setAsideOnly: false, bubbleUpOnly: false },
-    removeLabel: "移回 Inbox",
+    removeLabel: "移回收件箱",
     removeIcon: "ph-tray",
   },
   setAside: {
@@ -81,12 +81,12 @@ const PILE_META: Record<
     subtitle: "留作参考、稍后处理的邮件",
     icon: "ph-push-pin",
     options: { replyLaterOnly: false, setAsideOnly: true, bubbleUpOnly: false },
-    removeLabel: "移回 Inbox",
+    removeLabel: "移回收件箱",
     removeIcon: "ph-tray",
   },
   bubbleUp: {
     title: "提醒",
-    subtitle: "到点会回到 Inbox 顶部的邮件",
+    subtitle: "到点会回到收件箱顶部的邮件",
     icon: "ph-arrow-fat-line-up",
     options: { replyLaterOnly: false, setAsideOnly: false, bubbleUpOnly: true },
     removeLabel: "取消提醒",

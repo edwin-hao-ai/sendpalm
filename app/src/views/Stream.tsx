@@ -116,7 +116,7 @@ export function Stream() {
       await upsertMessage({ ...m, setAside: true });
       paged.patchMessage(m.id, { setAside: true });
       showToast({
-        message: "已搁置，仍保留在 Stream 中",
+        message: "已搁置，仍保留在报刊中",
         kind: "success",
         action: { label: "查看搁置堆", run: () => {
             setView("setAside");
@@ -137,7 +137,7 @@ export function Stream() {
       await upsertMessage({ ...m, replyLater: true });
       paged.patchMessage(m.id, { replyLater: true });
       showToast({
-        message: "已加入稍后回复，仍保留在 Stream 中",
+        message: "已加入稍后回复，仍保留在报刊中",
         kind: "success",
         action: { label: "查看稍后回复", run: () => {
             setView("replyLater");

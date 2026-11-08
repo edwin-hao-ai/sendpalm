@@ -134,10 +134,14 @@ describe("saveAttachment", () => {
 
     await saveAttachment("file_err", "x.pdf");
 
+    // The toast is human copy now; the raw filesystem message goes to the
+    // error log via `detail` (a user cannot act on "EACCES: permission
+    // denied, open …").
     expect(mockedShowToast).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "error",
-        message: expect.stringContaining("permission denied"),
+        message: expect.stringContaining("保存失败"),
+        detail: expect.stringContaining("permission denied"),
       }),
     );
   });

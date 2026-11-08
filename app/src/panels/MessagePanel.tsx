@@ -326,7 +326,7 @@ export function MessagePanel(props: { messageId: string }) {
     await moveMessageToBucket(m.id, "paperTrail");
     // (no local list to refresh — global bumpRefreshTick below covers other views)
     bumpRefreshTick();
-    showToast({ message: "已归档到 Records", kind: "success" });
+    showToast({ message: "已归档到单据", kind: "success" });
   };
 
   const moveToTrash = async () => {

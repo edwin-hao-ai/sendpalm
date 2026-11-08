@@ -52,11 +52,11 @@ test.describe("SendPalm real backend — empty states (no mock data)", () => {
   }) => {
     await page.goto("/");
     await page.locator("body.app-ready").waitFor({ timeout: 10_000 });
-    // The empty-state copy was rewritten in the 8/18 perf pass to make
-    // the value proposition explicit ("重要邮件" rather than the
-    // generic "空的") and to drop the "Settings → Accounts" pointer
-    // (onboarding handles account creation in a dedicated view now).
-    await expect(page.getByText(/Inbox 是给你的重要邮件/)).toBeVisible();
+    // With no mailbox connected the empty state has to say so and offer the
+    // button — a passive "新邮件到了会自动出现在这里" was a dead end on the
+    // first screen a new user ever sees.
+    await expect(page.getByText("还没有连接邮箱")).toBeVisible();
+    await expect(page.locator("[data-empty-add-account]")).toBeVisible();
     // 'Inbox zero' was the OLD mock-data copy — it must NOT appear.
     await expect(page.getByText("Inbox zero")).toHaveCount(0);
     await shoot(page, "02-imbox-empty");

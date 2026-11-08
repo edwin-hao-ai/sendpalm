@@ -130,9 +130,9 @@ export function Gate() {
   /** One short label per bucket for the swipe affordance. The shared
    *  BUCKET_SUGGEST_LABEL carries the longer "建议" wording for the buttons. */
   const SUGGEST_LABEL: Record<MessageBucket, string> = {
-    imbox: "Inbox",
-    feed: "Stream",
-    paperTrail: "Records",
+    imbox: "收件箱",
+    feed: "报刊",
+    paperTrail: "单据",
     trash: "回收站",
     spam: "垃圾邮件",
   };
@@ -323,7 +323,12 @@ export function Gate() {
         ttlMs: 6000,
       });
     } catch (e) {
-      showToast({ message: `AI 建议失败：${e}`, kind: "error" });
+      showToast({
+        message: "AI 建议生成失败——请检查模型配置后重试",
+        kind: "error",
+        source: "gate-ai",
+        detail: e instanceof Error ? e.message : String(e),
+      });
     } finally {
       setAiBusy(false);
     }
@@ -507,7 +512,7 @@ export function Gate() {
             }}
           >
             <Icon name="ph-clock-counter-clockwise" size={14} />
-            查看 Gate 历史
+            查看筛选历史
           </button>
           </>
         }

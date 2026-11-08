@@ -41,7 +41,7 @@ const ACTIONS: {
 }[] = [
   {
     id: "archive",
-    label: "归档到 Records",
+    label: "归档到单据",
     icon: "ph-tray",
     shortcut: "e",
     run: () => setBucket("paperTrail"),

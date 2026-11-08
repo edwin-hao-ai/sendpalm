@@ -1249,7 +1249,7 @@ export function Imbox() {
           when={!(paged().resource.loading && paged().items().length === 0)}
           fallback={<SkeletonBlock />}
         >
-          <Show when={hasAny()} fallback={<EmptyState />}>
+          <Show when={hasAny()} fallback={<EmptyState hasAccount={emailAccounts(accounts()).length > 0} />}>
             <div
               class="feed-list"
               data-feed-list
@@ -1777,16 +1777,47 @@ function ImboxHeader(props: {
   );
 }
 
-function EmptyState() {
+/** Cold-start empty state.
+ *
+ *  This is the first thing a brand-new user sees, and it used to be a dead
+ *  end: a passive "新邮件到了会自动出现在这里" with no way to make that
+ *  happen. Nothing arrives until an account is connected, so with zero
+ *  mailboxes the copy has to say that and offer the button.
+ */
+function EmptyState(props: { hasAccount: boolean }) {
   return (
     <div class="imbox-empty">
       <Icon name="ph-tray" size={48} />
-      <h2>Inbox 是给你的重要邮件</h2>
+      <h2>{props.hasAccount ? "收件箱是空的" : "还没有连接邮箱"}</h2>
       <p>
-        重要的、需要你来处理的对话会出现在这里。
-        <br />
-        新邮件到了会自动出现在这里。
+        {props.hasAccount
+          ? "需要你处理的邮件会出现在这里。"
+          : "连接你的第一个邮箱后，新邮件会自动收进这里。"}
       </p>
+      <Show when={!props.hasAccount}>
+        <button
+          type="button"
+          data-empty-add-account
+          onClick={() => {
+            setSettingsTab("accounts");
+            setView("settings");
+          }}
+          style={{
+            "margin-top": "var(--space-3)",
+            "min-height": "40px",
+            padding: "8px 20px",
+            "border-radius": "var(--radius-pill)",
+            border: "none",
+            background: "var(--palm)",
+            color: "#fff",
+            "font-size": "var(--text-caption)",
+            "font-weight": 700,
+            cursor: "pointer",
+          }}
+        >
+          添加邮箱账户
+        </button>
+      </Show>
     </div>
   );
 }
