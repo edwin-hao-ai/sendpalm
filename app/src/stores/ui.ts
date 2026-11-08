@@ -341,7 +341,14 @@ export interface Toast {
   kind: ToastKind;
   action?: { label: string; run: () => void | Promise<void> };
   ttlMs?: number;
+  /** How many identical messages collapsed into this one. Shown as ×N. */
+  repeat?: number;
 }
+
+/** Hard ceiling on visible toasts. Error toasts never auto-dismiss, so a
+ *  failing background loop could otherwise stack them until the screen was
+ *  unusable — the opposite of what a notification is for. */
+const MAX_TOASTS = 4;
 export const [toasts, setToasts] = createSignal<Toast[]>([]);
 
 /** ARCH-4: persistent error log — every `kind: "error"` toast
@@ -414,11 +421,31 @@ export function showToast(t: Omit<Toast, "id"> & { source?: string; detail?: str
   if (t.kind === "error") {
     recordError(t.source ?? "toast", t.message, t.detail);
   }
-  setToasts((xs) => [...xs, { id, ...t }]);
+  let finalId = id;
+  setToasts((xs) => {
+    // Collapse an identical message that is still on screen instead of
+    // stacking a second copy (and a second permanent error card).
+    const twin = xs.find(
+      (x) => x.kind === t.kind && x.message === t.message,
+    );
+    if (twin) {
+      finalId = twin.id;
+      return xs.map((x) =>
+        x.id === twin.id
+          ? { ...x, repeat: (x.repeat ?? 1) + 1, action: t.action ?? x.action }
+          : x,
+      );
+    }
+    const next = [...xs, { id, ...t, repeat: 1 }];
+    // Drop the oldest entries past the cap, never the one just added.
+    return next.length > MAX_TOASTS
+      ? next.slice(next.length - MAX_TOASTS)
+      : next;
+  });
   if (ttl > 0) {
-    setTimeout(() => dismissToast(id), ttl);
+    setTimeout(() => dismissToast(finalId), ttl);
   }
-  return id;
+  return finalId;
 }
 export function dismissToast(id: ID) {
   setToasts((xs) => xs.filter((t) => t.id !== id));

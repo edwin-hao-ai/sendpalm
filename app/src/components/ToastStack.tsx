@@ -4,7 +4,7 @@
  *  Error toasts never auto-dismiss (see stores/ui.ts showToast).
  */
 
-import { For, createEffect, createSignal, untrack } from "solid-js";
+import { For, Show, createEffect, createSignal, untrack } from "solid-js";
 import { toasts, dismissToast, type Toast, type ToastKind } from "../stores/ui";
 import { Icon } from "./Icon";
 import { useViewport } from "../utils/gestures";
@@ -116,7 +116,22 @@ export function ToastStack() {
             }}
           >
             <Icon name={COLOR[t.kind].icon} size={18} />
-            <span style={{ flex: 1 }}>{t.message}</span>
+            <span style={{ flex: 1 }}>
+              {t.message}
+              <Show when={(t.repeat ?? 1) > 1}>
+                <span
+                  data-toast-repeat
+                  style={{
+                    "margin-left": "6px",
+                    "font-size": "var(--text-micro)",
+                    opacity: 0.7,
+                    "font-variant-numeric": "tabular-nums",
+                  }}
+                >
+                  ×{t.repeat}
+                </span>
+              </Show>
+            </span>
             {t.action && (
               <button
                 data-testid="toast-action"
