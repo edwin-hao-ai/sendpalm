@@ -3776,3 +3776,29 @@ build 干净；新增 `first-run.spec.ts` 锁住冷启动 CTA。
   lock 都 panic → 一次后台 panic 扩散成整个应用无响应。改为 `unwrap_or_else(|e| e.into_inner())`。
 
 验证：TS 781、Rust 157、Playwright **158 passed / 0 failed / 1 skipped**。
+
+### 2026-11-09 iOS 黑屏结案：三个 bug，都不在 webview 里
+
+挂了三天的问题，根因是进程在 webview 之前就死了。
+
+1. **`#[cfg_attr(mobile, tauri::mobile_entry_point)]` 落在了 `install_crypto_provider` 上**
+   —— 拆函数时新加的 doc 注释把属性和 `pub fn run()` 隔开了。iOS 的 `ffi::start_app()`
+   调的是「装 rustls」那个函数，装完返回 → `main` 返回 → 进程 1 秒内主动退出
+   （系统日志：`RBSProcessExitContext| voluntary`）。桌面从 `main.rs` 直接调 `run()`，
+   所以从来没暴露。
+2. **迁移在全新数据库上乱序执行**：sqlx 按迭代顺序跑，而列表是
+   `1..24, 30, 31, 29, 28, 27, 26, 25` —— 28（回填 `is_newsletter`）跑在 26（加列）
+   前面，报 `no such column: is_newsletter`。**老库会跳过已应用项，所以这是
+   「只有新用户才会撞」的首次启动崩溃，所有平台都一样。** 现在列表收进
+   `pub fn migrations()` 并按版本排序，`migration_tests::fresh_database_applies_every_migration_in_order`
+   守着（去掉排序该用例立刻失败）。
+3. **后台任务抢在建表之前**：MCP gateway 和同步循环从 `setup()` 起，而 schema 是
+   webview 打开数据库后由 SQL 插件建的。全新安装时 gateway 报 `no such table: app_kv`、
+   同步循环往没有 `messages` 表的库里抓信。两者现在都先等表出现（最多 20s）。
+
+**验证**：iPhone 17 模拟器实测启动 → 新手引导 → 收件箱（截图在
+`docs/ios-screenshots/`）；桌面端用干净的 `HOME` 跑全新安装 —— 31 条迁移全部应用、
+同步写入 46 封、日志零数据库错误。新增 `app/scripts/verify-ios.sh`（会构建/安装/启动/
+截屏，并在进程已退出时**报错**），补上了 AGENTS 引用了几周却不存在的那条命令。
+
+Rust 159、TS 784、Playwright 158 通过 / 0 失败。
