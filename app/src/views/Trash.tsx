@@ -15,6 +15,7 @@ import { Avatar } from "../components/Avatar";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
+import { RowSelect, selectedRowStyle } from "../components/RowSelect";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { SkeletonList } from "../components/Skeleton";
 import { setDetailOpen, setSelectedMessageId, showToast } from "../stores/ui";
@@ -243,8 +244,10 @@ export function Trash() {
                         "align-items": "center",
                         padding: "var(--space-3) 0",
                         "border-bottom": "0.5px solid var(--border)",
+                        ...selectedRowStyle(m.id),
                       }}
                     >
+                      <RowSelect id={m.id} />
                       <Avatar name={c?.name ?? "?"} src={c?.avatar} size={32} />
                       <div
                         onClick={() => {

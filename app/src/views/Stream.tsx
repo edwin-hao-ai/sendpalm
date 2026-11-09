@@ -31,6 +31,7 @@ import { ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { htmlToPlainText, looksLikeHtml } from "../utils/html";
 import { PageHeader } from "../components/PageHeader";
+import { RowSelect, selectedRowStyle } from "../components/RowSelect";
 import { EmailBody } from "../components/EmailBody";
 import { setView, showToast, appSettings } from "../stores/ui";
 import { formatMessageDate } from "../utils/message-dates";
@@ -317,6 +318,7 @@ function StreamCard(props: StreamCardProps) {
         transition:
           "box-shadow var(--duration-fast) var(--ease-out)",
         "margin-bottom": "var(--space-3)",
+        ...selectedRowStyle(props.m.id),
       }}
     >
       <header
@@ -327,6 +329,7 @@ function StreamCard(props: StreamCardProps) {
           "margin-bottom": "var(--space-3)",
         }}
       >
+        <RowSelect id={props.m.id} />
         <Avatar
           name={props.contact?.name ?? "订阅"}
           src={props.contact?.avatar}

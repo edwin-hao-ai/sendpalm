@@ -10,6 +10,7 @@ import { Avatar } from "../components/Avatar";
 import { Empty, ErrorState } from "../components/Empty";
 import { Icon } from "../components/Icon";
 import { PageHeader } from "../components/PageHeader";
+import { RowSelect, selectedRowStyle } from "../components/RowSelect";
 import {
   setDetailOpen,
   setSelectedMessageId,
@@ -241,8 +242,10 @@ function RecordRow(props: {
           gap: "var(--space-3)",
           padding: "var(--space-3) 0",
           cursor: "pointer",
+          ...selectedRowStyle(props.m.id),
         }}
       >
+        <RowSelect id={props.m.id} />
         <Avatar
           name={props.contact?.name ?? "Receipt"}
           src={props.contact?.avatar}

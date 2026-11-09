@@ -37,6 +37,7 @@ import { ShortcutHelp } from "./components/ShortcutHelp";
 import { BulkActionMenu } from "./components/BulkActionMenu";
 import { LockScreen } from "./components/LockScreen";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
+import { BulkSelectionBar } from "./components/BulkSelectionBar";
 import { initApp } from "./bootstrap";
 import {
   agentPanelOpen,
@@ -171,6 +172,7 @@ export default function App() {
           </Suspense>
         </Show>
         <ToastStack />
+        <BulkSelectionBar />
         <Show when={composeOpen()}>
           <Suspense fallback={null}>
             <Compose />

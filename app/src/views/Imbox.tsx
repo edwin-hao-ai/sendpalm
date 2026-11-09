@@ -504,81 +504,8 @@ export function Imbox() {
     setLastSelectedId(toId);
   };
 
-  const clearSelection = () => {
-    setSelectedIds(new Set<string>());
-    setLastSelectedId(null);
-  };
 
-  /* ── Bulk actions (mouse-discoverable bar when selection exists) ── */
 
-  const bulkMove = async (
-    bucket: "paperTrail" | "trash",
-    doneMsg: string,
-  ) => {
-    const ids = [...selectedIds()];
-    if (ids.length === 0) return;
-    clearSelection();
-    for (const id of ids) removeFromBoth(id);
-    try {
-      for (const id of ids) await moveMessageToBucket(id, bucket);
-      await refreshAll();
-      showToast({
-        message: `${doneMsg}（${ids.length} 封）`,
-        kind: "success",
-        action: {
-          label: "撤销",
-          run: async () => {
-            for (const id of ids) await moveMessageToBucket(id, "imbox");
-            await refreshAll();
-            showToast({ message: "已撤销", kind: "success" });
-          },
-        },
-      });
-    } catch (err) {
-      console.error("[imbox] bulk move failed:", err);
-      await refreshAll();
-      showToast({ message: "操作失败，请重试", kind: "error" });
-    }
-  };
-
-  const bulkPending = async () => {
-    const ids = [...selectedIds()];
-    if (ids.length === 0) return;
-    clearSelection();
-    for (const id of ids) removeFromBoth(id);
-    try {
-      for (const id of ids) {
-        await setMessagePileFlags(id, {
-          replyLater: true,
-          setAside: false,
-          bubbleUpAt: null,
-        });
-      }
-      await refreshAll();
-      showToast({
-        message: `已加入稍后回复（${ids.length} 封）`,
-        kind: "success",
-        action: {
-          label: "撤销",
-          run: async () => {
-            for (const id of ids) {
-              await setMessagePileFlags(id, {
-                replyLater: false,
-                setAside: false,
-                bubbleUpAt: null,
-              });
-            }
-            await refreshAll();
-            showToast({ message: "已撤销", kind: "success" });
-          },
-        },
-      });
-    } catch (err) {
-      console.error("[imbox] bulk pending failed:", err);
-      await refreshAll();
-      showToast({ message: "操作失败，请重试", kind: "error" });
-    }
-  };
 
   const bundleSelectedState = (b: Bundle): "none" | "partial" | "all" => {
     const ids = b.messages.map((m) => m.id);
@@ -1494,58 +1421,6 @@ export function Imbox() {
             {/* Bulk action bar — floats in when the user has selected
                 cards (x key or checkbox), making multi-select
                 discoverable for mouse users. */}
-            <Show when={showBulkBar()}>
-              <div
-                data-bulk-bar
-                role="toolbar"
-                aria-label="批量操作"
-                style={{
-                  position: "fixed",
-                  bottom: isMobileLayout()
-                    ? "calc(64px + env(safe-area-inset-bottom, 0px))"
-                    : "var(--space-5)",
-                  left: "50%",
-                  transform: "translateX(-50%)",
-                  display: "flex",
-                  "align-items": "center",
-                  gap: "var(--space-2)",
-                  padding: "8px 12px",
-                  background: "var(--glass-bg)",
-                  "backdrop-filter": "var(--glass-blur)",
-                  "-webkit-backdrop-filter": "var(--glass-blur)",
-                  border: "0.5px solid var(--glass-border)",
-                  "border-radius": "var(--radius-pill)",
-                  "box-shadow": "var(--glass-shadow)",
-                  "z-index": "var(--z-detail)",
-                  animation: "toast-enter 0.2s var(--ease-out) both",
-                }}
-              >
-                <span
-                  style={{
-                    "font-size": "var(--text-caption)",
-                    "font-weight": "700",
-                    color: "var(--text-secondary)",
-                    "white-space": "nowrap",
-                  }}
-                >
-                  已选 {selectedIds().size} 封
-                </span>
-                <BulkBarButton
-                  label="稍后回复"
-                  onClick={() => void bulkPending()}
-                />
-                <BulkBarButton
-                  label="归档"
-                  onClick={() => void bulkMove("paperTrail", "已归档到 Records")}
-                />
-                <BulkBarButton
-                  label="删除"
-                  danger
-                  onClick={() => void bulkMove("trash", "已移到回收站")}
-                />
-                <BulkBarButton label="取消选择" onClick={clearSelection} />
-              </div>
-            </Show>
           </Show>
         </Show>
       </Show>
@@ -1553,32 +1428,6 @@ export function Imbox() {
   );
 }
 
-function BulkBarButton(props: {
-  label: string;
-  onClick: () => void;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={props.onClick}
-      style={{
-        padding: "6px 12px",
-        "min-height": "32px",
-        "border-radius": "var(--radius-pill)",
-        border: props.danger ? "0.5px solid var(--status-danger)" : "none",
-        background: props.danger ? "transparent" : "var(--paper-mid)",
-        color: props.danger ? "var(--status-danger)" : "var(--text-secondary)",
-        "font-size": "var(--text-caption)",
-        "font-weight": "600",
-        cursor: "pointer",
-        "white-space": "nowrap",
-      }}
-    >
-      {props.label}
-    </button>
-  );
-}
 
 function TabEmpty(props: {
   tab: ImboxTabId;

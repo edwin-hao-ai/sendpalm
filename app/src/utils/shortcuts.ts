@@ -164,7 +164,13 @@ export function useGlobalShortcuts() {
       // Imbox has its own local x-key handler; avoid double toast.
       if (view() === "imbox") return;
       e.preventDefault();
-       showToast({ message: "多选暂只在 Inbox 可用", kind: "info" });
+      // These views select by ticking the checkbox on each row; the bulk bar
+      // and `;` menu work the same wherever the selection came from.
+      showToast({
+        message: "点每行左侧的勾选框可以多选（收件箱里也支持 x 键）",
+        kind: "info",
+        ttlMs: 3000,
+      });
     },
     "list:open": (e) => {
       if (!isListView(view())) return;
