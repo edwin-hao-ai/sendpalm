@@ -300,19 +300,10 @@ function matchRow(
         );
       case "match":
         return matchFts(cond.value, row);
-      case "like": {
-        const hay = String(colVal ?? "").toLowerCase();
-        const raw = String(cond.value ?? "").toLowerCase();
-        // SQLite LIKE: % = any run, _ = one char. Anchored if no leading %.
-        const starts = raw.startsWith("%");
-        const ends = raw.endsWith("%");
-        const core = raw.replace(/^%+|%+$/g, "").replace(/_/g, ".");
-        if (!core) return true;
-        const re = new RegExp(
-          `${starts ? "" : "^"}${core}${ends ? "" : "$"}`,
+      case "like":
+        return likeToRegExp(String(cond.value ?? ""), cond.escape).test(
+          String(colVal ?? ""),
         );
-        return re.test(hay);
-      }
       case "is null":
         return colVal == null;
       case "is not null":
@@ -334,19 +325,55 @@ function matchRow(
     : conditions.every(tester);
 }
 
+/** SQLite LIKE → RegExp, honouring `ESCAPE '<char>'`.
+ *
+ *  `%` = any run, `_` = one char, everything else literal. A character
+ *  preceded by the escape character is always literal (so `100\%` matches the
+ *  literal text "100%"). Case-insensitive, like SQLite's LIKE for ASCII.
+ */
+function likeToRegExp(pattern: string, escape?: string): RegExp {
+  let out = "";
+  let i = 0;
+  while (i < pattern.length) {
+    const ch = pattern[i]!;
+    if (escape && ch === escape && i + 1 < pattern.length) {
+      out += pattern[i + 1]!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      i += 2;
+      continue;
+    }
+    if (ch === "%") out += ".*";
+    else if (ch === "_") out += ".";
+    else out += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    i += 1;
+  }
+  return new RegExp(`^${out}$`, "i");
+}
+
 function matchFts(query: unknown, row: Row): boolean {
+  // The real index is FTS5/trigram and `searchIndex()` sends quoted terms
+  // (`"拒付"`). Strip the quotes (and the FTS5 `""` escape) so the mock
+  // behaves like trigram substring matching instead of looking for the quote
+  // characters themselves.
   const q = String(query ?? "")
     .toLowerCase()
     .trim();
   if (!q) return true;
   const hay = [row.title, row.body].filter(Boolean).join(" ").toLowerCase();
-  return q.split(/\s+/).every((term) => hay.includes(term));
+  const terms = q
+    .replace(/\bAND\b/g, " ")
+    .replace(/"/g, "")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (terms.length === 0) return false;
+  return terms.every((term) => hay.includes(term));
 }
 
 interface Condition {
   col: string;
   op: string;
   value: unknown;
+  /** LIKE ... ESCAPE '<char>' — the character that disables % and _. */
+  escape?: string;
 }
 
 function readColumnName(tokens: Token[], start: number): { name: string; next: number } {
@@ -394,11 +421,32 @@ function parseWhere(
     let col = rawCol;
 
     // LIKE <value> — keyword operator (tokenized as an id).
+    // MATCH — FTS5's operator. The keyword tokenizes as an identifier, so
+    // without this branch `WHERE search_index MATCH $1` produced NO
+    // conditions at all and the mock returned every row: every search test
+    // built on it was vacuously green.
+    if (normalizeId(tokens[i]) === "match") {
+      i++;
+      const v = resolveValue(tokens, i, bindValues);
+      i = v.next;
+      conditions.push({ col, op: "match", value: v.value });
+      continue;
+    }
     if (normalizeId(tokens[i]) === "like") {
       i++;
       const v = resolveValue(tokens, i, bindValues);
       i = v.next;
-      conditions.push({ col, op: "like", value: v.value });
+      // Real SQLite needs ESCAPE for literal % / _ (searchIndex escapes user
+      // input). Ignoring the clause made the mock treat "100\%" as "match
+      // everything", so escaping could not be tested.
+      let escape: string | undefined;
+      if (normalizeId(tokens[i]) === "escape") {
+        i++;
+        const e = resolveValue(tokens, i, bindValues);
+        i = e.next;
+        escape = String(e.value ?? "");
+      }
+      conditions.push({ col, op: "like", value: v.value, escape });
       continue;
     }
     // IS NULL / IS NOT NULL

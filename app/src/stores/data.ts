@@ -5,6 +5,7 @@
  */
 
 import Database from "@tauri-apps/plugin-sql";
+import { buildSearchPlan, escapeLike } from "../utils/search";
 import { IS_BROWSER } from "../services/tauri-shim";
 
 // Browser-mode guard. When running outside Tauri in dev (pnpm dev / Playwright),
@@ -136,20 +137,54 @@ export async function backfillSearchIndex(): Promise<void> {
   }
 }
 
+/** Search across messages, contacts, files and events.
+ *
+ *  The index uses the `trigram` tokenizer (migration 0032) so Chinese
+ *  substrings match. Queries are shaped by `buildSearchPlan`:
+ *
+ *  - every term ≥ 3 chars → FTS5 with **quoted** terms (`Re: 报价` used to
+ *    throw `no such column: Re`; `a-b` threw on the dash)
+ *  - any term shorter than 3 chars → LIKE fallback (trigram cannot match
+ *    those, and 「拒付」 is 2 characters)
+ */
 export async function searchIndex(query: string): Promise<SearchResult[]> {
+  const plan = buildSearchPlan(query);
+  if (!plan) return [];
   const db = await getDb();
-  const q = query.trim();
-  if (!q) return [];
+
+  if (plan.kind === "like") {
+    // One placeholder per term; the same index is used for title and body so
+    // the term is bound once.
+    const params = plan.terms.map((t) => `%${escapeLike(t)}%`);
+    const predicate = plan.terms
+      .map(
+        (_t, i) =>
+          `(title LIKE $${i + 1} ESCAPE '\\' OR body LIKE $${i + 1} ESCAPE '\\')`,
+      )
+      .join(" AND ");
+    const rows = await db.select<Record<string, unknown>[]>(
+      `SELECT id, kind, title, body FROM search_index
+        WHERE ${predicate}
+        ORDER BY kind, title LIMIT 50`,
+      params,
+    );
+    return rows.map(toSearchResult);
+  }
+
   const rows = await db.select<Record<string, unknown>[]>(
     "SELECT id, kind, title, body FROM search_index WHERE search_index MATCH $1 ORDER BY rank LIMIT 50",
-    [q],
+    [plan.match],
   );
-  return rows.map((r) => ({
+  return rows.map(toSearchResult);
+}
+
+function toSearchResult(r: Record<string, unknown>): SearchResult {
+  return {
     id: r.id as string,
     kind: r.kind as SearchResult["kind"],
     title: r.title as string,
     body: r.body as string,
-  }));
+  };
 }
 
 /* ── Helpers ──────────────────────────────────────────── */

@@ -253,6 +253,12 @@ pub fn migrations() -> Vec<Migration> {
             kind: MigrationKind::Up,
         },
         Migration {
+            version: 32,
+            description: "rebuild search index with the trigram tokenizer",
+            sql: include_str!("../migrations/0032_search_trigram.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
             version: 29,
             description: "imap folder/uid identity for flag sync",
             sql: include_str!("../migrations/0029_imap_identity.sql"),
@@ -510,7 +516,7 @@ mod migration_tests {
     #[test]
     fn every_migration_file_is_registered() {
         let registered: Vec<i64> = migrations().iter().map(|m| m.version).collect();
-        for v in 1..=31 {
+        for v in 1..=32 {
             assert!(
                 registered.contains(&v),
                 "migration {v} is missing from migrations()"
