@@ -314,8 +314,11 @@ pub async fn backfill_markup_bodies(pool: &sqlx::SqlitePool) -> Result<u32, Stri
             // has no tags at all (Chinese newsletters encode every CJK
             // character, so the body reads `&#38543;&#30528;…` in every
             // text surface *and* in the search index).
+            // Empty bodies belong here too: some HTML-only mail was stored
+            // with no text part at all, which makes it unsearchable (the
+            // index is built from `body`).
             "SELECT id, body FROM messages \
-              WHERE (body LIKE '%</%' OR body LIKE '%&#%') \
+              WHERE (body IS NULL OR body = '' OR body LIKE '%</%' OR body LIKE '%&#%') \
                 AND body_html IS NOT NULL AND body_html <> '' \
                 AND id > $1 ORDER BY id LIMIT $2",
         )
@@ -330,7 +333,18 @@ pub async fn backfill_markup_bodies(pool: &sqlx::SqlitePool) -> Result<u32, Stri
         }
         for (id, body) in rows {
             last_id = id.clone();
-            let text = html_to_text(&body);
+            let text = if body.trim().is_empty() {
+                // Nothing to repair in place — extract from the HTML part.
+                let html: Option<(String,)> =
+                    sqlx::query_as("SELECT body_html FROM messages WHERE id = $1")
+                        .bind(&id)
+                        .fetch_optional(pool)
+                        .await
+                        .map_err(|e| format!("backfill read html {id}: {e}"))?;
+                html.map(|(h,)| html_to_text(&h)).unwrap_or_default()
+            } else {
+                html_to_text(&body)
+            };
             sqlx::query("UPDATE messages SET body = $1 WHERE id = $2")
                 .bind(&text)
                 .bind(&id)
