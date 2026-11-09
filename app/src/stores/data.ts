@@ -3105,6 +3105,8 @@ export async function loadAppSettings(
       },
       preferences: {
         theme: "light",
+        density: "standard",
+        accent: "#0a8f63",
         notifications: {
           desktop: true,
           digest: false,

@@ -81,6 +81,12 @@ import {
 import { formatThousands } from "../utils/counts";
 import { classifyVerifyResult } from "../utils/account-verify";
 import {
+  ACCENT_CHOICES,
+  DENSITY_LABEL,
+  applyAppearance,
+  type Density,
+} from "../utils/theme";
+import {
   ensureNotificationPermission,
   notifySettingsChanged,
 } from "../services/notifications";
@@ -2075,6 +2081,76 @@ function PreferencesTab() {
           setAppSettings("preferences", "theme", v ? "dark" : "light")
         }
       />
+
+      <SectionTitle>显示密度</SectionTitle>
+      <div style={{ display: "flex", gap: "var(--space-2)", "margin-bottom": "var(--space-3)" }}>
+        <For each={["compact", "standard", "comfortable"] as Density[]}>
+          {(d) => (
+            <button
+              type="button"
+              data-density-choice={d}
+              aria-pressed={(s.preferences.density ?? "standard") === d}
+              onClick={() => {
+                setAppSettings("preferences", "density", d);
+                applyAppearance({ density: d });
+              }}
+              style={{
+                padding: "6px 16px",
+                "border-radius": "var(--radius-pill)",
+                border: "0.5px solid",
+                "border-color":
+                  (s.preferences.density ?? "standard") === d
+                    ? "var(--palm)"
+                    : "var(--border)",
+                background:
+                  (s.preferences.density ?? "standard") === d
+                    ? "var(--palm-soft)"
+                    : "transparent",
+                color:
+                  (s.preferences.density ?? "standard") === d
+                    ? "var(--palm)"
+                    : "var(--text-secondary)",
+                "font-size": "var(--text-caption)",
+                "font-weight": 700,
+                cursor: "pointer",
+              }}
+            >
+              {DENSITY_LABEL[d]}
+            </button>
+          )}
+        </For>
+      </div>
+
+      <SectionTitle>强调色</SectionTitle>
+      <div
+        data-accent-choices
+        style={{ display: "flex", gap: "var(--space-2)", "margin-bottom": "var(--space-3)" }}
+      >
+        <For each={ACCENT_CHOICES}>
+          {(c) => (
+            <button
+              type="button"
+              aria-label={`强调色：${c.label}`}
+              aria-pressed={(s.preferences.accent ?? "#0a8f63") === c.value}
+              onClick={() => {
+                setAppSettings("preferences", "accent", c.value);
+                applyAppearance({ accent: c.value });
+              }}
+              style={{
+                width: "28px",
+                height: "28px",
+                "border-radius": "50%",
+                background: c.value,
+                border:
+                  (s.preferences.accent ?? "#0a8f63") === c.value
+                    ? "2px solid var(--text-primary)"
+                    : "2px solid transparent",
+                cursor: "pointer",
+              }}
+            />
+          )}
+        </For>
+      </div>
 
       <SectionTitle>邮件规则</SectionTitle>
       <RulesSettings />

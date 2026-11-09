@@ -9,6 +9,7 @@ import { load } from "@tauri-apps/plugin-store";
 import { IS_BROWSER } from "./services/tauri-shim";
 import { maybePromptNotificationPermission } from "./services/notifications";
 import { applyLockOnBoot } from "./services/app-lock";
+import { applyAppearance } from "./utils/theme";
 import { vaultGetSecret, LLM_API_KEY_VAULT_KEY } from "./services/backend";
 import { setLocale, type Locale } from "./i18n";
 import {
@@ -101,6 +102,12 @@ export async function initApp() {
           "data-theme",
           t === "dark" ? "dark" : "light",
         );
+        // Density + accent are CSS-only overrides on <html>; the token system
+        // already owns every colour and spacing decision.
+        applyAppearance({
+          density: settings.preferences?.density,
+          accent: settings.preferences?.accent,
+        });
 
         // Tray menu actions (托盘设计稿 docs/design/tray-mockup.html):
         // 写邮件 / 打开指定邮件 / 跳转设置。Real app only — the events are

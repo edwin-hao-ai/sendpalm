@@ -585,6 +585,11 @@ export interface AppSettings {
   };
   preferences: {
     theme: "light" | "dark";
+    /** List density. `standard` is the default and the layout the rest of
+     *  the design was tuned against. */
+    density?: "compact" | "standard" | "comfortable";
+    /** Accent colour (hex). Drives `--palm` and its soft/glow derivatives. */
+    accent?: string;
     notifications: {
       desktop: boolean;
       digest: boolean;

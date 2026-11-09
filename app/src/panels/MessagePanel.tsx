@@ -2093,6 +2093,7 @@ export function moreMenuItemDefs(opts: {
     { id: "sticky", icon: "ph-note", label: "添加便签" },
     { id: "clip", icon: "ph-bookmark-simple", label: "保存为 Clip" },
     { id: "extract-tasks", icon: "ph-check-square", label: "提取任务", testId: "message-extract-tasks" },
+    { id: "print", icon: "ph-printer", label: "打印", testId: "message-print" },
   ];
   const moves: MoreMenuItemDef[] = (
     [
@@ -2187,6 +2188,7 @@ function MoreMenu(props: {
     "move-paperTrail": () => void props.onMoveToBucket("paperTrail"),
     "ask-agent": () => void props.onAskAgent(),
     "extract-tasks": () => void props.onExtractTasks(),
+    print: () => window.print(),
     label: () => props.onLabel(),
     move: () => props.onMove(),
     "save-draft": () => void props.onSaveDraft(),

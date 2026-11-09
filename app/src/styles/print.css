@@ -1,0 +1,63 @@
+/* Print — the message you are reading, nothing else.
+ *
+ * The app is a three-pane layout with fixed overlays; printing it raw gives
+ * a screenshot of the shell. Everything except the open detail panel is
+ * hidden, the panel is un-fixed, and the iframe body is allowed to paginate.
+ */
+@media print {
+  #sidebar,
+  #topbar,
+  #drop-bar,
+  #toast,
+  #agent-panel,
+  #bulk-bar,
+  [data-bulk-bar],
+  [data-lock-screen],
+  [data-error-boundary],
+  .account-tabs,
+  #main {
+    display: none !important;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  #detail-panel {
+    position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+    backdrop-filter: none !important;
+  }
+
+  /* The panel scrolls internally on screen; printing needs the whole flow. */
+  #detail-panel *,
+  #detail-panel {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+
+  #detail-panel iframe {
+    height: auto !important;
+    min-height: 0 !important;
+    border: 0 !important;
+  }
+
+  /* Buttons and toolbars are chrome. */
+  #detail-panel button[aria-label],
+  [data-compose-formatbar] {
+    display: none !important;
+  }
+
+  a {
+    color: inherit !important;
+    text-decoration: underline !important;
+  }
+}

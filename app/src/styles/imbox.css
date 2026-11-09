@@ -734,3 +734,15 @@
 
 
 
+
+/* Density — 设置 → 偏好 → 显示密度.
+ * `contain-intrinsic-size` must be updated with the padding or the virtual
+ * scroller reserves the wrong height and the scrollbar jumps. */
+[data-density="compact"] .feed-card {
+  padding: 8px 12px;
+  contain-intrinsic-size: auto 68px;
+}
+[data-density="comfortable"] .feed-card {
+  padding: 20px 12px;
+  contain-intrinsic-size: auto 104px;
+}

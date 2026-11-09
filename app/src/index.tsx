@@ -34,6 +34,7 @@ import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/animations.css";
 import "./styles/imbox.css";
+import "./styles/print.css";
 
 render(() => <App />, document.getElementById("root") as HTMLElement);
 
