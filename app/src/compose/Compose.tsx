@@ -48,7 +48,14 @@ import type { Draft, ScheduledSend, Snippet } from "../types";
 import { uid, arrayBufferToBase64 } from "../utils/id";
 import { addHours, addDays, isoNow, nextWeekday } from "../utils/date";
 import { formFactor } from "../utils/viewport";
-import { htmlToPlainText, plainTextToHtml } from "../utils/html";
+import { htmlToPlainText } from "../utils/html";
+import {
+  insertLink,
+  prefixLines,
+  richTextToHtml,
+  richTextToPlain,
+  wrapSelection,
+} from "../utils/rich-text";
 import { glassPanelStyle } from "../components/glass";
 
 /** Email shape shared by the To/Cc/Bcc fields and the recipient pills. */
@@ -312,6 +319,44 @@ export function Compose() {
   const [showSchedulePicker, setShowSchedulePicker] = createSignal(false);
   const [sendMenuOpen, setSendMenuOpen] = createSignal(false);
   let fileInputRef: HTMLInputElement | undefined;
+  let bodyRef: HTMLTextAreaElement | undefined;
+
+  /** Apply a composer edit and restore the selection the helper asks for. */
+  const applyEdit = (next: {
+    text: string;
+    selStart: number;
+    selEnd: number;
+  }) => {
+    setDraft({ ...draft(), body: next.text });
+    // The signal updates the DOM on the next microtask; restore afterwards or
+    // the caret jumps to the end after every toolbar press.
+    queueMicrotask(() => {
+      const el = bodyRef;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(next.selStart, next.selEnd);
+    });
+  };
+
+  const selection = () => ({
+    start: bodyRef?.selectionStart ?? draft().body.length,
+    end: bodyRef?.selectionEnd ?? draft().body.length,
+  });
+
+  const applyWrap = (marker: string) => {
+    const { start, end } = selection();
+    applyEdit(wrapSelection(draft().body, start, end, marker));
+  };
+
+  const applyLink = () => {
+    const { start, end } = selection();
+    applyEdit(insertLink(draft().body, start, end));
+  };
+
+  const applyBullets = () => {
+    const { start, end } = selection();
+    applyEdit(prefixLines(draft().body, start, end));
+  };
 
   const attachFiles = async (files: FileList | null) => {
     if (!files) return;
@@ -515,7 +560,7 @@ export function Compose() {
     attachments: d.attachments,
     // Same transform `sendNow` uses, so a scheduled message renders exactly
     // like an immediate one.
-    htmlBody: plainTextToHtml(d.body),
+    htmlBody: richTextToHtml(d.body),
     inReplyTo: d.inReplyTo,
   });
 
@@ -601,7 +646,9 @@ export function Compose() {
         mime: a.mime,
         dataBase64: a.dataBase64,
       }));
-      const htmlBody = plainTextToHtml(d.body);
+      // HTML readers get the formatting; text-only readers get the same
+      // words with the markers stripped.
+      const htmlBody = richTextToHtml(d.body);
       // Replies/Reply-All carry In-Reply-To so recipients' clients can
       // thread the conversation (Gmail threads on References/In-Reply-To,
       // not on subject). Forward intentionally doesn't. A draft reopened
@@ -615,7 +662,7 @@ export function Compose() {
       const result = await sendEmailViaBackend(
         recipient,
         subject,
-        d.body,
+        richTextToPlain(d.body),
         d.accountId,
         outgoingAttachments,
         d.cc,
@@ -1149,7 +1196,50 @@ export function Compose() {
                 </Field>
 
                 {/* Body */}
+                <div
+                  data-compose-formatbar
+                  style={{
+                    display: "flex",
+                    gap: "4px",
+                    "margin-bottom": "6px",
+                  }}
+                >
+                  <For
+                    each={[
+                      { key: "bold", icon: "ph-text-b", title: "粗体", run: () => applyWrap("**") },
+                      { key: "italic", icon: "ph-text-italic", title: "斜体", run: () => applyWrap("*") },
+                      { key: "link", icon: "ph-link", title: "链接", run: applyLink },
+                      { key: "list", icon: "ph-list-bullets", title: "项目符号", run: applyBullets },
+                    ]}
+                  >
+                    {(b) => (
+                      <button
+                        type="button"
+                        data-format={b.key}
+                        title={b.title}
+                        aria-label={b.title}
+                        // Keep the textarea selection: mousedown otherwise
+                        // blurs it before the handler reads selectionStart.
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={b.run}
+                        style={{
+                          width: "28px",
+                          height: "28px",
+                          display: "flex",
+                          "align-items": "center",
+                          "justify-content": "center",
+                          "border-radius": "var(--radius-sm)",
+                          color: "var(--text-secondary)",
+                          background: "transparent",
+                        }}
+                      >
+                        <Icon name={b.icon} size={15} />
+                      </button>
+                    )}
+                  </For>
+                </div>
                 <textarea
+                  ref={(el) => (bodyRef = el)}
                   value={draft().body}
                   onInput={(e) =>
                     setDraft({ ...draft(), body: e.currentTarget.value })
