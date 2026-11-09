@@ -8,7 +8,6 @@ use services::state::SyncStateStore;
 use tauri::Manager;
 use tauri_plugin_sql::{Migration, MigrationKind};
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Install the process-level rustls CryptoProvider.
 ///
 /// rustls 0.23 refuses to build a `ClientConfig` without one, so this must run
@@ -86,19 +85,17 @@ fn setup_tray_for_desktop(app: &tauri::App) {
     });
 }
 
-pub fn run() {
-    install_crypto_provider();
-
-    // iOS/Tauri swallows panics behind stop_unwind and aborts without a message.
-    // Write any panic to a temp file so we can read it back after a crash.
-    std::panic::set_hook(Box::new(|info| {
-        let msg = format!("SendPalm panic: {}\n", info);
-        let tmp = std::env::temp_dir().join("sendpalm-panic.log");
-        let _ = std::fs::write(&tmp, &msg);
-        eprintln!("{}", msg);
-    }));
-
-    let migrations = vec![
+/// The full migration set, **sorted by version**.
+///
+/// Split out of `run()` so it is testable. sqlx applies migrations in
+/// iterator order, not by version, and this list had grown with 30/31/29/28/
+/// 27/26/25 appended after 24 — on a fresh database 28 (newsletter backfill)
+/// ran before 26 (which adds `is_newsletter`) and the very first launch died
+/// with `no such column: is_newsletter`. Existing installs never noticed
+/// because applied migrations are skipped. Sorting makes append order
+/// irrelevant.
+pub fn migrations() -> Vec<Migration> {
+    let mut out = vec![
         Migration {
             version: 1,
             description: "create_initial_tables",
@@ -286,6 +283,33 @@ pub fn run() {
             kind: MigrationKind::Up,
         },
     ];
+    out.sort_by_key(|m| m.version);
+    out
+}
+
+/// Mobile entry point.
+///
+/// This attribute MUST sit directly above `run`. It had drifted onto
+/// `install_crypto_provider` (a doc comment was inserted between the
+/// attribute and the function it belonged to), so iOS's `ffi::start_app()`
+/// called the rustls installer, returned, and the process exited voluntarily
+/// about a second after launch — the "black first frame" that looked like a
+/// webview failure. Desktop never noticed because `main.rs` calls `run()`
+/// directly.
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    install_crypto_provider();
+
+    // iOS/Tauri swallows panics behind stop_unwind and aborts without a message.
+    // Write any panic to a temp file so we can read it back after a crash.
+    std::panic::set_hook(Box::new(|info| {
+        let msg = format!("SendPalm panic: {}\n", info);
+        let tmp = std::env::temp_dir().join("sendpalm-panic.log");
+        let _ = std::fs::write(&tmp, &msg);
+        eprintln!("{}", msg);
+    }));
+
+    let migrations = migrations();
 
     eprintln!("[sendpalm] starting tauri builder");
     let result = tauri::Builder::default()
@@ -327,6 +351,20 @@ pub fn run() {
                     }
                     match services::sync_loop::open_pool().await {
                         Ok(pool) => {
+                            // The schema is created by the SQL plugin when the
+                            // webview opens the DB, which happens after this
+                            // task starts. Without the wait, a fresh install
+                            // logged `[mcp] gateway failed to start: … no such
+                            // table: app_kv`.
+                            if !services::sync_loop::wait_for_schema(
+                                &pool,
+                                std::time::Duration::from_secs(20),
+                            )
+                            .await
+                            {
+                                eprintln!("[mcp] schema never appeared; gateway not started");
+                                return;
+                            }
                             match services::mcp::start_mcp_server(pool.clone()).await {
                                 Ok(port) => {
                                     eprintln!("[mcp] gateway listening on 127.0.0.1:{port}");
@@ -416,4 +454,67 @@ pub fn run() {
         std::process::exit(1);
     }
     eprintln!("[sendpalm] tauri run returned");
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::migrations;
+
+    /// A brand-new install must be able to create its database.
+    ///
+    /// Regression guard for the 2026-11-09 iOS black screen: the migration
+    /// list was appended out of order, sqlx runs them in iterator order, and
+    /// on a fresh database migration 28 (`UPDATE … is_newsletter`) executed
+    /// before 26 (`ALTER TABLE … ADD COLUMN is_newsletter`) — every first
+    /// launch failed with `no such column: is_newsletter`. Existing databases
+    /// skipped everything and never noticed.
+    #[tokio::test]
+    async fn fresh_database_applies_every_migration_in_order() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("open in-memory sqlite");
+
+        let mut previous = 0i64;
+        for m in migrations() {
+            assert!(
+                m.version > previous,
+                "migrations must be strictly ascending: {} came after {}",
+                m.version,
+                previous
+            );
+            previous = m.version;
+            sqlx::raw_sql(&m.sql)
+                .execute(&pool)
+                .await
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "migration {} ({}) failed on a fresh database: {e}",
+                        m.version, m.description
+                    )
+                });
+        }
+
+        // Columns that later migrations depend on.
+        sqlx::query("SELECT is_newsletter, rfc_message_id, imap_uid FROM messages LIMIT 0")
+        .execute(&pool)
+        .await
+        .expect("columns added by migrations 26/29/30 must exist");
+        sqlx::query("SELECT html_body, in_reply_to FROM drafts LIMIT 0")
+            .execute(&pool)
+            .await
+            .expect("draft reply-context columns from migration 31 must exist");
+    }
+
+    /// The list itself must stay complete — a migration file on disk that is
+    /// never registered would only surface on a fresh install.
+    #[test]
+    fn every_migration_file_is_registered() {
+        let registered: Vec<i64> = migrations().iter().map(|m| m.version).collect();
+        for v in 1..=31 {
+            assert!(
+                registered.contains(&v),
+                "migration {v} is missing from migrations()"
+            );
+        }
+    }
 }

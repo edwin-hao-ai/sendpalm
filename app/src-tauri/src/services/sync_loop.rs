@@ -366,6 +366,17 @@ fn spawn_account_loop(
             account.account_id, account.creds.email, account.last_uid
         );
 
+        // Same race as the MCP gateway: this task is spawned from `setup()`,
+        // but the `messages` table only exists once the webview has opened
+        // the database and the SQL plugin has run its migrations.
+        if !wait_for_schema(&pool, Duration::from_secs(20)).await {
+            eprintln!(
+                "[sync] schema never appeared for {}; not syncing this pass",
+                account.account_id
+            );
+            return;
+        }
+
         let client = ImapClient::new(account.creds.clone());
         let parsed_settings = account
             .settings_json
@@ -2546,6 +2557,34 @@ pub fn build_from_mailbox(account_email: &str, display_name: &str) -> Result<Str
 
 pub async fn open_pool() -> Result<SqlitePool, String> {
     open_pool_at(&db_path()).await
+}
+
+/// Wait until the SQL plugin has finished creating the schema.
+///
+/// Migrations are run by `tauri-plugin-sql` when the **webview** opens the
+/// database, i.e. after this Rust process is already up. Background work
+/// started from `setup()` — the MCP gateway, the per-account sync loop — can
+/// therefore race ahead of the schema: on a fresh install the gateway logged
+/// `no such table: app_kv` and the sync loop began fetching mail into a
+/// database with no `messages` table. Poll for the table instead of assuming
+/// it exists; give up quietly after the timeout and let the next tick retry.
+pub async fn wait_for_schema(pool: &SqlitePool, timeout: Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let ready: Result<(i64,), sqlx::Error> =
+            sqlx::query_as("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='messages'")
+                .fetch_one(pool)
+                .await;
+        if let Ok((n,)) = ready {
+            if n > 0 {
+                return true;
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
 }
 
 /// Path-parameterized variant for tests and the MCP gateway (same WAL +
