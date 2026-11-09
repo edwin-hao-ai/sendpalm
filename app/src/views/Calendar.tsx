@@ -49,6 +49,7 @@ import {
   setCalendarSelected as setCursor,
   calendarFilter as filter,
   setCalendarFilter as setFilter,
+  view as appView,
   consumeCreateIntent,
 } from "../stores/ui";
 import { useRefreshEffect } from "../utils/gestures";
@@ -403,6 +404,71 @@ export function Calendar() {
     setEditing(null);
     showToast({ message: "已删除", kind: "info" });
   };
+
+  /** Arrow-key navigation inside the calendar.
+   *
+   *  The view was mouse-only: `d/w/y`, `t` and `←/→` were wired to the
+   *  editable shortcut registry, but there was no way to move the selected
+   *  day or open a day's event without a pointer.
+   *
+   *  Arrows are intentionally NOT rebindable — they are the only way to walk
+   *  the grid, and stealing them for a user shortcut would strand keyboard
+   *  users.
+   */
+  onMount(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      if (appView() !== "calendar") return;
+      // Never fight a text field or an open dialog.
+      const t = ev.target as HTMLElement | null;
+      if (t?.closest?.("input, textarea, select, [contenteditable=true]")) return;
+      if (document.querySelector('[role="dialog"]')) return;
+
+      const stepDays = (days: number) => {
+        const next = new Date(cursor());
+        next.setDate(next.getDate() + days);
+        setCursor(next);
+        ev.preventDefault();
+      };
+      const stepMonths = (months: number) => {
+        const next = new Date(cursor());
+        next.setMonth(next.getMonth() + months);
+        setCursor(next);
+        ev.preventDefault();
+      };
+
+      switch (ev.key) {
+        case "ArrowLeft":
+          if (view() === "year") stepMonths(-1);
+          else stepDays(view() === "week" ? -7 : -1);
+          break;
+        case "ArrowRight":
+          if (view() === "year") stepMonths(1);
+          else stepDays(view() === "week" ? 7 : 1);
+          break;
+        case "ArrowUp":
+          stepDays(-7);
+          break;
+        case "ArrowDown":
+          stepDays(7);
+          break;
+        case "Enter": {
+          // Open the first event of the selected day, if any.
+          const day = cursor();
+          const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+          const first = (events() ?? []).find((e) => e.dt === key);
+          if (first) {
+            ev.preventDefault();
+            openEvent(first);
+          }
+          break;
+        }
+        default:
+          break;
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    onCleanup(() => document.removeEventListener("keydown", onKey));
+  });
 
   const openEvent = (e: CalendarEvent) => {
     // Accept either a master event id or an occurrence id
