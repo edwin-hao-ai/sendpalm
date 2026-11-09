@@ -238,7 +238,17 @@ export function RecipientInput(props: RecipientInputProps) {
           setInvalidHint(null);
         }}
         onFocus={() => setFocused(true)}
-        onBlur={() => setTimeout(() => setFocused(false), 150)}
+        onBlur={() => {
+          // Commit a complete address on blur. Without this, typing
+          // "alice@example.com" and clicking 发送 left the draft's recipient
+          // empty (the text only became a pill on Enter / comma), so the send
+          // button stayed disabled and the click did nothing — while the
+          // field plainly showed an address. Partial text is left alone so a
+          // suggestion click can still complete it.
+          const verdict = classifyRecipient(raw(), pills());
+          if (verdict.kind === "add") commitRaw();
+          setTimeout(() => setFocused(false), 150);
+        }}
         onKeyDown={onKeyDown}
         aria-label={props.placeholder ?? "收件人"}
         aria-activedescendant={

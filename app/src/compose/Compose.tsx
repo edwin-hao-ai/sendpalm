@@ -111,6 +111,17 @@ interface DraftAttachment {
   dataBase64: string;
 }
 
+/** How long 撤销 stays available after pressing send. */
+const UNDO_SEND_MS = 5000;
+
+interface PendingSend {
+  draft: DraftState;
+  recipient: string;
+  subject: string;
+  inReplyTo?: string;
+  attachments: { filename: string; mime: string; dataBase64: string }[];
+}
+
 interface DraftState {
   id: string;
   recipient: string;
@@ -313,6 +324,11 @@ export function Compose() {
   });
 
   const [draft, setDraft] = createSignal<DraftState>(blank());
+  /** Queued send waiting out the undo window. */
+  const [pendingSend, setPendingSend] = createSignal<{
+    timer: number;
+    snapshot: PendingSend;
+  } | null>(null);
   const [showCc, setShowCc] = createSignal(false);
   const [showBcc, setShowBcc] = createSignal(false);
   const [showSnippetPicker, setShowSnippetPicker] = createSignal(false);
@@ -639,42 +655,83 @@ export function Compose() {
       return;
     }
     setSendMenuOpen(false);
-    showToast({ message: "正在发送…", kind: "info", ttlMs: 2000 });
-    try {
-      const outgoingAttachments = d.attachments.map((a) => ({
+
+    // Everything below the validation is deferred by the undo window: the
+    // draft is persisted first, so quitting inside the window leaves a draft
+    // instead of losing the message.
+    const snapshot: PendingSend = {
+      draft: d,
+      recipient,
+      subject,
+      inReplyTo:
+        d.inReplyTo ??
+        ((composeContext().mode === "reply" ||
+          composeContext().mode === "replyAll")
+          ? composeContext().originalMsg?.rfcMessageId
+          : undefined),
+      attachments: d.attachments.map((a) => ({
         filename: a.name,
         mime: a.mime,
         dataBase64: a.dataBase64,
-      }));
-      // HTML readers get the formatting; text-only readers get the same
-      // words with the markers stripped.
-      const htmlBody = richTextToHtml(d.body);
-      // Replies/Reply-All carry In-Reply-To so recipients' clients can
-      // thread the conversation (Gmail threads on References/In-Reply-To,
-      // not on subject). Forward intentionally doesn't. A draft reopened
-      // from disk carries the id in `d.inReplyTo`.
-      const ctx = composeContext();
-      const inReplyTo =
-        d.inReplyTo ??
-        ((ctx.mode === "reply" || ctx.mode === "replyAll")
-          ? ctx.originalMsg?.rfcMessageId
-          : undefined);
+      })),
+    };
+    await persistDraft("edited");
+    void closeCompose();
+
+    const firstTo = recipient.split(",")[0]?.trim() ?? recipient;
+    const timer = window.setTimeout(() => {
+      setPendingSend(null);
+      void performSend(snapshot);
+    }, UNDO_SEND_MS);
+    setPendingSend({ timer, snapshot });
+
+    showToast({
+      message: `已发送给 ${firstTo}`,
+      kind: "success",
+      ttlMs: UNDO_SEND_MS,
+      action: {
+        label: "撤销",
+        run: () => undoPendingSend(firstTo),
+      },
+    });
+  };
+
+  /** Re-open the composer with the message intact after 撤销. */
+  const undoPendingSend = (firstTo: string) => {
+    const pending = pendingSend();
+    if (!pending) return;
+    window.clearTimeout(pending.timer);
+    setPendingSend(null);
+    setComposeContext({
+      mode: "new",
+      draft: toDraftRow(pending.snapshot.draft, "edited"),
+    });
+    setComposeOpen(true);
+    showToast({
+      message: `已撤销发送给 ${firstTo}，草稿已保留`,
+      kind: "info",
+    });
+  };
+
+  /** The actual SMTP round-trip, after the undo window has elapsed. */
+  const performSend = async (p: PendingSend) => {
+    const d = p.draft;
+    try {
       const result = await sendEmailViaBackend(
-        recipient,
-        subject,
+        p.recipient,
+        p.subject,
         richTextToPlain(d.body),
         d.accountId,
-        outgoingAttachments,
+        p.attachments,
         d.cc,
         d.bcc,
         d.fromAlias,
-        htmlBody,
-        inReplyTo,
+        richTextToHtml(d.body),
+        p.inReplyTo,
       );
-      await persistDraft("sent");
-      void closeCompose();
+      await upsertDraft({ ...toDraftRow(d, "sent") });
       if (result) {
-        const firstTo = recipient.split(",")[0]?.trim() ?? recipient;
+        const firstTo = p.recipient.split(",")[0]?.trim() ?? p.recipient;
         const createFollowUp = async () => {
           if (!result.local_message_id) {
             showToast({
@@ -683,11 +740,10 @@ export function Compose() {
             });
             return;
           }
-          const due = addDays(new Date(), 3);
           await upsertFollowUp({
             id: uid("fu"),
             msgId: result.local_message_id,
-            dueAt: due.toISOString(),
+            dueAt: addDays(new Date(), 3).toISOString(),
             status: "pending",
             note: "发送后 3 天跟进",
           });
@@ -696,28 +752,32 @@ export function Compose() {
         showToast({
           message: `已发送给 ${firstTo}`,
           kind: "success",
-          action: {
-            label: "3 天后跟进",
-            run: () => void createFollowUp(),
-          },
+          ttlMs: 6000,
+          action: { label: "3 天后跟进", run: () => void createFollowUp() },
         });
       } else {
         showToast({
-          message: "尚未绑定邮箱账户，无法发送。草稿已保存。",
-          kind: "info",
+          message: "发送没有完成，草稿已保留",
+          kind: "error",
+          ttlMs: 0,
           action: { label: "去设置", run: goToAccountSettings },
         });
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      // The draft is still in the drafts box; say so instead of implying the
+      // message vanished.
       showToast({
-        message: "发送失败，请检查网络后重试",
+        message: "发送失败，草稿已保留，可稍后重试",
         kind: "error",
-        ttlMs: 8000,
-        detail: msg,
+        ttlMs: 0,
+        detail: e instanceof Error ? e.message : String(e),
+        action: {
+          label: "打开草稿",
+          run: () => {
+            setView("drafts");
+          },
+        },
       });
-      // Keep modal open so user can retry.
-      setSendMenuOpen(false);
     }
   };
 
@@ -900,7 +960,6 @@ export function Compose() {
                   }
                   void sendNow();
                 }}
-                disabled={!!sendBlockReason()}
                 title={sendBlockReason() ?? "发送（⌘↵）"}
                 style={{
                   padding: "6px 14px",
@@ -1417,8 +1476,14 @@ export function Compose() {
                 title={sendBlockReason() ?? "发送（⌘↵）"}
               >
                 <button
-                  onClick={() => void sendNow()}
-                  disabled={!!sendBlockReason()}
+                  onClick={() => {
+                    const reason = sendBlockReason();
+                    if (reason) {
+                      showToast({ message: reason, kind: "info" });
+                      return;
+                    }
+                    void sendNow();
+                  }}
                   style={{
                     display: "flex",
                     "align-items": "center",
@@ -1442,7 +1507,6 @@ export function Compose() {
                 </button>
                 <button
                   onClick={() => setSendMenuOpen(!sendMenuOpen())}
-                  disabled={!!sendBlockReason()}
                   aria-label="发送选项"
                   title="发送选项"
                   style={{
