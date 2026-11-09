@@ -531,7 +531,16 @@ export function SyncBadge() {
         }}
       >
         <Icon
-          name={aggregateBusy() ? "spinner" : "arrows-clockwise"}
+          // No mailbox connected → this is an "add account" affordance, not
+          // a sync button. Phones hide the label, so without this the pill
+          // rendered as a blank bubble.
+          name={
+            aggregateBusy()
+              ? "spinner"
+              : emailAccounts().length === 0
+                ? "plus"
+                : "arrows-clockwise"
+          }
           size={11}
         />
         {/* Phones show a bare count instead of nothing: an unlabelled green
