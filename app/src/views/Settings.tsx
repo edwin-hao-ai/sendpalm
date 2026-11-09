@@ -79,6 +79,7 @@ import {
   syncNow,
 } from "../services/backend";
 import { formatThousands } from "../utils/counts";
+import { classifyVerifyResult } from "../utils/account-verify";
 import {
   ensureNotificationPermission,
   notifySettingsChanged,
@@ -1107,6 +1108,8 @@ function AddAccountModal(props: {
   const [accountEmail, setAccountEmail] = createSignal("");
   const [accountPassword, setAccountPassword] = createSignal("");
   const [saving, setSaving] = createSignal(false);
+  /** Inline failure from the real IMAP handshake (see `verifyAccount`). */
+  const [verifyError, setVerifyError] = createSignal<string | null>(null);
 
   // OAuth providers (Gmail / Outlook) can't be connected yet — offering
   // them in the picker leads to a dead end, so the select only lists
@@ -1179,29 +1182,82 @@ function AddAccountModal(props: {
         vacationResponder: { enabled: false, subject: "", body: "" },
       },
     } as unknown as Account;
+    setVerifyError(null);
     await upsertAccount(account);
+
     // Persist password into the OS keychain.
+    let vaultOk: boolean;
     try {
-      const ok = await vaultSave(id, accountPassword());
-      if (ok) {
-        showToast({
-          message: `已添加 ${prov.label} 账户 ${e}，密码已安全存入系统钥匙串`,
-          kind: "success",
-        });
-      } else {
-        showToast({
-          message: `已添加账户 ${e}（浏览器预览模式，密码未保存）`,
-          kind: "info",
-        });
-      }
+      vaultOk = await vaultSave(id, accountPassword());
     } catch (vaultErr) {
       showToast({
-        message: `已添加账户 ${e}，但密码存入系统钥匙串失败`,
+        message: "密码存入系统钥匙串失败，账户未添加",
         kind: "error",
         source: "vault",
         detail: String(vaultErr),
       });
+      await deleteAccount(id).catch(() => undefined);
+      setSaving(false);
+      return;
     }
+    if (!vaultOk) {
+      // Browser preview: no keychain, no IMAP. Say so instead of claiming a
+      // connection that was never attempted.
+      showToast({
+        message: `已添加账户 ${e}（浏览器预览模式，未验证连接）`,
+        kind: "info",
+      });
+      setSaving(false);
+      props.onAdded();
+      props.onClose();
+      return;
+    }
+
+    // Actually connect. "密码已存入钥匙串" is not "邮箱连上了", and this is
+    // the first thing a new user does — a typo'd password used to surface as
+    // silence for up to a minute and then a red banner in the list.
+    try {
+      await syncNow(id, "INBOX");
+    } catch {
+      /* getSyncState below reports the reason */
+    }
+    const state = await getSyncState(id);
+    const code = state.error_code;
+    const outcome = classifyVerifyResult(code);
+
+    if (outcome === "reject") {
+      // Wrong credentials: do not leave a half-configured mailbox behind.
+      await deleteAccount(id).catch(() => undefined);
+      await vaultDelete(id).catch(() => undefined);
+      props.onAdded();
+      setVerifyError(
+        code === "auth_failed"
+          ? `账号或密码不正确。${prov.credentials_hint}`
+          : "系统没有拿到密码。请重新输入后重试。",
+      );
+      setSaving(false);
+      return;
+    }
+
+    if (outcome === "retry-later") {
+      // The credentials are probably fine; keep the account so the background
+      // loop can retry.
+      showToast({
+        message: `已添加 ${prov.label} 账户 ${e}，但暂时连不上服务器——稍后会自动重试`,
+        kind: "warning",
+      });
+      setSaving(false);
+      props.onAdded();
+      props.onClose();
+      return;
+    }
+
+    showToast({
+      message: `已连接 ${prov.label} · ${e}${
+        state.last_uid > 0 ? " · 正在导入邮件" : ""
+      }`,
+      kind: "success",
+    });
     setSaving(false);
     props.onAdded();
     props.onClose();
@@ -1243,7 +1299,7 @@ function AddAccountModal(props: {
                   : "pointer",
             }}
           >
-            {saving() ? "添加中…" : "添加并连接"}
+            {saving() ? "正在连接邮箱…" : "添加并连接"}
           </button>
         </>
       }
@@ -1327,6 +1383,24 @@ function AddAccountModal(props: {
           </Field>
         );
       })()}
+      <Show when={verifyError()}>
+        <p
+          data-account-verify-error
+          role="alert"
+          style={{
+            margin: "var(--space-2) 0 0",
+            padding: "8px 12px",
+            "border-radius": "var(--radius-md)",
+            background:
+              "color-mix(in srgb, var(--status-danger) 10%, var(--paper-light))",
+            color: "var(--status-danger)",
+            "font-size": "var(--text-caption)",
+            "line-height": 1.6,
+          }}
+        >
+          {verifyError()}
+        </p>
+      </Show>
       <p
         style={{
           "font-size": "var(--text-micro)",
