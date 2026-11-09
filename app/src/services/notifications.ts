@@ -63,6 +63,7 @@ export function maybePromptNotificationPermission(): void {
 export async function notifySettingsChanged(prefs: {
   desktop: boolean;
   digest: boolean;
+  sound: boolean;
   quietHoursEnabled: boolean;
   quietHoursStart: string;
   quietHoursEnd: string;
@@ -74,6 +75,7 @@ export async function notifySettingsChanged(prefs: {
       // Tauri 2 maps camelCase → snake_case on the way in; the Rust command
       // argument is `digest_enabled`.
       digestEnabled: prefs.digest,
+      soundEnabled: prefs.sound,
       quietHoursEnabled: prefs.quietHoursEnabled,
       quietHoursStart: prefs.quietHoursStart,
       quietHoursEnd: prefs.quietHoursEnd,

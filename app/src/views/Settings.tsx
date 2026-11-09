@@ -3513,6 +3513,18 @@ function PreferencesNotificationsTab() {
         }}
       />
       <ToggleRow
+        label="通知声音"
+        description="关闭后仍然弹提醒，只是不响——适合开会或只想要视觉提示的场景。"
+        checked={prefs().sound}
+        onChange={async (v) => {
+          setAppSettings("preferences", "notifications", {
+            ...prefs(),
+            sound: v,
+          });
+          await notifySettingsChanged({ ...prefs(), sound: v });
+        }}
+      />
+      <ToggleRow
         label="静默时段"
         description="在指定时段内只显示应用内红点，不弹系统通知。"
         checked={prefs().quietHoursEnabled}

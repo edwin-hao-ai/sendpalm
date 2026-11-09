@@ -593,6 +593,8 @@ export interface AppSettings {
     notifications: {
       desktop: boolean;
       digest: boolean;
+      /** Play the OS sound with the banner. */
+      sound: boolean;
       quietHoursEnabled: boolean;
       quietHoursStart: string;
       quietHoursEnd: string;

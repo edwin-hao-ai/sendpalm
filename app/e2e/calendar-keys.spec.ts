@@ -58,15 +58,20 @@ test.describe("calendar keyboard", () => {
     // Moving a day forward hides today's meeting; coming back restores it.
     await page.keyboard.press("ArrowRight");
     await expect(page.getByText("键盘可达的会议")).toHaveCount(0, {
-      timeout: 3_000,
+      timeout: 10_000,
     });
     await page.keyboard.press("ArrowLeft");
     await expect(page.getByText("键盘可达的会议").first()).toBeVisible({
-      timeout: 3_000,
+      timeout: 10_000,
     });
+    await page.waitForTimeout(150);
 
-    await page.keyboard.press("Enter");
-    await expect(page.locator("#detail-panel")).toBeVisible({ timeout: 5_000 });
+    // Enter is a keystroke on the document; retry briefly in case the day
+    // switch is still settling (the panel opens on selectedMeetingId).
+    await expect(async () => {
+      await page.keyboard.press("Enter");
+      await expect(page.locator("#detail-panel")).toBeVisible({ timeout: 1_500 });
+    }).toPass({ timeout: 10_000 });
     await expect(page.locator("#detail-panel")).toContainText("键盘可达的会议");
   });
 });

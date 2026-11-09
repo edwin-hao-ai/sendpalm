@@ -39,7 +39,9 @@ import { showToast, setView } from "../stores/ui";
 import { useRefreshEffect, useSoftRefreshEffect, useViewport } from "../utils/gestures";
 import { SwipeActions } from "../components/SwipeActions";
 import { PageHeader } from "../components/PageHeader";
-import { VIEW_LABEL } from "../utils/labels";
+import { VIEW_LABEL, bucketLabel as bucketName } from "../utils/labels";
+import { senderRule } from "../utils/mail-rule";
+import { safeInvoke } from "../services/backend";
 
 const BUCKETS: {
   id: MessageBucket;
@@ -114,6 +116,8 @@ export function Gate() {
 
   const [cursor, setCursor] = createSignal(0);
   const [busy, setBusy] = createSignal(false);
+  /** Sticky screener decision: also write a mail rule for new mail. */
+  const [remember, setRemember] = createSignal(false);
   const current = (): { contact: Contact; message: Message } | undefined =>
     visibleQueue()[cursor()];
 
@@ -164,6 +168,34 @@ export function Gate() {
     });
   };
 
+  /** "以后这个发件人都这样" — writes a mail_rule for NEW mail from this
+   *  sender so the next message does not land back in the screener. */
+  const createSenderRule = async (contact: Contact, bucket: string) => {
+    const email = contact.emails[0]?.value ?? "";
+    const rule = senderRule(email, bucket, 1);
+    if (!rule) return;
+    try {
+      // The command returns the rule id, so a swallowed IPC failure cannot be
+      // reported as success (safeInvoke returns null for both).
+      const saved = await safeInvoke<string>("upsert_mail_rule", { rule });
+      if (!saved) {
+        showToast({
+          message: "规则没有保存，下次这个发件人还会出现在筛选台",
+          kind: "warning",
+        });
+        return;
+      }
+      showToast({
+        message: `以后 ${contact.name} 的邮件直接进${
+          bucket === "spam" ? "垃圾邮件" : bucketName(bucket)
+        }`,
+        kind: "success",
+      });
+    } catch {
+      showToast({ message: "规则保存失败，下次还会出现在筛选台", kind: "warning" });
+    }
+  };
+
   const approve = async (bucket: MessageBucket) => {
     const cur = current();
     if (!cur || busy()) return;
@@ -179,6 +211,7 @@ export function Gate() {
       };
       await upsertContact(updatedContact);
       await updateMessagesBucketByContact(cur.contact.id, bucket);
+      if (remember()) await createSenderRule(cur.contact, bucket);
       if (bucket === "imbox" && cur.message) void extractTasksForMessage(cur.message.id, "automatic").catch(() => {});
       // Undo matters more here than anywhere else: a swipe is a reflex, and a
       // decision the user cannot take back makes them slow down and stop
@@ -230,6 +263,7 @@ export function Gate() {
       };
       await upsertContact(updatedContact);
       await updateMessagesBucketByContact(cur.contact.id, "spam");
+      if (remember()) await createSenderRule(cur.contact, "spam");
       showToast({
         message: `已屏蔽 ${cur.contact.name}`,
         kind: "info",
@@ -735,6 +769,26 @@ export function Gate() {
                     "margin-bottom": "var(--space-4)",
                   }}
                 >
+                  <label
+                    data-gate-remember
+                    style={{
+                      display: "flex",
+                      "align-items": "center",
+                      gap: "6px",
+                      "margin-bottom": "6px",
+                      "font-size": "var(--text-caption)",
+                      color: "var(--text-secondary)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={remember()}
+                      onChange={(e) => setRemember(e.currentTarget.checked)}
+                      style={{ width: "14px", height: "14px" }}
+                    />
+                    以后这个发件人的邮件都这样处理
+                  </label>
                   <For each={BUCKETS}>
                     {(b) => (
                       <button

@@ -26,9 +26,17 @@ if (!IS_TAURI && typeof window !== "undefined") {
       currentWindow: { label: "main" },
       currentWebview: { label: "main" },
     },
-    invoke: (cmd: string, _args?: unknown): Promise<unknown> => {
+    invoke: (cmd: string, args?: unknown): Promise<unknown> => {
       let result: unknown;
       switch (cmd) {
+        // The screener's "以后都这样" writes a rule and reports its id back, so
+        // a swallowed failure cannot look like success. Echo the id here so
+        // the browser preview behaves like the real command.
+        case "upsert_mail_rule": {
+          const rule = (args as { rule?: { id?: string } } | undefined)?.rule;
+          result = rule?.id ?? "rule_preview";
+          break;
+        }
         case "list_accounts":
         case "list_contacts":
         case "list_messages":

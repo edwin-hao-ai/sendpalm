@@ -7,6 +7,7 @@ pub async fn notify_settings_changed(
     app: AppHandle,
     desktop_enabled: bool,
     digest_enabled: bool,
+    sound_enabled: bool,
     quiet_hours_enabled: bool,
     quiet_hours_start: String,
     quiet_hours_end: String,
@@ -14,6 +15,7 @@ pub async fn notify_settings_changed(
     let prefs = NotificationPrefs {
         desktop_enabled,
         digest: digest_enabled,
+        sound: sound_enabled,
         quiet_hours_enabled,
         quiet_hours_start,
         quiet_hours_end,

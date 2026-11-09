@@ -719,7 +719,7 @@ pub async fn list_mail_rules() -> Result<Vec<crate::services::rules::MailRule>, 
 #[tauri::command]
 pub async fn upsert_mail_rule(
     rule: crate::services::rules::MailRule,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let pool = crate::services::sync_loop::open_pool().await?;
     sqlx::query(
         "INSERT INTO mail_rules (id, name, enabled, match_field, match_pattern, action_bucket, action_label, priority) \
@@ -740,7 +740,7 @@ pub async fn upsert_mail_rule(
     .execute(&pool)
     .await
     .map_err(|e| format!("upsert rule: {e}"))?;
-    Ok(())
+    Ok(rule.id)
 }
 
 #[tauri::command]

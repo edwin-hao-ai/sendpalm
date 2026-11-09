@@ -452,10 +452,17 @@ export function Calendar() {
           stepDays(7);
           break;
         case "Enter": {
-          // Open the first event of the selected day, if any.
-          const day = cursor();
-          const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
-          const first = (events() ?? []).find((e) => e.dt === key);
+          // Open the first event of the selected day. Compare local date keys
+          // rather than the raw string: `dt` may carry a time component, and
+          // the grid itself uses `sameDate(new Date(e.dt), day)`.
+          const key = localDateKey(cursor());
+          const first = (events() ?? []).find(
+            (e) =>
+              localDateKey(new Date(e.dt)) === key ||
+              // Legacy/imported rows can carry a full ISO datetime; compare
+              // the date prefix too so Enter still finds them.
+              (typeof e.dt === "string" && e.dt.slice(0, 10) === key),
+          );
           if (first) {
             ev.preventDefault();
             openEvent(first);

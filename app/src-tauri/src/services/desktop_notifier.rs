@@ -11,6 +11,8 @@ pub struct NotificationPrefs {
     pub desktop_enabled: bool,
     /// Coalesce per-message notifications into one summary per sync pass.
     pub digest: bool,
+    /// Play the OS notification sound. Off for "quiet but visible".
+    pub sound: bool,
     pub quiet_hours_enabled: bool,
     pub quiet_hours_start: String, // "HH:MM" 24h
     pub quiet_hours_end: String,
@@ -23,6 +25,7 @@ impl Default for NotificationPrefs {
             // Default off: one banner per message is the behaviour every
             // other client has, and digest is the opt-in noise reduction.
             digest: false,
+            sound: true,
             quiet_hours_enabled: false,
             quiet_hours_start: "22:00".to_string(),
             quiet_hours_end: "08:00".to_string(),
@@ -93,10 +96,11 @@ pub async fn notify_new_mail(
         subject.to_string()
     };
     let body = format!("From {sender}\n({account_id})");
-    app.notification()
-        .builder()
-        .title(title)
-        .body(body)
+    let mut builder = app.notification().builder().title(title).body(body);
+    if prefs.sound {
+        builder = builder.sound("default");
+    }
+    builder
         .show()
         .map_err(|e| format!("notification: {e}"))?;
     Ok(())
@@ -153,6 +157,13 @@ mod tests {
     fn digest_is_off_by_default() {
         assert!(!NotificationPrefs::default().digest);
         assert!(prefs(true).digest);
+    }
+
+    #[test]
+    fn sound_is_on_by_default() {
+        // The default should look and sound like a normal mail client; the
+        // toggle exists to silence the banner without hiding it.
+        assert!(NotificationPrefs::default().sound);
     }
 
     #[test]
