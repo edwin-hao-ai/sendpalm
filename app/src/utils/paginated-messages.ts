@@ -113,6 +113,17 @@ export function usePaginatedMessages(
   const items = createMemo(() => pages());
   const hasMore = createMemo(() => offset() < total());
 
+  /** Cursor for the next page: the last loaded row in
+   *  `(timeline_at DESC, id DESC)` order. Derived from the window rather than
+   *  stored, so prepends/removals cannot leave it pointing at a deleted row. */
+  const nextCursor = () => {
+    const last = pages()[pages().length - 1];
+    if (!last) return undefined;
+    const timelineAt = last.timelineAt ?? last.receivedAt ?? last.st ?? "";
+    if (!timelineAt) return undefined;
+    return { timelineAt, id: last.id };
+  };
+
   const loadMore = async () => {
     if (loadingMore() || !hasMore()) return;
     setLoadingMore(true);
@@ -121,7 +132,10 @@ export function usePaginatedMessages(
       const next = await listMessagesPaged({
         ...readOptions(),
         limit: pageSize,
-        offset: offset(),
+        // Keyset when we can (O(1)), OFFSET only as a fallback for rows that
+        // carry no timeline value (legacy imports).
+        before: nextCursor(),
+        offset: 0,
       });
       // The scope changed while page N+1 was in flight — dropping the
       // result is what stops two mailboxes being concatenated.

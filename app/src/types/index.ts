@@ -151,6 +151,10 @@ export interface Message {
   /** Sender-declared date from the RFC 5322 `Date` header. Null/undefined when
    *  the header was missing or malformed — never fabricated. */
   sentAt?: ISODate | null;
+  /** Sort key for every list query (`timeline_at = sent_at || received_at`).
+   *  Carried on the row so pagination can use keyset cursors instead of
+   *  OFFSET, which is O(offset) — 17 s at 100k rows. */
+  timelineAt?: string;
   /** Mail server receipt time (`INTERNALDATE`). The trustworthy timeline value
    *  for Inbox ordering; null until fetched for legacy rows. */
   receivedAt?: ISODate | null;

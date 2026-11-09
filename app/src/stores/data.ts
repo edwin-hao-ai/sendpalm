@@ -200,6 +200,7 @@ function rowToMessage(r: Record<string, unknown>): Message {
     tm: r.tm as string,
     st: r.st as string,
     sentAt: (r.sent_at as string | null) ?? null,
+    timelineAt: (r.timeline_at as string | undefined) ?? undefined,
     receivedAt: (r.received_at as string | null) ?? null,
     ac: r.ac as string,
     bucket: r.bucket as Message["bucket"],
@@ -1194,6 +1195,10 @@ export interface ListMessagesOptions {
   replyLaterOnly?: boolean;
   setAsideOnly?: boolean;
   bubbleUpOnly?: boolean;
+  /** Keyset cursor: return rows strictly *after* this one in
+   *  `(timeline_at DESC, id DESC)` order. Replaces OFFSET for "load more",
+   *  which is O(offset) — measured at 17 s for offset 50 000 on 100k rows. */
+  before?: { timelineAt: string; id: string };
   /** Restrict to these account ids (`messages.ac`). `undefined` means "no
    *  account filter" and is the hot path when the user has one account or
    *  every account is merged. An empty array means "no account can match"
@@ -1340,7 +1345,25 @@ export async function listMessagesPaged(
     where.push(`ac IN (${options.accountIds.map(() => "?").join(", ")})`);
     params.push(...options.accountIds);
   }
+  // Keyset pagination. `OFFSET n` makes SQLite walk n rows before returning
+  // anything: measured 17 s at n = 50 000 on a 100k mailbox, vs 9 ms for the
+  // same page addressed by cursor. `(timeline_at, id)` is a total order
+  // because id is unique, so no row is ever skipped or repeated.
+  const pageWhere = [...where];
+  const pageParams = [...params];
+  if (options.before) {
+    pageWhere.push(
+      "(timeline_at < ? OR (timeline_at = ? AND id < ?))",
+    );
+    pageParams.push(
+      options.before.timelineAt,
+      options.before.timelineAt,
+      options.before.id,
+    );
+  }
   const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+  const pageWhereClause =
+    pageWhere.length > 0 ? `WHERE ${pageWhere.join(" AND ")}` : "";
   const db = await getDb();
   const totalRow = await db.select<Array<{ total: number }>>(
     `SELECT COUNT(*) AS total FROM messages ${whereClause}`,
@@ -1349,15 +1372,16 @@ export async function listMessagesPaged(
   const total = totalRow[0]?.total ?? 0;
   const rows = await db.select<Record<string, unknown>[]>(
     options.lightweight
-      ? `SELECT id, pid, subj, prev, tm, st, sent_at, received_at, ac, bucket, direction, unread,
+      ? `SELECT id, pid, subj, prev, tm, st, sent_at, received_at, timeline_at, ac, bucket, direction, unread,
                 is_newsletter,
                 labels_json, attachments_json, trackers_json,
                 reply_later, set_aside, bubble_up_at, remind_at, deleted_at,
                 to_addr, cc_json, bcc_json, thread_id, calendar_json
-           FROM messages ${whereClause}
-           ORDER BY timeline_at DESC LIMIT ? OFFSET ?`
-      : `SELECT * FROM messages ${whereClause} ORDER BY timeline_at DESC LIMIT ? OFFSET ?`,
-    [...params, limit, offset],
+           FROM messages ${pageWhereClause}
+           ORDER BY timeline_at DESC, id DESC LIMIT ? OFFSET ?`
+      : `SELECT * FROM messages ${pageWhereClause} ORDER BY timeline_at DESC, id DESC LIMIT ? OFFSET ?`,
+    // OFFSET is only ever 0 now: the cursor does the skipping.
+    [...pageParams, limit, options.before ? 0 : offset],
   );
   return {
     items: rows.map(options.lightweight ? rowToMessageLight : rowToMessage),
@@ -1367,13 +1391,9 @@ export async function listMessagesPaged(
   };
 }
 
-/** Lightweight query for the Imbox pile slices (Pending / Saved / Remind).
- *  Only the rows and columns actually shown in a pile card are fetched,
- *  avoiding the multi-megabyte full-table transfer when the mailbox is
- *  large. */
 export interface PileMessage {
-  id: string;
-  pid: string;
+  id: ID;
+  pid: ID;
   subj: string;
   tm: string;
   st: string;
@@ -1382,35 +1402,61 @@ export interface PileMessage {
   bubbleUpAt: boolean;
 }
 
+/** Lightweight query for the Imbox pile slices (Pending / Saved / Remind).
+ *
+ *  Three narrow selects instead of one `OR`:
+ *  - an `OR` of three flags defeats the partial indexes from migration 0022
+ *    and scans the whole table (705 ms at 100k rows, on every Imbox render
+ *    and every soft sync tick);
+ *  - each branch below matches exactly one partial index (`reply_later = 1`,
+ *    `set_aside = 1`, `bubble_up_at IS NOT NULL`), so each is O(matching
+ *    rows). Measured 2 ms at 100k.
+ *
+ *  The merge happens in memory: a row can sit in two piles (e.g. replied
+ *  later *and* reminded), so dedupe by id and sort by the timeline.
+ */
 export async function listPileMessages(): Promise<PileMessage[]> {
   const db = await getDb();
-  const rows = await db.select<
-    Array<{
-      id: string;
-      pid: string;
-      subj: string | null;
-      tm: string | null;
-      st: string;
-      reply_later: number;
-      set_aside: number;
-      bubble_up_at: unknown;
-    }>
-  >(
-    `SELECT id, pid, subj, tm, st, reply_later, set_aside, bubble_up_at
-     FROM messages
-     WHERE reply_later = 1 OR set_aside = 1 OR bubble_up_at IS NOT NULL
-     ORDER BY timeline_at DESC`,
-  );
-  return rows.map((r) => ({
-    id: r.id,
-    pid: r.pid,
-    subj: r.subj ?? "",
-    tm: r.tm ?? "",
-    st: r.st,
-    replyLater: r.reply_later === 1,
-    setAside: r.set_aside === 1,
-    bubbleUpAt: r.bubble_up_at != null,
-  }));
+  type Row = {
+    id: string;
+    pid: string;
+    subj: string | null;
+    tm: string | null;
+    st: string;
+    timeline_at: string | null;
+    reply_later: number;
+    set_aside: number;
+    bubble_up_at: unknown;
+  };
+  const cols =
+    "id, pid, subj, tm, st, timeline_at, reply_later, set_aside, bubble_up_at";
+  const branches = await Promise.all([
+    db.select<Row[]>(`SELECT ${cols} FROM messages WHERE reply_later = 1`),
+    db.select<Row[]>(`SELECT ${cols} FROM messages WHERE set_aside = 1`),
+    db.select<Row[]>(`SELECT ${cols} FROM messages WHERE bubble_up_at IS NOT NULL`),
+  ]);
+
+  const byId = new Map<string, Row>();
+  for (const rows of branches) {
+    for (const r of rows) if (!byId.has(r.id)) byId.set(r.id, r);
+  }
+
+  return [...byId.values()]
+    .sort((a, b) => {
+      const ta = a.timeline_at ?? a.st ?? "";
+      const tb = b.timeline_at ?? b.st ?? "";
+      return tb.localeCompare(ta);
+    })
+    .map((r) => ({
+      id: r.id,
+      pid: r.pid,
+      subj: r.subj ?? "",
+      tm: r.tm ?? "",
+      st: r.st,
+      replyLater: r.reply_later === 1,
+      setAside: r.set_aside === 1,
+      bubbleUpAt: r.bubble_up_at != null,
+    }));
 }
 
 export async function getMessage(id: ID): Promise<Message | null> {

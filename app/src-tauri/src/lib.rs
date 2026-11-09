@@ -259,6 +259,12 @@ pub fn migrations() -> Vec<Migration> {
             kind: MigrationKind::Up,
         },
         Migration {
+            version: 33,
+            description: "list and count indexes for 100k-message mailboxes",
+            sql: include_str!("../migrations/0033_message_list_indexes.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
             version: 29,
             description: "imap folder/uid identity for flag sync",
             sql: include_str!("../migrations/0029_imap_identity.sql"),
@@ -516,7 +522,7 @@ mod migration_tests {
     #[test]
     fn every_migration_file_is_registered() {
         let registered: Vec<i64> = migrations().iter().map(|m| m.version).collect();
-        for v in 1..=32 {
+        for v in 1..=33 {
             assert!(
                 registered.contains(&v),
                 "migration {v} is missing from migrations()"

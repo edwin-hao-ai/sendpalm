@@ -23,6 +23,7 @@ const makeMessage = (id: string, unread = true): Message => ({
   bodyHtml: null,
   tm: "10:00",
   st: "2026-01-01T00:00:00.000Z",
+  timelineAt: "2026-01-01T00:00:00.000Z",
   ac: "acct-1",
   bucket: "imbox",
   direction: "in",
@@ -182,7 +183,7 @@ describe("removeByIds keeps total and offset honest", () => {
     expect(handle.total()).toBe(1);
   });
 
-  it("pulls the offset back so loadMore cannot skip rows", async () => {
+  it("never re-reads rows that are already loaded", async () => {
     // 100 loaded of 200 total; removing one loaded row must leave offset 99,
     // not 100 — otherwise the next page starts one row too far and that
     // message is never shown.
@@ -212,11 +213,13 @@ describe("removeByIds keeps total and offset honest", () => {
     });
     await handle.loadMore();
 
+    // The page is addressed by cursor, so a removed row cannot shift the
+    // window and make the next page skip a message.
     expect(
       vi.mocked(listMessagesPaged).mock.calls[
         vi.mocked(listMessagesPaged).mock.calls.length - 1
       ]?.[0],
-    ).toMatchObject({ offset: 99 });
+    ).toMatchObject({ before: { id: "m99" }, offset: 0 });
     expect(handle.items()[handle.items().length - 1]?.id).toBe("tail");
   });
 
@@ -228,5 +231,73 @@ describe("removeByIds keeps total and offset honest", () => {
 
     expect(handle.items()).toHaveLength(1);
     expect(handle.total()).toBe(1);
+  });
+});
+
+describe("keyset pagination", () => {
+  it("asks the next page for rows after the last loaded one, not an offset", async () => {
+    const rows = Array.from({ length: 100 }, (_, i) => makeMessage(`k${i}`));
+    vi.mocked(listMessagesPaged).mockResolvedValueOnce({
+      items: rows,
+      total: 200,
+      limit: 100,
+      offset: 0,
+    });
+    let handle!: PaginatedMessagesHandle;
+    createRoot((fn) => {
+      handle = usePaginatedMessages({ bucket: "imbox", direction: "in" }, 100);
+      rootDispose = fn;
+    });
+    await vi.waitFor(() => expect(handle.items().length).toBe(100));
+
+    vi.mocked(listMessagesPaged).mockResolvedValueOnce({
+      items: [makeMessage("tail")],
+      total: 200,
+      limit: 100,
+      offset: 0,
+    });
+    await handle.loadMore();
+
+    // `OFFSET n` is O(n) — 17 s at 50 000 rows on a 100k mailbox. The cursor
+    // must be the last loaded row and the offset pinned to 0.
+    expect(
+      vi.mocked(listMessagesPaged).mock.calls[
+        vi.mocked(listMessagesPaged).mock.calls.length - 1
+      ]?.[0],
+    ).toMatchObject({
+      before: { timelineAt: "2026-01-01T00:00:00.000Z", id: "k99" },
+      offset: 0,
+    });
+    expect(handle.items()[handle.items().length - 1]?.id).toBe("tail");
+  });
+
+  it("falls back to offset when a row carries no timeline value", async () => {
+    const legacy = { ...makeMessage("old"), timelineAt: undefined, st: "" };
+    vi.mocked(listMessagesPaged).mockResolvedValueOnce({
+      items: [legacy],
+      total: 2,
+      limit: 100,
+      offset: 0,
+    });
+    let handle!: PaginatedMessagesHandle;
+    createRoot((fn) => {
+      handle = usePaginatedMessages({ bucket: "imbox" }, 100);
+      rootDispose = fn;
+    });
+    await vi.waitFor(() => expect(handle.items().length).toBe(1));
+
+    vi.mocked(listMessagesPaged).mockResolvedValueOnce({
+      items: [makeMessage("next")],
+      total: 2,
+      limit: 100,
+      offset: 1,
+    });
+    await handle.loadMore();
+
+    expect(
+      vi.mocked(listMessagesPaged).mock.calls[
+        vi.mocked(listMessagesPaged).mock.calls.length - 1
+      ]?.[0],
+    ).toMatchObject({ before: undefined, offset: 0 });
   });
 });
