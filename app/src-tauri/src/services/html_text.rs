@@ -259,6 +259,15 @@ mod tests {
     }
 
     #[test]
+    fn decodes_numeric_entities_for_cjk() {
+        // What a Chinese newsletter body actually looks like before decoding.
+        assert_eq!(
+            html_to_text("&#38543;&#30528;&#12304;AD&#12305;"),
+            "随着【AD】"
+        );
+    }
+
+    #[test]
     fn a_stray_ampersand_survives() {
         assert_eq!(html_to_text("R&D and <b>Q&A</b>"), "R&D and Q&A");
     }
@@ -301,8 +310,13 @@ pub async fn backfill_markup_bodies(pool: &sqlx::SqlitePool) -> Result<u32, Stri
 
     loop {
         let rows: Vec<(String, String)> = sqlx::query_as(
+            // `</` catches raw markup; `&#` catches entity-encoded text that
+            // has no tags at all (Chinese newsletters encode every CJK
+            // character, so the body reads `&#38543;&#30528;…` in every
+            // text surface *and* in the search index).
             "SELECT id, body FROM messages \
-              WHERE body LIKE '%</%' AND body_html IS NOT NULL AND body_html <> '' \
+              WHERE (body LIKE '%</%' OR body LIKE '%&#%') \
+                AND body_html IS NOT NULL AND body_html <> '' \
                 AND id > $1 ORDER BY id LIMIT $2",
         )
         .bind(&last_id)
@@ -323,6 +337,22 @@ pub async fn backfill_markup_bodies(pool: &sqlx::SqlitePool) -> Result<u32, Stri
                 .execute(pool)
                 .await
                 .map_err(|e| format!("backfill markup body {id}: {e}"))?;
+            // The FTS row still holds the gibberish, so Chinese queries could
+            // not match these messages. Rewrite the indexed body too.
+            sqlx::query("DELETE FROM search_index WHERE id = $1")
+                .bind(&id)
+                .execute(pool)
+                .await
+                .ok();
+            sqlx::query(
+                "INSERT INTO search_index (id, kind, title, body) \
+                 SELECT id, 'message', subj, $1 FROM messages WHERE id = $2",
+            )
+            .bind(&text)
+            .bind(&id)
+            .execute(pool)
+            .await
+            .ok();
             repaired += 1;
         }
     }

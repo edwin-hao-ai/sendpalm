@@ -203,15 +203,77 @@ export async function prefetchImages(
   return result;
 }
 
+/** Named entities that actually appear in mail. Anything else is left
+ *  literal so a stray `&foo;` in prose never turns into a mystery glyph. */
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+  ensp: " ",
+  emsp: " ",
+  hellip: "…",
+  mdash: "—",
+  ndash: "–",
+  copy: "©",
+  reg: "®",
+  trade: "™",
+  middot: "·",
+  bull: "•",
+  lsquo: "‘",
+  rsquo: "’",
+  ldquo: "“",
+  rdquo: "”",
+  laquo: "«",
+  raquo: "»",
+  times: "×",
+  divide: "÷",
+  euro: "€",
+  pound: "£",
+  yen: "¥",
+  deg: "°",
+  plusmn: "±",
+};
+
+/**
+ * Decode HTML entities.
+ *
+ * Numeric entities are the important case: Chinese newsletters encode every
+ * CJK character (`&#38543;`), so without this a preview is a wall of
+ * `&#38543;&#30528;…` — unreadable, and exactly what Stream was showing.
+ */
+export function decodeHtmlEntities(text: string): string {
+  return text.replace(
+    /&(#[0-9]+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]{1,31});/g,
+    (match, body: string) => {
+      if (body.startsWith("#")) {
+        const hex = body.startsWith("#x") || body.startsWith("#X");
+        const code = parseInt(hex ? body.slice(2) : body.slice(1), hex ? 16 : 10);
+        if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) return match;
+        // Surrogate halves are not valid code points on their own.
+        if (code >= 0xd800 && code <= 0xdfff) return match;
+        try {
+          return String.fromCodePoint(code);
+        } catch {
+          return match;
+        }
+      }
+      return NAMED_ENTITIES[body.toLowerCase()] ?? match;
+    },
+  );
+}
+
 export function htmlToPlainText(html: string): string {
-  return html
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&")
+  return decodeHtmlEntities(
+    html
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+      // Tags first, entities second: decoding `&lt;` before stripping would
+      // invent markup that was only ever text.
+      .replace(/<[^>]+>/g, " "),
+  )
     .replace(/\s+/g, " ")
     .trim();
 }

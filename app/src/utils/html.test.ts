@@ -4,6 +4,8 @@ import {
   analyzeImages,
   emailBodyPreview,
   plainTextToHtml,
+  decodeHtmlEntities,
+  htmlToPlainText,
 } from "./html";
 
 describe("sanitizeEmailHtml", () => {
@@ -215,5 +217,42 @@ describe("gateBodyPreview", () => {
   it("returns empty for empty bodies", async () => {
     const { gateBodyPreview } = await import("./html");
     expect(gateBodyPreview("")).toBe("");
+  });
+});
+
+describe("decodeHtmlEntities", () => {
+  it("decodes numeric entities — the CJK case", () => {
+    // Chinese newsletters encode every character: &#38543; &#30528; &#12304;…
+    expect(decodeHtmlEntities("&#38543;&#30528;&#12304;AD&#12305;")).toBe(
+      "随着【AD】",
+    );
+  });
+
+  it("decodes hex entities", () => {
+    expect(decodeHtmlEntities("&#x4E2D;&#x6587;")).toBe("中文");
+  });
+
+  it("decodes the named entities mail actually uses", () => {
+    expect(decodeHtmlEntities("a&nbsp;b &amp; c &mdash; d &hellip;")).toBe(
+      "a b & c — d …",
+    );
+  });
+
+  it("leaves unknown or malformed entities alone", () => {
+    expect(decodeHtmlEntities("&notarealentity; &#; & x")).toBe(
+      "&notarealentity; &#; & x",
+    );
+  });
+
+  it("rejects surrogate halves and out-of-range code points", () => {
+    expect(decodeHtmlEntities("&#55296;")).toBe("&#55296;");
+    expect(decodeHtmlEntities("&#1114112;")).toBe("&#1114112;");
+  });
+
+  it("does not invent markup from escaped tags", () => {
+    // Tags are stripped BEFORE decoding, so &lt;b&gt; stays literal text.
+    expect(htmlToPlainText("<p>&lt;b&gt;bold?&lt;/b&gt;</p>")).toBe(
+      "<b>bold?</b>",
+    );
   });
 });
