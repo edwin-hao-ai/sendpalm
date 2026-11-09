@@ -578,6 +578,37 @@ Profile data from a real-mail session showed `syncBadge.refreshAll` and `notific
 
 ---
 
+### 11.12 Lessons learned (Session 2026-11-09 — iOS "black first frame" was two bugs, neither in the webview)
+
+The iOS app had been "builds, launches, window is black" for three days. It was not a webview
+problem at all.
+
+- **`#[cfg_attr(mobile, tauri::mobile_entry_point)]` had drifted onto the wrong function.** A doc
+  comment for `install_crypto_provider` was inserted *between* the attribute and `pub fn run()`, so
+  the attribute bound to the installer. On iOS `ffi::start_app()` called that function, it installed
+  rustls, returned, `main` returned, and the process exited ~1s after launch. Desktop never noticed
+  because `main.rs` calls `run()` directly. **Rule: an attribute and its item must never be separated
+  by a doc comment or any other line; grep the attribute before moving code around it.**
+- **`simctl launch` printing a PID proves nothing.** The app was dying immediately. The signal is in
+  the system log: `Process exited: <FBApplicationProcess …> -> <RBSProcessExitContext| voluntary>`
+  ("voluntary" = `main` returned or `process::exit`, not a crash). Read it with
+  `xcrun simctl spawn <udid> log show --last 2m --predicate 'process == "SendPalm"'`; our own
+  `[stderr]` lines (`[sendpalm] starting tauri builder`, `tauri run error: …`) show up there.
+- **sqlx applies migrations in iterator order, not by version.** The `migrations` vec had grown as
+  `1..24, 30, 31, 29, 28, 27, 26, 25`, so on a **fresh** database migration 28 (`UPDATE … SET
+  is_newsletter`) ran before 26 (`ALTER TABLE … ADD COLUMN is_newsletter`) and the first launch died
+  with `no such column: is_newsletter`. Existing installs skip applied migrations and never see it —
+  i.e. this is a *new-user-only* crash, the worst kind to ship. The list is now sorted in
+  `pub fn migrations()` and guarded by `migration_tests::fresh_database_applies_every_migration_in_order`,
+  which fails if the sort is removed. **Rule: any migration list, and any fresh-install path, needs a
+  test that starts from an empty database.**
+- **`gen/apple/assets/` being empty is normal.** Tauri 2 embeds the frontend into the Rust binary
+  (`LC_ALL=C strings SendPalm.app/SendPalm | grep assets/index-` proves it) and serves it from
+  `tauri://localhost`. An empty `assets/` folder is a leftover of the template, not the bug.
+- **Use `app/scripts/verify-ios.sh`.** It builds (optional), boots, installs, launches, screenshots
+  into `docs/ios-screenshots/`, and *fails loudly if the process is not alive afterwards* — the exact
+  check that was missing. AGENTS had been referencing this script for weeks while it did not exist.
+
 ## 12. Agent Skills & Global Protocols
 
 SendPalm adopts a set of global agent skills stored in `~/.agents/skills/`. These skills are available to Kimi Code, Claude Code, OpenCode, and any other agent that reads the standard skill directory. **Invoke them by name** when the situation matches their description:

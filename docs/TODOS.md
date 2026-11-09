@@ -127,8 +127,15 @@
       `uid_next - 1`。线上验证：找回 214 封，最新到今天。
 - [x] **iOS 构建四道门**：27.2 runtime / 部署目标 15.0 / `pnpm-native` shim（CLI 升
       2.12.4）/ 默认 toolchain。外加托盘 + 自启按平台切开（iOS 没有 `tauri::tray`）。
-- [ ] **iOS 首帧黑屏**：能 archive / install / launch，进程活着但窗口全黑。
-      下一步查 WKWebView 有没有加载到内置前端资源。
+- [x] **iOS 首帧黑屏** —— 已解决，是两层叠加的真 bug（2026-11-09）：
+      ① `#[cfg_attr(mobile, tauri::mobile_entry_point)]` 被 doc 注释挤到了
+      `install_crypto_provider` 上，`run()` 反而没有注解 —— iOS 的 `ffi::start_app()`
+      调用的是「装 rustls」那个函数，装完返回，进程 1 秒内主动退出；
+      ② 迁移列表 1..24 之后是 30/31/29/28/27/26/25 的追加顺序，而 sqlx 按迭代顺序
+      执行 —— 全新数据库上 28（回填 `is_newsletter`）跑在 26（加列）之前，
+      报 `no such column: is_newsletter`，**任何平台的首次安装都会初始化失败**。
+      两层都修完，模拟器实测能进新手引导和收件箱（截图见 docs/ios-screenshots/）。
+      回归守卫：`src-tauri` 新增 `migration_tests::fresh_database_applies_every_migration_in_order`。
 - [ ] **326 位历史发件人仍在筛选台**：导入过渡不追溯，是否一次性放行待拍板。
 
 ## 2026-11-05 迁移过渡 & 自动分类（已落地）
