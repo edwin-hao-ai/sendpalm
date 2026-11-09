@@ -32,6 +32,7 @@ export function BrandMark(props: { compact?: boolean }): JSX.Element {
         width="22"
         height="22"
         aria-hidden="true"
+        draggable={false}
         style={{ "flex-shrink": 0, display: "block" }}
       />
       <span

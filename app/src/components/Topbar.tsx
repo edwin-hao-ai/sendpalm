@@ -65,12 +65,16 @@ export function Topbar() {
       }}
       onMouseDown={(e) => {
         // Belt-and-suspenders window drag: `-webkit-app-region: drag` is
-        // unreliable inside the glass/blur titlebar on some macOS builds
-        // (cursor stays a resize arrow and the window won't move). A
-        // direct mousedown → startDragging works everywhere. Only when
-        // the press lands on the bar itself — interactive children are
-        // no-drag and stopPropagation below.
-        if (e.target !== e.currentTarget) return;
+        // unreliable inside the glass/blur titlebar on some macOS builds.
+        //
+        // The previous guard was `e.target !== e.currentTarget`, which is
+        // true for *every* mousedown that lands on a child — i.e. almost the
+        // whole bar — so the fallback only fired on the few pixels of padding
+        // and dragging felt broken. Skip interactive elements instead.
+        const el = e.target as HTMLElement | null;
+        if (el?.closest("button, a, input, textarea, select, [role='button']")) {
+          return;
+        }
         void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
           void getCurrentWindow().startDragging();
         });
@@ -82,7 +86,10 @@ export function Topbar() {
           "align-items": "center",
           gap: "var(--space-3)",
           "min-width": "0",
-          "-webkit-app-region": "no-drag",
+          // Draggable on purpose: with the overlay titlebar this block is the
+          // largest empty strip in the window, and it was marked no-drag —
+          // leaving only the few pixels of padding to move the window by.
+          "-webkit-app-region": "drag",
         }}
       >
         <BrandMark compact={isMobile()} />
