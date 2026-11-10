@@ -20,11 +20,16 @@ import {
   type NavGroup,
   type NavSection,
 } from "../utils/labels";
-import { useLongPress, useRefreshEffect, useViewport } from "../utils/gestures";
+import {
+  useCountsRefreshEffect,
+  useLongPress,
+  useRefreshEffect,
+  useSoftRefreshEffect,
+  useViewport,
+} from "../utils/gestures";
 import { countGateCandidates, countUnreadByBucket } from "../stores/data";
 import { formatGateCount } from "../utils/counts";
 import { useAccountScope } from "../utils/use-account-scope";
-import { useSoftRefreshEffect } from "../utils/gestures";
 import "./Sidebar.css";
 
 /** Display label for a route. The single source lives in utils/labels.ts
@@ -88,6 +93,12 @@ export function Sidebar() {
   // comment replaced last round).
   useSoftRefreshEffect(() => {
     void refetchGateCount();
+    void refetchUnread();
+  });
+  // Reading one message changes the unread badge and nothing else here — the
+  // Gate count cannot move. Listening to the narrow tick keeps the list behind
+  // the reading pane from refetching just to keep a number honest.
+  useCountsRefreshEffect(() => {
     void refetchUnread();
   });
   let sidebarTicksReady = false;

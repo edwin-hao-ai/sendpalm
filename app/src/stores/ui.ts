@@ -136,6 +136,31 @@ export function consumeCreateIntent(kind: CreateIntent): boolean {
   return true;
 }
 
+/** "Open the Agent panel with this message as context" — set by the message
+ *  panel, consumed by `AgentPanel`.
+ *
+ *  The message panel used to call `useAgent()` itself, only to run
+ *  `newSession` + `sendChat`. `useAgent()` eagerly creates four resources
+ *  (`agent_sessions` / `agent_tasks` / `agent_drafts` / `agent_audit`), so
+ *  merely opening a message pulled those whole tables across the IPC bridge —
+ *  twice, because the panel had its own instance (AGENTS §11.7). An intent
+ *  keeps the hook in the one component that actually renders agent data.
+ */
+export interface AgentIntent {
+  messageId: ID;
+  /** Prompt to send once the session is open, e.g. 「请总结这封邮件」. */
+  prompt?: string;
+}
+export const [pendingAgentIntent, setPendingAgentIntent] =
+  createSignal<AgentIntent | null>(null);
+
+/** Consumer side: returns the pending intent once, then clears it. */
+export function consumeAgentIntent(): AgentIntent | null {
+  const intent = pendingAgentIntent();
+  if (intent) setPendingAgentIntent(null);
+  return intent;
+}
+
 export const [selectedContactId, setSelectedContactId] =
   createSignal<ID | null>(null);
 export const [selectedMessageId, setSelectedMessageId] =
@@ -168,6 +193,20 @@ export function bumpRefreshTick(): void {
 export const [softRefreshTick, setSoftRefreshTick] = createSignal(0);
 export function bumpSoftRefreshTick(): void {
   setSoftRefreshTick((n) => n + 1);
+}
+
+/** Aggregate-count refresh: only the badges that are SQL `COUNT(*)`s listen to
+ *  this (sidebar rows, account tabs, the 30-day header).
+ *
+ *  A full soft tick is wrong for "the user read one message": it also refetches
+ *  piles, the contact map and every other view's resources, which made the
+ *  list behind the reading pane re-render on every open (measured 59 queries
+ *  and a visible flash). Reading one row changes one integer in two counts and
+ *  nothing else.
+ */
+export const [countsTick, setCountsTick] = createSignal(0);
+export function bumpCountsTick(): void {
+  setCountsTick((n) => n + 1);
 }
 
 /** Live count of contacts that still need Gate screening.

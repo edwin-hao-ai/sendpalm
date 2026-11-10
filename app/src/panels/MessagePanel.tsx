@@ -42,6 +42,7 @@ import {
   setSelectedContactId,
   bumpRefreshTick,
   setAgentPanelOpen,
+  setPendingAgentIntent,
   appSettings,
 } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
@@ -58,7 +59,6 @@ import { formatMessageDate } from "../utils/message-dates";
 import { addDays, isoNow, relativeTime } from "../utils/date";
 import { trackerSummary } from "../utils/trackers";
 import type { Clip, Contact, FollowUp, Message, Sticky } from "../types";
-import { useAgent } from "../agent/useAgent";
 import { addCalendarEvent } from "../services/backend";
 import { saveAttachment } from "../utils/save-attachment";
 import { senderRule } from "../utils/mail-rule";
@@ -83,7 +83,6 @@ import {
 type ViewMode = "rendered" | "plain" | "source";
 
 export function MessagePanel(props: { messageId: string }) {
-  const agent = useAgent();
   const { isMobile } = useViewport();
   const [message, { refetch: refetchMessage }] = createResource(
     () => props.messageId,
@@ -454,10 +453,12 @@ export function MessagePanel(props: { messageId: string }) {
     });
   };
 
-  const askAgentAboutMessage = async () => {
+  const askAgentAboutMessage = () => {
     const m = message();
     if (!m) return;
-    await agent.newSession("message", m.id);
+    // The panel owns `useAgent()`; handing it an intent keeps the four
+    // agent tables out of this component's mount path.
+    setPendingAgentIntent({ messageId: m.id });
     setAgentPanelOpen(true);
     showToast({
       message: "已打开 Agent，可以询问关于这封邮件的问题",
@@ -472,16 +473,11 @@ export function MessagePanel(props: { messageId: string }) {
     setView("contacts");
   };
 
-  const summarizeMessage = async () => {
+  const summarizeMessage = () => {
     const m = message();
     if (!m) return;
-    await agent.newSession("message", m.id);
-    agent.setChatInput("请总结这封邮件");
+    setPendingAgentIntent({ messageId: m.id, prompt: "请总结这封邮件" });
     setAgentPanelOpen(true);
-    // Give the panel a tick to mount, then send the pre-filled prompt.
-    setTimeout(async () => {
-      await agent.sendChat();
-    }, 100);
   };
 
   const copyMessage = async () => {

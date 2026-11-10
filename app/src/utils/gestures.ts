@@ -2,16 +2,40 @@
  * Spec: prototype-v11 §6 / mobile responsive plan.
  */
 
-import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
-import { refreshTick, softRefreshTick } from "../stores/ui";
+import { createEffect, createSignal, onCleanup, onMount, untrack } from "solid-js";
+import { countsTick, refreshTick, softRefreshTick } from "../stores/ui";
 
-/** React to a global refresh tick (e.g. backend sync events). */
+/** Run `callback` only when the tick changes — never because of what the
+ *  callback itself reads.
+ *
+ *  This is load-bearing, not tidiness. The callback runs inside the effect's
+ *  tracking scope, so every signal it touches becomes a dependency. A caller
+ *  that refetches a resource and then walks it (Topbar's sync badge refreshed
+ *  the account list, then read the accounts to fetch their sync state) tracks
+ *  that resource; each resolution re-ran the effect, refetching again. The
+ *  result was an unbounded IPC loop from app start — measured at ~28,000
+ *  `SELECT * FROM accounts` in half a second, one core pinned for the whole
+ *  session, and every list in the app re-evaluating while the user was only
+ *  opening a message.
+ */
 export function useRefreshEffect(callback: () => void) {
   createEffect(() => {
-    // Access the tick so this effect re-runs when it changes.
-    const _ = refreshTick();
-    void _;
-    callback();
+    // Accessed OUTSIDE `untrack`: this is the only dependency we want.
+    refreshTick();
+    untrack(callback);
+  });
+}
+
+/** React to a change in the SQL aggregate counts only.
+ *
+ *  Subscribed by badge holders (sidebar rows, account tabs). It exists so
+ *  "one message was read" does not have to borrow the soft tick, which
+ *  refetches piles and the contact map and makes the list flash.
+ */
+export function useCountsRefreshEffect(callback: () => void) {
+  createEffect(() => {
+    countsTick();
+    untrack(callback);
   });
 }
 
@@ -19,9 +43,8 @@ export function useRefreshEffect(callback: () => void) {
  *  view (e.g. a sync event that only affects counters/pile slices). */
 export function useSoftRefreshEffect(callback: () => void) {
   createEffect(() => {
-    const _ = softRefreshTick();
-    void _;
-    callback();
+    softRefreshTick();
+    untrack(callback);
   });
 }
 

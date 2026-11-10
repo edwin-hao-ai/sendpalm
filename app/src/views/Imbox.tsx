@@ -20,6 +20,7 @@ import {
   createMemo,
   createResource,
   createSignal,
+  untrack,
   createEffect,
   onCleanup,
   onMount,
@@ -72,7 +73,7 @@ import {
   mailSyncIssue,
   setSettingsTab,
   activeAccountId,
-  bumpSoftRefreshTick,
+  bumpCountsTick,
   type MailSyncIssue,
   type ViewName,
 } from "../stores/ui";
@@ -583,10 +584,14 @@ export function Imbox() {
   /** Reading a message moves it between tabs, which our in-memory patches
    *  handle — but the header's 30-day unread count, the account-tab badges
    *  and the sidebar badge are SQL counts that only refresh on a tick.
-   *  Without this the header said "3 封待读" above a list of 2. */
+   *  Without this the header said "3 封待读" above a list of 2.
+   *
+   *  Deliberately the *counts* tick, not the soft one: a soft tick also
+   *  refetches the pile slices, the contact map and the notification bell, so
+   *  merely opening a message re-rendered the whole list behind it. */
   const refreshUnreadCounts = () => {
     void refetchRecentUnread();
-    bumpSoftRefreshTick();
+    bumpCountsTick();
   };
 
   const replyLater = async (m: Message) => {
@@ -2674,16 +2679,16 @@ function DateGroupedList(props: {
 
 function useRefreshEffect(callback: () => void) {
   createEffect(() => {
-    const _ = refreshTick();
-    void _;
-    callback();
+    // Only the tick is a dependency — see utils/gestures.ts for why the
+    // callback must not contribute its own (it caused a refetch loop).
+    refreshTick();
+    untrack(callback);
   });
 }
 
 function useSoftRefreshEffect(callback: () => void) {
   createEffect(() => {
-    const _ = softRefreshTick();
-    void _;
-    callback();
+    softRefreshTick();
+    untrack(callback);
   });
 }

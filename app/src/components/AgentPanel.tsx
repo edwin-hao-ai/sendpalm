@@ -32,6 +32,7 @@ import {
   selectedContactId,
   showToast,
   appSettings,
+  consumeAgentIntent,
 } from "../stores/ui";
 import { PanelResizeHandle } from "./PanelResizeHandle";
 import { relativeTime } from "../utils/date";
@@ -125,6 +126,20 @@ export function AgentPanel() {
   const [confirmClearAudit, setConfirmClearAudit] = createSignal(false);
 
   const contactById = agent.contactById;
+
+  // The message panel asks for "open the Agent with this mail" by leaving an
+  // intent behind; it deliberately does not create its own `useAgent()`.
+  createEffect(() => {
+    const intent = consumeAgentIntent();
+    if (!intent) return;
+    void (async () => {
+      await agent.newSession("message", intent.messageId);
+      if (intent.prompt) {
+        agent.setChatInput(intent.prompt);
+        await agent.sendChat();
+      }
+    })();
+  });
 
   /* Memory edits auto-save (debounced). The store effect skips the
    * initial run so simply opening the panel doesn't write to disk. */

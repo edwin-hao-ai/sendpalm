@@ -6,7 +6,7 @@
  */
 
 import { IS_BROWSER } from "./services/tauri-shim";
-import { setQueryDelay } from "./services/mock-db";
+import { issuedQueries, setQueryDelay } from "./services/mock-db";
 import type {
   Account,
   AgentDraft,
@@ -57,6 +57,9 @@ interface E2EHelpers {
   listContacts: () => Promise<Contact[]>;
   listMessages: () => Promise<Message[]>;
   listEvents: () => Promise<CalendarEvent[]>;
+  /** Every SELECT issued since the last reset, oldest first. Lets a test
+   *  assert that an interaction did NOT re-query a list. */
+  queries: () => string[];
   /** Make every query take `ms`, so a loading state is observable. An
    *  in-memory double resolves in a microtask; a real mailbox does not, and
    *  "no skeleton" bugs are invisible without that wait. */
@@ -118,6 +121,7 @@ if (IS_BROWSER() && typeof window !== "undefined") {
   window.__sendpalmE2E = {
     resetData: resetAllData,
     delayQueries: setQueryDelay,
+    queries: () => issuedQueries.slice(),
     seedAccount: upsertAccount,
     seedContact: upsertContact,
     seedMessage: upsertMessage,

@@ -21,7 +21,7 @@ import {
   shouldShowAccountTabs,
 } from "../utils/accounts";
 import { activeAccountId, setActiveAccountId } from "../stores/ui";
-import { useRefreshEffect, useSoftRefreshEffect } from "../utils/gestures";
+import { useCountsRefreshEffect, useRefreshEffect, useSoftRefreshEffect } from "../utils/gestures";
 import type { Account, MessageBucket } from "../types";
 
 export interface AccountTabsProps {
@@ -70,6 +70,15 @@ export function AccountTabs(props: AccountTabsProps) {
       return;
     }
     if (!props.accounts) void refetchAccounts();
+  });
+
+  let firstCountsTick = true;
+  useCountsRefreshEffect(() => {
+    if (firstCountsTick) {
+      firstCountsTick = false;
+      return;
+    }
+    void refetchCounts();
   });
 
   const [counts, { refetch: refetchCounts }] = createResource(

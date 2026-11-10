@@ -1,6 +1,6 @@
 /** Topbar — search, view title, notification bell, sync badge, avatar menu. */
 
-import { Show, For, onMount } from "solid-js";
+import { Show, For, createEffect, onMount } from "solid-js";
 import { Icon } from "./Icon";
 import { BrandMark } from "./BrandMark";
 import { ErrorLogButton } from "./ErrorLog";
@@ -443,6 +443,16 @@ export function SyncBadge() {
     // state it saw on first mount, e.g. "添加邮箱账户 →" while two accounts
     // were already connected.
     void refetchAccounts();
+  });
+  // `refreshAll` walks the account list, so it must re-run when that list
+  // arrives or changes — the mount call above races the first query, and with
+  // an empty list it deliberately renders nothing ("添加邮箱账户"). This is a
+  // tracked read on purpose; it used to live inside the tick effect, which
+  // made the effect depend on the very resource it refetched (an unbounded
+  // refetch loop) and is now split out.
+  createEffect(() => {
+    const list = accounts();
+    if (list === undefined) return;
     void refreshAll();
   });
 
