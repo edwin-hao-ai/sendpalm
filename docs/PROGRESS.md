@@ -4014,3 +4014,29 @@ CSS 背景被拦下就**永久丢失**——头图用背景图实现的 newslett
 真库里的 NVIDIA 那封复验：黑色报头、分栏色块、绿色按钮全部按设计呈现。
 新增 `e2e/mail-images.spec.ts` 覆盖整条链路（计数、拦截状态、恢复后的原始地址、
 以及发件人自己的链接颜色全程不受影响）。
+
+### 2026-11-11 真正的根因：Tauri 改写了 CSP，邮件 iframe 里的内联样式与脚本全被拦掉
+
+用户反馈「点了显示图片也看不到」「字体/链接颜色还是奇怪」。查到最后是**一个配置项**，而且它同时
+解释了上一轮 §11.15 那个"运行时 `<style>` 不生效"的谜：
+
+`tauri.conf.json` 里写的 `style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'`
+**并不是 app 真正跑的策略**。Tauri 的 asset CSP modification 会扫描打包进二进制的 HTML，为自己
+的内联 `<style>`/`<script>` 注入 `sha256-…` hash；**一旦出现 hash，浏览器就不再理会该指令里的
+`'unsafe-inline'`**。于是所有*运行时生成*的标记——视图里 Solid 渲染的 `<style>`、以及邮件 iframe
+整段 `srcdoc`——都被静默拦掉：app 里没有控制台可看，用户只看到"丑"和"点了没反应"。
+
+症状对得上：邮件全是 Times 白底、页脚单元格挤成一行（`<style>` 没生效）；「显示图片」点了没反应
+（iframe 里的 show-images 脚本没执行过）。
+
+修法：`app.security.dangerousDisableAssetCspModification: true`。邮件正文本来就在 sandbox iframe 里，
+`'unsafe-inline'` 是这里正确的取舍。
+
+**怎么确认的**：往 `srcdoc` 里临时塞一个 `position:fixed` 的 div，让 iframe 自己的脚本把探针结果
+写进去——app 里显示 `sheets=3 inline=0 font=Helvetica, Lucida Gran size=14px csp=none`，即样式与
+脚本都通了；同一封邮件随即变成 Helvetica 14px、页脚 `Contact Us | App Store Connect | 地址` 分行、
+链接 #0088FF 无下划线。探针已移除。
+
+**另一个坑**：这一整轮我都在 `~/.cargo/shared-target/debug/bundle/macos/SendPalm.app` 上验证，
+而用户点开的是 `/Applications/SendPalm.app`——**8 月 31 日的旧包**。难怪"修了还是老样子"。
+现已把最新构建装到 `/Applications`。

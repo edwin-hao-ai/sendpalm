@@ -789,6 +789,31 @@ re-index at boot)
   cards in place, and 单据/垃圾邮件/回收站 render through a virtual list that owns its scroll state —
   so they never walked this path. State that, instead of claiming a global fix.
 
+### 11.18 Lessons learned (Session 2026-11-11 — Tauri rewrites the CSP, and that killed every inline style
+and script inside the mail frame)
+
+- **`csp` in `tauri.conf.json` is not the policy the app ships.** Tauri's asset CSP modification walks the
+  bundled HTML and injects `sha256-…` hashes for its own inline `<style>`/`<script>`. Once a hash is
+  present the browser **ignores `'unsafe-inline'`** in that directive, so *dynamically created* markup —
+  a `<style>` block a Solid view renders, or the whole `srcdoc` of the mail iframe — is blocked with no
+  console message in the app. Symptoms: every email rendered as Times-on-white with table cells jammed
+  into one line, and 「显示图片」 did nothing because the iframe's click/show-images script never ran.
+  Fix: `"dangerousDisableAssetCspModification": true` in `app.security` (the iframes are sandboxed, so
+  `'unsafe-inline'` is the right trade), or `dangerousDisableAssetCspModification: ["style-src","script-src"]`
+  to narrow it.
+- **§11.15's "runtime `<style>` never applied" was this, not a Solid quirk.** The probe that reported
+  `tag=none` was right; the follow-up explanation (querySelector during a render pass) was wrong. Two
+  sessions of styling bugs came from this one setting.
+- **A build is not the app the user runs.** Every fix in this session was verified in
+  `~/.cargo/shared-target/debug/bundle/macos/SendPalm.app` while `/Applications/SendPalm.app` sat there
+  from August. The user kept launching the old one and reporting bugs that were already fixed. **Check
+  what is installed before believing a bug report is new**, and copy the build to `/Applications` when
+  the point is "look at it in the real app".
+- **Prove a rendering fix inside the real webview, not in Chromium.** The same `htmlEmailSrcdoc` produced
+  a perfect render in Playwright and an unstyled one in WKWebView. A temporary probe *inside* the
+  `srcdoc` — a `position:fixed` div whose text is written by the frame's own script — is enough to tell
+  "script ran and CSS applied" from "markup arrived, everything else blocked". Remove it afterwards.
+
 ## 12. Agent Skills & Global Protocols
 
 SendPalm adopts a set of global agent skills stored in `~/.agents/skills/`. These skills are available to Kimi Code, Claude Code, OpenCode, and any other agent that reads the standard skill directory. **Invoke them by name** when the situation matches their description:
