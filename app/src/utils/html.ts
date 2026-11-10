@@ -113,21 +113,54 @@ export function stripRemoteCssUrls(css: string): string {
   );
 }
 
-export function sanitizeEmailHtml(html: string): string {
-  // Senders put their CSS in <head>, and DOMPurify sanitises a *body* fragment
-  // by default — so `<style>` was dropped along with the rest of the head and
-  // every transactional mail rendered as Times-on-white. Lift the style blocks
-  // out, sanitise the rest, then put the (scrubbed) CSS back at the front.
-  const styleBlocks: string[] = [];
-  const withoutStyles = html.replace(
-    /<style\b[^>]*>([\s\S]*?)<\/style>/gi,
-    (_all, css: string) => {
-      styleBlocks.push(stripRemoteCssUrls(css));
-      return "";
-    },
-  );
+export interface EmailCssSplit {
+  /** The mail without its `<style>` blocks. */
+  body: string;
+  /** The sender's CSS with remote `url()` neutralised — what renders at first. */
+  blockedCss: string;
+  /** The sender's CSS untouched — switched on by 「显示图片」. */
+  fullCss: string;
+  /** Remote `url()` references the CSS contains (backgrounds/logos). */
+  remoteUrlCount: number;
+}
 
-  const cleaned = DOMPurify.sanitize(withoutStyles, {
+/** Separate a mail's CSS from its body, in both forms we need.
+ *
+ *  Senders put CSS in `<head>`, and DOMPurify sanitises a *body* fragment, so
+ *  the style blocks have to be lifted out and re-attached by hand.
+ *
+ *  Two variants exist because a CSS `url()` is a tracking pixel with a paint
+ *  job: the first render uses the blocked one (every remote reference points
+ *  at `about:blank`), and 「显示图片」 flips a second `<style media="not all">`
+ *  block to `media="all"` — no re-serialisation, no extra network call, and the
+ *  sender's layout comes back exactly as designed.
+ */
+export function splitEmailCss(html: string): EmailCssSplit {
+  const blocks: string[] = [];
+  const body = html.replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gi, (_all, css: string) => {
+    blocks.push(css);
+    return "";
+  });
+  // A stray `</style>` inside a declaration would end the block early; these
+  // sequences cannot appear in valid CSS anyway.
+  const fullCss = blocks
+    .filter((block) => block.trim())
+    .map((block) => block.replace(/<\/?style/gi, ""))
+    .join("\n");
+  const remoteUrlCount = (
+    fullCss.match(/url\(\s*(['"]?)(?:https?:)?\/\/[^)'"]*\1\s*\)/gi) ?? []
+  ).length;
+  return {
+    body,
+    blockedCss: stripRemoteCssUrls(fullCss),
+    fullCss,
+    remoteUrlCount,
+  };
+}
+
+/** Sanitise a mail body (its `<style>` blocks already removed). */
+function sanitizeMailBody(html: string): string {
+  return DOMPurify.sanitize(html, {
     ALLOWED_TAGS: EMAIL_ALLOWED_TAGS,
     FORBID_TAGS: [
       "script",
@@ -162,14 +195,12 @@ export function sanitizeEmailHtml(html: string): string {
     KEEP_CONTENT: true,
     ADD_ATTR: ["target", "rel"],
   });
+}
 
-  const css = styleBlocks
-    .filter((block) => block.trim())
-    // A stray `</style>` inside a declaration would end the block early; these
-    // three sequences cannot appear in valid CSS anyway.
-    .map((block) => block.replace(/<\/?style/gi, ""))
-    .join("\n");
-  return css ? `<style>${css}</style>${cleaned}` : cleaned;
+export function sanitizeEmailHtml(html: string): string {
+  const { body, blockedCss } = splitEmailCss(html);
+  const cleaned = sanitizeMailBody(body);
+  return blockedCss ? `<style>${blockedCss}</style>${cleaned}` : cleaned;
 }
 
 export interface ImageAnalysis {
@@ -183,6 +214,9 @@ export interface ImageAnalysis {
    *  `htmlEmailSrcdoc`, which wraps it) explicitly. */
   safeHtml?: string;
   externalImageCount: number;
+  /** Remote `url()` references in the sender's CSS (backgrounds, logos) —
+   *  also blocked until 「显示图片」. */
+  cssBackgroundCount: number;
   hasTrackingPixel: boolean;
 }
 
@@ -208,7 +242,12 @@ export function analyzeImages(
   const hasTrackingPixel = externalMatches.some((m) =>
     TRACKING_DIMENSIONS.test(m),
   );
-  const out: ImageAnalysis = { externalImageCount, hasTrackingPixel };
+  const cssBackgroundCount = splitEmailCss(html).remoteUrlCount;
+  const out: ImageAnalysis = {
+    externalImageCount,
+    cssBackgroundCount,
+    hasTrackingPixel,
+  };
   if (options.includeSafeHtml) {
     out.safeHtml = sanitizeEmailHtml(html);
   }
@@ -464,7 +503,19 @@ export function emailBodyPreview(
  *  links open in the OS browser instead of navigating inside the iframe.
  */
 export function htmlEmailSrcdoc(html: string): string {
-  const safe = sanitizeEmailHtml(html);
+  const { body, blockedCss, fullCss } = splitEmailCss(html);
+  const safe = sanitizeMailBody(body);
+  // The sender's CSS ships twice: the blocked copy is what renders first, and
+  // the untouched copy sits in a sheet switched off with `media="not all"`.
+  // 「显示图片」 flips it to `media="all"` (see the handler below), which brings
+  // background images back at their original urls — no re-serialisation, and
+  // nothing leaves the machine until the user asks.
+  const cssBlocks = [
+    blockedCss ? `<style>${blockedCss}</style>` : "",
+    fullCss && fullCss !== blockedCss
+      ? `<style id="sp-css-full" media="not all">${fullCss}</style>`
+      : "",
+  ].join("\n");
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -524,6 +575,11 @@ document.addEventListener('click', function(e) {
 }, true);
 window.addEventListener('message', function(e) {
   if (e.data && e.data.type === 'sendpalm:show-images') {
+    // Background images live in the sender's CSS, which was shipped switched
+    // off with media="not all". Turning the sheet on restores the original
+    // url() values — the layout the sender designed, no second network pass.
+    var full = document.getElementById('sp-css-full');
+    if (full) full.setAttribute('media', 'all');
     var srcMap = e.data.srcMap || {};
     var imgs = document.querySelectorAll('.sp-img-hidden');
     for (var i = 0; i < imgs.length; i++) {
@@ -537,6 +593,7 @@ window.addEventListener('message', function(e) {
 });
 </script>
 </head>
+${cssBlocks}
 <body>${safe}</body>
 </html>`;
 }

@@ -214,17 +214,26 @@ export function EmailBody(props: EmailBodyProps) {
     }
   });
 
+  /** Everything 「显示图片」 would reveal: `<img>` tags plus CSS backgrounds.
+   *  Both are blocked until the user asks, so both belong in the count. */
+  const hiddenImageCount = () =>
+    (imageAnalysis()?.externalImageCount ?? 0) +
+    (imageAnalysis()?.cssBackgroundCount ?? 0);
+
   const onShowImages = async () => {
     const html = m().bodyHtml;
     if (!html) return;
     setShowBusy(true);
     try {
       const urls = extractExternalImageUrls(html);
-      if (urls.length === 0) {
+      if (urls.length === 0 && (imageAnalysis()?.cssBackgroundCount ?? 0) === 0) {
         showToast({ kind: "info", message: "此邮件没有外部图片" });
         return;
       }
-      const map = await prefetchImages(urls);
+      // `<img>` sources go through the image proxy; CSS backgrounds cannot be
+      // rewritten per-declaration, so they are restored at their original
+      // urls by switching the sender's sheet back on inside the iframe.
+      const map = urls.length > 0 ? await prefetchImages(urls) : new Map();
       const win = currentIframe?.contentWindow;
       if (win) {
         win.postMessage(
@@ -437,7 +446,7 @@ export function EmailBody(props: EmailBodyProps) {
         when={
           props.showImagesBar !== false &&
           imageAnalysis() &&
-          (imageAnalysis()?.externalImageCount ?? 0) > 0
+          hiddenImageCount() > 0
         }
       >
         <div
@@ -477,7 +486,7 @@ export function EmailBody(props: EmailBodyProps) {
             >
               <Icon name="ph-spinner" size={12} />
             </Show>
-            显示图片（{imageAnalysis()?.externalImageCount}）
+            显示图片（{hiddenImageCount()}）
           </button>
           <Show when={props.senderEmail}>
             <label
