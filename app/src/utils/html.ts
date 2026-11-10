@@ -471,13 +471,36 @@ export function htmlEmailSrcdoc(html: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-html, body { margin: 0; padding: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.6; color: #333; }
-img { max-width: 100%; height: auto; }
-a { color: #0A8F63; }
+/* Defaults for mail that ships without styling — deliberately minimal.
+ *
+ * Everything here is a *fallback*: the sender's own rules are appended after
+ * this block, so any rule they write wins at equal specificity. That is the
+ * whole point — an email has to look like the sender built it, not like our
+ * product. Two rules earned their place the hard way:
+ *   - no table/td resets: collapsing the borders and adding cell padding
+ *     silently re-laid-out every table-based newsletter;
+ *   - no brand colour on links: painting mail links SendPalm green made
+ *     ordinary mail read as if our UI had bled into it.
+ */
+html, body { margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  /* 15px: Apple Mail / Gmail body size. 14px read as "small print". */
+  font-size: 15px;
+  line-height: 1.55;
+  color: #222;
+  -webkit-font-smoothing: antialiased;
+  /* A pasted URL must not stretch the page. */
+  overflow-wrap: anywhere;
+}
+/* Neutral link blue; senders override it constantly. */
+a { color: #0b57d0; }
+/* Anti-overflow only — mail hardcodes image widths. */
+img { max-width: 100% !important; height: auto !important; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-table { border-collapse: collapse; max-width: 100%; }
-td, th { padding: 6px 10px; vertical-align: top; }
-blockquote { border-left: 3px solid #0A8F63; margin: 0; padding: 0 0 0 12px; color: #666; font-style: italic; }
+blockquote { margin: 0; padding: 0 0 0 12px; border-left: 3px solid #ddd; color: #555; }
 .sp-img-hidden { display: none !important; }
 .sp-img-hidden[data-shown="true"] { display: inline !important; }
 </style>

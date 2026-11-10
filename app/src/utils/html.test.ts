@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   sanitizeEmailHtml,
+  htmlEmailSrcdoc as emailSrcdoc,
   analyzeImages,
   emailBodyPreview,
   plainTextToHtml,
@@ -311,5 +312,32 @@ describe("email styles survive sanitising", () => {
     expect(safe).not.toContain("<script");
     expect(safe).not.toContain("onclick");
     expect(safe).toContain("<style");
+  });
+});
+
+describe("the mail frame's own defaults stay out of the sender's way", () => {
+  const srcdoc = () => emailSrcdoc("<p>hello</p>");
+
+  it("does not re-lay-out table-based newsletters", () => {
+    // `border-collapse: collapse` plus 6/10px cell padding silently moved every
+    // table cell in every marketing mail; both were removed after a render
+    // comparison showed the layout drifting from the sender's design.
+    const doc = srcdoc();
+    expect(doc).not.toContain("border-collapse");
+    expect(doc).not.toMatch(/td,\s*th\s*\{[^}]*padding/);
+  });
+
+  it("does not paint mail links in the product's brand colour", () => {
+    // SendPalm green on links made ordinary mail read like our UI bled into it.
+    expect(srcdoc()).not.toContain("#0A8F63");
+    expect(srcdoc()).toContain("#0b57d0");
+  });
+
+  it("uses a readable body size for unstyled mail", () => {
+    expect(srcdoc()).toContain("font-size: 15px");
+  });
+
+  it("still hides remote images until asked", () => {
+    expect(srcdoc()).toContain(".sp-img-hidden");
   });
 });
