@@ -398,7 +398,10 @@ function StreamCard(props: StreamCardProps) {
             background: "var(--paper)",
           }}
         >
-          <EmailBody message={props.m} minHeight={200} showImagesBar={false} />
+          {/* The image bar stays on: a newsletter without its images is a
+              page of blank boxes, and the bar is the only way to reveal them
+              (plus "always show for this sender"). */}
+          <EmailBody message={props.m} minHeight={200} />
         </div>
       </Show>
 
