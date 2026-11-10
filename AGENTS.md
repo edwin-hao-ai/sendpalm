@@ -609,6 +609,61 @@ problem at all.
   into `docs/ios-screenshots/`, and *fails loudly if the process is not alive afterwards* — the exact
   check that was missing. AGENTS had been referencing this script for weeks while it did not exist.
 
+### 11.13 Lessons learned (Session 2026-11-09/10 — release-readiness audit: Tauri capabilities, search, scale)
+
+Everything below was found by auditing the *shipped* build, not the dev server. Several of these had
+been silently wrong for months because the browser test double and the dev server both forgave them.
+
+- **A missing Tauri capability surfaces as an unhandled promise rejection, not a build error.**
+  `getCurrentWindow().startDragging()` without `core:window:allow-start-dragging` in
+  `capabilities/default.json` rejects at runtime. `core:default` does **not** include the window
+  mutators. Symptom was a red toast reading `window.start_dragging not allowed`.
+- **`-webkit-app-region: drag` needs the whole strip, and the JS fallback must not test
+  `target === currentTarget`.** That guard is true for every child element, so with a topbar full of
+  controls the fallback ran only on the padding pixels. Correct guard:
+  `el.closest("button, a, input, textarea, select, [role='button']")` → skip, otherwise
+  `startDragging()`. Also mark decorative blocks `drag` (not `no-drag`) and give images
+  `draggable={false}`.
+- **`window.prompt` / `window.confirm` do not work in a WKWebView.** `prompt` returns null (the
+  sticky-note button was a silent no-op in the desktop build); `confirm` is unreliable and unstyled.
+  Use `Modal` / `ConfirmDialog`.
+- **HTML numeric entities are how Chinese ESPs encode text** (`&#38543;&#30528;`), and both sides
+  needed a decoder: `utils/html.ts` for previews and `services/html_text.rs` for the stored `body`.
+  Decode **after** stripping tags, or `&lt;b&gt;` becomes real markup. Existing rows need a backfill
+  — `backfill_markup_bodies` now also matches `&#` and empty bodies, and rewrites the FTS row.
+- **`unicode61` does not segment CJK.** A run of Chinese is one token, so only a prefix ever matched
+  (`郝亚伟` yes, `拒付` no). Search uses the `trigram` tokenizer (migration 0032) plus a LIKE fallback
+  for 1–2 character terms, which trigram cannot index and which are the most common Chinese query.
+- **FTS5 parses the raw query as syntax.** `Re: 报价` dies with `no such column: Re` and `a-b` with
+  `no such column: b`. Quote every term (`"Re:"`) in `utils/search.ts`; unit-test the plan, not the SQL.
+- **A test double that does not understand an operator returns *everything*.** `mock-db` had no
+  `MATCH` branch, so `WHERE search_index MATCH $1` produced zero conditions and every row matched —
+  every search test was vacuously green. Treat the double as code: unknown operators must fail loudly,
+  and add a negative case (`searchIndex("100%")` must not match the world).
+- **`OFFSET` pagination is O(offset).** 17 s for page 500 of a 100k mailbox. Use a keyset cursor
+  (`(timeline_at, id) < (?, ?)` with `ORDER BY timeline_at DESC, id DESC`); `id` makes it a total
+  order so nothing is skipped or repeated. Keep a fresh-DB/full-walk test that asserts the partition
+  property (exactly N unique rows).
+- **`OR` across three boolean flags defeats partial indexes.** The pile query scanned the table
+  (705 ms at 100k). Three narrow selects (one per partial index) merged in memory: 0 ms.
+- **sqlx applies migrations in iterator order, not by version.** The list had grown
+  `1..24, 30, 31, 29, …`, so a fresh database ran the backfill before the `ALTER TABLE` and the first
+  launch died with `no such column: is_newsletter` — a **new-user-only** crash that existing installs
+  skip. `pub fn migrations()` now sorts, and `migration_tests::fresh_database_applies_every_migration_in_order`
+  fails if the sort is removed. Never edit an applied migration's SQL (sqlx checksums it).
+- **A full-reindex migration blocks startup with no window.** Rebuilding the trigram index over 4515
+  messages took 74 s before `Builder::build()` returned, so the app looked dead. Fresh installs are
+  unaffected (no rows). Any future whole-table migration must run after the window exists, chunked.
+- **`safeInvoke` returns null for success *and* failure.** A command whose success the UI reports must
+  return a value (`upsert_mail_rule` now returns the rule id) — otherwise "saved" and "swallowed IPC
+  error" are indistinguishable.
+- **Error toasts never auto-dismiss by design; without dedupe + a cap they cover the screen** when a
+  background loop fails repeatedly. Collapse identical `kind`+`message` into one with a ×N counter and
+  cap the queue (4).
+- **In dev, `page.evaluate(import('/src/stores/ui.ts'))` can resolve to a different module instance
+  than the app's**, so poking signals there is a silent no-op. Drive the real UI in e2e; if a test
+  needs a signal, add a data attribute or an event.
+
 ## 12. Agent Skills & Global Protocols
 
 SendPalm adopts a set of global agent skills stored in `~/.agents/skills/`. These skills are available to Kimi Code, Claude Code, OpenCode, and any other agent that reads the standard skill directory. **Invoke them by name** when the situation matches their description:

@@ -29,3 +29,11 @@ app/dist/
 # Tauri local SQLite db (debug only — production lives in user data dir)
 app/dev.db
 app/dev.db-journal
+
+# mddock overlay state under build/output dirs (AGENTS §11: never observe,
+# never commit). `.mddock/*` above only covers the repo root.
+dist/.mddock/
+
+# Local agent tool state (goal/plan caches) — per-machine, never shared
+.opencode/goals/
+.superpowers/.superpowers/
