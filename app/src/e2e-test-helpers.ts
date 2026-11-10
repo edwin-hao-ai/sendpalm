@@ -15,6 +15,7 @@ import type {
   Contact,
   FileItem,
   Message,
+  Notification,
 } from "./types";
 import {
   upsertAccount,
@@ -22,6 +23,7 @@ import {
   upsertMessage,
   upsertEvent,
   upsertFile,
+  upsertNotification,
   listContacts,
   listMessages,
   listEvents,
@@ -30,7 +32,7 @@ import {
   upsertAgentSession,
   upsertAgentDraft,
 } from "./stores/data";
-import { bumpRefreshTick } from "./stores/ui";
+import { bumpRefreshTick, bumpSoftRefreshTick } from "./stores/ui";
 
 interface SeedPayload {
   accounts?: Account[];
@@ -54,6 +56,9 @@ interface E2EHelpers {
   seedFile: (f: FileItem) => Promise<void>;
   seedAgentSession: (x: AgentSession) => Promise<void>;
   seedAgentDraft: (x: AgentDraft) => Promise<void>;
+  /** Seed a notification and refresh the surfaces that count them (the
+   *  topbar badge), which a raw INSERT would not do. */
+  seedNotification: (n: Notification) => Promise<void>;
   listContacts: () => Promise<Contact[]>;
   listMessages: () => Promise<Message[]>;
   listEvents: () => Promise<CalendarEvent[]>;
@@ -129,6 +134,10 @@ if (IS_BROWSER() && typeof window !== "undefined") {
     seedFile: upsertFile,
     seedAgentSession: upsertAgentSession,
     seedAgentDraft: upsertAgentDraft,
+    seedNotification: async (n: Notification) => {
+      await upsertNotification(n);
+      bumpSoftRefreshTick();
+    },
     listContacts,
     listMessages,
     listEvents,

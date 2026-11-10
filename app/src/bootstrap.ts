@@ -212,9 +212,11 @@ export async function initApp() {
     // from an already-warm signal.
     void refetchContacts();
 
-    // Backfill the FTS index for contacts/files created before the index
-    // existed. New messages are indexed by the Rust sync loop; existing
-    // messages are backfilled via migration 0009.
+    // Index anything the search index is missing (legacy rows from before the
+    // index existed). Every write indexes itself, so this is usually a no-op:
+    // it used to re-index the whole database on every launch — 420 MB through
+    // the IPC bridge and 8,658 index rewrites, i.e. ~145 s of CPU and a loud
+    // fan for three minutes after each start.
     void backfillSearchIndex();
 
     setLoading(false);

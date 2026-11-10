@@ -101,9 +101,46 @@ async function removeFromSearchIndex(id: ID): Promise<void> {
   await db.execute("DELETE FROM search_index WHERE id = $1", [id]);
 }
 
-export async function backfillSearchIndex(): Promise<void> {
-  const contacts = await listContacts();
-  for (const c of contacts) {
+/** Index entities that the search index does not have yet.
+ *
+ *  This used to re-index the entire database on every launch: `listMessages()`
+ *  pulled all 4,515 rows **with bodies** (~420 MB on the reference mailbox),
+ *  then a delete+insert ran per row — 8,658 of them, each re-tokenized into the
+ *  trigram index. Result: the first ~3 minutes after every launch burned a full
+ *  CPU core (measured 145 s of CPU) and the fan came on, to rewrite an index
+ *  that was already complete.
+ *
+ *  Every write already indexes itself (`upsertMessage`, `upsertContact`,
+ *  `upsertFile`, `upsertEvent`), so the only rows that can be missing are ones
+ *  stored before the index existed. Ask which ids are absent — two cheap id
+ *  scans — and index just those. A healthy database does no work at all.
+ */
+export async function backfillSearchIndex(): Promise<number> {
+  const db = await getDb();
+  const indexed = new Set(
+    (await db.select<Array<{ id: ID }>>("SELECT id FROM search_index")).map(
+      (r) => r.id,
+    ),
+  );
+  const missingIds = async (table: string): Promise<ID[]> =>
+    (
+      await db.select<Array<{ id: ID }>>(`SELECT id FROM ${table}`)
+    )
+      .map((r) => r.id)
+      .filter((id) => !indexed.has(id));
+
+  let added = 0;
+
+  for (const id of await missingIds("messages")) {
+    const m = await getMessage(id);
+    if (!m) continue;
+    await indexEntity(m.id, "message", m.subj, m.body);
+    added++;
+  }
+  for (const id of await missingIds("contacts")) {
+    const c = await getContact(id);
+    if (!c) continue;
+    // Same field set the incremental path uses on write.
     const emails = c.emails.map((e) => e.value).join(" ");
     await indexEntity(
       c.id,
@@ -111,22 +148,22 @@ export async function backfillSearchIndex(): Promise<void> {
       c.name,
       `${c.company} ${c.title} ${emails} ${c.notes}`,
     );
+    added++;
   }
-  const messages = await listMessages();
-  for (const m of messages) {
-    await indexEntity(m.id, "message", m.subj, m.body);
-  }
-  const files = await listFiles();
-  for (const f of files) {
+  for (const id of await missingIds("files")) {
+    const f = await getFile(id);
+    if (!f) continue;
     await indexEntity(
       f.id,
       "file",
       f.name,
       `${f.type} ${f.mime} ${f.sender ?? ""}`,
     );
+    added++;
   }
-  const events = await listEvents();
-  for (const e of events) {
+  for (const id of await missingIds("events")) {
+    const e = await getEvent(id);
+    if (!e) continue;
     await indexEntity(
       e.id,
       "event",
@@ -134,7 +171,9 @@ export async function backfillSearchIndex(): Promise<void> {
       `${e.notes} ${e.brief} ${e.location ?? ""}`,
       e.dt,
     );
+    added++;
   }
+  return added;
 }
 
 /** Search across messages, contacts, files and events.

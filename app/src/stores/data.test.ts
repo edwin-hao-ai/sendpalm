@@ -15,6 +15,8 @@ import {
   listContactFollowUps,
   listContactClips,
   listTasksForMessage,
+  backfillSearchIndex,
+  searchIndex,
   listCompanyContacts,
   listCompanyMessages,
   listCompanyFiles,
@@ -119,6 +121,44 @@ function makeMessage(id: string, pid: string, overrides?: Partial<Message>): Mes
     ...overrides,
   };
 }
+
+describe("backfillSearchIndex", () => {
+  beforeEach(() => {
+    resetMockDb();
+  });
+
+  it("does no work when every row is already indexed", async () => {
+    // A healthy database: writes index themselves. The old implementation
+    // pulled every message body (420 MB on a real mailbox) and rewrote all
+    // 8,658 index rows on **every launch** — ~145 s of CPU per start.
+    await upsertContact(makeContact("c-1"));
+    await upsertMessage(makeMessage("m-1", "c-1"));
+
+    const before = issuedQueries.length;
+    const added = await backfillSearchIndex();
+    expect(added).toBe(0);
+
+    const during = issuedQueries.slice(before);
+    expect(during.filter((q) => /insert into search_index/i.test(q))).toHaveLength(0);
+    // The expensive shape must be gone: no `SELECT * FROM messages`.
+    expect(during.filter((q) => /select \* from messages/i.test(q))).toHaveLength(0);
+  });
+
+  it("indexes a row that is missing from the index", async () => {
+    await upsertContact(makeContact("c-2"));
+    await upsertMessage(makeMessage("m-2", "c-2", { subj: "kumquat" }));
+    // Simulate a legacy row: present in messages, absent from the index.
+    const db = (await import("../services/mock-db")) as unknown as {
+      MockDb: new () => { execute: (q: string, p?: unknown[]) => Promise<unknown> };
+    };
+    await new db.MockDb().execute("DELETE FROM search_index WHERE id = $1", ["m-2"]);
+
+    const added = await backfillSearchIndex();
+    expect(added).toBe(1);
+    const hits = await searchIndex("kumquat");
+    expect(hits.some((h) => h.id === "m-2")).toBe(true);
+  });
+});
 
 describe("listTasksForMessage", () => {
   beforeEach(() => {
