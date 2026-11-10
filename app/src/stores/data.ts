@@ -2334,6 +2334,22 @@ export async function listTasks(): Promise<Task[]> {
   return rows.map(rowToTask);
 }
 
+/** Tasks that were created out of one specific message.
+ *
+ *  The reverse of `Task.relatedMessageId`, so the reading pane can say "this
+ *  mail has 3 tasks" instead of the user having to remember they made one.
+ *  `tasks` is a small table (single digits in practice), so the scan costs
+ *  nothing — the row count is what bounds it, not an index.
+ */
+export async function listTasksForMessage(messageId: ID): Promise<Task[]> {
+  const db = await getDb();
+  const rows = await db.select<Record<string, unknown>[]>(
+    "SELECT * FROM tasks WHERE related_message_id = $1 ORDER BY created_at DESC",
+    [messageId],
+  );
+  return rows.map(rowToTask);
+}
+
 export async function listTasksPage(limit = 100): Promise<Task[]> {
   const db = await getDb();
   const rows = await db.select<Record<string, unknown>[]>("SELECT * FROM tasks ORDER BY created_at DESC LIMIT $1", [Math.max(1, Math.min(10_000, limit))]);

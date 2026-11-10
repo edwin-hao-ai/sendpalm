@@ -50,7 +50,7 @@ export function Tasks() {
     <ResourceGate resource={data} isEmpty={d => !d.tasks.length && !d.suggestions.length} empty={<p>还没有任务</p>} errorView={() => <ErrorState title="加载失败" retry={() => void refetch()} />}>
       {d => <>
         <Show when={d.suggestions.length}><section aria-label="AI 建议待确认"><h2>AI 建议 · 待确认</h2><p class="tasks-hint">这些是草稿，确认后才会成为任务。请核对原文、日期和承诺方向。</p><For each={d.suggestions}>{s => <SuggestionCard suggestion={s} draftCache={draftCache} onChange={() => void refetch()} />}</For></section></Show>
-        <For each={GROUPS}>{group => <Show when={d.tasks.some(t => t.direction === group.direction)}><section><h2>{group.label}</h2><For each={d.tasks.filter(t => t.direction === group.direction)}>{task => <button class="tasks-row" onClick={() => openTask(task.id)}><span>{task.title}</span><span class="tasks-hint">{STATUS_LABEL[task.status]}{task.due ? ` · ${task.due.slice(0, 10)}` : ""}</span></button>}</For></section></Show>}</For>
+        <For each={GROUPS}>{group => <Show when={d.tasks.some(t => t.direction === group.direction)}><section><h2>{group.label}</h2><For each={d.tasks.filter(t => t.direction === group.direction)}>{task => <button class="tasks-row" onClick={() => openTask(task.id)}><span>{task.relatedMessageId ? <i class="ph ph-envelope-simple tasks-source-mark" aria-label="来自邮件" title="来自邮件" /> : null}{task.title}</span><span class="tasks-hint">{STATUS_LABEL[task.status]}{task.due ? ` · ${task.due.slice(0, 10)}` : ""}</span></button>}</For></section></Show>}</For>
         <Show when={d.tasks.length === limit()}><button class="tasks-button" onClick={() => setLimit(n => n + PAGE_SIZE)}>加载更多任务</button></Show>
       </>}
     </ResourceGate>

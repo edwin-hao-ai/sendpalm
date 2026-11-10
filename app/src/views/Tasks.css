@@ -10,3 +10,13 @@
 .task-suggestion label { display: grid; gap: var(--space-1); font-size: var(--text-caption); min-width: 0; }
 .task-suggestion input, .task-suggestion select, .task-suggestion textarea { width: 100%; min-height: 44px; padding: var(--space-2); background: var(--paper-mid); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--radius-md); }
 @media (max-width: 767px) { .tasks-view { padding: var(--space-3); } .task-suggestion-fields > label { flex: 1 1 100%; } .tasks-row { flex-direction: column; } }
+
+/* Provenance mark: this task was created from a mail, and the task panel
+   carries the 「来源邮件」 link back to it. Decorative only — the row itself
+   opens the panel, so nothing here is a second click target. */
+.tasks-source-mark {
+  margin-right: 6px;
+  font-size: 0.85em;
+  color: var(--text-muted);
+  vertical-align: -1px;
+}

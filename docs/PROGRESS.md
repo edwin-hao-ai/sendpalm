@@ -3888,3 +3888,32 @@ Rust 159、TS 784、Playwright 158 通过 / 0 失败。
 顺手：侧边栏分组行的小箭头离右边太近，选中时像贴上去的；给箭头一侧留 6px 内边距。
 
 验证：TS 846、Rust 164、Playwright 170 passed / 1 skipped。
+
+### 2026-11-10 文件/联系人性能与"从邮件建任务"
+
+**文件页三个问题**
+
+1. **按钮竖着排**——每张卡片左下角三个 28px 圆钮纵向堆叠、卡片还被撑高约 40px。
+   原因是 `.file-card-actions` 的定位规则写在运行时 `<style>{FILES_CSS}</style>` 里，
+   打包后的 app 里这段样式**不生效**（同一份 JS 在浏览器里是生效的）。全项目还有
+   Calendar / Search / Insights / MeetingPanel / Imbox 关键帧共 6 处同样写法，
+   统一改成真正的 `.css` 文件由 Vite 打包（其余视图本来就是这样）。
+2. **首屏空白数秒**——3740 张卡片一次性挂载，主线程被占住，视图进场动画
+   (`view-enter` + `both`) 让整棵子树停在 `opacity: 0`，于是骨架在 DOM 里却从没被合成上屏。
+   现在网格按 120 张窗口渲染，底部「加载更多（120 / 3740）」；筛选仍作用于全集，
+   不会漏结果。首屏回到一帧。
+3. **文件名是 UUID**（`8CA8CD55-…jpeg`）——IMAP 附件没带 Content-Disposition 文件名，
+   属于数据侧问题，尚未处理，已记进 TODOS。
+
+**联系人**：342 行 / 58 KB，无性能问题。但截图里能看到重复联系人
+（ASICS ×2、App Store Connect ×2、Apple ×5），属于去重问题，记进 TODOS。
+
+**从邮件建任务**（`docs/superpowers/specs/2026-11-10-task-from-email-design.md`）
+
+- 消息「更多」→**新建任务**：标题取选中文字或邮件主题，备注自动带发件人/时间/正文摘要，
+  写入 `relatedMessageId` + `relatedContactId`，`direction: mine`，然后直接打开任务面板补截止时间。
+  全程不需要模型——原来只有「提取任务」这条 AI 路径，没配 API Key 就等于没有这个功能。
+- 反向可见：任务列表行给带来源的任务加小信封标记；阅读面板正文上方列出「这封邮件的任务」，
+  点击直达。`listTasksForMessage` 之前只有查询没有 UI，现在接上了。
+
+验证：TS 848、Playwright 173 passed / 1 skipped（新增 `task-from-message.spec.ts`）。

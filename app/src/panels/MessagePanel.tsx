@@ -30,6 +30,8 @@ import {
   listFollowUpsForMessage,
   listFilesByIds,
   listContactsByIds,
+  listTasksForMessage,
+  upsertTask,
 } from "../stores/data";
 import {
   setDetailOpen,
@@ -43,6 +45,8 @@ import {
   bumpRefreshTick,
   setAgentPanelOpen,
   setPendingAgentIntent,
+  setSelectedTaskId,
+  bumpSoftRefreshTick,
   appSettings,
 } from "../stores/ui";
 import { Avatar } from "../components/Avatar";
@@ -64,7 +68,11 @@ import { saveAttachment } from "../utils/save-attachment";
 import { senderRule } from "../utils/mail-rule";
 import { safeInvoke } from "../services/backend";
 import { Modal } from "../components/Modal";
-import { useRefreshEffect, useViewport } from "../utils/gestures";
+import {
+  useRefreshEffect,
+  useSoftRefreshEffect,
+  useViewport,
+} from "../utils/gestures";
 import { notifyMessageUpdated } from "../services/sync-events";
 import { formatMessageSource, messagePreview } from "./message-source";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -761,6 +769,67 @@ export function MessagePanel(props: { messageId: string }) {
     showToast({ message: "已保存为 Clip", kind: "success" });
   };
 
+  /** A task that remembers which mail it came from.
+   *
+   *  Clip already captures the selection; a task needs the same context plus
+   *  a link home, so the Tasks view can offer 「来源邮件」 instead of asking the
+   *  user to remember why the task exists. No model involved — the AI path
+   *  («提取任务») still runs when one is configured; this one always works.
+   */
+  const createTaskFromMessage = async () => {
+    const m = message();
+    if (!m) return;
+    const c = contact();
+    // Selection first (the closest thing to what the user pointed at), then
+    // the subject — a task titled after the mail is recognizable in a list.
+    const selection = (
+      window.getSelection()?.toString() ??
+      getIframeSelection()
+    ).trim();
+    const title = (selection || m.subj || "无主题").trim().slice(0, 200);
+    const notes = [
+      c ? `${c.name} <${c.emails[0]?.value ?? ""}>` : "",
+      m.tm ? `收到 ${m.tm}` : "",
+      (m.prev ?? "").trim().slice(0, 240),
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const id = uid("t");
+    try {
+      await upsertTask({
+        id,
+        title,
+        notes,
+        status: "todo",
+        priority: "normal",
+        // A task you create from a mail is something *you* now have to do.
+        direction: "mine",
+        relatedMessageId: m.id,
+        relatedContactId: m.pid,
+        createdAt: isoNow(),
+      });
+      clearIframeSelection();
+      bumpSoftRefreshTick();
+      showToast({ message: "已创建任务，可补充截止时间", kind: "success" });
+      // Open it so the deadline can be set without hunting for it in Tasks.
+      setSelectedMessageId(null);
+      setSelectedTaskId(id);
+      setDetailOpen(true);
+    } catch {
+      showToast({ message: "创建任务失败，请重试", kind: "error" });
+    }
+  };
+
+  /** Tasks already attached to this mail — rendered above the body so the
+   *  answer to "did I make a task out of this?" is visible while reading. */
+  const [relatedTasks, { refetch: refetchRelatedTasks }] = createResource(
+    () => currentMessage()?.id ?? null,
+    async (id) => (id ? await listTasksForMessage(id) : []),
+  );
+  useSoftRefreshEffect(() => {
+    void refetchRelatedTasks();
+  });
+
   const fuForMsg = createMemo<FollowUp[]>(() =>
     (followUps() ?? []).filter((f) => f.msgId === props.messageId),
   );
@@ -1043,6 +1112,66 @@ export function MessagePanel(props: { messageId: string }) {
                   >
                     {name}
                   </span>
+                )}
+              </For>
+            </div>
+          </Show>
+
+          {/* Tasks already made from this mail. The link is stored on the
+              task (`relatedMessageId`), so this is the only place the reverse
+              direction can be seen while reading. */}
+          <Show when={(relatedTasks() ?? []).length > 0}>
+            <div
+              data-message-tasks
+              style={{
+                display: "flex",
+                "align-items": "center",
+                "flex-wrap": "wrap",
+                gap: "var(--space-2)",
+                padding: "var(--space-2) var(--space-4)",
+              }}
+            >
+              <span
+                style={{
+                  "font-size": "var(--text-micro)",
+                  color: "var(--text-muted)",
+                }}
+              >
+                这封邮件的任务
+              </span>
+              <For each={relatedTasks() ?? []}>
+                {(t) => (
+                  <button
+                    data-message-task={t.id}
+                    onClick={() => {
+                      setSelectedMessageId(null);
+                      setSelectedTaskId(t.id);
+                      setDetailOpen(true);
+                    }}
+                    style={{
+                      display: "inline-flex",
+                      "align-items": "center",
+                      gap: "4px",
+                      padding: "3px 10px",
+                      "border-radius": "var(--radius-pill)",
+                      background:
+                        t.status === "done"
+                          ? "var(--paper-mid)"
+                          : "var(--palm-soft)",
+                      color:
+                        t.status === "done"
+                          ? "var(--text-muted)"
+                          : "var(--palm)",
+                      border: "none",
+                      "font-size": "var(--text-caption)",
+                      "font-weight": 600,
+                      cursor: "pointer",
+                      "text-decoration":
+                        t.status === "done" ? "line-through" : "none",
+                    }}
+                  >
+                    {t.title}
+                  </button>
                 )}
               </For>
             </div>
@@ -1732,6 +1861,7 @@ export function MessagePanel(props: { messageId: string }) {
             onSaveDraft={saveAsDraft}
             onMoveToBucket={moveToBucketDirect}
             onAskAgent={askAgentAboutMessage}
+            onNewTask={createTaskFromMessage}
             onExtractTasks={async () => {
               const current = message();
               if (!current) return;
@@ -2121,6 +2251,7 @@ export function moreMenuItemDefs(opts: {
     { id: "follow-up", icon: "ph-bell-ringing", label: "跟进提醒" },
     { id: "sticky", icon: "ph-note", label: "添加便签" },
     { id: "clip", icon: "ph-bookmark-simple", label: "保存为 Clip" },
+    { id: "new-task", icon: "ph-list-plus", label: "新建任务", testId: "message-new-task" },
     { id: "extract-tasks", icon: "ph-check-square", label: "提取任务", testId: "message-extract-tasks" },
     { id: "print", icon: "ph-printer", label: "打印", testId: "message-print" },
   ];
@@ -2201,6 +2332,7 @@ function MoreMenu(props: {
   onMoveToBucket: (bucket: Message["bucket"]) => Promise<void> | void;
   onAskAgent: () => Promise<void> | void;
   onExtractTasks: () => Promise<void> | void;
+  onNewTask: () => Promise<void> | void;
 }) {
   const [open, setOpen] = createSignal(false);
 
@@ -2216,6 +2348,7 @@ function MoreMenu(props: {
     "move-feed": () => void props.onMoveToBucket("feed"),
     "move-paperTrail": () => void props.onMoveToBucket("paperTrail"),
     "ask-agent": () => void props.onAskAgent(),
+    "new-task": () => void props.onNewTask(),
     "extract-tasks": () => void props.onExtractTasks(),
     print: () => window.print(),
     label: () => props.onLabel(),

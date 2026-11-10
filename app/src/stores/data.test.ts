@@ -14,6 +14,7 @@ import {
   listContactTasks,
   listContactFollowUps,
   listContactClips,
+  listTasksForMessage,
   listCompanyContacts,
   listCompanyMessages,
   listCompanyFiles,
@@ -118,6 +119,32 @@ function makeMessage(id: string, pid: string, overrides?: Partial<Message>): Mes
     ...overrides,
   };
 }
+
+describe("listTasksForMessage", () => {
+  beforeEach(() => {
+    resetMockDb();
+  });
+
+  it("returns only the tasks created from that mail, newest first", async () => {
+    const base = {
+      status: "todo" as const,
+      priority: "normal" as const,
+      notes: "",
+    };
+    await upsertTask({ ...base, id: "t-old", title: "旧任务", relatedMessageId: "m-1", createdAt: "2024-01-01T00:00:00.000Z" });
+    await upsertTask({ ...base, id: "t-new", title: "新任务", relatedMessageId: "m-1", createdAt: "2024-02-01T00:00:00.000Z" });
+    await upsertTask({ ...base, id: "t-other", title: "别的邮件", relatedMessageId: "m-2", createdAt: "2024-03-01T00:00:00.000Z" });
+    // A task with no source at all (created by hand from the Tasks view).
+    await upsertTask({ ...base, id: "t-manual", title: "手写任务", createdAt: "2024-04-01T00:00:00.000Z" });
+
+    const tasks = await listTasksForMessage("m-1");
+    expect(tasks.map((t) => t.id)).toEqual(["t-new", "t-old"]);
+  });
+
+  it("returns an empty array for a mail with no tasks", async () => {
+    expect(await listTasksForMessage("m-none")).toEqual([]);
+  });
+});
 
 describe("listGateQueue", () => {
   beforeEach(() => {

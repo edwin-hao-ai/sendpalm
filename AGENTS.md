@@ -711,6 +711,31 @@ been silently wrong for months because the browser test double and the dev serve
   never observable). `e2e/gate-loading.spec.ts` asserts the screener paints its own skeleton, and
   `data.test.ts` asserts the sender scan carries no `body`. See §11.13 on doubles that fail quietly.
 
+### 11.15 Lessons learned (Session 2026-11-10 — runtime `<style>` never applied in the packaged app)
+
+- **A `<style>{css}</style>` element rendered by a view does not take effect in the packaged
+  build.** Six surfaces did this (Files card actions, Calendar, Search, Insights, MeetingPanel, the
+  Imbox spinner keyframes). In the dev server the rules apply; in the `.app` they don't, and nothing
+  reports it — no CSP violation, no console error. The visible symptom was the Files card rendering
+  its three action buttons in normal flow (a vertical column at the bottom-left of every card)
+  because the only rule that positions them was missing. **Rule: view styles live in a `.css` file
+  imported by the component**, which is what every other view in this repo already does. A grep for
+  `<style` in `src/` is now the regression check.
+- **An entry animation plus a slow first render equals a blank page, not a slow page.**
+  `animation: view-enter 0.3s both` holds the wrapper at its first keyframe (`opacity: 0`) until the
+  animation clock advances. If the same tick is busy mounting 3,740 cards, no frame is produced, the
+  skeleton in the DOM is never composited, and the user reports "it's blank for seconds". Diagnose
+  by asking what is on the main thread at that moment, not by adding another spinner — the fix was
+  to stop mounting 3,740 cards.
+- **`ps -o %cpu` is a decaying average; `top -l N -pid` is the instantaneous one.** A process that
+  did heavy work at boot reads 80-120% for a minute afterwards. Use `top` (or `sample`, and read the
+  *main thread's* sub-counts, not the whole-file leaf sort) before concluding a loop is still
+  running — the earlier refetch storm and the boot-time backfill looked identical in `ps`.
+- **`document.querySelector` during a render pass cannot see elements from that same pass.** A probe
+  embedded in the JSX runs before Solid attaches the subtree to the document, so it reported
+  `tag=none` for an element that existed. Probe from `onMount`/`setTimeout(0)`, or verify through the
+  rendered output instead.
+
 ## 12. Agent Skills & Global Protocols
 
 SendPalm adopts a set of global agent skills stored in `~/.agents/skills/`. These skills are available to Kimi Code, Claude Code, OpenCode, and any other agent that reads the standard skill directory. **Invoke them by name** when the situation matches their description:
