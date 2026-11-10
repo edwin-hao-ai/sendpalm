@@ -228,14 +228,70 @@ const NAMED_ENTITIES: Record<string, string> = {
   rdquo: "”",
   laquo: "«",
   raquo: "»",
+  sbquo: "‚",
+  bdquo: "„",
   times: "×",
   divide: "÷",
   euro: "€",
   pound: "£",
   yen: "¥",
+  cent: "¢",
   deg: "°",
   plusmn: "±",
+  sect: "§",
+  para: "¶",
+  permil: "‰",
+  dagger: "†",
+  Dagger: "‡",
+  prime: "′",
+  Prime: "″",
+  frasl: "/",
+  larr: "←",
+  rarr: "→",
+  uarr: "↑",
+  darr: "↓",
+  harr: "↔",
+  ne: "≠",
+  le: "≤",
+  ge: "≥",
+  infin: "∞",
+  minus: "−",
+  sup2: "²",
+  sup3: "³",
+  frac12: "½",
+  frac14: "¼",
+  frac34: "¾",
+  // Zero-width / formatting entities: decode them so they stop showing up as
+  // literal `&zwj;` in previews. `stripInvisible` removes them afterwards.
+  zwj: "\u200d",
+  zwnj: "\u200c",
+  lrm: "\u200e",
+  rlm: "\u200f",
+  shy: "\u00ad",
+  thinsp: " ",
 };
+
+/** Characters that must never reach a preview.
+ *
+ *  `&zwj;` / `&zwnj;` / BOM / soft hyphen are punctuation for screen readers and
+ *  word breakers; rendered literally they look like noise ("&zwj; &zwj;…" was
+ *  all a Stream card showed).
+ */
+const INVISIBLE = /[\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff\u00ad]/g;
+
+/** Plain-text body → something safe to show in a one-line preview.
+ *
+ *  `body` is supposed to be already-decoded text, but real mail (especially
+ *  marketing mail relayed through Chinese ESPs) still carries entities like
+ *  `&zwj;` or `&nbsp;`, which render as literal noise in a list row.
+ */
+export function plainPreview(text: string): string {
+  return stripInvisible(decodeHtmlEntities(text));
+}
+
+export function stripInvisible(text: string): string {
+  return text.replace(INVISIBLE, "");
+}
 
 /**
  * Decode HTML entities.
@@ -266,13 +322,15 @@ export function decodeHtmlEntities(text: string): string {
 }
 
 export function htmlToPlainText(html: string): string {
-  return decodeHtmlEntities(
-    html
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-      // Tags first, entities second: decoding `&lt;` before stripping would
-      // invent markup that was only ever text.
-      .replace(/<[^>]+>/g, " "),
+  return stripInvisible(
+    decodeHtmlEntities(
+      html
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+        // Tags first, entities second: decoding `&lt;` before stripping would
+        // invent markup that was only ever text.
+        .replace(/<[^>]+>/g, " "),
+    ),
   )
     .replace(/\s+/g, " ")
     .trim();

@@ -6,6 +6,7 @@ import {
   plainTextToHtml,
   decodeHtmlEntities,
   htmlToPlainText,
+  stripInvisible,
 } from "./html";
 
 describe("sanitizeEmailHtml", () => {
@@ -254,5 +255,21 @@ describe("decodeHtmlEntities", () => {
     expect(htmlToPlainText("<p>&lt;b&gt;bold?&lt;/b&gt;</p>")).toBe(
       "<b>bold?</b>",
     );
+  });
+});
+
+describe("invisible entities", () => {
+  it("stops &zwj; from reaching a preview", () => {
+    // Marketing mail is full of these; rendered literally a Stream card is
+    // nothing but「&zwj; &zwj; &zwj;…」.
+    expect(htmlToPlainText("<p>a&zwj;b&zwnj;c&shy;d</p>")).toBe("abcd");
+  });
+
+  it("keeps a space where a spacing entity was", () => {
+    expect(htmlToPlainText("a&thinsp;b&ensp;c&emsp;d")).toBe("a b c d");
+  });
+
+  it("strips zero-width characters that were already literal", () => {
+    expect(stripInvisible("a\u200db\u200bc\ufeffd")).toBe("abcd");
   });
 });

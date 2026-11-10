@@ -11,6 +11,8 @@ export interface MessageSender {
   isMe?: boolean;
 }
 
+import { plainPreview } from "../utils/html";
+
 export function formatMessageSource(
   message: Message,
   sender: MessageSender,
@@ -29,7 +31,7 @@ export function formatMessageSource(
 
 /** Build a plain-text preview limited to a single line. */
 export function messagePreview(body: string, max = 110): string {
-  const collapsed = body.replace(/\s+/g, " ").trim();
+  const collapsed = plainPreview(body).replace(/\s+/g, " ").trim();
   if (collapsed.length <= max) return collapsed;
   return `${collapsed.slice(0, max)}…`;
 }

@@ -46,6 +46,7 @@ import {
   htmlEmailSrcdoc,
   htmlToPlainText,
   looksLikeHtml,
+  plainPreview,
   plainTextToHtml,
   prefetchImages,
 } from "../utils/html";
@@ -511,5 +512,5 @@ export function EmailBody(props: EmailBodyProps) {
  *  previews cheap; full rendering is EmailBody's job on expand. */
 export function emailPreviewText(m: Pick<Message, "body" | "prev">): string {
   const raw = m.body || m.prev || "";
-  return looksLikeHtml(raw) ? htmlToPlainText(raw) : raw;
+  return looksLikeHtml(raw) ? htmlToPlainText(raw) : plainPreview(raw);
 }

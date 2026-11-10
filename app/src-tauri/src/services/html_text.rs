@@ -115,7 +115,27 @@ pub fn html_to_text(html: &str) -> String {
         // "spacer.gif" or a tracking pixel description.
     }
 
-    collapse_blank_lines(&out)
+    strip_zero_width(&collapse_blank_lines(&out))
+}
+
+/// Remove zero-width / bidi control characters.
+///
+/// `&zwj;` and friends are word-breaking punctuation for the renderer, not
+/// text. Left in place they show up as literal `&zwj; &zwj; …` in every
+/// preview (a real marketing mail was nothing else).
+fn strip_zero_width(text: &str) -> String {
+    text.chars()
+        .filter(|c| {
+            !matches!(
+                c,
+                '\u{200b}'..='\u{200f}'
+                    | '\u{202a}'..='\u{202e}'
+                    | '\u{2060}'..='\u{2064}'
+                    | '\u{feff}'
+                    | '\u{00ad}'
+            )
+        })
+        .collect()
 }
 
 /// Decode the entities that appear in real mail bodies.
@@ -170,6 +190,38 @@ fn decode_entity(entity: &str) -> Option<String> {
         "copy" => "©",
         "reg" => "®",
         "trade" => "™",
+        "sbquo" => "‚",
+        "bdquo" => "„",
+        "prime" => "′",
+        "thinsp" => " ",
+        "ensp" => " ",
+        "emsp" => " ",
+        "frasl" => "/",
+        "larr" => "←",
+        "rarr" => "→",
+        "uarr" => "↑",
+        "darr" => "↓",
+        "harr" => "↔",
+        "ne" => "≠",
+        "le" => "≤",
+        "ge" => "≥",
+        "infin" => "∞",
+        "minus" => "−",
+        "sup2" => "²",
+        "sup3" => "³",
+        "frac12" => "½",
+        "frac14" => "¼",
+        "frac34" => "¾",
+        "cent" => "¢",
+        "sect" => "§",
+        "para" => "¶",
+        "permil" => "‰",
+        "dagger" => "†",
+        "zwj" => "\u{200d}",
+        "zwnj" => "\u{200c}",
+        "lrm" => "\u{200e}",
+        "rlm" => "\u{200f}",
+        "shy" => "\u{00ad}",
         _ => "",
     };
     if !simple.is_empty() {
@@ -259,6 +311,11 @@ mod tests {
     }
 
     #[test]
+    fn drops_zero_width_entities() {
+        assert_eq!(html_to_text("<p>a&zwj;b&zwnj;c&shy;d</p>"), "abcd");
+    }
+
+    #[test]
     fn decodes_numeric_entities_for_cjk() {
         // What a Chinese newsletter body actually looks like before decoding.
         assert_eq!(
@@ -318,7 +375,10 @@ pub async fn backfill_markup_bodies(pool: &sqlx::SqlitePool) -> Result<u32, Stri
             // with no text part at all, which makes it unsearchable (the
             // index is built from `body`).
             "SELECT id, body FROM messages \
-              WHERE (body IS NULL OR body = '' OR body LIKE '%</%' OR body LIKE '%&#%') \
+              WHERE (body IS NULL OR body = ''
+                     OR body LIKE '%</%' OR body LIKE '%&#%'
+                     OR body LIKE '%&zwj;%' OR body LIKE '%&zwnj;%'
+                     OR body LIKE '%&nbsp;%' OR body LIKE '%&shy;%') \
                 AND body_html IS NOT NULL AND body_html <> '' \
                 AND id > $1 ORDER BY id LIMIT $2",
         )

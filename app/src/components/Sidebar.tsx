@@ -292,7 +292,19 @@ function WideNav(props: {
           const isActive = () => props.activeGroup === group.id;
           return (
             <div style={{ "margin-bottom": "2px" }}>
-              <div style={{ display: "flex", "align-items": "center" }}>
+              {/* One surface for the whole row. The active tint used to sit on
+                  the label button only, so the caret rendered as a second,
+                  detached circle — the row read as two pieces instead of a
+                  selected item. */}
+              <div
+                style={{
+                  display: "flex",
+                  "align-items": "center",
+                  height: "34px",
+                  "border-radius": "var(--radius-md)",
+                  background: isActive() ? "var(--paper-light)" : "transparent",
+                }}
+              >
                 <button
                   type="button"
                   data-nav-group={group.id}
@@ -315,7 +327,7 @@ function WideNav(props: {
                     padding: "0 8px",
                     "border-radius": "var(--radius-md)",
                     border: "none",
-                    background: isActive() ? "var(--paper-light)" : "transparent",
+                    background: "transparent",
                     color: isActive()
                       ? "var(--text-primary)"
                       : "var(--text-secondary)",

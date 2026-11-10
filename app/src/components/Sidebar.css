@@ -58,6 +58,14 @@
   position: static;
   transform: none;
   opacity: 1;
+  /* Inside the row's own surface: a palm-soft hover would blot a second
+     shape inside the selection. */
+  background: transparent;
+}
+
+.sidebar-disclosure--static:hover {
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  color: var(--text-primary);
 }
 
 /* Touch screens have no hover — keep the caret visible. */

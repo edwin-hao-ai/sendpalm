@@ -403,16 +403,60 @@ function StreamCard(props: StreamCardProps) {
       </Show>
 
       <Show when={showParagraphs()}>
-        <div
-          style={{
-            color: "var(--text-secondary)",
-            "font-size": "var(--text-body-sm)",
-            "line-height": 1.6,
-          }}
-        >
-          <For each={visibleParagraphs()}>
-            {(p) => <p style={{ margin: "0 0 var(--space-2)" }}>{p}</p>}
-          </For>
+        <div style={{ position: "relative" }}>
+          <div
+            style={{
+              color: "var(--text-secondary)",
+              "font-size": "var(--text-body-sm)",
+              "line-height": 1.7,
+              // Room for the fade to swallow the last lines instead of
+              // cutting them mid-glyph.
+              "padding-bottom": props.expanded ? 0 : "28px",
+            }}
+          >
+            <For each={visibleParagraphs()}>
+              {(p) => <p style={{ margin: "0 0 var(--space-2)" }}>{p}</p>}
+            </For>
+          </div>
+
+          {/* Collapsed: the text does not end, it fades into the paper. A hard
+              cut reads as "this mail is three lines long"; a soft fade reads
+              as "there is more, keep reading" — which is the whole point of a
+              newspaper column. */}
+          <Show when={!props.expanded}>
+            <div
+              aria-hidden="true"
+              data-stream-fade
+              style={{
+                position: "absolute",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                height: "72px",
+                background:
+                  "linear-gradient(to bottom, transparent 0%, var(--paper-light) 72%, var(--paper-light) 100%)",
+                "pointer-events": "none",
+              }}
+            />
+            <span
+              aria-hidden="true"
+              style={{
+                position: "absolute",
+                right: "2px",
+                bottom: "2px",
+                display: "inline-flex",
+                "align-items": "center",
+                gap: "4px",
+                "font-size": "var(--text-micro)",
+                "font-weight": 700,
+                color: "var(--text-muted)",
+                "letter-spacing": "0.04em",
+                "pointer-events": "none",
+              }}
+            >
+              继续读 <Icon name="ph-caret-down" size={10} />
+            </span>
+          </Show>
         </div>
       </Show>
 

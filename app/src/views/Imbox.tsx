@@ -93,7 +93,7 @@ import {
 } from "../utils/message-dates";
 import { PageHeader } from "../components/PageHeader";
 import { appSettings } from "../stores/ui";
-import { looksLikeHtml, htmlToPlainText } from "../utils/html";
+import { looksLikeHtml, htmlToPlainText, plainPreview } from "../utils/html";
 
 /** Profile timezone used for every mail date label/group in this view.
  *  Invalid values fall back to the OS zone inside the helpers. */
@@ -1931,7 +1931,7 @@ function MessageCard(props: MessageCardProps) {
     // Senders that stuff markup into the text part (HTML-only mail) would
     // show `<!DOCTYPE html>` tag soup here — strip to readable text, same
     // treatment as the Gate card.
-    const text = looksLikeHtml(raw) ? htmlToPlainText(raw) : raw;
+    const text = looksLikeHtml(raw) ? htmlToPlainText(raw) : plainPreview(raw);
     if (text.length <= PREVIEW_CHARS) return text;
     return text.slice(0, PREVIEW_CHARS).trimEnd() + "…";
   });
