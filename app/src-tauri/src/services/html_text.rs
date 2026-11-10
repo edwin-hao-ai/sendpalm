@@ -362,6 +362,27 @@ mod tests {
 /// them all into memory is the 8 GB boot we already paid for once.
 pub async fn backfill_markup_bodies(pool: &sqlx::SqlitePool) -> Result<u32, String> {
     const CHUNK: i64 = 100;
+
+    // Run once per schema/extractor generation, not once per launch.
+    //
+    // Idempotence is not enough here: a row whose HTML has no extractable text
+    // (image-only newsletters) is rewritten to an empty body, which matches
+    // `body = ''` again on the next boot, so the same 16 rows were re-extracted
+    // and re-tokenized into the trigram index on **every** start — ~1.9 s of
+    // CPU plus a WAL checkpoint, for no change. The version is bumped when
+    // `html_to_text` learns something new (the last bump added zero-width and
+    // entity decoding, so every existing body needs one fresh pass).
+    const BACKFILL_VERSION: &str = "2";
+    let applied: Option<(String,)> = sqlx::query_as(
+        "SELECT value FROM app_kv WHERE key = 'html_text_backfill_version'",
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("backfill version read: {e}"))?;
+    if applied.as_ref().map(|(v,)| v.as_str()) == Some(BACKFILL_VERSION) {
+        return Ok(0);
+    }
+
     let mut repaired = 0u32;
     let mut last_id = String::new();
 
@@ -430,5 +451,16 @@ pub async fn backfill_markup_bodies(pool: &sqlx::SqlitePool) -> Result<u32, Stri
             repaired += 1;
         }
     }
+    sqlx::query(
+        // `app_kv.updated_at` is NOT NULL (date_backfill writes it too), so a
+        // two-column insert fails with 1299 and the version never sticks.
+        "INSERT INTO app_kv (key, value, updated_at) VALUES ('html_text_backfill_version', $1, datetime('now')) \
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+    )
+    .bind(BACKFILL_VERSION)
+    .execute(pool)
+    .await
+    .map_err(|e| format!("backfill version write: {e}"))?;
+
     Ok(repaired)
 }
