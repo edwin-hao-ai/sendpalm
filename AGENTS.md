@@ -736,6 +736,38 @@ been silently wrong for months because the browser test double and the dev serve
   `tag=none` for an element that existed. Probe from `onMount`/`setTimeout(0)`, or verify through the
   rendered output instead.
 
+### 11.16 Lessons learned (Session 2026-11-10 — resident-app energy: measure CPU correctly, and never
+re-index at boot)
+
+- **`ps aux` / `ps -o %cpu` is a decaying average, not "what it costs now".** A process that did heavy
+  work at startup reads 80-120% for a minute afterwards, and a WebView that loaded a 420 MB payload
+  reads 24% long after it went quiet. Both numbers were wrong here. Measure **cumulative CPU time**
+  (`ps -o time= -p <pid>` sampled twice, delta ÷ interval) and confirm with `top -l N -pid`; that pair
+  settled the question at 0.07% (app) + 0.9% (WebKit).
+- **`pgrep -f sendpalm-app` in a shell script matches the shell running the script**, whose command
+  line contains that string — so the "app" you measure can be your own `sh`. Use `pgrep -x`.
+- **A one-shot migration that runs on every launch is the most expensive bug class in a resident app.**
+  `bootstrap` called `backfillSearchIndex()` on every start: it pulled all 4,515 message rows *with
+  bodies* (420 MB through the IPC bridge) and rewrote 8,658 FTS rows — 145 s of CPU per launch, for an
+  index that was already complete. The repair pass had the same shape (16 rows re-extracted every
+  launch, because their extracted body was empty and re-matched `body = ''`). Both are now gated:
+  the indexer diffs ids (`SELECT id`, no bodies) and indexes only what is missing; the repair records
+  a version in `app_kv` and runs once per extractor generation.
+- **Idempotence is not enough when the result re-matches the trigger.** "Repair rows whose body is
+  empty" + "repair an unrepairable row to an empty body" is an infinite cycle spread across launches.
+  Test the *post-condition*: after the pass, the same pass on the same data must do nothing.
+- **Test schemas must mirror production, or the gate silently fails.** The version write was rejected
+  by `app_kv.updated_at NOT NULL` (SQLite 1299); the pass kept running and nothing surfaced it except
+  a log line. A test that creates `app_kv` the way production does caught it immediately.
+- **Report a recurring failure once, and remember a *set* of signatures.** Three different warnings per
+  60 s cycle means a single "last message" slot still prints all three every cycle (~4,300 lines/day).
+  Keep the set, clear it when the condition clears so a new breakage is loud again.
+- **An infinite CSS animation keeps a laptop from idling.** The notification badge pulsed forever
+  whenever an unread notification existed — i.e. always. Bound every always-visible loop
+  (`iteration-count: 3`) and guard it: `document.getAnimations()` filtered on
+  `iterations === Infinity` must be empty when the app is idle. Seed the element first, or the guard
+  passes vacuously (the badge was not even mounted the first time).
+
 ## 12. Agent Skills & Global Protocols
 
 SendPalm adopts a set of global agent skills stored in `~/.agents/skills/`. These skills are available to Kimi Code, Claude Code, OpenCode, and any other agent that reads the standard skill directory. **Invoke them by name** when the situation matches their description:

@@ -3917,3 +3917,34 @@ Rust 159、TS 784、Playwright 158 通过 / 0 失败。
   点击直达。`listTasksForMessage` 之前只有查询没有 UI，现在接上了。
 
 验证：TS 848、Playwright 173 passed / 1 skipped（新增 `task-from-message.spec.ts`）。
+
+### 2026-11-10 常驻代价：启动 145 秒 CPU → 1.4 秒
+
+用户问"常驻应用会不会把电脑耗死"。先纠正我自己上一轮的错误读数：`ps -o %cpu` 是**衰减平均值**，
+`ps aux` 里 WebKit 显示的 24% 是启动期的残留；用累计 CPU 时间（`ps -o time`）与 `top` 同时测，
+稳定后是 **0.07%（主进程）+ 0.9%（WebKit）**。
+
+但真正的浪费藏在启动：**每次启动都要花约 145 秒 CPU**（前 3 分钟一个核跑满，风扇起转），
+用户感知就是"一开就烫"。三个原因：
+
+1. **`bootstrap` 每次启动重建整个搜索索引**。`backfillSearchIndex()` 拉 `listMessages()`
+   全部 4515 行**含正文**（420 MB 过 IPC），再逐行删除+插入 `search_index`
+   ——8658 次，每次重跑 trigram 分词。而索引本来就是完整的（8658 行对应 8658 个实体）。
+   现在改成先扫 id（9 ms，不碰正文）、diff 出缺失的再索引；健康库零工作量。
+2. **HTML 正文修复每次启动重做同样的 16 行**。纯图片 newsletter 抽不出文本 → 写回空 body
+   → 下次又匹配 `body = ''`。改用 `app_kv` 里的版本号做一次性开关（版本号在
+   `html_to_text` 变化时 bump）。顺带发现 `app_kv.updated_at` 是 NOT NULL，
+   第一版版本写入直接报 1299，版本号根本没写进去——测试里用真实 schema 才抓到。
+3. **没有凭据时的同步重试每分钟打三条同样的日志**。改成"每个不同问题只报一次"，
+   恢复后清空记忆；重载循环仍然是 60 秒（新加账户不用重启）。
+
+另外把两个常驻动画封顶：通知徽章原来 `infinite`（有未读通知就一直脉冲，等于永久），
+同步胶囊同理。新增 e2e 守卫"空闲时不得有无限动画"，并先验证它在旧代码上会失败。
+
+**真机实测（打包 .app）**：启动 CPU 2.0 s（修复前 145 s）、WebKit 侧 1.7 s；
+t=12 秒后两条曲线都是平的，空闲 **0.07% / 0.9%**。日志从每分钟 3 行变成一次。
+
+顺带修复 `tests/desktop_notifier_test.rs`——`NotificationPrefs` 加字段后这个测试一直编译不过，
+`cargo test` 全量其实是红的。
+
+验证：TS 850、Rust 36 个测试目标全绿、Playwright 175 passed / 1 skipped。
