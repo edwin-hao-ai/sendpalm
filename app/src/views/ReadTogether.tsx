@@ -575,7 +575,7 @@ export function ReadTogether() {
                 <EmailBody
                   message={current()!}
                   minHeight={240}
-                  showImagesBar={false}
+                  trustSender={!currentContact()?.blocked}
                 />
               </div>
               </Show>

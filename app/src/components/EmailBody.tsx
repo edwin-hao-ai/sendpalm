@@ -88,6 +88,9 @@ export interface EmailBodyProps {
   minHeight?: number;
   /** Hide the 「显示图片」 bar (compact cards). */
   showImagesBar?: boolean;
+  /** The user already accepted this sender (screened, not blocked), so the
+   *  mail opens with its images loaded instead of a wall of blank space. */
+  trustSender?: boolean;
   /** Test hook. */
   "data-testid"?: string;
 }
@@ -106,6 +109,9 @@ export function EmailBody(props: EmailBodyProps) {
   const [iframeReady, setIframeReady] = createSignal(false);
   const [showBusy, setShowBusy] = createSignal(false);
   const [alwaysShow, setAlwaysShow] = createSignal(false);
+  /** Images load immediately for a sender the user has accepted (or asked to
+   *  always show); unknown senders keep the click-to-load path. */
+  const revealByDefault = () => props.trustSender === true || alwaysShow();
   let pendingSanitize = 0;
   let currentIframe: HTMLIFrameElement | null = null;
   let currentIframeResizeObserver: ResizeObserver | null = null;
@@ -158,7 +164,7 @@ export function EmailBody(props: EmailBodyProps) {
     const myId = ++pendingSanitize;
     setTimeout(() => {
       if (myId !== pendingSanitize) return; // stale
-      setIframeSrc(htmlEmailSrcdoc(html));
+      setIframeSrc(htmlEmailSrcdoc(html, { showImages: revealByDefault() }));
       setIframeReady(true);
     }, 0);
   });
@@ -310,6 +316,85 @@ export function EmailBody(props: EmailBodyProps) {
           </div>
         </Show>
       </Show>
+      {/* Show images + per-sender "always show" — only mount when the
+          sanitized HTML actually contains external <img> tags. The
+          button is per-message because the prefetch map must target
+          this message's iframe, and the checkbox policy is per-sender
+          so the same sender in another thread inherits it. */}
+      <Show
+        when={
+          props.showImagesBar !== false &&
+          imageAnalysis() &&
+          !revealByDefault() &&
+          hiddenImageCount() > 0
+        }
+      >
+        <div
+          data-show-images-bar
+          style={{
+            display: "flex",
+            "align-items": "center",
+            "flex-wrap": "wrap",
+            gap: "var(--space-3)",
+            "margin-top": "var(--space-2)",
+            "font-size": "var(--text-caption)",
+            color: "var(--text-secondary)",
+          }}
+        >
+          <span data-images-blocked-hint style={{ color: "var(--text-muted)" }}>
+            已屏蔽此发件人，远程图片未加载
+          </span>
+          <button
+            type="button"
+            onClick={() => void onShowImages()}
+            disabled={showBusy()}
+            data-show-images
+            style={{
+              display: "inline-flex",
+              "align-items": "center",
+              gap: "var(--space-1)",
+              padding: "4px 10px",
+              "border-radius": "var(--radius-pill, 999px)",
+              border: "0.5px solid var(--border)",
+              background: "var(--paper-light)",
+              color: "var(--text-primary)",
+              cursor: showBusy() ? "wait" : "pointer",
+              "font-size": "var(--text-caption)",
+              opacity: showBusy() ? 0.6 : 1,
+            }}
+          >
+            <Show
+              when={showBusy()}
+              fallback={<Icon name="ph-image" size={12} />}
+            >
+              <Icon name="ph-spinner" size={12} />
+            </Show>
+            显示图片（{hiddenImageCount()}）
+          </button>
+          <Show when={props.senderEmail}>
+            <label
+              style={{
+                display: "inline-flex",
+                "align-items": "center",
+                gap: "var(--space-1)",
+                cursor: "pointer",
+                "user-select": "none",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={alwaysShow()}
+                onChange={(e) =>
+                  void onToggleAlwaysShow(e.currentTarget.checked)
+                }
+                data-always-show-images
+                style={{ margin: 0 }}
+              />
+              <span>始终显示此发件人的图片</span>
+            </label>
+          </Show>
+        </div>
+      </Show>
       <iframe
         data-email-body-html
         ref={(el) => {
@@ -437,81 +522,6 @@ export function EmailBody(props: EmailBodyProps) {
         }}
         title={props.title ?? props.message.subj ?? "邮件正文"}
       />
-      {/* Show images + per-sender "always show" — only mount when the
-          sanitized HTML actually contains external <img> tags. The
-          button is per-message because the prefetch map must target
-          this message's iframe, and the checkbox policy is per-sender
-          so the same sender in another thread inherits it. */}
-      <Show
-        when={
-          props.showImagesBar !== false &&
-          imageAnalysis() &&
-          hiddenImageCount() > 0
-        }
-      >
-        <div
-          data-show-images-bar
-          style={{
-            display: "flex",
-            "align-items": "center",
-            "flex-wrap": "wrap",
-            gap: "var(--space-3)",
-            "margin-top": "var(--space-2)",
-            "font-size": "var(--text-caption)",
-            color: "var(--text-secondary)",
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => void onShowImages()}
-            disabled={showBusy()}
-            data-show-images
-            style={{
-              display: "inline-flex",
-              "align-items": "center",
-              gap: "var(--space-1)",
-              padding: "4px 10px",
-              "border-radius": "var(--radius-pill, 999px)",
-              border: "0.5px solid var(--border)",
-              background: "var(--paper-light)",
-              color: "var(--text-primary)",
-              cursor: showBusy() ? "wait" : "pointer",
-              "font-size": "var(--text-caption)",
-              opacity: showBusy() ? 0.6 : 1,
-            }}
-          >
-            <Show
-              when={showBusy()}
-              fallback={<Icon name="ph-image" size={12} />}
-            >
-              <Icon name="ph-spinner" size={12} />
-            </Show>
-            显示图片（{hiddenImageCount()}）
-          </button>
-          <Show when={props.senderEmail}>
-            <label
-              style={{
-                display: "inline-flex",
-                "align-items": "center",
-                gap: "var(--space-1)",
-                cursor: "pointer",
-                "user-select": "none",
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={alwaysShow()}
-                onChange={(e) =>
-                  void onToggleAlwaysShow(e.currentTarget.checked)
-                }
-                data-always-show-images
-                style={{ margin: 0 }}
-              />
-              <span>始终显示此发件人的图片</span>
-            </label>
-          </Show>
-        </div>
-      </Show>
     </>
   );
 }

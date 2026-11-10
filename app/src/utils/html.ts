@@ -6,11 +6,21 @@ import { invoke } from "@tauri-apps/api/core";
 const PLACEHOLDER_DATA_URL =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E";
 
+/** Whether the next sanitize pass should hide remote images.
+ *
+ *  Mail from a sender the user has already accepted loads its images straight
+ *  away — that is what every other client does, and a wall of blank space is
+ *  not "private", it is broken-looking. Only first-time / blocked senders keep
+ *  the click-to-load path. The hook below reads this flag; `sanitize` runs
+ *  synchronously so the save/restore cannot interleave.
+ */
+let hideRemoteImages = true;
+
 // Register hook once at module load (idempotent per module instance).
 DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   if (node.nodeName === "IMG") {
     const src = node.getAttribute("src");
-    if (src && /^https?:\/\//i.test(src)) {
+    if (hideRemoteImages && src && /^https?:\/\//i.test(src)) {
       node.setAttribute("data-original-src", src);
       node.setAttribute("src", PLACEHOLDER_DATA_URL);
       node.classList.add("sp-img-hidden");
@@ -159,7 +169,17 @@ export function splitEmailCss(html: string): EmailCssSplit {
 }
 
 /** Sanitise a mail body (its `<style>` blocks already removed). */
-function sanitizeMailBody(html: string): string {
+function sanitizeMailBody(html: string, showImages = false): string {
+  const previous = hideRemoteImages;
+  hideRemoteImages = !showImages;
+  try {
+    return sanitizeMailBodyInner(html);
+  } finally {
+    hideRemoteImages = previous;
+  }
+}
+
+function sanitizeMailBodyInner(html: string): string {
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS: EMAIL_ALLOWED_TAGS,
     FORBID_TAGS: [
@@ -502,20 +522,30 @@ export function emailBodyPreview(
  *  card expand). The click interceptor posts a message up to the parent so
  *  links open in the OS browser instead of navigating inside the iframe.
  */
-export function htmlEmailSrcdoc(html: string): string {
+export function htmlEmailSrcdoc(
+  html: string,
+  options: { showImages?: boolean } = {},
+): string {
   const { body, blockedCss, fullCss } = splitEmailCss(html);
-  const safe = sanitizeMailBody(body);
+  // Trusted sender: render the sender's sheet live and keep their images, so
+  // nothing is hidden and there is nothing to click.
+  const showImages = options.showImages === true;
+  const safe = sanitizeMailBody(body, showImages);
   // The sender's CSS ships twice: the blocked copy is what renders first, and
   // the untouched copy sits in a sheet switched off with `media="not all"`.
   // 「显示图片」 flips it to `media="all"` (see the handler below), which brings
   // background images back at their original urls — no re-serialisation, and
   // nothing leaves the machine until the user asks.
-  const cssBlocks = [
-    blockedCss ? `<style>${blockedCss}</style>` : "",
-    fullCss && fullCss !== blockedCss
-      ? `<style id="sp-css-full" media="not all">${fullCss}</style>`
-      : "",
-  ].join("\n");
+  const cssBlocks = showImages
+    ? fullCss
+      ? `<style>${fullCss}</style>`
+      : ""
+    : [
+        blockedCss ? `<style>${blockedCss}</style>` : "",
+        fullCss && fullCss !== blockedCss
+          ? `<style id="sp-css-full" media="not all">${fullCss}</style>`
+          : "",
+      ].join("\n");
   return `<!DOCTYPE html>
 <html>
 <head>

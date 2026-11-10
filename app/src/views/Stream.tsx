@@ -401,7 +401,11 @@ function StreamCard(props: StreamCardProps) {
           {/* The image bar stays on: a newsletter without its images is a
               page of blank boxes, and the bar is the only way to reveal them
               (plus "always show for this sender"). */}
-          <EmailBody message={props.m} minHeight={200} />
+          <EmailBody
+            message={props.m}
+            minHeight={200}
+            trustSender={!props.contact?.blocked}
+          />
         </div>
       </Show>
 

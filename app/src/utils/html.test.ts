@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   sanitizeEmailHtml,
   htmlEmailSrcdoc as emailSrcdoc,
+  htmlEmailSrcdoc as srcdocFor,
   analyzeImages,
   emailBodyPreview,
   plainTextToHtml,
@@ -339,5 +340,32 @@ describe("the mail frame's own defaults stay out of the sender's way", () => {
 
   it("still hides remote images until asked", () => {
     expect(srcdoc()).toContain(".sp-img-hidden");
+  });
+});
+
+describe("a trusted sender's mail opens with its images", () => {
+  const mail = `<html><head><style>.hero{background:url('https://cdn.example.com/h.png')}</style></head>
+    <body><img src="https://cdn.example.com/logo.png"><div class="hero">x</div></body></html>`;
+
+  it("keeps img sources untouched when showImages is set", () => {
+    const doc = srcdocFor(mail, { showImages: true });
+    // `sp-img-hidden` and `data-original-src` also appear in the frame's own
+    // CSS + show-images script; what matters is the <img> markup itself.
+    const img = doc.slice(doc.indexOf("<img"), doc.indexOf("<img") + 120);
+    expect(img).toContain("cdn.example.com/logo.png");
+  });
+
+  it("ships the sender's sheet live instead of a switched-off copy", () => {
+    const doc = srcdocFor(mail, { showImages: true });
+    // The toggled sheet is the marker; the phrase "not all" also appears in a
+    // comment inside the frame script, so match the element, not the text.
+    expect(doc).not.toContain('id="sp-css-full"');
+    expect(doc).toContain("cdn.example.com/h.png");
+  });
+
+  it("still hides them for an unknown sender", () => {
+    const doc = srcdocFor(mail);
+    expect(doc).toContain("sp-img-hidden");
+    expect(doc).toContain('id="sp-css-full"');
   });
 });

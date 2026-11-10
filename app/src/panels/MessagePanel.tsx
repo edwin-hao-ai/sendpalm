@@ -1372,6 +1372,9 @@ export function MessagePanel(props: { messageId: string }) {
                             senderEmail={
                               !sender().isMe ? sender().email : undefined
                             }
+                            // Images load by default; only a sender the user
+                            // explicitly blocked keeps them behind the bar.
+                            trustSender={!c()?.blocked}
                           />
                         </Show>
                       </Show>
