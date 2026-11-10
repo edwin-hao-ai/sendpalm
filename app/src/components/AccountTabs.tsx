@@ -145,7 +145,7 @@ export function AccountTabs(props: AccountTabsProps) {
               color={a.color}
               active={activeAccountId() === a.id}
               isolated={a.privacy === "isolated"}
-              count={counts()?.[a.id]}
+              count={counts.latest?.[a.id]}
               onSelect={select}
             />
           )}

@@ -282,7 +282,7 @@ export function Imbox() {
 
   const contactMap = createMemo<Map<string, Contact>>(() => {
     const map = new Map<string, Contact>();
-    for (const c of contacts() ?? []) map.set(c.id, c);
+    for (const c of contacts.latest ?? []) map.set(c.id, c);
     return map;
   });
 
@@ -423,7 +423,10 @@ export function Imbox() {
   /* ── Piles (Pending / Saved / Remind) ─────────────────────────────── */
 
   const piles = createMemo((): Pile[] => {
-    const all = pileMessages() ?? [];
+    // `.latest`: the pile slices refresh on every sync tick, and a pending read
+    // here would make the whole list fall back to its skeleton (collapsing
+    // `#main` and resetting the reader's scroll position).
+    const all = pileMessages.latest ?? [];
     const all_piles: Pile[] = [
       {
         id: "pending",
@@ -456,11 +459,11 @@ export function Imbox() {
   // Count for the standalone 专注回复 button (shown when the Pending
   // pile is non-empty).
   const pendingCount = createMemo(
-    () => (pileMessages() ?? []).filter((m) => m.replyLater).length,
+    () => (pileMessages.latest ?? []).filter((m) => m.replyLater).length,
   );
 
   const remindedCount = createMemo(
-    () => (pileMessages() ?? []).filter((m) => m.bubbleUpAt).length,
+    () => (pileMessages.latest ?? []).filter((m) => m.bubbleUpAt).length,
   );
 
   /* ── Bundle drawer state ─────────────────────────────────────────── */
@@ -1060,7 +1063,7 @@ export function Imbox() {
       <ImboxHeader
         total={newPaged.total() + seenPaged.total()}
         newCount={newPaged.total()}
-        recentUnread={recentUnread() ?? 0}
+        recentUnread={recentUnread.latest ?? 0}
         previouslySeenCount={seenPaged.total()}
         syncing={syncing()}
         onSync={syncNow}
@@ -1381,7 +1384,7 @@ export function Imbox() {
                   {(p) => (
                     <PileCard
                       pile={p}
-                      contacts={contacts() ?? []}
+                      contacts={contacts.latest ?? []}
                       compact={isMobileLayout()}
                       onOpen={(id) => open(id)}
                     />
