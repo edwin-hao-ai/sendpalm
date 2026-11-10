@@ -65,6 +65,15 @@ async function seed(page: Page) {
   await page.locator("body.app-ready").waitFor({ timeout: 10_000 });
   await page.evaluate(() => window.__sendpalmE2E?.__seedReady);
   await expect(page.locator("[data-message-id]").first()).toBeVisible({ timeout: 10_000 });
+
+  // One unread notification so the topbar badge is mounted — that badge used
+  // to pulse forever, which is the case this file guards.
+  await page.evaluate(async () => {
+    await window.__sendpalmE2E!.seedNotification({
+      id: "n-1", type: "info", title: "测试通知", body: "", read: false,
+      createdAt: new Date().toISOString(),
+    } as never);
+  });
 }
 
 const queries = (page: Page) =>
@@ -85,6 +94,36 @@ test("an idle inbox does not re-query the store", async ({ page }) => {
   // A 60s reminder tick is the only legitimate background query, and this
   // window is 1s wide.
   expect(issued, `idle queries:\n${issued.join("\n")}`).toHaveLength(0);
+});
+
+/** A resident app must be able to sit still. An animation with
+ *  `iteration-count: infinite` keeps the compositor producing frames for as
+ *  long as the element is mounted — and the notification badge is mounted for
+ *  as long as there is one unread notification, i.e. always. Finite
+ *  animations (a skeleton that goes away, a spinner while syncing) are fine;
+ *  an unbounded one never lets the machine idle. */
+test("nothing animates forever while the app sits idle", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await seed(page);
+  await page.waitForTimeout(1_500);
+
+  // The badge must actually be mounted, or this test proves nothing.
+  await expect(page.locator('[aria-label="通知"]').first()).toContainText("1");
+
+  const endless = await page.evaluate(() =>
+    document
+      .getAnimations()
+      .filter((a) => {
+        const timing = (a.effect as KeyframeEffect | null)?.getTiming();
+        return timing?.iterations === Infinity;
+      })
+      .map((a) => {
+        const el = (a.effect as KeyframeEffect | null)?.target as Element | null;
+        const name = (a as Animation & { animationName?: string }).animationName ?? "?";
+        return `${name} on ${el ? el.tagName.toLowerCase() : "?"}`;
+      }),
+  );
+  expect(endless, `unbounded animations:\n${endless.join("\n")}`).toHaveLength(0);
 });
 
 test("opening a message queries the detail, not the list", async ({ page }) => {

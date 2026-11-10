@@ -3,6 +3,10 @@ use sendpalm_app_lib::services::desktop_notifier::{should_notify, NotificationPr
 fn prefs(desktop: bool, quiet: bool, start: &str, end: &str) -> NotificationPrefs {
     NotificationPrefs {
         desktop_enabled: desktop,
+        // Per-message notifications by default; the digest and sound toggles
+        // are independent of the timing rules these tests exercise.
+        digest: false,
+        sound: true,
         quiet_hours_enabled: quiet,
         quiet_hours_start: start.to_string(),
         quiet_hours_end: end.to_string(),

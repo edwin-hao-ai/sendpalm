@@ -373,7 +373,12 @@ function NotificationBell(props: { onClick: () => void }) {
             display: "flex",
             "align-items": "center",
             "justify-content": "center",
-            animation: "pulse-soft 1.8s ease-in-out infinite",
+            // Three beats, not forever. This badge is mounted for as long as
+            // there is one unread notification — i.e. effectively always on a
+            // resident mail client — and an infinite compositor animation is
+            // exactly what keeps a laptop from idling. It re-mounts when the
+            // count goes 0 → N, which restarts the animation.
+            animation: "pulse-soft 1.8s ease-in-out 3",
           }}
         >
           {n() > 99 ? "99+" : n()}
@@ -540,8 +545,10 @@ export function SyncBadge() {
           "font-size": "var(--text-micro)",
           "font-weight": "600",
           "white-space": "nowrap",
+          // Bounded for the same reason: a sync that never finishes (an
+          // account stuck on a dead server) must not pulse for hours.
           animation: aggregateBusy()
-            ? "pulse-soft 1.6s ease-in-out infinite"
+            ? "pulse-soft 1.6s ease-in-out 6"
             : undefined,
           transition:
             "background var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out)",
