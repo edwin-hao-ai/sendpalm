@@ -1104,6 +1104,14 @@ function BatchPanel(props: {
           "margin-top": "var(--space-3)",
           position: "sticky",
           bottom: "var(--space-3)",
+          // Sticky bars float over the scrolling card list; without a surface
+          // the buttons looked glued onto whatever was underneath in dark
+          // mode.
+          background: "var(--paper)",
+          padding: "var(--space-2)",
+          "margin-left": "calc(-1 * var(--space-2))",
+          "margin-right": "calc(-1 * var(--space-2))",
+          "border-radius": "var(--radius-md)",
         }}
       >
         <button disabled={props.busy} style={btn()} onClick={() => props.onApply("imbox")}>

@@ -469,6 +469,11 @@ export function ReadTogether() {
               style={{
                 flex: 1,
                 overflow: "auto",
+                // A default macOS overlay scrollbar sits on top of the card's
+                // right edge and reads as a foreign UI element. A thin,
+                // colour-matched rail is quieter and does not overlap text.
+                "scrollbar-width": "thin",
+                "scrollbar-color": "var(--border-strong) transparent",
                 padding: "var(--space-5)",
                 display: "flex",
                 "flex-direction": "column",
