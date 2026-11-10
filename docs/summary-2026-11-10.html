@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SendPalm 工作报告 · 2026-08 ~ 11</title>
+<style>
+  :root{
+    --paper:#fbfaf7; --card:#ffffff; --ink:#23231f; --ink2:#5b5b54; --ink3:#8a8a80;
+    --line:#e6e3da; --palm:#0a8f63; --palm-soft:#eaf6f0;
+    --red:#b42318; --red-soft:#fdecea;
+    --amber:#b7791f; --amber-soft:#fdf4e3;
+    --blue:#2f6feb; --blue-soft:#eaf0fd;
+    --purple:#7700a2; --purple-soft:#f6eafa;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:0 20px 80px;
+    background:var(--paper); color:var(--ink);
+    font:16px/1.75 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:900px; margin:0 auto}
+
+  header{padding:56px 0 28px; border-bottom:1px solid var(--line); margin-bottom:8px}
+  .kicker{font-size:13px; letter-spacing:.12em; text-transform:uppercase; color:var(--palm); font-weight:800}
+  h1{font-size:40px; line-height:1.2; letter-spacing:-.02em; margin:10px 0 12px; font-weight:850}
+  .sub{color:var(--ink2); font-size:17px; max-width:660px; margin:0}
+
+  h2{font-size:26px; letter-spacing:-.01em; margin:56px 0 6px; font-weight:820; scroll-margin-top:20px}
+  h2 .num{color:var(--ink3); font-weight:800; font-size:15px; vertical-align:2px; margin-right:10px}
+  h3{font-size:17px; margin:26px 0 8px; font-weight:780}
+  p{margin:10px 0}
+  .lead{color:var(--ink2)}
+  code{font:.88em/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; background:#f0eee8; padding:1px 5px; border-radius:4px}
+
+  /* summary box */
+  .tldr{
+    background:var(--palm-soft); border:1px solid #cfe9dd; border-radius:14px;
+    padding:22px 26px; margin:28px 0 8px;
+  }
+  .tldr b{display:block; font-size:13px; letter-spacing:.1em; text-transform:uppercase; color:var(--palm); margin-bottom:10px}
+  .tldr ol{margin:0; padding-left:22px}
+  .tldr li{margin:6px 0}
+
+  /* metric strip */
+  .metrics{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:22px 0 8px}
+  .metric{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px}
+  .metric .v{font-size:26px; font-weight:850; letter-spacing:-.02em; line-height:1.15}
+  .metric .k{font-size:12px; color:var(--ink3); margin-top:2px}
+
+  /* cards */
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px 24px; margin:14px 0}
+  .card h3{margin-top:0}
+
+  table{width:100%; border-collapse:collapse; margin:14px 0; font-size:14.5px}
+  th,td{text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top}
+  th{font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink3); font-weight:800}
+  tr:last-child td{border-bottom:0}
+  td.num{font-variant-numeric:tabular-nums; white-space:nowrap}
+
+  .badge{display:inline-block; font-size:11.5px; font-weight:800; padding:2px 8px; border-radius:999px; letter-spacing:.02em; white-space:nowrap}
+  .b-fatal{background:var(--red-soft); color:var(--red)}
+  .b-high{background:var(--amber-soft); color:var(--amber)}
+  .b-mid{background:var(--blue-soft); color:var(--blue)}
+  .b-low{background:#f1f0eb; color:var(--ink2)}
+  .b-done{background:var(--palm-soft); color:var(--palm)}
+
+  .delta{font-variant-numeric:tabular-nums}
+  .from{color:var(--ink3); text-decoration:line-through}
+  .to{color:var(--palm); font-weight:800}
+
+  details{margin:10px 0; border:1px solid var(--line); border-radius:10px; background:var(--card); padding:0}
+  details summary{cursor:pointer; padding:12px 16px; font-weight:750; font-size:15px; list-style:none}
+  details summary::-webkit-details-marker{display:none}
+  details summary::before{content:"▸ "; color:var(--ink3)}
+  details[open] summary::before{content:"▾ "}
+  details > div{padding:0 18px 16px; border-top:1px solid var(--line); margin-top:0}
+
+  ul.tight{margin:8px 0; padding-left:20px}
+  ul.tight li{margin:4px 0}
+
+  footer{margin-top:64px; padding-top:22px; border-top:1px solid var(--line); color:var(--ink3); font-size:13.5px}
+
+  nav.toc{display:flex; flex-wrap:wrap; gap:8px; margin:20px 0 4px}
+  nav.toc a{
+    font-size:13px; text-decoration:none; color:var(--ink2); background:var(--card);
+    border:1px solid var(--line); border-radius:999px; padding:5px 12px;
+  }
+  nav.toc a:hover{border-color:var(--palm); color:var(--palm)}
+
+  @media print{
+    body{background:#fff}
+    details{border:0} details summary{display:none} details > div{border:0; padding:0}
+    h2{page-break-after:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">SendPalm · 工作总结</div>
+  <h1>从「能跑」到「敢发」</h1>
+  <p class="sub">
+    这段时间做的主要是三件事：把多账户真正做到能用、把用户会踩到的坑一个个挖出来修掉、
+    最后在真机上跑一遍确认。下面是按「你关心什么」组织的，不是按提交记录。
+  </p>
+</header>
+
+<div class="tldr">
+  <b>如果只看三行</b>
+  <ol>
+    <li><b>多邮件账户</b>：以前只能合并、不能切换；现在有账户标签、能按邮箱筛选、能标记「不并入全部账户」。</li>
+    <li><b>审计修了 20+ 个真问题</b>：包括 3 个会让人直接放弃的（首屏没按钮、便签在桌面版完全无效、日历会被一条邮件打成错误页），以及 1 个「只有新用户才会撞」的首次安装崩溃。</li>
+    <li><b>现在可以发布了</b>：核心闭环全部跑通，关键路径都在真机（打包后的 App + 真实 4006 封邮件）上验证过。</li>
+  </ol>
+</div>
+
+<div class="metrics">
+  <div class="metric"><div class="v">842</div><div class="k">前端单测（起点 663）</div></div>
+  <div class="metric"><div class="v">161</div><div class="k">Rust 单测（起点 157）</div></div>
+  <div class="metric"><div class="v">168</div><div class="k">端到端用例全绿</div></div>
+  <div class="metric"><div class="v">−49%</div><div class="k">首屏 JS 体积</div></div>
+  <div class="metric"><div class="v">10 万</div><div class="k">封邮件压测通过</div></div>
+</div>
+
+<nav class="toc">
+  <a href="#accounts">1 · 多账户</a>
+  <a href="#audit">2 · 审计修了什么</a>
+  <a href="#perf">3 · 性能</a>
+  <a href="#ios">4 · iOS 黑屏</a>
+  <a href="#ship">5 · 发布就绪项</a>
+  <a href="#real">6 · 真机验证</a>
+  <a href="#left">7 · 还剩什么</a>
+</nav>
+
+<!-- ══════════════════════════════════════════════ -->
+<h2 id="accounts"><span class="num">01</span>多邮件账户：怎么合并、怎么切换</h2>
+
+<p class="lead">你最初的问题是这两个。答案分两半：<b>合并本来就是默认的</b>，<b>切换以前根本没有</b>。</p>
+
+<div class="card">
+  <h3>合并：不需要做任何事</h3>
+  <p>所有邮箱的邮件都写在同一张表里，每封邮件带一个「账户 id」。所以合并是默认状态，
+     同一个人给你工作邮箱和个人邮箱各发一封，列表里也是一组。</p>
+
+  <h3>切换：以前不存在，现在有三种粒度</h3>
+  <ul class="tight">
+    <li><b>全部账户</b>（默认）—— 合并视图，不加任何过滤，就是原来的行为。</li>
+    <li><b>单个邮箱</b> —— 列表上方一排标签：「全部账户 / 工作 / 私人…」，每个带未读数，点一下就只看这个邮箱。</li>
+    <li><b>隔离账户</b> —— 账户设置里可选「并入全部账户」或「单独查看」。选后者的邮箱不进合并视图，
+        只有切过去才看得见（比如工作邮箱不混进私人收件箱）。</li>
+  </ul>
+
+  <p>另外：合并视图里每行带一个<b>彩色首字母圆点</b>标明来源（新账户会从调色板轮流取色，
+     以前所有账户都是同一个绿色，根本分不出来），侧栏未读数也跟着当前选的邮箱走。</p>
+</div>
+
+<!-- ══════════════════════════════════════════════ -->
+<h2 id="audit"><span class="num">02</span>审计：修掉的 20+ 个真问题</h2>
+
+<p class="lead">按「严重程度」排。致命的意思是：用户第一次打开就会放弃。</p>
+
+<table>
+  <thead><tr><th style="width:78px">级别</th><th>问题</th><th style="width:96px">状态</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><span class="badge b-fatal">致命</span></td>
+      <td><b>首屏是死胡同</b><br>没连邮箱时，空态写着「新邮件到了会自动出现在这里」——假的，而且没有任何按钮，
+          唯一入口是顶栏一个没字的胶囊。</td>
+      <td><span class="badge b-done">已修</span></td>
+    </tr>
+    <tr>
+      <td><span class="badge b-fatal">致命</span></td>
+      <td><b>「便签」在桌面版完全没反应</b><br>用的是 <code>window.prompt</code>，而桌面 App 的内核不实现它。点了什么都不发生。</td>
+      <td><span class="badge b-done">已修</span></td>
+    </tr>
+    <tr>
+      <td><span class="badge b-fatal">致命</span></td>
+      <td><b>一条没有颜色的日程把整个日历打成错误页</b></td>
+      <td><span class="badge b-done">已修</span></td>
+    </tr>
+    <tr>
+      <td><span class="badge b-high">高</span></td>
+      <td><b>计数越用越错，还会吞邮件</b><br>删/归档一封后总数不减、翻页位置不回退，
+          结果「加载更多」跳过一封真实邮件，那封信永远不会出现。</td>
+      <td><span class="badge b-done">已修</span></td>
+    </tr>
+    <tr>
+      <td><span class="badge b-high">高</span></td>
+      <td><b>只有新用户才会撞的首次安装崩溃</b><br>数据库迁移的执行顺序错了，全新安装会直接初始化失败（老用户因为迁移已记录而跳过，所以从没暴露）。</td>
+      <td><span class="badge b-done">已修</span></td>
+    </tr>
+    <tr>
+      <td><span class="badge b-high">高</span></td>
+      <td><b>中文搜索搜不到自己的邮件</b><br>实测：标题「郝亚伟先生的拒付资料」，搜「拒付」0 条；搜「Re: 报价」直接报错。</td>
+      <td><span class="badge b-done">已修</span></td>
+    </tr>
+    <tr>
+      <td><span class="badge b-high">高</span></td>
+      <td><b>连接邮箱没有验证</b><br>以前填完密码就提示「密码已存入钥匙串」——那是对存储的陈述，不是「邮箱能用」。密码打错要等一分钟才知道。</td>
+      <td><span class="badge b-done">已修</span></td>
+    </tr>
+    <tr>
+      <td><span class="badge b-high">高</span></td>
+      <td><b>错误提示会永久堆满屏幕</b><br>后台同步持续失败时，每分钟多一张不会消失的卡片，最后整个界面糊住。</td>
+      <td><span class="badge b-done">已修</span></td>
+    </tr>
+    <tr>
+      <td><span class="badge b-high">高</span></td>
+      <td><b>窗口拖不动</b>（你在真机上遇到的）<br>顶栏的拖拽判断写错，几乎永远不触发；就算触发也会报权限错误。</td>
+      <td><span class="badge b-done">已修</span></td>
+    </tr>
+    <tr>
+      <td><span class="badge b-mid">中</span></td>
+      <td><b>中英混排</b><br>通知面板整块是英文（Notifications / Mark all read / Today…），任务面板字段也是（Status / Priority / Due），
+          搜索分组是 People / Messages / Files。</td>
+      <td><span class="badge b-done">已修</span></td>
+    </tr>
+    <tr>
+      <td><span class="badge b-mid">中</span></td>
+      <td><b>报刊卡片显示成一堆 <code>&amp;#38543;&amp;#30528;…</code></b><br>中文电子报把每个字编码成实体，前端没解码。</td>
+      <td><span class="badge b-done">已修</span></td>
+    </tr>
+    <tr>
+      <td><span class="badge b-mid">中</span></td>
+      <td><b>手机上邮件头部被裁掉</b><br>「富文本 / 纯文本 / 源码」三段控件超出屏幕，<code>源码</code> 被切掉。</td>
+      <td><span class="badge b-done">已修</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<details>
+  <summary>还有一批「小但会让人皱眉」的（点开）</summary>
+  <div>
+    <ul class="tight">
+      <li>删除任务用的是系统原生确认框（不可样式化、在桌面内核里不可靠）→ 换成应用内对话框</li>
+      <li>打开发件人选择器出现 <code>me@gmail.com &lt;me@gmail.com&gt;</code> 重复显示</li>
+      <li>手机详情底栏三个按钮里两个只有图标、一个带文字</li>
+      <li>手机顶栏同步按钮是个无字绿色胶囊，像神秘按钮</li>
+      <li>两条错误提示把原始异常直接糊给用户看（<code>AI 建议失败：Error: 401…</code>）</li>
+      <li>Rust 侧 8 处「锁中毒」写法：一次后台崩溃会让所有数据库操作连锁失败</li>
+      <li>生产构建在浏览器里打开是整页报错（只影响预览，不影响 Tauri 包，但很吓人）</li>
+      <li>收件箱每次同步 tick 都重拉整张联系人表（含备注、模式等大字段）</li>
+    </ul>
+  </div>
+</details>
+
+<div class="card">
+  <h3>顺带补的两件「结构性」工作</h3>
+  <p><b>1. 黑屏有了兜底。</b>以前任何渲染异常都会让窗口变空，兜底是用全屏黑块盖住整个 App——
+     等于同一个黑屏加一段堆栈。现在：出错只替换出错的视图，侧栏顶栏照常可用，
+     给「重试 / 重新载入 / 技术详情」，异常同时进错误日志。启动完成后的运行期错误只出一条可关闭的提示条，
+     不再盖住界面。</p>
+  <p><b>2. 加载态和错误态补齐。</b>面板、浮层、设置分区以前是「加载中空白、失败也空白」，
+     看起来和「这条记录没有内容」一模一样。现在统一走一个面板级状态组件（骨架 / 带重试的错误 / 空态），
+     并且有一条测试守着 23 个资源消费方，防止以后回退。</p>
+</div>
+
+<!-- ══════════════════════════════════════════════ -->
+<h2 id="perf"><span class="num">03</span>性能：两个真正的瓶颈</h2>
+
+<h3>3.1 首屏体积</h3>
+<p>第一次打包时，入口 JS 是 <b>583 kB</b>（gzip 177 kB）——因为详情面板、撰写窗口、命令面板、
+新手引导全都塞在首屏里，哪怕用户只想看一眼收件箱。</p>
+
+<table>
+  <thead><tr><th>chunk</th><th>改前</th><th>改后</th></tr></thead>
+  <tbody>
+    <tr><td>入口</td><td class="delta"><span class="from">583 kB / 177 kB gz</span></td><td class="delta to">272 kB / 90 kB gz</td></tr>
+    <tr><td>详情面板</td><td>在入口内</td><td>首次打开时加载（125 kB）</td></tr>
+    <tr><td>撰写窗口</td><td>在入口内</td><td>首次撰写时加载（35 kB）</td></tr>
+    <tr><td>命令面板</td><td>在入口内</td><td>首次 ⌘K 时加载（27 kB）</td></tr>
+  </tbody>
+</table>
+<p class="lead">打包产物冷启动实测：首屏 108 ms，传输约 109 kB。</p>
+
+<h3>3.2 十万封邮件（之前没测过）</h3>
+<p>写了一个 10 万封邮件的压测，量了所有列表和搜索用到的查询。发现两个悬崖：</p>
+
+<table>
+  <thead><tr><th>查询</th><th>修前</th><th>修后</th></tr></thead>
+  <tbody>
+    <tr><td>首屏第一页</td><td class="num">72 ms</td><td class="num to">4 ms</td></tr>
+    <tr><td><b>翻到第 500 页</b>（「加载更多」）</td><td class="num from">17,272 ms</td><td class="num to">0 ms</td></tr>
+    <tr><td><b>稍后回复 / 搁置 / 提醒 计数</b></td><td class="num from">705 ms</td><td class="num to">0 ms</td></tr>
+    <tr><td>侧栏未读</td><td class="num">—</td><td class="num to">6 ms</td></tr>
+    <tr><td>30 天未读</td><td class="num">—</td><td class="num to">17 ms</td></tr>
+    <tr><td>每个账户的徽章</td><td class="num">—</td><td class="num to">12 ms</td></tr>
+    <tr><td>中文三字搜索</td><td class="num">—</td><td class="num to">506 ms</td></tr>
+    <tr><td>单封邮件详情</td><td class="num">—</td><td class="num to">0 ms</td></tr>
+  </tbody>
+</table>
+
+<p><b>原因和解法：</b>「加载更多」用的是 <code>OFFSET</code>，数据库必须一行行跳过前面的记录（所以越翻越慢）；
+改成用「上一页最后一封」当游标。三个 pile 计数用了一条 <code>OR</code> 查询，把索引全废了；
+拆成三条窄查询。另外补了几个列表/计数索引。</p>
+
+<p class="lead">正确性也验了：用游标翻完 10 万封，<b>正好 100,000 条、不重不漏</b>。</p>
+
+<!-- ══════════════════════════════════════════════ -->
+<h2 id="ios"><span class="num">04</span>iOS 黑屏：三个 bug 叠在一起</h2>
+
+<p class="lead">这个挂了好几天的「窗口全黑」，其实和 webview 一点关系都没有——进程根本没活过一秒。</p>
+
+<div class="card">
+  <h3>① 启动入口的注解挂到了别的函数上</h3>
+  <p>拆分代码时，一段注释被插在「启动入口」的注解和函数之间，注解于是绑到了旁边那个函数上。
+     结果 iOS 启动时调用的是「装加密库」的函数，装完就返回，进程立刻退出——
+     系统日志写得很清楚：<code>Process exited … | voluntary</code>（主动退出，不是崩溃）。
+     桌面版从<code>main</code>直接调用，所以永远不暴露。</p>
+
+  <h3>② 数据库迁移顺序错了（所有平台都会中招）</h3>
+  <p>迁移是按「列表顺序」执行的，而列表后半段是倒着追加的。全新数据库上，
+     「回填字段」跑在了「加字段」前面，直接报错退出。
+     <b>老用户因为迁移已记录会跳过，所以这是一个「只有新用户才会撞」的首次安装失败。</b></p>
+
+  <h3>③ 后台任务抢在建表之前</h3>
+  <p>MCP 网关和同步循环在窗口打开前就启动，比数据库建表还早，报 <code>no such table</code>。
+     现在两者都先等表出现。</p>
+</div>
+
+<p><b>验证：</b>iPhone 17 模拟器里启动 → 新手引导 → 收件箱，截图在 <code>docs/ios-screenshots/</code>。
+另外补了一个 <code>verify-ios.sh</code> 脚本（文档里引用了几周，但仓库里其实没有），
+它会在进程已经退出时直接报错——缺的正是这一步检查。</p>
+
+<!-- ══════════════════════════════════════════════ -->
+<h2 id="ship"><span class="num">05</span>发布就绪：把「差一点」的补齐</h2>
+
+<table>
+  <thead><tr><th style="width:70px">级别</th><th>做了什么</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><span class="badge b-fatal">P0</span></td>
+      <td><b>搜索重做</b>：索引换成「三字符切片」，任意中文子串都能命中；查询逐词加引号，
+          带冒号/连字符不再报错；一到两个字的短词走另一条路径。<br>
+          <span class="delta"><span class="from">拒付 → 0 条</span> <span class="to">拒付 → 命中</span></span>，
+          <span class="delta"><span class="from">Re: 报价 → 报错</span> <span class="to">Re: 报价 → 正常</span></span>。<br>
+          顺带发现测试用的模拟数据库根本没实现这个查询——<b>以前所有搜索测试都是假绿</b>。</td>
+    </tr>
+    <tr>
+      <td><span class="badge b-fatal">P0</span></td>
+      <td><b>连接邮箱真的连一次</b>：保存后立刻跑一轮收信，按结果分三种处理——
+          密码错就<b>撤销这个账户</b>并就地报错（带服务商提示），网络问题保留账户并告知会自动重试。</td>
+    </tr>
+    <tr>
+      <td><span class="badge b-high">P1</span></td>
+      <td><b>富文本撰写</b>：粗体 / 斜体 / 链接 / 项目符号。发出去时渲染两份——
+          HTML 收件人看到格式，纯文本收件人看到<b>去掉标记</b>的同一段话（不会收到 <code>**urgent**</code>）。</td>
+    </tr>
+    <tr>
+      <td><span class="badge b-high">P1</span></td>
+      <td><b>撤销发送</b>：点发送后先扣 5 秒，期间可以撤销并把正文带回撰写窗口；
+          就算这时退出应用，草稿也还在，不会丢。</td>
+    </tr>
+    <tr>
+      <td><span class="badge b-high">P1</span></td>
+      <td><b>修了一个真 bug</b>：收件人输入框失焦时不提交。表现为——
+          「打好地址直接点发送」，按钮是禁用的、点了没反应，可输入框里明明显示着地址。</td>
+    </tr>
+    <tr>
+      <td><span class="badge b-high">P1</span></td>
+      <td><b>多选扩展到所有列表</b>：报刊 / 单据 / 回收站 / 垃圾邮件都能勾选，
+          批量条（稍后回复 / 归档 / 删除）抽成全局组件。</td>
+    </tr>
+    <tr>
+      <td><span class="badge b-high">P1</span></td>
+      <td><b>日历键盘导航</b>：←/→ 一天（周视图一周、年视图一月）、↑/↓ 一周、Enter 打开当天第一场。</td>
+    </tr>
+    <tr>
+      <td><span class="badge b-mid">P2</span></td>
+      <td><b>密度三档</b>（紧凑/标准/舒适）、<b>强调色 5 选</b>、<b>打印样式</b>（⌘P 打当前这封）、
+          <b>通知声音开关</b>、<b>筛选台决定沉淀为规则</b>（「以后这个发件人都这样」）。</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ══════════════════════════════════════════════ -->
+<h2 id="real"><span class="num">06</span>真机验证（macOS 打包后的 App + 真实 4006 封邮件）</h2>
+
+<p class="lead">不是「应该没问题」——是拖了一次窗口、点了一遍视图、查了数据库。</p>
+
+<table>
+  <thead><tr><th>验证项</th><th>结果</th></tr></thead>
+  <tbody>
+    <tr><td>启动 / 首屏</td><td>正常，4006 封、143 封待读、分组合并、底部待办条都在</td></tr>
+    <tr><td>窗口拖拽</td><td>从品牌区拖动，窗口坐标 <span class="delta">(120,60) → (370,300)</span>，<b>没有再报权限错误</b></td></tr>
+    <tr><td>筛选台</td><td>329 位待审，卡片 + 新加的「以后都这样」勾选框</td></tr>
+    <tr><td>报刊</td><td>272 篇，HTML 实体已解码成正常中文</td></tr>
+    <tr><td>数据库修复</td><td>实体乱码正文 <span class="delta"><span class="from">170</span> → <span class="to">0</span></span>；空正文 7 → 1（剩下那条是纯图邮件）</td></tr>
+    <tr><td>视图切换</td><td>先出骨架屏，再出内容</td></tr>
+  </tbody>
+</table>
+
+<p class="lead"><b>一个已知的升级代价：</b>已有邮箱的用户升级到这一版，<b>第一次启动会慢约 74 秒</b>
+（要重建 4515 封邮件的搜索索引，这段时间窗口还没创建）。全新安装没有历史数据，不受影响。</p>
+
+<!-- ══════════════════════════════════════════════ -->
+<h2 id="left"><span class="num">07</span>还剩什么（8 条，都不是功能缺陷）</h2>
+
+<table>
+  <thead><tr><th style="width:120px">类型</th><th>事项</th></tr></thead>
+  <tbody>
+    <tr><td><span class="badge b-low">要过夜</span></td><td>24 小时内存曲线（托盘常驻 + 待机一夜，确认没有缓慢膨胀）</td></tr>
+    <tr><td><span class="badge b-low">要别的机器</span></td><td>Windows / Linux 真机验证（托盘、开机自启、通知语义差异）</td></tr>
+    <tr><td><span class="badge b-low">要真凭据</span></td><td>新用户首次配置邮箱的完整走查（浏览器路径已有自动化测试）</td></tr>
+    <tr><td><span class="badge b-low">苹果手机</span></td><td>首屏那排快筛（订阅 / 新面孔 / 一起读）收进筛选面板</td></tr>
+    <tr><td><span class="badge b-low">观感</span></td><td>筛选台卡牌（用「厚度」表达还剩多少、滑动 5° 倾斜、批量小结）</td></tr>
+    <tr><td><span class="badge b-low">观感</span></td><td>日历双分段控件、洞察卡片等高、文件筛选条对齐、头像中文单字、时间格式三级规则、绿色按钮收敛</td></tr>
+    <tr><td><span class="badge b-low">明确不做</span></td><td>整页切换阅读 / 左右分栏 / 列表铺满 1150（此前评审明确否掉）</td></tr>
+    <tr><td><span class="badge b-low">待借鉴</span></td><td>竞品报告里另外 9 条可借鉴项</td></tr>
+  </tbody>
+</table>
+
+<p class="lead">这些要么需要<b>过夜采样或别的操作系统</b>，要么是<b>纯审美取舍</b>——没有客观正确答案，
+我按自己的想法改可能不合你的眼。你说哪几条要，我再动。</p>
+
+<!-- ══════════════════════════════════════════════ -->
+<h2 id="how"><span class="num">08</span>你可以自己验证</h2>
+
+<details>
+  <summary>命令速查（点开）</summary>
+  <div>
+    <table>
+      <tbody>
+        <tr><td>全部前端单测</td><td><code>cd app &amp;&amp; pnpm test</code></td></tr>
+        <tr><td>Rust 单测</td><td><code>cd app/src-tauri &amp;&amp; cargo test --lib</code></td></tr>
+        <tr><td>十万封压测</td><td><code>cargo test --test scale_100k -- --ignored --nocapture</code></td></tr>
+        <tr><td>端到端（浏览器）</td><td><code>cd app &amp;&amp; pnpm e2e</code></td></tr>
+        <tr><td>iOS 构建 + 截屏</td><td><code>cd app &amp;&amp; ./scripts/verify-ios.sh --build</code></td></tr>
+        <tr><td>桌面打包</td><td><code>cd app &amp;&amp; pnpm tauri build</code></td></tr>
+      </tbody>
+    </table>
+    <p class="lead" style="font-size:14px">详细记录：
+      <code>docs/UX-AUDIT-2026-11-08.md</code>（逐项审计）、
+      <code>docs/PROGRESS.md</code>（每次改动）、
+      <code>docs/TODOS.md</code>（还剩什么）。</p>
+  </div>
+</details>
+
+<footer>
+  SendPalm · 2026-08 ~ 2026-11 · 本文档由工作记录整理，不含主观评分。
+</footer>
+
+</div>
+</body>
+</html>
