@@ -301,6 +301,11 @@ function WideNav(props: {
                   display: "flex",
                   "align-items": "center",
                   height: "34px",
+                  // The caret lives INSIDE the selected surface; flush against
+                  // the edge it reads as a glued-on second element instead of
+                  // part of the row. Inset on the caret side only — the label
+                  // keeps its own 8px on the other side.
+                  padding: "0 6px 0 0",
                   "border-radius": "var(--radius-md)",
                   background: isActive() ? "var(--paper-light)" : "transparent",
                 }}
