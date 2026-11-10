@@ -61,6 +61,8 @@ import type { Clip, Contact, FollowUp, Message, Sticky } from "../types";
 import { useAgent } from "../agent/useAgent";
 import { addCalendarEvent } from "../services/backend";
 import { saveAttachment } from "../utils/save-attachment";
+import { senderRule } from "../utils/mail-rule";
+import { safeInvoke } from "../services/backend";
 import { Modal } from "../components/Modal";
 import { useRefreshEffect, useViewport } from "../utils/gestures";
 import { notifyMessageUpdated } from "../services/sync-events";
@@ -418,7 +420,38 @@ export function MessagePanel(props: { messageId: string }) {
     bumpRefreshTick();
     setDetailOpen(false);
     setSelectedMessageId(null);
-    showToast({ message: `已移到 ${bucketLabel(bucket)}`, kind: "success" });
+
+    // One manual move is a decision worth remembering: without the offer the
+    // same sender keeps landing in the wrong bucket forever.
+    showToast({
+      message: `已移到 ${bucketLabel(bucket)}`,
+      kind: "success",
+      ttlMs: 10_000,
+      action:
+        m.pid && bucket !== "trash" && bucket !== "spam"
+          ? {
+              label: "以后都这样",
+              run: async () => {
+                const sender = await getContact(m.pid);
+                const email = sender?.emails[0]?.value ?? "";
+                const rule = senderRule(email, bucket, 1);
+                if (!rule) {
+                  showToast({ message: "这个发件人没有邮箱地址", kind: "warning" });
+                  return;
+                }
+                const id = await safeInvoke<string>("upsert_mail_rule", {
+                  rule,
+                });
+                showToast({
+                  message: id
+                    ? `以后 ${sender?.name ?? email} 的邮件直接进 ${bucketLabel(bucket)}`
+                    : "规则没有保存，下次仍会回到原处",
+                  kind: id ? "success" : "warning",
+                });
+              },
+            }
+          : undefined,
+    });
   };
 
   const askAgentAboutMessage = async () => {

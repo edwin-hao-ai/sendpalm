@@ -84,8 +84,18 @@ export function buildShortcutGroups(shortcuts: Shortcut[]): HelpGroup[] {
     if (list) list.push(entry);
     else groups.set(g, [entry]);
   }
-  // Esc is hard-wired in the global handler, not a configurable row.
+  // Keys that are hard-wired in their view rather than registered as
+  // configurable shortcuts — they still need to be discoverable here.
   groups.get("全局")?.push({ combo: "Esc", label: "关闭面板 / 弹窗" });
+  groups.get("全局")?.push({ combo: "⌘↵", label: "在写信窗口里直接发送" });
+  const calendar = groups.get("日历");
+  if (calendar) {
+    calendar.push(
+      { combo: "← / →", label: "上一天 / 下一天（周视图一周、年视图一月）" },
+      { combo: "↑ / ↓", label: "上一周 / 下一周" },
+      { combo: "Enter", label: "打开当天第一场会议" },
+    );
+  }
   return GROUP_ORDER.filter((g) => groups.has(g)).map((g) => ({
     group: g,
     items: groups.get(g)!,

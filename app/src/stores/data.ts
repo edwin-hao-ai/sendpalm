@@ -903,6 +903,53 @@ export async function countGateCandidates(): Promise<number> {
   return rows.length;
 }
 
+/** Senders who were silently approved during a mailbox import.
+ *
+ *  The import transition auto-screens historical senders so a first sync does
+ *  not dump 300 cards on the user. That is the right default, but it is
+ *  invisible: there was no way to see *who* was let through, or to take a
+ *  second look. This is the count those two buttons operate on.
+ */
+export async function countAutoApprovedContacts(): Promise<number> {
+  const db = await getDb();
+  const rows = await db.select<Array<{ id: ID }>>(
+    `SELECT id FROM contacts
+      WHERE screened = 1 AND first_seen = 0 AND blocked = 0
+      LIMIT ${GATE_COUNT_LIMIT}`,
+  );
+  return rows.length;
+}
+
+/** Put the auto-approved senders back into the Screener. Returns their ids so
+ *  the toast can offer an undo. */
+export async function reopenAutoApprovedContacts(): Promise<ID[]> {
+  const db = await getDb();
+  const rows = await db.select<Array<{ id: ID }>>(
+    `SELECT id FROM contacts
+      WHERE screened = 1 AND first_seen = 0 AND blocked = 0
+      LIMIT ${GATE_COUNT_LIMIT}`,
+  );
+  const ids = rows.map((r) => r.id);
+  if (ids.length === 0) return [];
+  await db.execute(
+    `UPDATE contacts SET screened = 0, first_seen = 1
+      WHERE screened = 1 AND first_seen = 0 AND blocked = 0`,
+  );
+  return ids;
+}
+
+/** Undo `reopenAutoApprovedContacts` for the ids it returned. */
+export async function reapproveContacts(ids: ID[]): Promise<void> {
+  if (ids.length === 0) return;
+  const db = await getDb();
+  for (const id of ids) {
+    await db.execute(
+      "UPDATE contacts SET screened = 1, first_seen = 0 WHERE id = $1",
+      [id],
+    );
+  }
+}
+
 /** How far back the "待读" badge looks.
  *
  *  A first import leaves years of genuinely-unread mail in the store. Counting

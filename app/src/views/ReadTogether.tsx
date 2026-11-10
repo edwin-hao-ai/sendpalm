@@ -506,13 +506,16 @@ export function ReadTogether() {
                     display: "flex",
                     "align-items": "center",
                     gap: "var(--space-3)",
-                    "margin-bottom": "var(--space-4)",
+                    // Compressed: the sender block + H3 subject stacked up to
+                    // ~200px before the body on a laptop, so the first
+                    // paragraph of every card fell below the fold.
+                    "margin-bottom": "var(--space-2)",
                   }}
                 >
                   <Avatar
                     name={currentContact()?.name ?? "?"}
                     src={currentContact()?.avatar}
-                    size={48}
+                    size={36}
                   />
                   <div style={{ flex: 1, "min-width": 0 }}>
                     <div

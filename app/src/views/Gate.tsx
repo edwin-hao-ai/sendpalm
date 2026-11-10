@@ -368,6 +368,28 @@ export function Gate() {
     }
   };
 
+  /** Persist "以后都这样" for a batch of sender→bucket decisions. */
+  const rememberSenders = async (
+    list: { id: string; contact: Contact | undefined; bucket: string }[],
+  ) => {
+    let saved = 0;
+    for (const item of list) {
+      if (!item.contact) continue;
+      const email = item.contact.emails[0]?.value ?? "";
+      const rule = senderRule(email, item.bucket, 1);
+      if (!rule) continue;
+      const id = await safeInvoke<string>("upsert_mail_rule", { rule });
+      if (id) saved += 1;
+    }
+    showToast({
+      message:
+        saved > 0
+          ? `已记住 ${saved} 位发件人，以后他们的邮件直接归档`
+          : "规则没有保存，下次还会出现在筛选台",
+      kind: saved > 0 ? "success" : "warning",
+    });
+  };
+
   const applyAiSuggestions = async () => {
     const sug = aiSuggestions();
     const ids = Object.keys(sug);
@@ -387,7 +409,26 @@ export function Gate() {
         await updateMessagesBucketByContact(id, sug[id]!);
         ok += 1;
       }
-      showToast({ message: `已按 AI 建议整理 ${ok} 位发件人`, kind: "success" });
+      // The confirmation is the moment to make the decision stick: without
+      // this, next week's mail from the same senders lands back here.
+      const remembered = ids
+        .map((id) => ({
+          id,
+          contact: visibleQueue().find((q) => q.contact.id === id)?.contact,
+          bucket: sug[id]!,
+        }))
+        .filter((x) => x.contact);
+      showToast({
+        message: `已按 AI 建议整理 ${ok} 位发件人`,
+        kind: "success",
+        ttlMs: 12_000,
+        action: remembered.length
+          ? {
+              label: "以后都这样",
+              run: () => void rememberSenders(remembered),
+            }
+          : undefined,
+      });
       setAiSuggestions({});
       await refetchQueue();
     } finally {

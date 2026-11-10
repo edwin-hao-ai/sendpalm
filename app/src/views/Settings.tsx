@@ -81,6 +81,11 @@ import {
 import { formatThousands } from "../utils/counts";
 import { classifyVerifyResult } from "../utils/account-verify";
 import {
+  countAutoApprovedContacts,
+  reapproveContacts,
+  reopenAutoApprovedContacts,
+} from "../stores/data";
+import {
   ACCENT_CHOICES,
   DENSITY_LABEL,
   applyAppearance,
@@ -356,7 +361,9 @@ export function Settings() {
             display: "grid",
             "grid-template-columns": "280px minmax(0, 1fr)",
             gap: "var(--space-6)",
-            padding: "var(--space-4) var(--space-6) var(--space-6)",
+            // Same horizontal padding as `.page-header`, so the H1, the menu
+            // and the content share one left edge instead of three.
+            padding: "var(--space-2) var(--space-5) var(--space-5)",
             "align-items": "start",
             overflow: "auto",
           }}
@@ -369,9 +376,11 @@ export function Settings() {
           <main
             style={{
               "min-width": 0,
-              "max-width": "640px",
+              // Anchored to the grid's left edge, not centred: a centred
+              // column inside a left-aligned page reads as two layouts.
+              "max-width": "760px",
               width: "100%",
-              "justify-self": "center",
+              "justify-self": "stretch",
             }}
           >
             <SettingsContent activeTab={settingsTab()} />
@@ -1049,6 +1058,15 @@ function AccountsTab() {
           </For>
         )}
       </ResourceGate>
+
+      {/* Import transition: historical senders are auto-approved so a first
+          sync does not dump hundreds of cards on the user. That default is
+          invisible — this is where you can see it happened and take a second
+          look at who was let through. */}
+      <div style={{ "margin-top": "var(--space-6)" }}>
+        <SectionTitle>筛选台</SectionTitle>
+        <ScreenerImportReview />
+      </div>
 
       <Show when={editing()}>
         {(a) => (
@@ -3613,5 +3631,100 @@ function ToggleRow(props: {
       </span>
       <SwitchTrack checked={props.checked} />
     </button>
+  );
+}
+
+
+/** Settings → 账户 → 筛选台: review the senders auto-approved on import. */
+function ScreenerImportReview() {
+  const [count, { refetch }] = createResource(countAutoApprovedContacts);
+  const [busy, setBusy] = createSignal(false);
+
+  const reopen = async () => {
+    setBusy(true);
+    try {
+      const ids = await reopenAutoApprovedContacts();
+      await refetch();
+      bumpSoftRefreshTick();
+      showToast({
+        message: `已把 ${ids.length} 位发件人送回筛选台`,
+        kind: "success",
+        ttlMs: 12_000,
+        action: {
+          label: "撤销",
+          run: async () => {
+            await reapproveContacts(ids);
+            await refetch();
+            bumpSoftRefreshTick();
+          },
+        },
+      });
+    } catch (e) {
+      showToast({
+        message: "操作失败，请重试",
+        kind: "error",
+        detail: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      data-screener-review
+      style={{
+        display: "flex",
+        gap: "var(--space-3)",
+        "align-items": "flex-start",
+        padding: "var(--space-3)",
+        "border-radius": "var(--radius-md)",
+        background: "var(--paper-light)",
+        border: "0.5px solid var(--border)",
+      }}
+    >
+      <Icon name="ph-shield-check" size={18} style={{ color: "var(--palm)" }} />
+      <div style={{ flex: 1, "min-width": 0 }}>
+        <div style={{ "font-weight": 700, "font-size": "var(--text-body-sm)" }}>
+          导入时自动通过的发件人
+        </div>
+        <p
+          style={{
+            margin: "2px 0 0",
+            "font-size": "var(--text-caption)",
+            color: "var(--text-muted)",
+            "line-height": 1.6,
+          }}
+        >
+          {count() === undefined
+            ? "正在读取…"
+            : count() === 0
+              ? "没有。以后新导入的历史发件人也会自动通过，不会堆成一屏待审卡片。"
+              : `${count()} 位发件人在导入时被自动放进收件箱。想回头看是哪些人的话，可以把他们送回筛选台重新过一遍。`}
+        </p>
+        <Show when={(count() ?? 0) > 0}>
+          <button
+            type="button"
+            data-screener-reopen
+            disabled={busy()}
+            onClick={() => void reopen()}
+            style={{
+              "margin-top": "var(--space-2)",
+              padding: "6px 14px",
+              "border-radius": "var(--radius-pill)",
+              border: "0.5px solid var(--border)",
+              background: "transparent",
+              color: "var(--palm)",
+              "font-size": "var(--text-caption)",
+              "font-weight": 700,
+              cursor: busy() ? "wait" : "pointer",
+              opacity: busy() ? 0.6 : 1,
+            }}
+          >
+            {busy() ? "正在移动…" : "送回筛选台重审"}
+          </button>
+        </Show>
+      </div>
+    </div>
   );
 }
