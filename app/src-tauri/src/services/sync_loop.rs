@@ -186,6 +186,39 @@ const IDLE_ERROR_BACKOFF: Duration = Duration::from_secs(60);
 /// accounts.
 const ACCOUNT_RELOAD_INTERVAL: Duration = Duration::from_secs(60);
 
+/// Credential problems already reported in this session.
+///
+/// The reload loop runs every 60 s, and an account with no password in the
+/// keychain cannot get one until the user types it. One cycle emits three
+/// distinct messages (per-account skip, test fallback warning, no accounts),
+/// so a single "last message" slot still printed all three every minute and
+/// buried everything else in the log. Remember the set, report each problem
+/// once, and forget them when the situation recovers.
+static REPORTED_PROBLEMS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Log `message` unless the same `signature` was already reported.
+fn log_problem_once(signature: &str, message: impl FnOnce() -> String) {
+    let mut reported = match REPORTED_PROBLEMS.lock() {
+        Ok(guard) => guard,
+        // A poisoned lock must not silence the error path.
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if reported.iter().any(|s| s == signature) {
+        return;
+    }
+    eprintln!("{}", message());
+    reported.push(signature.to_string());
+}
+
+/// Credentials work again — a later breakage must be reported again.
+fn clear_problem_memory() {
+    let mut reported = match REPORTED_PROBLEMS.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    reported.clear();
+}
+
 /// How often the background purge job scans for expired trash/spam messages.
 const PURGE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
@@ -510,20 +543,25 @@ async fn load_sync_accounts(
 ) -> Result<Vec<SyncAccount>, String> {
     let db_accounts = load_accounts(pool, store).await?;
     if !db_accounts.is_empty() {
+        clear_problem_memory();
         return Ok(db_accounts);
     }
     if TEST_FALLBACK_ENABLED {
         // P0-5: log loudly when the test fallback fires — even in
         // dev, the user should be able to tell from the console that
         // they're not syncing a real account.
-        eprintln!(
-            "[sync] WARNING: no real accounts configured — falling back to SENDPALM_TEST_EMAIL ({})",
-            std::env::var("SENDPALM_TEST_EMAIL").unwrap_or_default()
-        );
+        log_problem_once("test-fallback", || {
+            format!(
+                "[sync] WARNING: no real accounts configured — falling back to SENDPALM_TEST_EMAIL ({})",
+                std::env::var("SENDPALM_TEST_EMAIL").unwrap_or_default()
+            )
+        });
         match build_test_fallback_account().await {
             Ok(a) => Ok(vec![a]),
             Err(e) => {
-                eprintln!("[sync] no accounts configured and test fallback unavailable: {e}");
+                log_problem_once("no-accounts", || {
+                    format!("[sync] no accounts configured and test fallback unavailable: {e}")
+                });
                 Ok(Vec::new())
             }
         }
@@ -560,7 +598,9 @@ async fn load_accounts(
                 settings_json,
             }),
             Err(e) => {
-                eprintln!("[sync] skipping account {id}: {e}");
+                log_problem_once(&format!("skip:{id}:{e}"), || {
+                    format!("[sync] skipping account {id}: {e}")
+                });
                 // The account exists but cannot sync (almost always: no
                 // password in the keychain). Surface it in the sync badge
                 // so the user sees "needs password" instead of a silently
