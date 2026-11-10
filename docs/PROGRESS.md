@@ -3857,3 +3857,34 @@ Rust 159、TS 784、Playwright 158 通过 / 0 失败。
   （单文件、离线可看、可打印；按「多账户 / 审计 / 性能 / iOS / 发布项 / 真机 / 还剩什么」组织）。
 
 验证：TS 842、Rust 161、Playwright 168 passed / 0 failed / 1 skipped、tsc / eslint / build 干净。
+
+### 2026-11-10「切到筛选台卡 5-10 秒还一片空白」
+
+用户报的是两件事，其实是一件 + 一件：
+
+- **空白没有 loading**：不是没做骨架屏，是主线程被占住了。`listGateQueue` 为了
+  328 位待审发件人，把这些人名下**所有**邮件都拉回来（3810 行 / 6.9 MB 正文），
+  再在 JS 里挑最新的那条。SQLite 侧 4.4 秒，之后主线程 `JSON.parse` 整个负载，
+  期间浏览器一帧都画不出来——DOM 里的骨架屏根本没被合成上屏。
+- **改法**：先用索引问「每个发件人最新的是哪封」（3 列、不含正文，覆盖索引 0.02 秒），
+  再按 id 只取那 328 行。正文只在 `prev` 为空时才读（`substr(body,1,300)`）——
+  读正文本身很贵：328 次 0.75 秒 vs 不读 0.02 秒，因为每行正文平均 90 KB 在溢出页里。
+  负载 6.9 MB → 130 KB。
+- **索引不能在迁移里建**：`(pid, timeline_at DESC, id, direction)` 在真实库上要 16 秒，
+  放迁移里就复刻 0032 那次「点了没反应 74 秒」。改到 `services/schema_maint.rs`，
+  窗口起来后后台建，且**建完才启动同步循环**（`CREATE INDEX` 全程持有写锁，和第一次
+  同步撞上会双双失败）。实测 4.4 秒建成，用户看不到。
+- **视图自己的加载态**：原来 Gate 在组件体里读 resource，注册到的是 `ViewSwitch` 那个
+  共享 Suspense，所以第一次进来看到的是**收件箱形状**的骨架，主线程一忙就什么都没有。
+  现在 resource 通过 user effect 拷进本地信号（Solid 对 user effect 不做 Suspense 注册），
+  头部立刻画出来、`GateSkeleton` 显示「正在读取…」、refetch 也不会再把视图拆掉重建。
+  `KeepAlive` 内部加了 per-view Suspense，lazy chunk 首次加载显示的是**这个视图**的骨架。
+- 装好的 `.app` 上实测：点击 → 卡片出来在一帧预算内（原来空白 1.5 秒左右）。
+
+配套测试：`mock-db` 记录每条 SELECT（`issuedQueries`）并能被要求变慢（`setQueryDelay`）。
+`data.test.ts` 断言扫描查询不带 `body`、明细按 id 取；`e2e/gate-loading.spec.ts` 断言
+筛选台画自己的骨架、且从不出现收件箱的骨架行。
+
+顺手：侧边栏分组行的小箭头离右边太近，选中时像贴上去的；给箭头一侧留 6px 内边距。
+
+验证：TS 846、Rust 164、Playwright 170 passed / 1 skipped。

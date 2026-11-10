@@ -664,6 +664,53 @@ been silently wrong for months because the browser test double and the dev serve
   than the app's**, so poking signals there is a silent no-op. Drive the real UI in e2e; if a test
   needs a signal, add a data attribute or an event.
 
+### 11.14 Lessons learned (Session 2026-11-10 — screener blank window: Suspense read-site, and a 53× payload)
+
+- **A Solid resource registers with the Suspense context at the *read site*, not where you put the
+  fallback.** `createResource`'s getter does `useContext(SuspenseContext)` from the current owner and
+  then `increment()`s it. `Gate` created its resource in the component body and read it from a
+  `createMemo`, so the increment landed on the boundary in `ViewSwitch` — adding a
+  `<Suspense fallback={<GateSkeleton/>}>` *inside* Gate's JSX did nothing, because that boundary is
+  created after the component body has already registered. Wrapping a component in its own Suspense
+  does not give it its own loading state. Either split the component so the reader is a child of the
+  boundary, or copy the resource into local signals from a **user effect** (see next point).
+- **Reads inside `createEffect` are exempt from Suspense registration.** The getter guards with
+  `if (Listener && !Listener.user && c)`; user effects set `Listener.user`. So
+  `createEffect(() => { const v = list(); if (v) setRows(v); })` turns a resource into ordinary state
+  with no suspension, which is how a view can own "header paints immediately + my own skeleton"
+  without fighting the framework. It also means a refetch no longer tears the view down: without
+  this, every `refetch()` (soft-refresh tick, post-decision reload) re-showed the boundary fallback
+  and re-created the DOM — silently resetting nothing (`cursor`/`decidedIds` live in the component's
+  owner, which survives) but throwing away scroll position and focus.
+- **A `lazy()` chunk throw is caught by the boundary above the *evaluation* of `props.children`.**
+  `ViewSwitch` had one shared `<Suspense fallback={<FeedSkeleton/>}>`, so the first visit to any view
+  showed the Imbox skeleton — wrong shape, reads as "still loading the previous screen". The boundary
+  now lives inside `KeepAlive`, i.e. under the point where the lazy component is evaluated, so each
+  view gets its own fallback. Anything that renders `props.children` may need this.
+- **`substr(body, 1, N)` is not a cheap preview.** It looks bounded but SQLite still loads the whole
+  column, so 328 of them over a mailbox averaging 90 KB of HTML per row measured **0.75 s** against
+  **0.02 s** for rows that skip it. Gate's card preview now reads the `prev` column and falls back to
+  `substr(body, …)` only `WHERE COALESCE(prev,'') = ''`. Same lesson in miniature as §11.7: bound the
+  *work*, not just the result size.
+- **"Fetch everything, pick in JS" is a 53× payload tax.** `listGateQueue` returned 3,810 rows
+  (6.9 MB) to keep 328. `SELECT id, pid, direction … ORDER BY timeline_at DESC` + `WHERE id IN (…)`
+  returns 130 KB. The SQL time was 4.4 s and the JS `JSON.parse` on the main thread was most of the
+  rest — which is why users saw *nothing*: no frame could paint while the thread was busy, so the
+  skeleton that was in the DOM was never composited. "No loading indicator" and "slow query" were the
+  same bug.
+- **A covering index for the pick, built off the boot path.** `(pid, timeline_at DESC, id, direction)`
+  turns the selection into an index-only scan (5.9 s → 0.02 s). Building it inside a migration would
+  have blocked startup for ~16 s with no window — the §11.13 failure mode again — so it lives in
+  `services/schema_maint.rs`, runs on a detached task after `wait_for_schema`, and the sync loop is
+  started *after* it finishes (a `CREATE INDEX` holds SQLite's write lock for its whole duration).
+  `schema_maint::queue_query_is_covering` fails if a future edit drops a column from the index.
+- **Make the test double record query *shape*, and be able to be slow.** `mock-db` now exposes
+  `issuedQueries` (every SELECT) and `setQueryDelay(ms)`. Two classes of bug were invisible without
+  them: a query that returns the right rows in the wrong shape (3,810 rows, all bodies), and a view
+  that shows nothing while pending (an in-memory double resolves in a microtask, so the skeleton is
+  never observable). `e2e/gate-loading.spec.ts` asserts the screener paints its own skeleton, and
+  `data.test.ts` asserts the sender scan carries no `body`. See §11.13 on doubles that fail quietly.
+
 ## 12. Agent Skills & Global Protocols
 
 SendPalm adopts a set of global agent skills stored in `~/.agents/skills/`. These skills are available to Kimi Code, Claude Code, OpenCode, and any other agent that reads the standard skill directory. **Invoke them by name** when the situation matches their description:
