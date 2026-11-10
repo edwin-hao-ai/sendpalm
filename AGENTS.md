@@ -768,6 +768,27 @@ re-index at boot)
   `iterations === Infinity` must be empty when the app is idle. Seed the element first, or the guard
   passes vacuously (the badge was not even mounted the first time).
 
+### 11.17 Lessons learned (Session 2026-11-11 — sanitised CSS, and refetch-vs-scroll)
+
+- **DOMPurify sanitises a *body* fragment; senders put their CSS in `<head>`.** Even with `"style"`
+  in `ALLOWED_TAGS`, `<style>` inside `<head>` is dropped with the rest of the head, so every mail
+  rendered as Times-on-white with table cells on one line. Lift the style blocks out, sanitise the
+  rest, put them back. Also scrub remote `url()` from that CSS — a background image is as good a
+  tracking pixel as `<img>`, and images are hidden until the user asks.
+- **A refetch inside a Suspense boundary is a scroll reset.** Reading a resource that goes back to
+  "pending" makes the boundary render its fallback; the view is torn down, the scroll container
+  collapses to zero height, its `scrollTop` clamps to 0, and restoring the content leaves the reader
+  at the top. The trigger here was "opening a mail marks it read → two counters refetch". Counters and
+  other background values should be read as `resource.latest` (last value, no registration); a stale
+  counter for one frame is invisible, a scroll reset is not.
+- **`startTransition` is not a general fix for that.** Wrapping tick callbacks in `startTransition`
+  prevents the fallback, but it also defers the updates: the Tasks error-state test stopped seeing its
+  error at all (`startTransition` there left the transition pending and the UI never flushed). It was
+  reverted in favour of `.latest`, which is local and cannot wedge a flush.
+- **The report was about one screen; the fix should say what it checked elsewhere.** 报刊 expands
+  cards in place, and 单据/垃圾邮件/回收站 render through a virtual list that owns its scroll state —
+  so they never walked this path. State that, instead of claiming a global fix.
+
 ## 12. Agent Skills & Global Protocols
 
 SendPalm adopts a set of global agent skills stored in `~/.agents/skills/`. These skills are available to Kimi Code, Claude Code, OpenCode, and any other agent that reads the standard skill directory. **Invoke them by name** when the situation matches their description:
