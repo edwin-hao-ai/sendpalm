@@ -6,6 +6,7 @@
 import {
   For,
   Show,
+  createEffect,
   createMemo,
   createResource,
   createSignal,
@@ -101,9 +102,29 @@ export function Gate() {
     void refetchQueue();
   });
 
-  const queue = createMemo<{ contact: Contact; message: Message }[]>(
-    () => queueItems() ?? [],
+  // Reading a resource from the component body (or from a memo) registers with
+  // the nearest Suspense boundary — which is the one in `ViewSwitch`, so the
+  // screener used to be replaced by the *Imbox* skeleton, or by nothing at all
+  // when the boundary had nothing to paint yet. The previous symptom was a
+  // blank window for several seconds on a real mailbox.
+  //
+  // Reads inside a USER effect are exempt from that registration (Solid checks
+  // `Listener.user`). Copying the resource into local signals keeps the shell,
+  // the header and the guide card on screen and lets this view own its own
+  // loading state.
+  const [queue, setQueue] = createSignal<{ contact: Contact; message: Message }[]>(
+    [],
   );
+  const [queueLoaded, setQueueLoaded] = createSignal(false);
+  const [queueError, setQueueError] = createSignal<unknown>(undefined);
+  createEffect(() => {
+    const rows = queueItems();
+    setQueueError(queueItems.error);
+    if (rows !== undefined) {
+      setQueue(rows);
+      setQueueLoaded(true);
+    }
+  });
 
   // Locally-decided contacts (approved/blocked). The card advances the
   // INSTANT the user decides — the DB writes and the next card are not on
@@ -148,6 +169,15 @@ export function Gate() {
     () => current()?.message?.id,
     async (id) => (id ? await getMessage(id) : null),
   );
+  // Same reason as `queue`: JSX reads would suspend the shared boundary and
+  // flash a skeleton over the whole screener every time the card changes.
+  const [currentBody, setCurrentBody] = createSignal<Message | undefined>(
+    undefined,
+  );
+  createEffect(() => {
+    const full = currentFull();
+    if (full) setCurrentBody(full);
+  });
 
 
   /** Optimistically hide the card and clamp the cursor. */
@@ -521,7 +551,7 @@ export function Gate() {
       }}
     >
         <Show
-          when={!queueItems.error}
+          when={!queueError()}
           fallback={
             <ErrorState
               title="筛选台加载失败"
@@ -542,7 +572,7 @@ export function Gate() {
             }}
           >
             <Icon name="ph-shield-check" size={14} />
-            {visibleQueue().length} 位待审 ·{" "}
+            {queueLoaded() ? `${visibleQueue().length} 位待审` : "正在读取…"} ·{" "}
             {t("gate.intro.body", "第一次给你写信的人会先停在这里。右滑放进，左滑拦下。")}
           </span>
         }
@@ -593,7 +623,7 @@ export function Gate() {
         }
       />
 
-      <Show when={queueItems() !== undefined} fallback={<GateSkeleton />}>
+      <Show when={queueLoaded()} fallback={<GateSkeleton />}>
       <Show when={!appSettings.preferences.gateGuideSeen && visibleQueue().length > 0}>
         <div
           data-gate-guide
@@ -794,7 +824,7 @@ export function Gate() {
                     }}
                   >
                     <EmailBody
-                      message={currentFull() ?? m()}
+                      message={currentBody() ?? m()}
                       minHeight={120}
                       showImagesBar={false}
                       style={{ "font-size": "var(--text-body-sm)" }}
@@ -1160,6 +1190,7 @@ function BatchPanel(props: {
 function GateSkeleton() {
   return (
     <div
+      data-gate-skeleton
       style={{
         background: "var(--surface-elevated)",
         border: "0.5px solid var(--border)",

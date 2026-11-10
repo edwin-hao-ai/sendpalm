@@ -338,14 +338,26 @@ pub fn run() {
                     let handle = app.handle().clone();
                     async move {
                         if let Ok(pool) = services::sync_loop::open_pool().await {
+                            // One-time index builds run BEFORE the sync loop
+                            // starts: `CREATE INDEX` holds SQLite's write lock
+                            // for its whole duration, and racing it against the
+                            // first sync chunk fails both. This task is
+                            // detached, so the window is already up — the user
+                            // never waits on it.
+                            if services::sync_loop::wait_for_schema(
+                                &pool,
+                                std::time::Duration::from_secs(30),
+                            )
+                            .await
+                            {
+                                services::schema_maint::ensure_gate_queue_index(&pool).await;
+                            }
                             let _ = services::sync_loop::backfill_imap_identity(&pool).await;
-                            let _ = pool;
-                            let _ = handle;
                         }
+                        services::sync_loop::start(handle.clone());
+                        services::scheduled_send::start(handle);
                     }
                 });
-                services::sync_loop::start(app.handle().clone());
-                services::scheduled_send::start(app.handle().clone());
             }
             // Local MCP gateway for AI agents (spec 2026-11-03). Runs
             // even when background sync is disabled — it is user-invoked

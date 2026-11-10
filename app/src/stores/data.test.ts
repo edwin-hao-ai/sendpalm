@@ -41,7 +41,7 @@ import {
   countRecentUnreadImbox,
 } from "./data";
 import { formatGateCount, GATE_COUNT_LIMIT } from "../utils/counts";
-import { resetMockDb, MockDb } from "../services/mock-db";
+import { resetMockDb, issuedQueries, MockDb } from "../services/mock-db";
 import type { Contact, Message, FileItem, CalendarEvent, Task, FollowUp, Clip } from "../types";
 
 const isoNow = () => new Date().toISOString();
@@ -160,6 +160,42 @@ describe("listGateQueue", () => {
     await upsertMessage(makeMessage("m-out", contact.id, { direction: "out" }));
 
     expect(await listGateQueue()).toEqual([]);
+  });
+
+  it("looks up the newest message per sender without reading bodies", async () => {
+    // The Gate asks "what is the newest mail from each unscreened sender?" for
+    // 300+ senders. Answering it with `SELECT … substr(body, 1, 4000) … WHERE
+    // pid IN (…)` is correct and unusable: on the reference mailbox that was
+    // 3,810 rows / 6.9 MB, which froze the view for ~6 s with no skeleton.
+    // The sender scan must therefore be a body-free, index-coverable projection.
+    for (const id of ["c-a", "c-b"]) {
+      await upsertContact(makeContact(id));
+      for (let i = 0; i < 4; i++) {
+        await upsertMessage(
+          makeMessage(`${id}-m${i}`, id, {
+            st: `2024-0${i + 1}-01T00:00:00.000Z`,
+            subj: `${id} ${i}`,
+          }),
+        );
+      }
+    }
+
+    const queue = await listGateQueue();
+    expect(queue).toHaveLength(2);
+
+    const scan = issuedQueries.find((q) => q.includes("WHERE pid IN ("));
+    expect(scan, "the queue must first ask which message is newest").toBeDefined();
+    expect(scan!.toLowerCase()).not.toContain("body");
+    expect(scan!.toLowerCase()).not.toContain("select *");
+
+    // Two senders → two detail rows, not eight.
+    const detail = issuedQueries.find((q) => q.includes("WHERE id IN ("));
+    expect(detail, "details are fetched by id, not by sender").toBeDefined();
+    // `body` is only read when the row has no `prev` preview: every row carries
+    // ~90 KB of HTML in overflow pages, and 328 of those reads cost 0.75 s
+    // against 0.02 s for the rows that skip them.
+    expect(detail!.toLowerCase()).toContain("when coalesce(prev, '') = ''");
+    expect(detail!.toLowerCase()).toContain("substr(body, 1, 300)");
   });
 
   it("skips contacts that have no messages", async () => {

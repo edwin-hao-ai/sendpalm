@@ -917,8 +917,35 @@ function runDelete(sql: string, bindValues: unknown[]): QueryResult {
 
 /* ── Public class ──────────────────────────────────────── */
 
+/** Every SELECT the app has issued since the last reset, newest last.
+ *
+ *  A query's *shape* is a performance contract, not an implementation detail
+ *  (AGENTS §11.7): `SELECT * FROM messages WHERE pid IN (…)` returns the right
+ *  rows and still freezes the app, because the payload is what costs. Tests
+ *  assert on the shape here; the returned rows alone cannot catch a regression.
+ */
+export const issuedQueries: string[] = [];
+
+/** Test-only: make every SELECT take this long.
+ *
+ *  Loading states that a real mailbox (or a slow disk) exposes are invisible
+ *  against an in-memory double, so a test that wants to see「加载中」has to ask
+ *  for the wait. Never non-zero outside a test.
+ */
+let queryDelayMs = 0;
+
+export function setQueryDelay(ms: number): void {
+  queryDelayMs = ms;
+}
+
 export class MockDb {
   select<T>(query: string, bindValues?: unknown[]): Promise<T> {
+    issuedQueries.push(query);
+    if (queryDelayMs > 0) {
+      return new Promise((resolve) => {
+        setTimeout(() => resolve(runSelect(query, bindValues ?? []) as T), queryDelayMs);
+      });
+    }
     const q = query.trim().toLowerCase();
     if (q.startsWith("select")) {
       return Promise.resolve(runSelect(query, bindValues ?? []) as T);
@@ -945,4 +972,5 @@ export class MockDb {
 /** Reset every in-memory table. Exposed for E2E tests. */
 export function resetMockDb(): void {
   clearAll();
+  issuedQueries.length = 0;
 }

@@ -1062,11 +1062,26 @@ export interface GateQueueItem {
   message: Message;
 }
 
+/** How much of a body the Gate card falls back to when the row has no
+ *  `prev` preview.
+ *
+ *  Reading `body` at all is expensive on a real mailbox — every row carries
+ *  ~90 KB of HTML in overflow pages, so 328 `substr(body, 1, …)` reads measured
+ *  0.75 s against 0.02 s without them. It is only worth reading when `prev`
+ *  (the preview the sync wrote) is empty, which is what the SQL below asks.
+ */
+const GATE_PREVIEW_CHARS = 300;
+
 /** Lightweight Gate queue query.
  *
  *  Avoids pulling the entire `messages` table (which can be many megabytes of
- *  HTML bodies in a real mailbox). We only fetch the unscreened contacts and
- *  the messages that belong to them, then pick the newest message per sender.
+ *  HTML bodies in a real mailbox). Two steps, because the naive one pays for
+ *  every message when it only keeps one per sender:
+ *
+ *  1. ask an index which message is newest per sender (also how many senders
+ *     are actually waiting — unscreened contacts with no mail cannot show a
+ *     card),
+ *  2. fetch only those rows, with the body clipped to a preview.
  */
 export async function listGateQueue(): Promise<GateQueueItem[]> {
   const db = await getDb();
@@ -1077,47 +1092,55 @@ export async function listGateQueue(): Promise<GateQueueItem[]> {
 
   const contactIds = contactRows.map((r) => r.id as ID);
   const placeholders = contactIds.map((_, i) => `$${i + 1}`).join(",");
-  // Bounded projection: the Gate card only needs the subject + a plain-text
-  // preview. The previous `SELECT *` pulled every message (with ~80 KB
-  // `body_html` each) for every unscreened sender — on a 4,000-message
-  // mailbox that was ~4,000 bodies / hundreds of MB, which froze the main
-  // thread on JSON.parse and left the view blank. We cap the body at 4 KB
-  // and never fetch `body_html`; the JS side keeps only the newest message
-  // per sender.
-  const messageRows = await db.select<Record<string, unknown>[]>(
-    `SELECT id, pid, subj, prev, tm, st, sent_at, received_at, ac, bucket, direction, unread,
-            is_newsletter,
-            labels_json, attachments_json, trackers_json, thread_id,
-            reply_later, set_aside, bubble_up_at, remind_at, to_addr,
-            cc_json, bcc_json, deleted_at, calendar_json,
-            is_newsletter,
-            substr(body, 1, 4000) AS body,
-            NULL AS body_html
-       FROM messages WHERE pid IN (${placeholders}) ORDER BY timeline_at DESC`,
+
+  // Step 1 — newest message id per sender. Three small columns, no `body`:
+  // with `idx_messages_pid_timeline` this is a covering index scan and never
+  // touches a table page (see `services/schema_maint.rs` for the measurement).
+  const idRows = await db.select<Record<string, unknown>[]>(
+    `SELECT id, pid, direction FROM messages
+      WHERE pid IN (${placeholders})
+      ORDER BY timeline_at DESC`,
     contactIds,
   );
-
-  const messagesByContact = new Map<ID, Record<string, unknown>[]>();
-  for (const row of messageRows) {
+  const newestByContact = new Map<ID, ID>();
+  for (const row of idRows) {
     // Outgoing messages (e.g. a Sent copy to a brand-new recipient) should not
     // surface in the Gate screener, which is meant for incoming first-time
     // senders. We filter here rather than in SQL so the in-memory MockDb used
     // by tests doesn't need full multi-condition IN() parsing.
     if (((row.direction as string | undefined) ?? "in") === "out") continue;
     const pid = row.pid as ID;
-    const existing = messagesByContact.get(pid);
-    if (existing) {
-      existing.push(row);
-    } else {
-      messagesByContact.set(pid, [row]);
-    }
+    // Rows arrive newest-first, so the first sighting per sender wins.
+    if (!newestByContact.has(pid)) newestByContact.set(pid, row.id as ID);
   }
+  const newestIds = [...newestByContact.values()];
+  if (newestIds.length === 0) return [];
+
+  // Step 2 — one row per sendable card, bodies clipped to a preview.
+  const messagePh = newestIds.map((_, i) => `$${i + 1}`).join(",");
+  const messageRows = await db.select<Record<string, unknown>[]>(
+    `SELECT id, pid, subj, prev, tm, st, sent_at, received_at, ac, bucket, direction, unread,
+            is_newsletter,
+            labels_json, attachments_json, trackers_json, thread_id,
+            reply_later, set_aside, bubble_up_at, remind_at, to_addr,
+            cc_json, bcc_json, deleted_at, calendar_json,
+            CASE
+              WHEN COALESCE(prev, '') = ''
+                THEN substr(body, 1, ${GATE_PREVIEW_CHARS})
+              ELSE ''
+            END AS body,
+            NULL AS body_html
+       FROM messages WHERE id IN (${messagePh})`,
+    newestIds,
+  );
+  const messageById = new Map<ID, Record<string, unknown>>();
+  for (const row of messageRows) messageById.set(row.id as ID, row);
 
   const result: GateQueueItem[] = [];
   const seenEmails = new Set<string>();
   for (const cRow of contactRows) {
-    const rows = messagesByContact.get(cRow.id as ID);
-    if (!rows || rows.length === 0) continue;
+    const row = messageById.get(newestByContact.get(cRow.id as ID) ?? "");
+    if (!row) continue;
     const contact = rowToContact(cRow);
     // Duplicate contact rows for the same address (merged imports, sync
     // re-creations) must not produce duplicate Gate cards. Key by the
@@ -1127,7 +1150,7 @@ export async function listGateQueue(): Promise<GateQueueItem[]> {
       .toLowerCase();
     if (seenEmails.has(emailKey)) continue;
     seenEmails.add(emailKey);
-    result.push({ contact, message: rowToMessage(rows[0]!) });
+    result.push({ contact, message: rowToMessage(row) });
   }
   return result;
 }

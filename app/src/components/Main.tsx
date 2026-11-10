@@ -138,7 +138,12 @@ const Agent = lazy(() =>
 /** Keep a view mounted after its first visit and toggle visibility
  *  instead of tearing it down. Combined with `lazy()`, the chunk
  *  downloads once and is reused for every subsequent visit. */
-function KeepAlive(props: { active: boolean; children: JSX.Element }) {
+function KeepAlive(props: {
+  active: boolean;
+  /** Shown while this view's lazy chunk is still loading. */
+  fallback?: JSX.Element;
+  children: JSX.Element;
+}) {
   const [mounted, setMounted] = createSignal(false);
   createEffect(() => {
     if (props.active) setMounted(true);
@@ -146,7 +151,14 @@ function KeepAlive(props: { active: boolean; children: JSX.Element }) {
   return (
     <Show when={mounted()}>
       <div style={{ display: props.active ? "contents" : "none" }}>
-        {props.children}
+        {/* The boundary has to live HERE, under KeepAlive: the `lazy()` throw
+            happens when `props.children` is evaluated, so a boundary further
+            out means every first visit to every view is replaced by the
+            shared fallback — the *previous* view's shape, which reads as
+            "nothing loaded" rather than "loading". */}
+        <Suspense fallback={props.fallback ?? <FeedSkeleton />}>
+          {props.children}
+        </Suspense>
       </div>
     </Show>
   );

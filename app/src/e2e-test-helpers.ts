@@ -6,6 +6,7 @@
  */
 
 import { IS_BROWSER } from "./services/tauri-shim";
+import { setQueryDelay } from "./services/mock-db";
 import type {
   Account,
   AgentDraft,
@@ -56,6 +57,10 @@ interface E2EHelpers {
   listContacts: () => Promise<Contact[]>;
   listMessages: () => Promise<Message[]>;
   listEvents: () => Promise<CalendarEvent[]>;
+  /** Make every query take `ms`, so a loading state is observable. An
+   *  in-memory double resolves in a microtask; a real mailbox does not, and
+   *  "no skeleton" bugs are invisible without that wait. */
+  delayQueries: (ms: number) => void;
   /**
    * Test-only escape hatch: returns the underlying Database
    * connection so a test can run arbitrary SQL (e.g. write
@@ -112,6 +117,7 @@ if (IS_BROWSER() && typeof window !== "undefined") {
 
   window.__sendpalmE2E = {
     resetData: resetAllData,
+    delayQueries: setQueryDelay,
     seedAccount: upsertAccount,
     seedContact: upsertContact,
     seedMessage: upsertMessage,

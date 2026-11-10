@@ -19,6 +19,7 @@ pub mod provider_catalog;
 pub mod providers;
 pub mod rules;
 pub mod scheduled_send;
+pub mod schema_maint;
 pub mod smtp;
 pub mod state;
 pub mod sync_loop;
