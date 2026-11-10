@@ -78,6 +78,11 @@ const EMAIL_ALLOWED_TAGS = [
   "small",
   "span",
   "strong",
+  // Newsletters lay out *and* style themselves with a <style> block; without
+  // it every mail fell back to Times-on-white regardless of the sender.
+  // Remote `url()` inside that CSS is neutralised below so this cannot become
+  // a tracking channel (see `stripRemoteCssUrls`).
+  "style",
   "sub",
   "summary",
   "sup",
@@ -94,8 +99,35 @@ const EMAIL_ALLOWED_TAGS = [
   "var",
 ];
 
+/** Replace remote `url(...)` references inside CSS with a no-op.
+ *
+ *  A sender can track opens with a CSS background just as easily as with an
+ *  `<img>`, and images are hidden until the user asks for them. Layout and
+ *  colours survive; the phone-home does not. Relative urls and data: urls are
+ *  left alone (they cannot leave the document).
+ */
+export function stripRemoteCssUrls(css: string): string {
+  return css.replace(
+    /url\(\s*(['"]?)((?:https?:)?\/\/[^)'"]*)\1\s*\)/gi,
+    "url(about:blank)",
+  );
+}
+
 export function sanitizeEmailHtml(html: string): string {
-  return DOMPurify.sanitize(html, {
+  // Senders put their CSS in <head>, and DOMPurify sanitises a *body* fragment
+  // by default — so `<style>` was dropped along with the rest of the head and
+  // every transactional mail rendered as Times-on-white. Lift the style blocks
+  // out, sanitise the rest, then put the (scrubbed) CSS back at the front.
+  const styleBlocks: string[] = [];
+  const withoutStyles = html.replace(
+    /<style\b[^>]*>([\s\S]*?)<\/style>/gi,
+    (_all, css: string) => {
+      styleBlocks.push(stripRemoteCssUrls(css));
+      return "";
+    },
+  );
+
+  const cleaned = DOMPurify.sanitize(withoutStyles, {
     ALLOWED_TAGS: EMAIL_ALLOWED_TAGS,
     FORBID_TAGS: [
       "script",
@@ -130,6 +162,14 @@ export function sanitizeEmailHtml(html: string): string {
     KEEP_CONTENT: true,
     ADD_ATTR: ["target", "rel"],
   });
+
+  const css = styleBlocks
+    .filter((block) => block.trim())
+    // A stray `</style>` inside a declaration would end the block early; these
+    // three sequences cannot appear in valid CSS anyway.
+    .map((block) => block.replace(/<\/?style/gi, ""))
+    .join("\n");
+  return css ? `<style>${css}</style>${cleaned}` : cleaned;
 }
 
 export interface ImageAnalysis {

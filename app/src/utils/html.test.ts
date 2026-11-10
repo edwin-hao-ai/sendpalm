@@ -273,3 +273,43 @@ describe("invisible entities", () => {
     expect(stripInvisible("a\u200db\u200bc\ufeffd")).toBe("abcd");
   });
 });
+
+describe("email styles survive sanitising", () => {
+  // Apple-style transactional mail: a <style> block plus table layout. Before
+  // `<style>` was allowed, every such message rendered as Times-on-white with
+  // the footer cells jammed together.
+  const apple = `<!DOCTYPE html><html><head>
+    <style type="text/css">
+      BODY, TD, P { font-family: Helvetica, sans-serif; font-size: 13px; }
+      A:link { color: #0088FF; }
+    </style></head><body>
+    <table><tr><td>Contact Us</td><td>App Store Connect</td></tr></table>
+    </body></html>`;
+
+  it("keeps the sender's CSS", () => {
+    const safe = sanitizeEmailHtml(apple);
+    expect(safe).toContain("<style");
+    expect(safe).toContain("font-family: Helvetica");
+    expect(safe).toContain("color: #0088FF");
+  });
+
+  it("does not let CSS phone home", () => {
+    const css = `<style>.h { background: url('https://tracker.example/pixel.png') }
+      .i { background: url(//cdn.example/a.png) }
+      .ok { background: url(data:image/png;base64,AAA) }</style>`;
+    const safe = sanitizeEmailHtml(css);
+    expect(safe).not.toContain("tracker.example");
+    expect(safe).not.toContain("cdn.example");
+    // Local/embedded references are not a tracking channel.
+    expect(safe).toContain("data:image/png;base64,AAA");
+  });
+
+  it("still drops script and event handlers", () => {
+    const safe = sanitizeEmailHtml(
+      `<style>p{color:red}</style><script>alert(1)</script><p onclick="x()">hi</p>`,
+    );
+    expect(safe).not.toContain("<script");
+    expect(safe).not.toContain("onclick");
+    expect(safe).toContain("<style");
+  });
+});
