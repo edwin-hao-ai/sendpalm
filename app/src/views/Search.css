@@ -1,0 +1,4 @@
+.search-result-row:hover,
+.search-result-row:focus-visible {
+  background: var(--paper-mid) !important;
+}

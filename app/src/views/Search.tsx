@@ -43,6 +43,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useRefreshEffect } from "../utils/gestures";
 import { formatBytes } from "../utils/date";
 import { fileTypeLabel } from "../panels/FilePanel";
+import "./Search.css";
 
 type ResultType =
   | "people"
@@ -332,7 +333,6 @@ export function Search() {
 
   return (
     <div style={{ animation: "view-enter 0.3s var(--ease-out) both" }}>
-      <style>{SEARCH_CSS}</style>
       <div style={{ "max-width": "720px", margin: "0 auto" }}>
         <PageHeader titleOnMobile title="搜索" />
       </div>
@@ -610,9 +610,3 @@ function iconForType(t: string): string {
   );
 }
 
-const SEARCH_CSS = `
-.search-result-row:hover,
-.search-result-row:focus-visible {
-  background: var(--paper-mid) !important;
-}
-`;

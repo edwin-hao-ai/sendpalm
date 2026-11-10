@@ -1,0 +1,10 @@
+/* Imbox — spin used by the sync-now button while a pass is running.
+ *
+ * Was injected as an inline `<style>` inside the view; a real stylesheet is
+ * bundled by Vite and cannot silently go missing in the packaged build.
+ */
+@keyframes imbox-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

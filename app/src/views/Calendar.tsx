@@ -58,6 +58,7 @@ import {
   type Occurrence,
 } from "../utils/calendar-occurrences";
 import type { CalendarEvent } from "../types";
+import "./Calendar.css";
 
 /** M11 — A master event + a concrete start time, materialized
  *  from a recurrence rule inside the current view window. The
@@ -506,7 +507,6 @@ export function Calendar() {
         animation: "view-enter 0.3s var(--ease-out) both",
       }}
     >
-      <style>{CALENDAR_CSS}</style>
       <div
         style={{
           "border-bottom": "1px solid var(--cal-border)",
@@ -3084,12 +3084,3 @@ const toolbarBtn = {
 /** Colocated CSS for hover/keyboard states that inline styles can't
  *  express. Kept in the view (not base.css) because every selector is
  *  `cal-`-scoped to this file. */
-const CALENDAR_CSS = `
-.cal-day-label .cal-day-label-pencil { opacity: 0; transition: opacity 0.15s var(--ease-out); color: var(--text-muted); }
-.cal-day-label:hover .cal-day-label-pencil, .cal-day-label:focus-visible .cal-day-label-pencil { opacity: 1; }
-.cal-day-label:hover { background: var(--paper-mid); }
-.cal-row-edit { opacity: 0; transition: opacity 0.15s var(--ease-out), background 0.15s var(--ease-out); }
-.cal-row:hover .cal-row-edit, .cal-row:focus-within .cal-row-edit { opacity: 1; }
-.cal-row-edit:hover { background: var(--paper-mid); color: var(--palm); }
-@media (pointer: coarse) { .cal-row-edit { opacity: 1; } }
-`;

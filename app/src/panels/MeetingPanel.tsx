@@ -45,6 +45,7 @@ import {
 import type { CalendarEvent, ActionItem, AgendaItem } from "../types";
 import { useRefreshEffect, useSoftRefreshEffect } from "../utils/gestures";
 import { listMessagesPaged } from "../stores/data";
+import "./MeetingPanel.css";
 
 export function MeetingPanel(props: { meetingId: string }) {
   const [event, { refetch: refetchEvent, mutate: setEvent }] = createResource(
@@ -267,7 +268,6 @@ export function MeetingPanel(props: { meetingId: string }) {
         position: "relative",
       }}
     >
-      <style>{MEETING_PANEL_CSS}</style>
       <header
         style={{
           padding: "var(--space-3) var(--space-5)",
@@ -885,11 +885,6 @@ function SectionHeader(props: { icon: string; title: string }) {
     </h4>
   );
 }
-
-const MEETING_PANEL_CSS = `
-@keyframes mp-spin { to { transform: rotate(360deg); } }
-.mp-spin { animation: mp-spin 0.8s linear infinite; display: inline-flex; }
-`;
 
 const rsvpBtn = (accent: string, primary: boolean): JSX.CSSProperties => ({
   display: "inline-flex",

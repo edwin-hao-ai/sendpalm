@@ -30,6 +30,7 @@ import { Avatar } from "../components/Avatar";
 import { healthToGroup } from "../utils/labels";
 import { useRefreshEffect } from "../utils/gestures";
 import { computeReplyTimeStats, formatDuration } from "../utils/insights";
+import "./Insights.css";
 
 export function Insights() {
   const [summary, { refetch }] = createResource(getInsightsSummary);
@@ -126,7 +127,6 @@ export function Insights() {
         animation: "view-enter 0.3s var(--ease-out) both",
       }}
     >
-      <style>{INSIGHTS_CSS}</style>
       <PageHeader title="洞察" class="insights-header" />
 
       <ResourceGate
@@ -723,9 +723,3 @@ function Card(props: { title: string; icon: string; children: unknown }) {
   );
 }
 
-const INSIGHTS_CSS = `
-.insight-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
-}
-`;

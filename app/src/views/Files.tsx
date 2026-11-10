@@ -10,6 +10,7 @@
 import {
   For,
   Show,
+  createEffect,
   createMemo,
   createResource,
   createSignal,
@@ -20,6 +21,7 @@ import {
 import { listFiles, listContacts } from "../stores/data";
 import { Empty, ErrorState } from "../components/Empty";
 import { PageHeader } from "../components/PageHeader";
+import "./Files.css";
 import { Icon } from "../components/Icon";
 import { ResourceGate } from "../components/ResourceGate";
 import { SkeletonList } from "../components/Skeleton";
@@ -147,6 +149,30 @@ export function Files() {
     );
   });
 
+  /** How many cards mount at once.
+   *
+   *  A real mailbox has thousands of attachments (3,740 on the reference
+   *  account). Mounting every card costs a full render pass plus a lazy
+   *  thumbnail observer each, and the work happens on the main thread while
+   *  the view's entry animation holds the wrapper at `opacity: 0` — so the
+   *  user saw a blank page for seconds. Filters still run over the complete
+   *  set; only the DOM is windowed.
+   */
+  const FILE_WINDOW = 120;
+  const [limit, setLimit] = createSignal(FILE_WINDOW);
+  const shown = createMemo(() => items().slice(0, limit()));
+  // Any filter change starts a new result set, so the window resets with it.
+  createEffect(() => {
+    typeFilter();
+    search();
+    dateFrom();
+    dateTo();
+    senderId();
+    sizeMinKb();
+    sizeMaxKb();
+    setLimit(FILE_WINDOW);
+  });
+
   const anyFilterActive = () =>
     Boolean(search().trim() || typeFilter() !== "all" || advancedActiveCount());
 
@@ -160,7 +186,6 @@ export function Files() {
 
   return (
     <div style={{ animation: "view-enter 0.3s var(--ease-out) both" }}>
-      <style>{FILES_CSS}</style>
       <div style={{ "max-width": "1200px", margin: "0 auto" }}>
         <PageHeader
           title="文件"
@@ -453,7 +478,7 @@ export function Files() {
                   gap: "var(--space-3)",
                 }}
               >
-                <For each={items()}>
+                <For each={shown()}>
                   {(f) => {
                     const c = contactById(f.pid);
                     return (
@@ -556,6 +581,32 @@ export function Files() {
                   }}
                 </For>
               </div>
+              <Show when={items().length > shown().length}>
+                <div
+                  style={{
+                    display: "flex",
+                    "justify-content": "center",
+                    "margin-top": "var(--space-4)",
+                  }}
+                >
+                  <button
+                    data-files-load-more
+                    onClick={() => setLimit((n) => n + FILE_WINDOW)}
+                    style={{
+                      padding: "8px 18px",
+                      "border-radius": "var(--radius-pill)",
+                      background: "var(--palm-soft)",
+                      color: "var(--palm)",
+                      border: "none",
+                      "font-weight": 700,
+                      "font-size": "var(--text-caption)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    加载更多（{shown().length} / {items().length}）
+                  </button>
+                </div>
+              </Show>
             </div>
           )}
         </ResourceGate>
@@ -648,37 +699,6 @@ function FileThumb(props: { file: FileItem }) {
     </div>
   );
 }
-
-const FILES_CSS = `
-.file-card:hover,
-.file-card:focus-visible {
-  background: var(--paper-mid) !important;
-}
-.file-card-name {
-  font-size: var(--text-body-sm);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  /* Break at natural boundaries (hyphens/dots) first so the extension
-     stays intact ("…-0913.pdf" rather than "…0913.p / df"); fall back
-     to breaking anywhere only when a segment is too long. */
-  overflow-wrap: anywhere;
-  word-break: normal;
-}
-.file-card-actions {
-  position: absolute;
-  top: var(--space-2);
-  right: var(--space-2);
-  display: none;
-  gap: 4px;
-}
-.file-card:hover .file-card-actions,
-.file-card:focus-within .file-card-actions,
-.file-card-actions-always {
-  display: flex;
-}
-`;
 
 const cardActionBtn: JSX.CSSProperties = {
   width: "28px",

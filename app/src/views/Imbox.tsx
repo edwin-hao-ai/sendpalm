@@ -95,6 +95,7 @@ import {
 import { PageHeader } from "../components/PageHeader";
 import { appSettings } from "../stores/ui";
 import { looksLikeHtml, htmlToPlainText, plainPreview } from "../utils/html";
+import "./Imbox.css";
 
 /** Profile timezone used for every mail date label/group in this view.
  *  Invalid values fall back to the OS zone inside the helpers. */
@@ -1506,7 +1507,6 @@ function ImboxHeader(props: {
     <>
       {/* Scoped keyframes — animations.css is owned by the styles group;
           keep the sync spinner self-contained here. */}
-      <style>{`@keyframes imbox-spin { to { transform: rotate(360deg); } }`}</style>
       <PageHeader
         title="收件箱"
         description={
