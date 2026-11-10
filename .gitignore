@@ -8,6 +8,7 @@ node_modules/
 
 # macOS metadata
 .DS_Store
+**/.DS_Store
 
 # Temporary verification screenshots and scratch files
 qa-tmp/*
