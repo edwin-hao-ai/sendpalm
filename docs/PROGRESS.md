@@ -3980,3 +3980,23 @@ Times 白底、页脚挤成一行的「Contact UsApp Store ConnectOne Apple Park
 要求滚动位置保持；先验证了它在修复前会失败（1909 → 128）。
 
 验证：TS 853、Playwright 175 passed / 1 skipped、Rust 36 个目标全绿。
+
+### 2026-11-11 邮件"还是看着不舒服"——把我们自己的样式撤出去
+
+把真库里的邮件（App Store Connect / DocuSign / Decentraland）过一遍真实渲染管线、读
+computed style，结论是：发件人的 CSS 已经生效了（Helvetica 14px、#666、链接 #0088FF，
+和 Apple 客户端一致）。"不舒服"来自**我们自己的三条默认样式**在发件人没写规则的地方横插一脚：
+
+- `table { border-collapse: collapse }` + `td, th { padding: 6px 10px }`：所有表格型
+  newsletter 的边框被合并、每个单元格被塞进 6/10px 内边距——"大体对、细看不对"就是这个。
+- `a { color: #0A8F63 }`：发件人没指定颜色的链接全变成 SendPalm 绿，等于品牌色渗进别人的邮件。
+  改成中性链接蓝 `#0b57d0`。
+- `font-size: 14px` 读起来像小字；改成 15px（Apple Mail / Gmail 的正文尺寸），行高 1.6 → 1.55。
+
+保留的只有"兜底框架"：零边距、系统字体栈、15px 正文、`img{max-width:100%}`（防止发件人
+写死宽度撑破面板）、`overflow-wrap:anywhere`（防止长 URL 撑宽）。发件人的规则仍然在后、
+同优先级下优先。
+
+四条单测钉住这个框架（无表格重置、无品牌色、15px、远程图片默认仍隐藏）。
+
+验证：TS 857、Playwright 175 passed / 1 skipped。
