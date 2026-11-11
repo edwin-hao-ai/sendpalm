@@ -809,6 +809,16 @@ and script inside the mail frame)
   from August. The user kept launching the old one and reporting bugs that were already fixed. **Check
   what is installed before believing a bug report is new**, and copy the build to `/Applications` when
   the point is "look at it in the real app".
+- **Mail passwords live in the OS keychain, and a rebuilt debug bundle loses them.** macOS binds keychain
+  access to the code signature; every `tauri build --debug` re-signs, so the entry the previous build wrote
+  becomes unreadable and the app shows 「邮件同步已暂停」. Debug builds now load `app/.env` at startup
+  (`CARGO_MANIFEST_DIR` is baked in, so it works from `~/.cargo/shared-target/...` and `/Applications`);
+  release never reads a file for secrets. To reinstall the entry by hand:
+  `cargo test --test install_mail_password -- --ignored`.
+- **Three credential problems, three sentences.** `missing_credentials` (no entry) / `credentials_unreadable`
+  (entry exists, this binary may not read it) / `auth_failed` (server rejected it). They share one user
+  action but not one explanation; the account state must store the classifier's answer instead of a
+  hardcoded code, or every surface has to be corrected later.
 - **Prove a rendering fix inside the real webview, not in Chromium.** The same `htmlEmailSrcdoc` produced
   a perfect render in Playwright and an unstyled one in WKWebView. A temporary probe *inside* the
   `srcdoc` — a `position:fixed` div whose text is written by the frame's own script — is enough to tell
