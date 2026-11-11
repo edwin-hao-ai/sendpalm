@@ -805,6 +805,35 @@ export function Imbox() {
 
   /* ── Mark a message read when opened ─────────────────────────────── */
 
+  /** Run a list mutation without letting the reader's scroll position move.
+   *
+   *  Opening a mail removes its row from this tab and prepends it to the other
+   *  one. Three things can then move the list on their own: the browser clamps
+   *  `scrollTop` when content above the viewport shrinks, WebKit scrolls to keep
+   *  a removed *focused* row in view, and opening the reading pane re-wraps
+   *  every preview (narrower column → taller rows). None of that is the
+   *  reader's doing, so the position is put back within the same frame and once
+   *  more after the layout settles.
+   */
+  const keepScrollStill = async <T,>(mutate: () => Promise<T> | T): Promise<T> => {
+    const el = document.querySelector<HTMLElement>("#main");
+    const before = el?.scrollTop ?? 0;
+    // Focus inside the row that is about to disappear is what makes WebKit
+    // scroll; move it out first.
+    const active = document.activeElement as HTMLElement | null;
+    if (el && active && el.contains(active)) active.blur();
+    try {
+      return await mutate();
+    } finally {
+      if (el) {
+        if (el.scrollTop !== before) el.scrollTop = before;
+        requestAnimationFrame(() => {
+          if (el.scrollTop !== before) el.scrollTop = before;
+        });
+      }
+    }
+  };
+
   const openAndMarkRead = async (m: Message) => {
     open(m.id);
     if (m.unread) {
@@ -814,12 +843,14 @@ export function Imbox() {
       // on mount so this is idempotent.
       newPaged.removeByIds([m.id]);
       try {
-        await seenPaged.prependByIds([m.id]);
-        // Scoped single-column update — the list row is lightweight
-        // (no body / bodyHtml), so a full upsertMessage here would
-        // wipe the body in the DB.
-        await markMessageUnread(m.id, false);
-        refreshUnreadCounts();
+        await keepScrollStill(async () => {
+          await seenPaged.prependByIds([m.id]);
+          // Scoped single-column update — the list row is lightweight
+          // (no body / bodyHtml), so a full upsertMessage here would
+          // wipe the body in the DB.
+          await markMessageUnread(m.id, false);
+          refreshUnreadCounts();
+        });
       } catch {
         // Restore on failure — re-prepend to newPaged and refetch
         // seenPaged so we don't keep a phantom.
