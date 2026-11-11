@@ -47,8 +47,10 @@ pub async fn sync_now(
         Ok(b) => b,
         Err(e) => {
             let code = crate::services::sync_loop::sync_error_code_pub(&e);
-            let needs_credentials =
-                matches!(code, "missing_credentials" | "auth_failed");
+            let needs_credentials = matches!(
+                code,
+                "missing_credentials" | "auth_failed" | "credentials_unreadable"
+            );
             state.put(
                 &account_id,
                 crate::services::state::AccountSyncState {

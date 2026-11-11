@@ -1257,7 +1257,9 @@ function AddAccountModal(props: {
       setVerifyError(
         code === "auth_failed"
           ? `账号或密码不正确。${prov.credentials_hint}`
-          : "系统没有拿到密码。请重新输入后重试。",
+          : code === "credentials_unreadable"
+            ? "系统钥匙串拒绝了访问。请重新输入一次密码并允许系统弹窗。"
+            : "系统没有拿到密码。请重新输入后重试。",
       );
       setSaving(false);
       return;

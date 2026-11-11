@@ -122,10 +122,12 @@ interface Pile {
 /** Sync-issue banner copy per error code — a missing password, a changed
  *  password, and a dead network are different problems with different
  *  fixes, and the user should never have to guess which one they have. */
-function bannerCopy(issue: MailSyncIssue): string {
+export function bannerCopy(issue: MailSyncIssue): string {
   switch (issue) {
     case "missing_credentials":
       return "邮件同步已暂停——输入邮箱密码后才能收取新邮件，当前只显示已同步的旧数据。";
+    case "credentials_unreadable":
+      return "系统钥匙串拒绝了本次访问——密码还在，重新输入一次即可（macOS 若弹窗询问，选择「始终允许」）。";
     case "auth_failed":
       return "邮箱密码验证失败——如果你最近修改过邮箱密码或撤销了专用密码，请重新输入。";
     case "network":
@@ -1140,6 +1142,7 @@ export function Imbox() {
           <Show
             when={
               mailSyncIssue() === "missing_credentials" ||
+              mailSyncIssue() === "credentials_unreadable" ||
               mailSyncIssue() === "auth_failed"
             }
           >
@@ -1161,7 +1164,7 @@ export function Imbox() {
                 "white-space": "nowrap",
               }}
             >
-              去输入
+              {mailSyncIssue() === "credentials_unreadable" ? "重新输入" : "去输入"}
             </button>
           </Show>
         </div>

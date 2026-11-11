@@ -612,7 +612,7 @@ async fn load_accounts(
                     crate::services::state::AccountSyncState {
                         last_synced_at: prev.last_synced_at,
                         status: crate::services::state::AccountSyncStatus::NeedsCredentials,
-                        error_code: Some("missing_credentials".to_string()),
+                        error_code: Some(sync_error_code(&e).to_string()),
                         ..Default::default()
                     },
                 );
@@ -660,7 +660,12 @@ async fn resolve_credentials(
                 std::env::var("SENDPALM_TEST_PASSWORD")
                     .map_err(|e| format!("keyring failed and test password unavailable: {e}"))?
             } else {
-                return Err(format!("keyring error: {e}"));
+                // Deliberately not "no password in keyring": the entry may
+                // exist and simply be unreadable by this binary (macOS ties
+                // keychain access to the code signature, and every rebuilt
+                // dev bundle is re-signed). Same entry point for the user,
+                // very different explanation.
+                return Err(format!("keychain access denied: {e}"));
             }
         }
     };
@@ -757,6 +762,17 @@ pub fn sync_error_code_pub(e: &str) -> &'static str {
 
 pub(crate) fn sync_error_code(e: &str) -> &'static str {
     let lower = e.to_lowercase();
+    // A keychain that refuses access is not an empty keychain: the user has a
+    // password stored, this binary may not read it. Telling them to "set a
+    // password" would send them looking in the wrong place.
+    if lower.contains("keychain access denied")
+        || lower.contains("keyring access denied")
+        || lower.contains("errsecauthfailed")
+        || lower.contains("-25308")
+        || lower.contains("user interaction is not allowed")
+    {
+        return "credentials_unreadable";
+    }
     if lower.contains("keyring") && !lower.contains("authentication") && !lower.contains("failed") {
         return "missing_credentials";
     }
@@ -791,7 +807,10 @@ pub(crate) fn sync_error_code(e: &str) -> &'static str {
 }
 
 fn sync_failure_status(e: &str) -> crate::services::state::AccountSyncStatus {
-    matches!(sync_error_code(e), "missing_credentials" | "auth_failed")
+    matches!(
+        sync_error_code(e),
+        "missing_credentials" | "auth_failed" | "credentials_unreadable"
+    )
         .then_some(crate::services::state::AccountSyncStatus::NeedsCredentials)
         .unwrap_or(crate::services::state::AccountSyncStatus::Error)
 }
@@ -821,6 +840,28 @@ mod sync_error_class_tests {
         // Genuine server-side problems.
         assert_eq!(sync_error_code("select INBOX: no such mailbox"), "sync_failed");
         assert_eq!(sync_error_code("parse uid=123: malformed header"), "sync_failed");
+    }
+
+    /// A keychain that refuses access is not an empty keychain: the user has a
+    /// password stored, this binary may not read it (macOS ties the entry to the
+    /// code signature, and every rebuilt dev bundle is re-signed). Saying "输入
+    /// 邮箱密码" sends them looking in the wrong place — the fix is to try again,
+    /// not to wonder whether they ever set one.
+    #[test]
+    fn classifies_keychain_denied_as_unreadable() {
+        assert_eq!(
+            sync_error_code("keychain access denied: keyring get: errSecAuthFailed"),
+            "credentials_unreadable"
+        );
+        assert_eq!(
+            sync_error_code("keychain access denied: -25308 user interaction is not allowed"),
+            "credentials_unreadable"
+        );
+        // …and a genuinely empty keychain keeps its own code.
+        assert_eq!(
+            sync_error_code("no password in keyring"),
+            "missing_credentials"
+        );
     }
 }
 

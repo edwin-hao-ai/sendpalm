@@ -32,6 +32,10 @@ export function classifyVerifyResult(
       return "connected";
     case "auth_failed":
     case "missing_credentials":
+    // The password exists but this process was refused the keychain entry
+    // (macOS ties it to the code signature). Not the user's password — retry.
+    // falls through
+    case "credentials_unreadable":
       return "reject";
     case "network":
     case "sync_failed":

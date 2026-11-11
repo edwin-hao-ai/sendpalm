@@ -429,7 +429,12 @@ export function SyncBadge() {
     const code = (id: string) => next[id]?.error_code;
     const worst = list
       .map((a) => code(a.id))
-      .find((c) => c === "auth_failed" || c === "missing_credentials")
+      .find(
+        (c) =>
+          c === "auth_failed" ||
+          c === "missing_credentials" ||
+          c === "credentials_unreadable",
+      )
       ?? list.map((a) => code(a.id)).find((c) => c === "network" || c === "sync_failed");
     setMailSyncIssue((worst ?? null) as MailSyncIssue | undefined ?? null);
   };
@@ -649,9 +654,13 @@ export function SyncBadge() {
                 if (busy()) return "正在同步…";
                 switch (status()) {
                   case "needs_credentials":
-                    return s()?.error_code === "auth_failed"
-                      ? "密码已失效，请重新输入"
-                      : "需要输入密码";
+                    if (s()?.error_code === "auth_failed") {
+                      return "密码已失效，请重新输入";
+                    }
+                    if (s()?.error_code === "credentials_unreadable") {
+                      return "钥匙串拒绝访问，请重新输入";
+                    }
+                    return "需要输入密码";
                   case "error":
                     return s()?.error_code === "network"
                       ? "网络异常，自动重试中"

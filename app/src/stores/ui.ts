@@ -306,6 +306,10 @@ export const [contactTab, setContactTab] = createSignal<ContactTab>("Timeline");
  *  network, and a server outage must tell the user different things. */
 export type MailSyncIssue =
   | "missing_credentials"
+  /** The keychain has an entry this binary may not read (re-signed build,
+   *  dismissed macOS prompt). Same fix as missing — try again — but a very
+   *  different message from "you never set a password". */
+  | "credentials_unreadable"
   | "auth_failed"
   | "network"
   | "sync_failed"
@@ -315,7 +319,9 @@ export const [mailSyncIssue, setMailSyncIssue] = createSignal<MailSyncIssue>(
 );
 /** @deprecated use mailSyncIssue() — kept for one release of call sites. */
 export const mailCredentialsNeeded = () =>
-  mailSyncIssue() === "missing_credentials" || mailSyncIssue() === "auth_failed";
+  mailSyncIssue() === "missing_credentials" ||
+  mailSyncIssue() === "credentials_unreadable" ||
+  mailSyncIssue() === "auth_failed";
 
 export const [settingsTab, setSettingsTab] =
   createSignal<SettingsTab>("profile");
