@@ -177,6 +177,9 @@
   --detail-panel-min: 280px;
   --agent-panel-min: 280px;
   --detail-panel-width: 380px;
+  /* Narrowest column a list/reading view may be squeezed to when a side panel
+     is open. Below this the panel gives up width instead. */
+  --main-min-width: 360px;
   --agent-panel-width: 340px;
 
   /* ── Z-index ─────────────────────────────────────────────────── */

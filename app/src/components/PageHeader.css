@@ -13,7 +13,11 @@
 }
 
 .page-header-main {
-  flex: 1;
+  /* `flex: 1` with `min-width: 0` let the title shrink to nothing before the
+     action row was allowed to wrap: in a ~360px column the H1 collapsed to 38px
+     and 「筛选台」 stacked one glyph per line. A basis floor makes the actions
+     wrap to their own line instead. */
+  flex: 1 1 240px;
   min-width: 0;
 }
 

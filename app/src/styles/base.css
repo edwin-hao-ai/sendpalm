@@ -185,8 +185,20 @@ hr {
  * layout track would relayout the whole list every frame, see AGENTS
  * §11.2). Mobile keeps the full-screen sheet: no reserve, no margin. */
 @media (min-width: 768px) {
+  /* The panel may not eat the list.
+   *
+   * `--detail-panel-width` is user-draggable up to 720px. On a ~1000px window
+   * (sidebar + 720) that left the main column ~130px wide: the Gate card, a
+   * 720px-wide reading column, then wrapped to one character per line. Reserve
+   * a floor for the list instead and let the panel shrink to meet it. */
+  #app {
+    --panel-reserve: min(
+      var(--detail-panel-width),
+      calc(100vw - var(--sidebar-width) - var(--main-min-width))
+    );
+  }
   #app[data-detail="open"] #main {
-    margin-right: var(--detail-panel-width);
+    margin-right: var(--panel-reserve);
   }
   /* A slide-in over reserved space reads as a glitch (it slides into a
    * hole that is already empty). Fade instead. */
@@ -200,7 +212,9 @@ hr {
   top: calc(var(--topbar-height) + env(safe-area-inset-top));
   right: 0;
   bottom: 0;
-  width: var(--detail-panel-width);
+  /* Same clamp as the reserved space above, or the panel would overlap the
+     list it just made room for. */
+  width: var(--panel-reserve, var(--detail-panel-width));
   z-index: var(--z-detail);
   background: var(--surface-elevated);
   border-left: 0.5px solid var(--border);
