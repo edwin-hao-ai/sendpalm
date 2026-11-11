@@ -161,6 +161,89 @@ export function consumeAgentIntent(): AgentIntent | null {
   return intent;
 }
 
+/** The detail panel is a stack, not a switch.
+ *
+ *  Opening a mail from a contact's history used to *replace* the contact, so
+ *  返回 closed the panel and dropped the reader on the contacts list — the
+ *  contact they were reading was gone. Every "open this from that" action now
+ *  remembers what was open first, and 返回 restores it.
+ */
+export type PanelRef =
+  | { kind: "message"; id: ID }
+  | { kind: "contact"; id: ID }
+  | { kind: "company"; id: string }
+  | { kind: "file"; id: ID }
+  | { kind: "meeting"; id: ID }
+  | { kind: "task"; id: ID }
+  | { kind: "draft"; id: ID };
+
+const [panelStack, setPanelStack] = createSignal<PanelRef[]>([]);
+
+/** What the panel is showing right now, if anything. */
+function currentPanelRef(): PanelRef | null {
+  if (selectedMessageId()) return { kind: "message", id: selectedMessageId()! };
+  if (selectedContactId()) return { kind: "contact", id: selectedContactId()! };
+  if (selectedCompanyName())
+    return { kind: "company", id: selectedCompanyName()! };
+  if (selectedFileId()) return { kind: "file", id: selectedFileId()! };
+  if (selectedMeetingId()) return { kind: "meeting", id: selectedMeetingId()! };
+  if (selectedTaskId()) return { kind: "task", id: selectedTaskId()! };
+  if (selectedDraftId()) return { kind: "draft", id: selectedDraftId()! };
+  return null;
+}
+
+/** Call before replacing the panel's subject, so 返回 can come back. */
+export function rememberCurrentPanel(): void {
+  const current = currentPanelRef();
+  if (!current) return;
+  setPanelStack((stack) => [...stack.slice(-9), current]);
+}
+
+/** Put the previous subject back. Returns false when there is none. */
+export function restorePreviousPanel(): boolean {
+  const stack = panelStack();
+  const previous = stack[stack.length - 1];
+  if (!previous) return false;
+  setPanelStack(stack.slice(0, -1));
+  setSelectedMessageId(null);
+  setSelectedContactId(null);
+  setSelectedCompanyName(null);
+  setSelectedFileId(null);
+  setSelectedMeetingId(null);
+  setSelectedTaskId(null);
+  setSelectedDraftId(null);
+  switch (previous.kind) {
+    case "message":
+      setSelectedMessageId(previous.id);
+      break;
+    case "contact":
+      setSelectedContactId(previous.id);
+      break;
+    case "company":
+      setSelectedCompanyName(previous.id);
+      break;
+    case "file":
+      setSelectedFileId(previous.id);
+      break;
+    case "meeting":
+      setSelectedMeetingId(previous.id);
+      break;
+    case "task":
+      setSelectedTaskId(previous.id);
+      break;
+    case "draft":
+      setSelectedDraftId(previous.id);
+      break;
+  }
+  setDetailOpen(true);
+  return true;
+}
+
+/** Leaving the panel on purpose clears the stack. */
+export function clearPanelHistory(): void {
+  setPanelStack([]);
+}
+
 export const [selectedContactId, setSelectedContactId] =
   createSignal<ID | null>(null);
 export const [selectedMessageId, setSelectedMessageId] =

@@ -46,6 +46,8 @@ import {
   setAgentPanelOpen,
   setPendingAgentIntent,
   setSelectedTaskId,
+  rememberCurrentPanel,
+  restorePreviousPanel,
   bumpSoftRefreshTick,
   appSettings,
 } from "../stores/ui";
@@ -477,6 +479,7 @@ export function MessagePanel(props: { messageId: string }) {
   const openContact = () => {
     const c = contact();
     if (!c) return;
+    rememberCurrentPanel();
     setSelectedContactId(c.id);
     setView("contacts");
   };
@@ -907,6 +910,9 @@ export function MessagePanel(props: { messageId: string }) {
       >
         <button
           onClick={() => {
+            // Came here from a contact/file/task? Go back to it; otherwise
+            // close the panel.
+            if (restorePreviousPanel()) return;
             setSelectedMessageId(null);
             setDetailOpen(false);
           }}

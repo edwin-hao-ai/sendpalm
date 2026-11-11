@@ -15,6 +15,7 @@
 import {
   Show,
   Suspense,
+  createEffect,
   createSignal,
   lazy,
   onMount,
@@ -42,6 +43,7 @@ import { initApp } from "./bootstrap";
 import {
   agentPanelOpen,
   commandPaletteOpen,
+  clearPanelHistory,
   detailOpen,
   searchOpen,
   onboardingStep,
@@ -129,6 +131,12 @@ export default function App() {
         }, 600);
       });
     });
+  });
+
+  // Closing the panel on purpose means the stack is stale — 返回 later must not
+  // resurrect a panel the user left.
+  createEffect(() => {
+    if (!detailOpen()) clearPanelHistory();
   });
 
   return (

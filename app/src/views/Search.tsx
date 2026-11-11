@@ -38,6 +38,8 @@ import {
   setSelectedTaskId,
   showToast,
   view,
+  searchQuery,
+  setSearchQuery,
 } from "../stores/ui";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useRefreshEffect } from "../utils/gestures";
@@ -66,7 +68,12 @@ interface Result {
 }
 
 export function Search() {
-  const [q, setQ] = createSignal("");
+  // Seeded from the topbar query: pressing Enter there navigates here, and this
+  // view used to start empty regardless of what had just been typed.
+  const [q, setQ] = createSignal(searchQuery());
+  // Two-way with the topbar: arriving with a query keeps it, and typing here
+  // shows the same text up top.
+  createEffect(() => setQ(searchQuery()));
   const [debouncedQ, setDebouncedQ] = createSignal("");
   const [filter, setFilter] = createSignal<"all" | ResultType>("all");
   const [cursorIdx, setCursorIdx] = createSignal(0);
@@ -318,6 +325,7 @@ export function Search() {
       }
     } else if (e.key === "Escape") {
       setQ("");
+      setSearchQuery("");
     }
   };
 
@@ -349,7 +357,10 @@ export function Search() {
             ref={(el) => (inputRef = el)}
             autofocus
             value={q()}
-            onInput={(e) => setQ(e.currentTarget.value)}
+            onInput={(e) => {
+              setQ(e.currentTarget.value);
+              setSearchQuery(e.currentTarget.value);
+            }}
             onKeyDown={onKeyDown}
             placeholder="搜索整个工作区…"
             aria-label="搜索整个工作区"
@@ -367,6 +378,7 @@ export function Search() {
             <button
               onClick={() => {
                 setQ("");
+                setSearchQuery("");
                 inputRef?.focus();
               }}
               aria-label="清空搜索"

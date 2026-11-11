@@ -37,6 +37,7 @@ import {
   setSelectedContactId,
   contactTab,
   setContactTab,
+  rememberCurrentPanel,
   setSelectedMessageId,
   setSelectedFileId,
   showToast,
@@ -861,6 +862,9 @@ export function ContactPanel(props: { contactId: string }) {
               messages={msgs()}
               followUps={fus()}
               onOpen={(id) => {
+                // Remember the contact: 返回 in the mail must come back here,
+                // not close the panel and drop the reader on the list.
+                rememberCurrentPanel();
                 setSelectedContactId(null);
                 setSelectedMessageId(id);
               }}

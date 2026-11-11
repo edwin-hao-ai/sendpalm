@@ -146,8 +146,10 @@ export function LiveSearch() {
         r.run();
         close();
       } else if (searchQuery().trim()) {
+        // Keep the query: the full view seeds itself from it, and clearing it
+        // here is what made Enter land on "输入关键词开始搜索".
         setView("search");
-        close();
+        setSearchOpen(false);
       }
     } else if (e.key === "Escape") {
       close();

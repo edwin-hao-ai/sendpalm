@@ -4,6 +4,7 @@ import {
   bumpSoftRefreshTick,
   setSelectedMessageId,
   setSelectedTaskId,
+  rememberCurrentPanel,
   setSelectedContactId,
   setSelectedCompanyName,
   setSelectedFileId,
@@ -220,6 +221,8 @@ async function skipIneligibleQueuedRuns(): Promise<void> {
 export async function openTaskSource(messageId: string): Promise<boolean> {
   const message = await messageMetadata(messageId);
   if (!message) return false;
+  // 返回 from the source mail goes back to the task, not to the list.
+  rememberCurrentPanel();
   setSelectedTaskId(null);
   setSelectedContactId(null);
   setSelectedCompanyName(null);
