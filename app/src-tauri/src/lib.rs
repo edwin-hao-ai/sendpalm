@@ -309,8 +309,40 @@ pub fn migrations() -> Vec<Migration> {
 /// webview failure. Desktop never noticed because `main.rs` calls `run()`
 /// directly.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Debug builds only: load `app/.env` so the test mailbox works without a
+/// keychain round-trip.
+///
+/// The app reads mail passwords from the OS keychain. macOS ties that access to
+/// the binary's identity, and every debug rebuild is re-signed — so the entry
+/// written by the previous build is no longer readable and the app greets the
+/// developer with 「邮件同步已暂停——输入邮箱密码」. `resolve_credentials` already
+/// knows how to fall back to `SENDPALM_TEST_*`, but only when those variables
+/// exist, and a bundle launched from Finder has no environment.
+///
+/// `CARGO_MANIFEST_DIR` is baked in at compile time, so this finds the repo's
+/// `.env` from a bundle in `~/.cargo/shared-target/...` or `/Applications`.
+/// Release builds never read a file for credentials.
+#[cfg(debug_assertions)]
+fn load_dev_credentials() {
+    let candidates = [
+        Some(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.env")),
+        std::env::current_dir().ok().map(|dir| dir.join(".env")),
+    ];
+    for path in candidates.into_iter().flatten() {
+        if path.is_file() {
+            match dotenvy::from_path(&path) {
+                Ok(_) => eprintln!("[sendpalm] dev credentials loaded from {}", path.display()),
+                Err(e) => eprintln!("[sendpalm] dev credentials unreadable: {e}"),
+            }
+            return;
+        }
+    }
+}
+
 pub fn run() {
     install_crypto_provider();
+    #[cfg(debug_assertions)]
+    load_dev_credentials();
 
     // iOS/Tauri swallows panics behind stop_unwind and aborts without a message.
     // Write any panic to a temp file so we can read it back after a crash.
