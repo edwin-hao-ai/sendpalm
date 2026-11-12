@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../services/tauri-shim", () => ({ IS_BROWSER: () => true }));
 
 import {
+  countImboxUnread,
   countMessagesByAccount,
   countUnreadByBucket,
   listMessagesPaged,
@@ -128,13 +129,6 @@ describe("countMessagesByAccount", () => {
     expect(counts).toEqual({ work: 1, private: 1 });
   });
 
-  it("counts read only when asked (the 已读 tab badge)", async () => {
-    const counts = await countMessagesByAccount("imbox", ["work", "private"], {
-      readOnly: true,
-    });
-    expect(counts).toEqual({ work: 1, private: 0 });
-  });
-
   it("returns {} for no accounts without querying", async () => {
     expect(await countMessagesByAccount("imbox", [])).toEqual({});
   });
@@ -159,5 +153,26 @@ describe("countUnreadByBucket — account scope", () => {
       feed: 0,
       spam: 0,
     });
+  });
+});
+
+describe("countImboxUnread — account scope", () => {
+  // 合并列表之后 `paged.total()` 变成「总数」而不是「未读数」，
+  // 头部的「未读 / 已读 / 总数」三个数字里前两个都要靠这个计数。
+  // 它和 countRecentUnreadImbox 共用 RECENT_UNREAD_CAP —— 头部的
+  // olderUnread() 是两者的减法，上限不同会让 999+ 的邮箱算出负数。
+
+  it("counts every unread imbox row when no scope is given", async () => {
+    // w1 + p1 are the unread imbox rows; w2 is read, f1 is in the feed.
+    expect(await countImboxUnread()).toBe(2);
+  });
+
+  it("scopes the count to the selected mailbox so the header matches the list", async () => {
+    expect(await countImboxUnread(["work"])).toBe(1);
+    expect(await countImboxUnread(["private"])).toBe(1);
+  });
+
+  it("returns zero for an empty selection instead of `IN ()`", async () => {
+    expect(await countImboxUnread([])).toBe(0);
   });
 });

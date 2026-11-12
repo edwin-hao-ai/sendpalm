@@ -160,7 +160,7 @@ test.describe("Mail date integrity", () => {
   });
 
   for (const width of [375, 820, 1440]) {
-    test(`opening unread moves it from 新邮件 to 已读 and keeps detail open @ ${width}px`, async ({
+    test(`opening unread keeps the row in place and drops the unread mark @ ${width}px`, async ({
       page,
     }) => {
       await page.setViewportSize({ width, height: 900 });
@@ -170,25 +170,22 @@ test.describe("Mail date integrity", () => {
 
       const card = page.locator('[data-feed-card="message"]').first();
       await expect(card).toContainText("Read me");
+      await expect(card).toHaveClass(/unread/);
       await card.click();
 
       // Detail stays open.
       await expect(page.locator("#detail-panel")).toHaveClass(/open/);
 
-      // The unread tab emptied → its empty state offers the switch.
-      await expect(page.getByText("没有新邮件 🎉")).toBeVisible({
-        timeout: 5_000,
-      });
+      // The row stays where it was — only the unread mark is gone. Until the
+      // 11/12 merge this asserted the row had jumped to the 已读 tab, which is
+      // exactly the rearrangement that made reading feel destructive.
+      await expect(card).toBeVisible();
+      await expect(card).not.toHaveClass(/unread/);
 
-      // Close the detail (it overlays the tab bar, especially full-screen
-      // on mobile) before switching tabs.
-      await page.getByRole("button", { name: "返回" }).first().click();
-
-      // The message now lives in 已读.
-      await page.getByRole("button", { name: /已读/ }).first().click();
-      await expect(
-        page.locator('[data-feed-card="message"]').first(),
-      ).toContainText("Read me");
+      // And the unread chip agrees: nothing unread left.
+      await expect(page.locator("[data-imbox-chip='unread']")).toContainText(
+        "未读 0",
+      );
     });
   }
 });

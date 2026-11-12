@@ -138,8 +138,13 @@ test("opening a message queries the detail, not the list", async ({ page }) => {
 
   const issued = (await queries(page)).slice(before);
   // Opening a message legitimately reads its own row, thread, contact,
-  // attachments and notes — a bounded burst, not a stream.
-  expect(issued.length, `queries issued:\n${issued.join("\n")}`).toBeLessThan(36);
+  // attachments and notes — a bounded burst, not a stream. The budget went
+  // 36 → 42 on 11/12: measured 33 before the merge, 39 after (the merged
+  // Imbox needs a third counter — all-ages unread, for the 未读 chip and the
+  // header's 已读 line — plus the counts cascade it triggers). The guards that
+  // matter below — no agent tables, and zero queries once the panel has
+  // settled — are unchanged.
+  expect(issued.length, `queries issued:\n${issued.join("\n")}`).toBeLessThan(42);
   // The agent tables used to be pulled on every message open: the panel called
   // `useAgent()` just to run `newSession`, and that hook eagerly loads four
   // whole tables (AGENTS §11.7). It now receives an intent instead.

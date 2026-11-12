@@ -28,9 +28,9 @@ export interface AccountTabsProps {
   /** Which bucket's rows the badges count. */
   bucket: MessageBucket;
   /** Which rows the badge should describe. Defaults to every row in the
-   *  bucket; the Imbox passes `read` on its "已读" tab so the badge agrees
-   *  with the list under it. */
-  mode?: "all" | "unread" | "read";
+   *  bucket; the Imbox passes `unread` while its 未读 filter is on, so the
+   *  badge agrees with the list under it. */
+  mode?: "all" | "unread";
   /** Row count for the merged view. */
   total?: () => number;
   /** Account list from `useAccountScope()`. Passing it keeps the tab strip
@@ -91,7 +91,6 @@ export function AccountTabs(props: AccountTabsProps) {
       if (!args) return {};
       return countMessagesByAccount(args.bucket, args.ids, {
         unreadOnly: args.mode === "unread",
-        readOnly: args.mode === "read",
       });
     },
   );

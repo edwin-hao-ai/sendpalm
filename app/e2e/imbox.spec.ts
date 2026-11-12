@@ -217,13 +217,12 @@ test.describe("Imbox — single view focus", () => {
     await expect(
       page.locator("text=/最近 30 天 \\d+ 封待读 · \\d+ 已读 · \\d+ 总数/"),
     ).toBeVisible();
-    // Imbox now uses tabs to separate "New for you" / "Previously seen"
-    // (the v1 single-section structure was replaced in the 8/18 perf
-    // pass to keep unread lists scannable for accounts with thousands
-    // of read messages). The two tabs and one collapsed bundle are
-    // the visible signals the dataset is rendering correctly.
-    await expect(page.locator("[data-imbox-tab='new']")).toBeVisible();
-    await expect(page.locator("[data-imbox-tab='seen']")).toBeVisible();
+    // Read mail and unread mail live in ONE list now (the 「新邮件 / 已读」 tab
+    // pair went away on 11/12 — a row no longer moves when you open it). The
+    // four chips and one collapsed bundle are the visible signals the dataset
+    // is rendering correctly.
+    await expect(page.locator("[data-imbox-chip='all']")).toBeVisible();
+    await expect(page.locator("[data-imbox-chip='unread']")).toBeVisible();
     await expect(page.locator("[data-feed-card='bundle']")).toHaveCount(1);
     await expect(page.locator("[data-load-more-sentinel]")).toHaveCount(1);
     await shoot(page, "01-first-page");
@@ -316,20 +315,27 @@ test.describe("Imbox — single view focus", () => {
     );
     await seedAndOpen(page, contacts, messages);
 
-    // 100 unread from the loop + 2 previously-seen overrides the loop.
-    // The previously-seen page should still render after the unread —
-    // we just click the "Previously seen" tab to switch the active
-    // section and confirm its rows appear.
-    await expect(
-      page.locator("[data-imbox-tab='new']").first(),
-    ).toBeVisible();
-    await page.locator("[data-imbox-tab='seen']").first().click();
-    await expect(
-      page.locator("[data-imbox-tab='seen'][aria-selected='true']"),
-    ).toBeVisible();
-    // The seen tab has 450 rows from a single sender, so bundle
-    // detection collapses them into one bundle card. Assert the
-    // seen tab loaded anything (bundle or message).
+    // 100 unread from the loop + read rows from the same sender. They now live
+    // in ONE list: 全部 shows both, the 未读 chip narrows it to unread only,
+    // and clearing the chip brings the read rows back. That round-trip is the
+    // merged model's promise — the old version had to click a tab because
+    // opening a mail physically moved the row to a different container.
+    await expect(page.locator("[data-imbox-chip='all']")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await page.locator("[data-imbox-chip='unread']").click();
+    await expect(page.locator("[data-imbox-chip='unread']")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    // The query itself must now be unread-only: header says 0 已读, because the
+    // page it counted contains nothing else. (Counting visible rows here would
+    // be wrong — a collapsed bundle keeps its children in the DOM.)
+    await expect(page.locator("[data-imbox-counts]")).toContainText("0 已读");
+    await page.locator("[data-imbox-chip='all']").click();
+    // Read rows are back in the same list, no reload, no scroll reset.
+    await expect(page.locator("[data-imbox-counts]")).toContainText("502 总数");
     await expect(
       page
         .locator("[data-feed-card='message'], [data-feed-card='bundle']")
@@ -431,12 +437,11 @@ test.describe("Imbox — single view focus", () => {
     const { contacts, messages } = makeImboxDataset();
     await seedAndOpen(page, contacts, messages);
 
-    // The dataset is 500 messages from a single sender (APPLE_DEV), so
-    // bundle detection collapses the previously-seen page too. We expand
-    // the bundle and click an individual row inside its drawer to
-    // exercise the "click a previously-seen message" path. The chosen
-    // row (m_appledeveloper_60) is the 11th message in the seen tab.
-    await page.locator("[data-imbox-tab='seen']").first().click();
+    // The dataset is 500 messages from a single sender (APPLE_DEV), so bundle
+    // detection collapses them into one card. Read mail is in the same list as
+    // unread now, so the bundle is on the first page — no tab switch needed.
+    // We expand it and click an individual row inside its drawer to exercise
+    // the "click an already-read message" path.
     const bundle = page.locator("[data-feed-card='bundle']").first();
     await expect(bundle).toBeVisible({ timeout: 10_000 });
     await bundle.click();
@@ -451,6 +456,136 @@ test.describe("Imbox — single view focus", () => {
       timeout: 1_000,
     });
     await shoot(page, "08-detail-panel-opens");
+  });
+
+  test("opening an unread mail keeps the row in place and only drops the unread mark", async ({
+    page,
+  }) => {
+    // 本次改造的核心承诺：行不搬家。旧模型下点开会把它从「新邮件」删掉、
+    // 插到「已读」顶部，于是必须靠 keepScrollStill 掩盖跳动。
+    const contacts = [APPLE_DEV, NEWSPAPER];
+    const messages = [
+      makeMessage({
+        id: "m_keep_1",
+        pid: APPLE_DEV.id,
+        subj: "未读的那封",
+        prev: "正文第一行",
+        st: isoDaysAgo(0, 10),
+        unread: true,
+        bucket: "imbox",
+        direction: "in",
+      }),
+      makeMessage({
+        id: "m_keep_2",
+        pid: NEWSPAPER.id,
+        subj: "更早的一封",
+        prev: "正文第一行",
+        st: isoDaysAgo(1, 10),
+        unread: true,
+        bucket: "imbox",
+        direction: "in",
+      }),
+    ];
+    await seedAndOpen(page, contacts, messages);
+
+    const chip = page.locator("[data-imbox-chip='unread']");
+    await expect(chip).toContainText("2", { timeout: 10_000 });
+
+    const card = page.locator(
+      "[data-feed-card='message'][data-message-id='m_keep_1']",
+    );
+    await expect(card).toHaveClass(/unread/);
+    await card.click();
+    await expect(page.locator("#detail-panel.open")).toBeVisible();
+
+    // 同一个行还在列表里，只是不再加粗 —— 而且两个 chip 的数字跟着减一，
+    // 说明标已读的那条链路（notifyMessageUpdated → refreshUnreadCounts）
+    // 真的接上了。
+    await expect(card).toBeVisible();
+    await expect(card).not.toHaveClass(/unread/);
+    await expect(chip).toContainText("1");
+    await shoot(page, "09-row-stays-put");
+  });
+
+  test("under the unread filter, opening a mail removes the row from the list", async ({
+    page,
+  }) => {
+    // 未读筛选开着时，标已读的行不再满足筛选条件，必须真的离开列表 ——
+    // 否则筛选条件在撒谎（列表里躺着已读邮件）。
+    const contacts = [APPLE_DEV, NEWSPAPER];
+    const messages = [
+      makeMessage({
+        id: "m_filter_1",
+        pid: APPLE_DEV.id,
+        subj: "会被读掉的那封",
+        prev: "正文第一行",
+        st: isoDaysAgo(0, 10),
+        unread: true,
+        bucket: "imbox",
+        direction: "in",
+      }),
+      makeMessage({
+        id: "m_filter_2",
+        pid: NEWSPAPER.id,
+        subj: "留下的那封",
+        prev: "正文第一行",
+        st: isoDaysAgo(1, 10),
+        unread: true,
+        bucket: "imbox",
+        direction: "in",
+      }),
+    ];
+    await seedAndOpen(page, contacts, messages);
+
+    await page.locator("[data-imbox-chip='unread']").click();
+    const card = page.locator(
+      "[data-feed-card='message'][data-message-id='m_filter_1']",
+    );
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await card.click();
+    await expect(page.locator("#detail-panel.open")).toBeVisible();
+
+    await expect(card).toHaveCount(0);
+    await expect(
+      page.locator("[data-feed-card='message'][data-message-id='m_filter_2']"),
+    ).toBeVisible();
+  });
+
+  test("an emptied unread filter keeps the chips and offers a way back", async ({
+    page,
+  }) => {
+    // 未读筛选是服务端筛选：一封未读都没有时列表真的空了。旧实现里
+    // hasAny() 会把 chip 行一起吞掉，用户看到的是「收件箱是空的」，
+    // 但收件箱里明明还有已读邮件 —— 而且没有任何退回「全部」的入口，
+    // 因为 quickFilter 只存在于这个组件的 signal 里。
+    const contacts = [APPLE_DEV];
+    const messages = [
+      makeMessage({
+        id: "m_allread_1",
+        pid: APPLE_DEV.id,
+        subj: "已经读过的",
+        prev: "正文第一行",
+        st: isoDaysAgo(0, 9),
+        unread: false,
+        bucket: "imbox",
+        direction: "in",
+      }),
+    ];
+    await seedAndOpen(page, contacts, messages);
+    await expect(
+      page.locator("[data-feed-card='message'][data-message-id='m_allread_1']"),
+    ).toBeVisible({ timeout: 10_000 });
+
+    await page.locator("[data-imbox-chip='unread']").click();
+
+    // Chip 行必须活过自己筛出来的空结果。
+    await expect(page.locator("[data-imbox-chip='all']")).toBeVisible();
+    await expect(page.getByText("都读完了")).toBeVisible();
+
+    await page.getByRole("button", { name: "查看全部" }).click();
+    await expect(
+      page.locator("[data-feed-card='message'][data-message-id='m_allread_1']"),
+    ).toBeVisible();
   });
 
   test("keyboard: j/k move cursor, Enter opens", async ({ page }) => {

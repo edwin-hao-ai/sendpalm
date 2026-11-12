@@ -1006,26 +1006,58 @@ export const RECENT_UNREAD_CAP = 2000;
 /** Unread Imbox mail received in the last `days` days. */
 export async function countRecentUnreadImbox(
   nowIso: string,
-  days: number = RECENT_UNREAD_DAYS,
+  options: { days?: number; accountIds?: string[] } = {},
 ): Promise<number> {
+  const { days = RECENT_UNREAD_DAYS, accountIds } = options;
+  if (accountIds && accountIds.length === 0) return 0;
   const db = await getDb();
   const cutoff = new Date(
     Date.parse(nowIso) - days * 86_400_000,
   ).toISOString();
+  const accountWhere = accountIds
+    ? ` AND ac IN (${accountIds.map(() => "?").join(", ")})`
+    : "";
   // id-only + LIMIT, same constraint as countGateCandidates: the browser
-  // MockDb cannot parse COUNT(*).
+  // MockDb cannot parse COUNT(*). All placeholders are `?` on purpose — mixing
+  // `$1` with the account `?`s makes SQLite bind the cutoff into the first
+  // `ac IN (…)` slot, so the scoped count silently came back 0.
   const rows = await db.select<Array<{ id: ID }>>(
     `SELECT id FROM messages
       WHERE bucket = 'imbox' AND direction = 'in' AND unread = 1
-        AND deleted_at IS NULL AND timeline_at >= $1
+        AND deleted_at IS NULL AND timeline_at >= ?${accountWhere}
       LIMIT ${RECENT_UNREAD_CAP}`,
-    [cutoff],
+    [cutoff, ...(accountIds ?? [])],
+  );
+  return rows.length;
+}
+
+/** The whole Imbox's unread count, any age. The list itself is merged now, so
+ *  this number only feeds the header copy ("未读 / 已读 / 总数").
+ *
+ *  Shares `RECENT_UNREAD_CAP` with `countRecentUnreadImbox` on purpose: the
+ *  header's "更早 N 封未读" is the difference of the two, and two different
+ *  ceilings would make that subtraction wrong (or negative) on a big mailbox.
+ *  id-only + LIMIT, same shape as the recent query — the browser MockDb does
+ *  not parse `COUNT(*)`. */
+export async function countImboxUnread(
+  accountIds?: string[],
+): Promise<number> {
+  if (accountIds && accountIds.length === 0) return 0;
+  const db = await getDb();
+  const accountWhere = accountIds
+    ? ` AND ac IN (${accountIds.map(() => "?").join(", ")})`
+    : "";
+  const rows = await db.select<Array<{ id: ID }>>(
+    `SELECT id FROM messages
+      WHERE bucket = 'imbox' AND direction = 'in' AND unread = 1
+        AND deleted_at IS NULL${accountWhere}
+      LIMIT ${RECENT_UNREAD_CAP}`,
+    accountIds ?? [],
   );
   return rows.length;
 }
 
 /** Unread mail per bucket, for the sidebar's right-aligned counts.
- *
  *  Three narrow id-only selects instead of one GROUP BY: the browser MockDb
  *  understands simple WHERE clauses, and the number only needs to answer
  *  "which group has something waiting" — the list views carry the exact
@@ -1073,15 +1105,11 @@ export async function countUnreadByBucket(
 export async function countMessagesByAccount(
   bucket: MessageBucket,
   accountIds: string[],
-  options: { unreadOnly?: boolean; readOnly?: boolean } = {},
+  options: { unreadOnly?: boolean } = {},
 ): Promise<Record<string, number>> {
   const db = await getDb();
   const out: Record<string, number> = {};
-  const unreadClause = options.unreadOnly
-    ? " AND unread = 1"
-    : options.readOnly
-      ? " AND unread = 0"
-      : "";
+  const unreadClause = options.unreadOnly ? " AND unread = 1" : "";
   await Promise.all(
     accountIds.map(async (id) => {
       const rows = await db.select<Array<{ total: number }>>(
@@ -1294,13 +1322,6 @@ export interface ListMessagesOptions {
   bucket?: MessageBucket;
   direction?: "in" | "out";
   unreadOnly?: boolean;
-  /** Filter to messages that have been read (`unread = 0`). Mutually
-   *  exclusive with `unreadOnly`; if both are set, `unreadOnly` wins.
-   *  Used by the Imbox "Previously seen" tab so it has its own
-   *  paginated slice instead of sharing the same loaded window as
-   *  "New for you" (which capped read messages at PAGE_SIZE rows and
-   *  hid anything older). */
-  readOnly?: boolean;
   replyLaterOnly?: boolean;
   setAsideOnly?: boolean;
   bubbleUpOnly?: boolean;
@@ -1431,10 +1452,6 @@ export async function listMessagesPaged(
   }
   if (options.unreadOnly) {
     where.push("unread = 1");
-  } else if (options.readOnly) {
-    // readOnly is mutually exclusive with unreadOnly — fall back to the
-    // unread branch above if both are set.
-    where.push("unread = 0");
   }
   if (options.replyLaterOnly) {
     where.push("reply_later = 1");

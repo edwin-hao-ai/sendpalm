@@ -646,11 +646,9 @@ test.describe("Email workflows", () => {
     });
 
     await navigateTo(page, "imbox");
-    // After trash + undo the message lives in the "Previously seen" tab
-    // (opening a message marks it read, and trash doesn't move it back
-    // to unread). Click the tab to confirm it's restored on the right
-    // surface, instead of only checking the default "New for you" tab.
-    await page.locator("[data-imbox-tab='seen']").first().click();
+    // After trash + undo the message lives in the one Imbox list. Opening a
+    // message marks it read, and the merged list keeps it in place — so this
+    // now asserts the row survived the round-trip without any tab switch.
     await expect(page.locator(`[data-message-id="${MESSAGE_ID}"]`)).toBeVisible(
       { timeout: 5_000 },
     );

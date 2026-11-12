@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { dateBucket, bucketLabel } from "../utils/date";
+import { RECENT_UNREAD_CAP } from "../stores/data";
 import type { Item } from "./Imbox-helpers";
-import { groupItemsByDate, isImboxListMessage } from "./Imbox-helpers";
+import {
+  groupItemsByDate,
+  isImboxListMessage,
+  olderUnread,
+  readTotal,
+} from "./Imbox-helpers";
 
 const today = new Date("2026-08-18T14:00:00Z");
 
@@ -201,3 +207,37 @@ function stOf(item: Item): string {
   if ("messages" in item) return item.messages[0]!.st;
   return item.st;
 }
+
+describe("olderUnread / readTotal", () => {
+  // 合并列表后头部要同时说「最近 30 天 N 封待读 · 更早 M 封未读 · 已读 K ·
+  // 总数 T」。这三个数字来自两次查询和一个相减，任何一侧算错都会让用户
+  // 看到一个和自己的列表对不上的头。
+
+  it("subtracts the recent window from the unread total", () => {
+    expect(olderUnread(5, 8)).toBe(3);
+  });
+
+  it("clamps to zero when the recent count exceeds the total", () => {
+    // 两个计数来自两次查询，同步写入时可能短暂不一致。
+    expect(olderUnread(9, 8)).toBe(0);
+  });
+
+  it("says nothing when the recent count is capped", () => {
+    // 上线之后两个数字不再对应，减法就是猜。
+    expect(olderUnread(RECENT_UNREAD_CAP, 5000)).toBe(0);
+  });
+
+  it("says nothing when the unread total itself is capped", () => {
+    // 全量未读也是 LIMIT 限幅查出来的：3,762 封未读只会返回 2000，
+    // 减 5 得到的 1995 是个精确到个位的假数字。两侧都要挡。
+    expect(olderUnread(5, RECENT_UNREAD_CAP)).toBe(0);
+  });
+
+  it("derives the read total", () => {
+    expect(readTotal(8, 56)).toBe(48);
+  });
+
+  it("never returns a negative read total", () => {
+    expect(readTotal(60, 56)).toBe(0);
+  });
+});

@@ -2,6 +2,17 @@
 
 > Source: prototype-v11.38 (v11.38) — every feature reimplemented as Tauri 2 + SolidJS.
 
+## Imbox: unread is a visual, not a container (2026-11-12)
+
+- Opening a message no longer rearranges the Imbox. The 「新邮件 / 已读」 tab pair is gone; read and unread mail share one paginated list, unread renders as bold + a dot, and opening a mail leaves the row exactly where it was with only the mark removed.
+- 「未读」 joined 订阅 / 新面孔 as an exclusive quick filter (`data-imbox-chip`, `aria-pressed`, always mounted so an emptied list can never swallow its own off switch). Switching a chip re-queries page 1 and `loadMore` together through the options accessor, so no page can be appended under the previous filter.
+- Marking read still lands through the existing MessagePanel → `notifyMessageUpdated` → `patchMessage` path. The Imbox subscribes once; it removes the row only when the 未读 filter is on (a filter that keeps read rows would be lying) and otherwise just lets the patch un-bold it in place.
+- Deleted: `ImboxTabs`, `ImboxTabButton`, `TabEmpty`, `openAndMarkRead`, `keepScrollStill`, `newPaged`/`seenPaged`, `ListMessagesOptions.readOnly` and its `AccountTabs` `mode: "read"` caller. The 18-line `keepScrollStill` existed only to hide the row jumping between tabs.
+- Header arithmetic is now three numbers over one account scope: `countImboxUnread` (new, id-only + `LIMIT RECENT_UNREAD_CAP`) and `countRecentUnreadImbox` (now takes `{ days?, accountIds? }`) share one ceiling, so 「更早 N 封未读」 and 「已读 K」 can never go negative or disagree when the account switches.
+- Fixed a latent bug found by the new tests: `countRecentUnreadImbox` mixed a `$1` placeholder with account `?` placeholders, which binds the cutoff into the first `ac IN (…)` slot — a scoped recent-unread count always returned 0.
+- Verification: 875 Vitest tests pass (90 files); typecheck, lint clean. Playwright: 184 passed, 1 live Feishu test skipped. Three new regression specs: opening an unread mail keeps the row and decrements the chip; under the 未读 filter the same action does remove the row; an emptied unread filter keeps its chips and a 「查看全部」 exit.
+- Review fixes: an emptied unread filter used to take the whole chip row down with it (the only way back to 全部 lived in that row); 「更早 N 封未读」 and 「已读 K」 now go quiet once either count hits its `LIMIT` instead of printing a precise wrong number; 「u」 and the row actions refresh the SQL counts again (the subscription only sees `notifyMessageUpdated`, which `markMessageUnread` does not emit); opening a mail goes through `markMessageUnread` again so `\Seen` is mirrored to IMAP, guarded against firing twice while the detail resource is refreshing.
+
 ## Inbox email-to-Tasks (2026-11-02)
 
 - Added migration 0024: nullable provenance/direction on existing `tasks`, durable per-message extraction runs, and separate review suggestions. Confirmation uses a stable task ID; dismissal never creates a task. Existing task rows remain unclassified and editable in TaskPanel.

@@ -820,7 +820,12 @@ test.describe("UI audit shots — desktop 1440x900", () => {
   test("imbox card hover action bar", async ({ page }) => {
     await bootSeeded(page);
     await navTo(page, "imbox");
-    const card = page.locator('[data-feed-card="message"]').nth(1);
+    // Exclude bundle-drawer rows: they carry data-feed-card="message" too and
+    // sit in the DOM while collapsed, so nth(1) could land on a hidden row now
+    // that read mail shares the list with unread.
+    const card = page
+      .locator('[data-feed-card="message"]:not([data-bundle-row])')
+      .nth(1);
     await card.waitFor({ timeout: 8_000 });
     await card.hover();
     await page

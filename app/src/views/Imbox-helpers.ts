@@ -12,6 +12,7 @@
  *  (e.g. setAside / replyLater excluded upstream). */
 
 import type { Message } from "../types";
+import { RECENT_UNREAD_CAP } from "../stores/data";
 import { bucketLabel, type DateBucketKey } from "../utils/date";
 import { dateBucketInZone, messageTimelineAt } from "../utils/message-dates";
 
@@ -72,4 +73,24 @@ export function isImboxListMessage(
   m: Pick<Message, "setAside" | "replyLater" | "bubbleUpAt">,
 ): boolean {
   return !m.setAside && !m.replyLater && !m.bubbleUpAt;
+}
+
+/** Unread mail outside the "recent" window the header leads with.
+ *
+ *  Returns 0 when either side is saturated. Both counts are `LIMIT`-capped
+ *  (they share `RECENT_UNREAD_CAP`), so past the cap neither number is
+ *  trustworthy and subtracting them produces a number that is precise to the
+ *  digit and wrong by thousands. A 3,762-unread mailbox would otherwise read
+ *  "更早 1995 封未读". */
+export function olderUnread(recentUnread: number, unreadTotal: number): number {
+  if (recentUnread >= RECENT_UNREAD_CAP) return 0;
+  if (unreadTotal >= RECENT_UNREAD_CAP) return 0;
+  return Math.max(0, unreadTotal - recentUnread);
+}
+
+/** Read mail in the Imbox = everything minus the unread rows. Clamped, because
+ *  the two numbers come from separate queries and can disagree for a moment
+ *  while a sync commits. */
+export function readTotal(unreadTotal: number, total: number): number {
+  return Math.max(0, total - unreadTotal);
 }

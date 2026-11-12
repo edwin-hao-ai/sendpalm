@@ -358,6 +358,29 @@
 
 .feed-section-action:hover { text-decoration: underline; }
 
+/* Quick-filter chip row above the Imbox list. Always mounted: a filter that
+   empties the list must not also remove its own off switch. Wraps rather than
+   overflowing at 375px, where four chips + 一起读 do not fit on one line. */
+.imbox-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-1) 0 var(--space-2);
+  /* Sticky, like the tab bar it replaced: past a few dozen rows, switching
+     filter means scrolling back to the top otherwise. */
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--paper);
+}
+
+.imbox-chips .feed-section-action {
+  margin-left: var(--space-2);
+  min-height: 28px;
+}
+
 .bubble-up-banner {
   display: flex;
   align-items: center;
