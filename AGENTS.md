@@ -890,6 +890,46 @@ and script inside the mail frame)
   关闭时返回以 `SEND_DISABLED` 开头的错误信息，并明确让 Agent 退回 `create_draft`。
   验证方式不需要真的发信：把开关关掉、调一次 `send_email`、看到 SEND_DISABLED，再恢复。
 
+### 11.22 Lessons learned (Session 2026-11-12 — 托盘/铃铛打开的信件定位、浮层层叠、模板图标、通知权限)
+
+- **同一个"选中"概念有两个所有者时，外部入口一定看不见效果。** 列表的键盘高亮是 Imbox 自己的
+  `cursorIndex`，而托盘菜单/通知中心只写 `ui.selectedMessageId`——右侧详情打开了，左侧既没高亮
+  也不滚动。修法不是让外部去写 `cursorIndex`（它依赖分页窗口 + bundle 折叠 + 快筛后的下标），
+  而是在拥有列表的那一侧加一个 reveal effect：`selectedMessageId` → 行锚点 → 光标 + `scrollIntoView`。
+  锚点必须是纯函数（`rowAnchorForMessage`），因为「这封信被折叠进 sender bundle」这一分支让
+  `[data-message-id]` 根本不在 DOM 里。列表内点击用 `revealedId = id` 记一个 one-shot latch，
+  否则每次列表 patch / 同步 tick 都会把用户正在读的滚动位置拉回去。
+- **`scrollIntoView({block:"nearest"})`，不要 `center`。** 点击列表里的一行也会写同一个
+  `selectedMessageId`；`center` 会在每次点击时把整行居中，列表像被"推"了一下。
+- **子元素的 `z-index` 永远翻不过父级层叠上下文。** 顶栏是 `position:relative; z-index:20` 的层叠
+  上下文，写在它内部的浮层即使 `z-index:45`，整体仍然画在 `#detail-panel`(30) / `#agent-panel`(40)
+  之下——用户看到的是"浮层被列表盖住"。要么 portal 到根节点，要么把**父级**抬到这些面板之上。
+  抬父级要检查手机断点：那里详情是 `inset:0` 的整屏 sheet，必须继续盖住顶栏，所以顶栏在
+  `max-width:767px` 里回落到 `--z-sticky`。
+- **视觉断言要断言"谁拥有这个像素"。** 「浮层可见」在 bug 存在时也是 true（DOM 在、尺寸在、
+  `toBeVisible()` 绿）。真正的断言是 `document.elementFromPoint(中心)` 的结果被浮层 `contains`。
+  同理，行高亮不能只断言 class（§11.20），这里还多一层：要断言它在 `#main` 的视口矩形内。
+- **e2e 里的 `getByText(...).first()` 会点到列表而不是浮层。** 同一封邮件的主题在铃铛下拉和列表行里
+  都渲染，`.first()` 命中的是列表行（Playwright 还会自动滚到它），于是测试走的是**已经在工作的
+  那条路径**，修复前进退全绿。选择器要带作用域：给浮层加 `data-notification-panel` /
+  `data-notification-row`，只点面板里的那一个。
+- **macOS 菜单栏模板图 = 透明画布 + 实心字形。** `icon_as_template(true)` 下系统按 alpha 染色，
+  画一块实心圆角方板 + 镂空图形，16pt 时镂空细节全部丢失，屏幕上就是一块白/黑方块。
+  资产用 `tray-icon-template.svg` 作源（`rsvg-convert -w 32 -h 32`），并把 44×44 改成 32×32；
+  Windows/Linux 深色托盘里黑色字形会看不见，所以那边仍用彩色品牌图（`cfg!(target_os)` 分支）。
+- **开发态的裸二进制永远不会出现在通知中心。** `pnpm tauri dev` 跑的是
+  `~/.cargo/shared-target/debug/sendpalm-app`，不是 `.app` bundle；`UNUserNotificationCenter`
+  需要 bundle identifier，所以 dev 里"通知不弹"是环境，不是产品 bug。判断系统是否真的登记过：
+  `defaults read com.apple.ncprefs | grep -i palm` —— 0 命中就是从未授予/从未请求。
+- **Rust 侧的通知偏好必须启动时同步一次。** `notify_settings_changed` 只在用户动开关时调用，
+  于是"关掉桌面通知"能写进 prefs 文件、却活不过重启：Rust 内存里还是默认的 `desktop_enabled=true`。
+  bootstrap 读完设置就 `syncNotificationPrefs(...)`，比在 Rust 里再解析一遍 prefs JSON 更符合
+  "JS owns the preferences" 的既有分工。
+- **用户的意图和系统的回答是两个字段。** 权限被拒时旧代码把 `desktop` 改成 false，于是
+  "我明明开着通知"和"为什么没弹"同时成立，UI 无话可说。现在 `desktop` 只记用户意图，设置页
+  读 `isPermissionGranted()` 显示真实状态并提供「再次请求权限 / 打开系统设置」，Rust 的 ping 取
+  `意图 && 授权`，失败日志按"同因只记一次"打印（`record_failure_once`），否则每封新邮件一行。
+
 ## 12. Agent Skills & Global Protocols
 
 SendPalm adopts a set of global agent skills stored in `~/.agents/skills/`. These skills are available to Kimi Code, Claude Code, OpenCode, and any other agent that reads the standard skill directory. **Invoke them by name** when the situation matches their description:
