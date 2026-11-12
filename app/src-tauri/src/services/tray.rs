@@ -88,16 +88,19 @@ struct TrayState {
 }
 
 pub fn setup_tray(app: &AppHandle, pool: SqlitePool) -> Result<(), String> {
-    // Menu-bar template icon: a black plate with the paper-plane knocked
-    // out (tray-icon-template.png, rendered from logo-mark.svg). macOS
-    // tints template images automatically — black on a light menu bar,
-    // white on a dark one — matching the system icon style. The colored
-    // variant (tray-icon.png) stays for platforms where template mode is
-    // unsupported.
-    let icon = tauri::image::Image::from_bytes(include_bytes!(
-        "../../icons/tray-icon-template.png"
-    ))
-    .map_err(|e| format!("tray icon decode: {e}"))?;
+    // Menu-bar glyph. macOS gets a TEMPLATE image: a transparent canvas with a
+    // solid mark and NO plate, because the menu bar tints template images as a
+    // mask — a filled rounded square (the previous icon) renders as a heavy
+    // white blob whose knocked-out plane is an unreadable sliver at 16 pt.
+    // Other platforms get the coloured brand mark: Windows and most Linux
+    // panels have dark trays, where a black glyph disappears.
+    #[cfg(target_os = "macos")]
+    const ICON_BYTES: &[u8] = include_bytes!("../../icons/tray-icon-template.png");
+    #[cfg(not(target_os = "macos"))]
+    const ICON_BYTES: &[u8] = include_bytes!("../../icons/tray-icon.png");
+
+    let icon = tauri::image::Image::from_bytes(ICON_BYTES)
+        .map_err(|e| format!("tray icon decode: {e}"))?;
 
     let state = Arc::new(TrayState {
         pool: pool.clone(),
@@ -113,7 +116,7 @@ pub fn setup_tray(app: &AppHandle, pool: SqlitePool) -> Result<(), String> {
     let initial_menu = build_menu(app, 0, &[], 0, "Agent 网关 · 启动中");
     let tray = TrayIconBuilder::with_id("sendpalm-tray")
         .icon(icon)
-        .icon_as_template(true)
+        .icon_as_template(cfg!(target_os = "macos"))
         .menu_on_left_click(true)
         .menu(&initial_menu)
         .on_tray_icon_event({

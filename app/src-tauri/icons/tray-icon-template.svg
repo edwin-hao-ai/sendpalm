@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS menu-bar template glyph (16 pt @2x = 32×32 px).
+
+  A template image is drawn as a mask: only the alpha matters, macOS tints it
+  black on a light menu bar and white on a dark one. So this file must be a
+  transparent canvas with a solid glyph — NOT a coloured plate. The previous
+  version was a filled rounded square with the plane knocked out, which at
+  16 pt renders as a heavy white blob with an unreadable sliver (see
+  docs/superpowers/plans/2026-11-12-tray-notification-fixes.md).
+
+  Geometry: the same paper-plane as `src/assets/logo-mark.svg` (Phosphor
+  paper-plane-tilt), scaled to fill the canvas with ~1 px of breathing room
+  so it optically matches the system status items next to it.
+
+  Regenerate the PNG next to this file with:
+    rsvg-convert -w 32 -h 32 -f png -o tray-icon-template.png \
+      tray-icon-template.svg
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <g transform="translate(16 16.5) scale(0.118) translate(-128 -136)">
+    <path fill="#000000" d="M231.4,44.34s0,.1,0,.15l-58.2,191.94a15.88,15.88,0,0,1-14,11.51q-.69.06-1.38.06a15.86,15.86,0,0,1-14.42-9.15L107,164.15a4,4,0,0,1,.77-4.58l57.92-57.92a8,8,0,0,0-11.31-11.31L96.43,148.26a4,4,0,0,1-4.58.77L17.08,112.64a16,16,0,0,1,2.49-29.8l191.94-58.2.15,0A16,16,0,0,1,231.4,44.34Z"/>
+  </g>
+</svg>
