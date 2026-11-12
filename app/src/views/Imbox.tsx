@@ -266,9 +266,12 @@ export function Imbox() {
   // Leaving a row read is the one list mutation that used to move mail between
   // containers. Now it is a state change in place — except when the user is
   // looking at 「未读」, where a row that stops being unread no longer matches
-  // the filter and has to leave the list. All three paths (opening a message,
-  // the `u` key, a bulk mark-as-read) funnel through notifyMessageUpdated, so
-  // one subscription covers them.
+  // the filter and has to leave the list.
+  //
+  // Only the paths that go through `notifyMessageUpdated` arrive here: opening
+  // a mail (MessagePanel.markOpenedRead), Read Together, bulk mark-as-read.
+  // `toggleUnread` calls `markMessageUnread` directly, which does not emit —
+  // that path refreshes its own counts via `afterRowAction`.
   onCleanup(
     registerMessageUpdated((id, patch) => {
       if (patch.unread === undefined) return;
@@ -342,7 +345,7 @@ export function Imbox() {
   // on every comparison — for 100 items that's 700+ Date allocations and
   // 700+ Map lookups per sort, every time `items()` or `contactMap()`
   // changes. WKWebView (real Tauri) is 2-3x more sensitive to this than
-  // Chrome and the dominant cost during the "tab switch → scroll" window.
+  // Chrome and the dominant cost during the "switch filter → scroll" window.
   // chip 上直接显示数量——用户点之前就知道里面有多少封（"只看订阅"
   // "只看待审"这种自造词对普通人没有意义，数量和大白话才是信息）。
   const [pendingSenderCount] = createResource(countGatePending);
@@ -433,10 +436,9 @@ export function Imbox() {
     return decorated.map((d) => d.item);
   });
 
-  // With tabs, each section is its own paginated slice — both already
-  // carry unread/read filtering server-side. So `newForYou` and
-  // `previouslySeen` are just the current paged view, plus bundle
-  // grouping applied to the active tab.
+  // One list now: read and unread mail share `paged`, and bundle grouping
+  // applies to the whole window. `unreadOnly` narrows the query server-side;
+  // 订阅 / 新面孔 are filtered client-side inside `renderList`.
   //
   // No-op memo removed (was `createMemo(() => renderList())`). It
   // added a reactive layer that downstream `flatIds`, the
@@ -604,9 +606,21 @@ export function Imbox() {
     paged.removeByIds([id]);
   };
 
+  /** Runs after an action that changed or removed a row: refetch the pile
+   *  slices, and refresh the SQL counts behind the header and the chips.
+   *
+   *  The counts are not derivable from the list any more. Today `removeRow` only
+   *  drops the row in memory, so without this archive/trash/spam/pile leave
+   *  「未读 5」 above a list of 4 — and archiving an *unread* mail makes the
+   *  已读 number go DOWN, because 已读 = 总数 − 未读 and 未读 shrinks. */
+  const afterRowAction = async () => {
+    await refetchPiles();
+    refreshUnreadCounts();
+  };
+
   const refreshAll = async () => {
     await paged.refresh();
-    await refetchPiles();
+    await afterRowAction();
   };
 
   /** Reading a message changes a row in memory, which our patches handle — but
@@ -635,7 +649,7 @@ export function Imbox() {
         setAside: false,
         bubbleUpAt: null,
       });
-      await refetchPiles();
+      await afterRowAction();
       showToast({
         message: "已加入稍后回复",
         kind: "success",
@@ -667,7 +681,7 @@ export function Imbox() {
         setAside: true,
         bubbleUpAt: null,
       });
-      await refetchPiles();
+      await afterRowAction();
       showToast({
         message: "已搁置",
         kind: "success",
@@ -701,7 +715,7 @@ export function Imbox() {
         setAside: false,
         bubbleUpAt: whenIso,
       });
-      await refetchPiles();
+      await afterRowAction();
       showToast({
         message: `已设为${label}提醒`,
         kind: "success",
@@ -736,7 +750,7 @@ export function Imbox() {
     removeRow(m.id);
     try {
       await moveMessageToBucket(m.id, "paperTrail");
-      await refetchPiles();
+      await afterRowAction();
       showToast({
         message: "已归档到 Records",
         kind: "success",
@@ -760,7 +774,7 @@ export function Imbox() {
     removeRow(m.id);
     try {
       await moveMessageToBucket(m.id, "trash");
-      await refetchPiles();
+      await afterRowAction();
       showToast({
         message: "已移到回收站",
         kind: "info",
@@ -784,7 +798,7 @@ export function Imbox() {
     removeRow(m.id);
     try {
       await moveMessageToBucket(m.id, "spam");
-      await refetchPiles();
+      await afterRowAction();
       showToast({
         message: "已移到垃圾邮件",
         kind: "info",
@@ -811,11 +825,13 @@ export function Imbox() {
       const next = !m.unread;
       await markMessageUnread(m.id, next);
       // 未读筛选开着时，刚变已读的行不再满足条件，必须真的移出列表；
-      // 否则就地改写，行留在原位。无论哪种，refreshUnreadCounts 都在
-      // registerMessageUpdated 的订阅里统一触发。
+      // 否则就地改写，行留在原位。
       if (!next && unreadOnly()) paged.removeByIds([m.id]);
       else paged.patchMessage(m.id, { unread: next });
-      await refetchPiles();
+      // `markMessageUnread` does NOT emit notifyMessageUpdated, so the
+      // subscribe-once handler above never sees this path — refresh the counts
+      // here or the chip keeps advertising the old unread number.
+      await afterRowAction();
     } catch (err) {
       console.error("[imbox] toggleUnread failed:", err);
       await refreshAll();
@@ -885,7 +901,7 @@ export function Imbox() {
           removeRow(m.id);
           try {
             await moveMessageToBucket(m.id, target);
-            await refetchPiles();
+            await afterRowAction();
             const label = target === "imbox" ? "Inbox" : "Stream";
             showToast({ message: `已移到 ${label}`, kind: "info" });
           } catch (err) {
@@ -1066,6 +1082,15 @@ export function Imbox() {
   const allCount = () =>
     paged.resource.loading && paged.total() === 0 ? "…" : paged.total();
 
+  /** 「未读」chip 上的数字：同样先省略号后数字，并在计数被 LIMIT 截断时说
+   *  `2000+`，而不是把一个上限当成精确值。 */
+  const unreadChipCount = (total: { latest?: number }) =>
+    total.latest === undefined
+      ? "…"
+      : total.latest >= RECENT_UNREAD_CAP
+        ? `${RECENT_UNREAD_CAP}+`
+        : total.latest;
+
   return (
     <div class="imbox-view">
       <ImboxHeader
@@ -1185,7 +1210,14 @@ export function Imbox() {
           when={!(paged.resource.loading && paged.items().length === 0)}
           fallback={<SkeletonBlock />}
         >
-          <Show when={hasAny()} fallback={<EmptyState hasAccount={emailAccounts(accounts()).length > 0} />}>
+          {/* `quickFilter() !== "all"` keeps the chip row alive when the user's
+              own filter empties the list: the chips are the only way back out,
+              and quickFilter is component-local, so losing them strands the
+              reader until they leave the view. */}
+          <Show
+            when={hasAny() || quickFilter() !== "all"}
+            fallback={<EmptyState hasAccount={emailAccounts(accounts()).length > 0} />}
+          >
             <div
               class="feed-list"
               data-feed-list
@@ -1211,7 +1243,7 @@ export function Imbox() {
                 <ImboxChip
                   chip="unread"
                   label="未读"
-                  count={unreadTotal.latest ?? "…"}
+                  count={unreadChipCount(unreadTotal)}
                   active={quickFilter() === "unread"}
                   title="只显示未读邮件；再点一次回到全部"
                   onClick={() =>
@@ -1271,7 +1303,6 @@ export function Imbox() {
                     hasAccount={emailAccounts(accounts() ?? []).length > 0}
                     unreadOnly={unreadOnly()}
                     filterActive={quickFilter() !== "all"}
-                    total={paged.total()}
                     onClearFilters={() => setQuickFilter("all")}
                   />
                 }
@@ -1453,34 +1484,18 @@ function FilterEmpty(props: {
   hasAccount: boolean;
   unreadOnly: boolean;
   filterActive: boolean;
-  /** Total rows in the Imbox with no filter — what the user would see. */
-  total: number;
   onClearFilters: () => void;
 }) {
-  if (!props.hasAccount) {
-    return (
-      <Empty
-        icon="ph-tray"
-        title="还没有连接邮箱"
-        description="连接你的第一个邮箱后，新邮件会自动收进这里。"
-      />
-    );
-  }
+  // 筛选的解释优先于「没有连接邮箱」：一份导入/种子邮箱可以没有 account 行却
+  // 有邮件，而列表空着的原因此刻是筛选，不是缺少账户。反过来讲，用户在筛选
+  // 状态下看到的出口必须是「退出筛选」，不是「去添加账户」。
   if (props.unreadOnly) {
     return (
       <Empty
         icon="ph-check-circle"
         title="都读完了 🎉"
-        description={
-          props.total > 0
-            ? `收件箱里还有 ${props.total} 封已读邮件。`
-            : "收件箱是空的。"
-        }
-        action={
-          props.total > 0
-            ? { label: "查看全部", onClick: props.onClearFilters }
-            : undefined
-        }
+        description="已读的邮件仍在收件箱里。"
+        action={{ label: "查看全部", onClick: props.onClearFilters }}
       />
     );
   }
@@ -1491,6 +1506,15 @@ function FilterEmpty(props: {
         title="筛选条件下没有邮件"
         description="清除筛选即可看到全部。"
         action={{ label: "清除筛选", onClick: props.onClearFilters }}
+      />
+    );
+  }
+  if (!props.hasAccount) {
+    return (
+      <Empty
+        icon="ph-tray"
+        title="还没有连接邮箱"
+        description="连接你的第一个邮箱后，新邮件会自动收进这里。"
       />
     );
   }
@@ -1529,6 +1553,12 @@ function ImboxHeader(props: {
     props.recentUnread >= RECENT_UNREAD_CAP
       ? `${RECENT_UNREAD_CAP}+`
       : String(props.recentUnread);
+
+  /** Same rule for the whole-mailbox unread count. Past the cap both the
+   *  unread figure and anything derived from it (已读 = 总数 − 未读) are
+   *  unknowable, so the header names the cap instead of inventing a number. */
+  const unreadCapped = () => props.unreadTotal >= RECENT_UNREAD_CAP;
+  const unreadLabel = () => (unreadCapped() ? `${RECENT_UNREAD_CAP}+` : null);
 
   /** Unread mail older than the window — see `olderUnread` in Imbox-helpers
    *  for why a capped recent count makes the difference unknowable. */
@@ -1570,7 +1600,16 @@ function ImboxHeader(props: {
                 }
               >
                 最近 30 天 {recentLabel()} 封待读 ·{" "}
-                {readTotal(props.unreadTotal, props.total)} 已读 · {props.total} 总数
+                {unreadCapped() ? (
+                  <>
+                    {unreadLabel()} 封未读
+                  </>
+                ) : (
+                  <>
+                    {readTotal(props.unreadTotal, props.total)} 已读
+                  </>
+                )}{" "}
+                · {props.total} 总数
                 <Show when={older() > 0}>
                   <span
                     data-imbox-older-unread

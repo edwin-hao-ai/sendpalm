@@ -551,6 +551,43 @@ test.describe("Imbox — single view focus", () => {
     ).toBeVisible();
   });
 
+  test("an emptied unread filter keeps the chips and offers a way back", async ({
+    page,
+  }) => {
+    // 未读筛选是服务端筛选：一封未读都没有时列表真的空了。旧实现里
+    // hasAny() 会把 chip 行一起吞掉，用户看到的是「收件箱是空的」，
+    // 但收件箱里明明还有已读邮件 —— 而且没有任何退回「全部」的入口，
+    // 因为 quickFilter 只存在于这个组件的 signal 里。
+    const contacts = [APPLE_DEV];
+    const messages = [
+      makeMessage({
+        id: "m_allread_1",
+        pid: APPLE_DEV.id,
+        subj: "已经读过的",
+        prev: "正文第一行",
+        st: isoDaysAgo(0, 9),
+        unread: false,
+        bucket: "imbox",
+        direction: "in",
+      }),
+    ];
+    await seedAndOpen(page, contacts, messages);
+    await expect(
+      page.locator("[data-feed-card='message'][data-message-id='m_allread_1']"),
+    ).toBeVisible({ timeout: 10_000 });
+
+    await page.locator("[data-imbox-chip='unread']").click();
+
+    // Chip 行必须活过自己筛出来的空结果。
+    await expect(page.locator("[data-imbox-chip='all']")).toBeVisible();
+    await expect(page.getByText("都读完了")).toBeVisible();
+
+    await page.getByRole("button", { name: "查看全部" }).click();
+    await expect(
+      page.locator("[data-feed-card='message'][data-message-id='m_allread_1']"),
+    ).toBeVisible();
+  });
+
   test("keyboard: j/k move cursor, Enter opens", async ({ page }) => {
     const { contacts, messages } = makeImboxDataset();
     await seedAndOpen(page, contacts, messages);

@@ -77,11 +77,14 @@ export function isImboxListMessage(
 
 /** Unread mail outside the "recent" window the header leads with.
  *
- *  Returns 0 once `recentUnread` hit `RECENT_UNREAD_CAP`: past the cap the
- *  query cannot vouch for either number, so subtracting them would be a
- *  guess dressed as a fact. */
+ *  Returns 0 when either side is saturated. Both counts are `LIMIT`-capped
+ *  (they share `RECENT_UNREAD_CAP`), so past the cap neither number is
+ *  trustworthy and subtracting them produces a number that is precise to the
+ *  digit and wrong by thousands. A 3,762-unread mailbox would otherwise read
+ *  "更早 1995 封未读". */
 export function olderUnread(recentUnread: number, unreadTotal: number): number {
   if (recentUnread >= RECENT_UNREAD_CAP) return 0;
+  if (unreadTotal >= RECENT_UNREAD_CAP) return 0;
   return Math.max(0, unreadTotal - recentUnread);
 }
 

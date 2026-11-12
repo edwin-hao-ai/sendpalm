@@ -24,6 +24,36 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { moreMenuItemDefs } from "./MessagePanel";
 
+const h = vi.hoisted(() => ({
+  markMessageUnread: vi.fn(async () => {}),
+  notifyMessageUpdated: vi.fn(),
+}));
+
+vi.mock("../stores/data", () => ({
+  markMessageUnread: h.markMessageUnread,
+}));
+vi.mock("../services/sync-events", () => ({
+  notifyMessageUpdated: h.notifyMessageUpdated,
+}));
+
+describe("markOpenedRead", () => {
+  beforeEach(() => {
+    h.markMessageUnread.mockClear();
+    h.notifyMessageUpdated.mockClear();
+  });
+
+  it("goes through markMessageUnread so the server's \\Seen flag follows", async () => {
+    // Regression: opening a mail used to call `upsertMessage({...m,
+    // unread:false})`, which is local-only. `markMessageUnread` is the one
+    // function that mirrors the flag onto IMAP (`imap_set_seen`), so reading
+    // 20 mails here left them unread in webmail and on the phone forever.
+    const { markOpenedRead } = await import("./MessagePanel");
+    await markOpenedRead({ id: "m1" });
+    expect(h.markMessageUnread).toHaveBeenCalledWith("m1", false);
+    expect(h.notifyMessageUpdated).toHaveBeenCalledWith("m1", { unread: false });
+  });
+});
+
 it("adds per-message task extraction without removing the existing More actions", () => {
   const items = moreMenuItemDefs({ bucket: "imbox", setAsideActive: false });
   expect(items.find(i => i.id === "extract-tasks")?.label).toBe("提取任务");

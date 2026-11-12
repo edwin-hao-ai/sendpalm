@@ -16,6 +16,7 @@ import { extractTasksForMessage } from "../services/task-extraction";
 import {
   getContact,
   getMessage,
+  markMessageUnread,
   upsertSticky,
   deleteSticky,
   upsertFollowUp,
@@ -76,8 +77,7 @@ import {
   useViewport,
 } from "../utils/gestures";
 import { notifyMessageUpdated } from "../services/sync-events";
-import { formatMessageSource, messagePreview } from "./message-source";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { formatMessageSource, messagePreview } from "./message-source";import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
   EmailBody,
   clearIframeSelection,
@@ -209,14 +209,20 @@ export function MessagePanel(props: { messageId: string }) {
     void refetchAttachments();
   });
 
+  // One guard per message id: `refetchMessage` below flips the resource back to
+  // "refreshing", during which `message()` still returns the previous value —
+  // i.e. `unread: true` again. Without this the effect fires a second
+  // markOpenedRead on the same message, which doubles the counters cascade and
+  // pushes `\Seen` to IMAP twice.
+  const markedRead = new Set<string>();
   createEffect(() => {
     const m = message();
-    if (m && m.unread) {
-      void upsertMessage({ ...m, unread: false }).then(() => {
-        // Patch owning lists in place and refresh our own resource — no
+    if (m && m.unread && !markedRead.has(m.id)) {
+      markedRead.add(m.id);
+      void markOpenedRead(m).then(() => {
+        // Refresh our own resource so the header stops showing 未读 — no
         // global refreshTick, so the Imbox list does not refetch its whole
         // page when the user simply opens a message.
-        notifyMessageUpdated(m.id, { unread: false });
         void refetchMessage();
       });
     }
@@ -2239,6 +2245,22 @@ export interface MoreMenuItemDef {
   danger?: boolean;
   /** Visual separator rendered above this item. */
   separator?: boolean;
+}
+
+/** Mark a message read because the reader opened it.
+ *
+ *  Goes through `markMessageUnread` on purpose: it is the one function that
+ *  both updates the `unread` column and mirrors the flag onto IMAP
+ *  (`imap_set_seen`). The previous `upsertMessage({ ...m, unread: false })` was
+ *  local-only, so mail read in SendPalm stayed unread in webmail and on the
+ *  phone — and never got a second chance, because the sync loop never reads
+ *  server FLAGS back into `unread`.
+ *
+ *  `notifyMessageUpdated` is what lets an owning list (the Imbox) un-bold the
+ *  row in place instead of refetching its page. */
+export async function markOpenedRead(m: Pick<Message, "id">): Promise<void> {
+  await markMessageUnread(m.id, false);
+  notifyMessageUpdated(m.id, { unread: false });
 }
 
 /** Pure item list for the message ⋯ menu — exported for tests. The

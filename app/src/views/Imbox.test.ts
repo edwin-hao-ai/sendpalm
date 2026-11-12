@@ -227,6 +227,12 @@ describe("olderUnread / readTotal", () => {
     expect(olderUnread(RECENT_UNREAD_CAP, 5000)).toBe(0);
   });
 
+  it("says nothing when the unread total itself is capped", () => {
+    // 全量未读也是 LIMIT 限幅查出来的：3,762 封未读只会返回 2000，
+    // 减 5 得到的 1995 是个精确到个位的假数字。两侧都要挡。
+    expect(olderUnread(5, RECENT_UNREAD_CAP)).toBe(0);
+  });
+
   it("derives the read total", () => {
     expect(readTotal(8, 56)).toBe(48);
   });

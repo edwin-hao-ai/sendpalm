@@ -492,3 +492,40 @@ Task 2: Ruling: `no-refetch-storm` 的预算 36 → 42 —— 合并列表需要
 预算会继续涨，需要重新审视是否该把三个计数合成一次查询。
 
 Task 3: complete (commit cf06e40, tests: vitest → 873 pass, 用例减少 1 例即删除的 readOnly 用例)
+
+Task 4: complete.
+
+Final review (fresh reviewer) found 2 Critical + 2 Important; all fixed in ONE pass,
+each RED→GREEN:
+
+- **C1 chips died with their own empty result** — `hasAny()` gated the whole
+  feed-list, so the 未读 filter (a *server-side* filter: `paged.total()` → 0) took the
+  chip row and `FilterEmpty` down with it. The only route back to 全部 lived in that
+  row. Now the gate is `hasAny() || quickFilter() !== "all"`, and `FilterEmpty` puts
+  the filter explanation ahead of the cold-start one (a seeded/imported mailbox can
+  have mail without an `accounts` row). New e2e `an emptied unread filter keeps the
+  chips and offers a way back`.
+- **C2 capped counts printed a precise wrong number** — `olderUnread` only guarded the
+  *recent* side; `countImboxUnread` is `LIMIT 2000` too, so a 3,762-unread mailbox read
+  「更早 1995 封未读」. Both sides guarded now; the header and the 未读 chip say `2000+`.
+  Unit test pins the number it used to print (1995).
+- **I1 `u` key and row actions left the chips stale** — the subscription only sees
+  `notifyMessageUpdated`, and `markMessageUnread` does not emit it, so `u` never
+  refreshed the counts; `removeRow` had the same hole after archive/trash/spam/pile
+  (which made 已读 go *down* when you archived an unread mail). Added `afterRowAction`.
+- **I2 opening a mail stopped pushing `\Seen` to IMAP** — `markMessageUnread` is the
+  only function that mirrors the flag (`imap_set_seen`); the old path used the
+  local-only `upsertMessage`. Mail read in SendPalm stayed unread in webmail forever.
+  Restored via `MessagePanel.markOpenedRead`, with a per-id guard (the resource's
+  "refreshing" state returns the previous `unread: true` value, which fired the effect
+  — and the IMAP push — twice; that also cost +12 queries per open).
+
+Minors taken while in there: the chip row is `position: sticky` again (the deleted tab
+bar was), stale comments pointing at the two-tab model, the spec's `data-imbox-filter`
+selector typo, and the first-frame 已读 number.
+Minors deferred (ledger only): 订阅 chip counts unread newsletters while the filter
+lists all of them, and none of the three chip counters are account-scoped; the
+`Imbox-helpers` → `stores/data` import of `RECENT_UNREAD_CAP`; the ≤768px "does the
+clicked row keep its screen y" assertion (only `scrollTop` is pinned today).
+
+Final: 875 unit tests / 90 files, 184 e2e (1 skipped live-Feishu), typecheck + lint clean.

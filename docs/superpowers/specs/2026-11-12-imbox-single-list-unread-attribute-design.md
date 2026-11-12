@@ -226,7 +226,7 @@ j/k/x/l/a/e/t/z/!/u 快捷键（`openAndMarkRead` 调用点改 `openMessage`）�
 
 **e2e 改动**（选择器跟随）：`imbox.spec.ts:225,226,324-328,439`、
 `scenarios.spec.ts:328`、`workflows.spec.ts:653` 里的 `[data-imbox-tab='new'|'seen']`
-改为 `[data-imbox-filter='unread']`、`[data-imbox-filter='all']`。
+改为 `[data-imbox-chip='unread']`、`[data-imbox-chip='all']`。
 
 **新增 e2e**：点开一封未读 → 行仍在原位（同一 `data-message-id` 仍可见）→ 类名不再含
 `unread` → 未读数减 1。这是本次改动的核心承诺，必须有回归守卫。

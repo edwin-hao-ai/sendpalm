@@ -26,11 +26,11 @@ const top = (p: Page) => p.evaluate(() => ({
 
 /** Reading from an expanded bundle must not move the list.
  *
- *  Every click marks a mail read, which moves its row to the other tab. The
- *  browser then clamps `scrollTop` (content above shrank) and WebKit may scroll
- *  to keep the removed *focused* row in view — the reported symptom was the
- *  list landing at the bottom after a few clicks. `openAndMarkRead` now restores
- *  the position across that mutation; this pins the invariant. */
+ *  Every click marks a mail read. Before the 11/12 merge that moved the row to
+ *  the other tab, so the browser clamped `scrollTop` (content above shrank) and
+ *  WebKit might scroll to keep the removed *focused* row in view — the reported
+ *  symptom was the list landing at the bottom after a few clicks. Rows no longer
+ *  move at all, and this pins the invariant that they don't start again. */
 test("clicking messages in an expanded bundle keeps the list still", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
