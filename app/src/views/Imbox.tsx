@@ -1570,70 +1570,46 @@ function ImboxHeader(props: {
       <PageHeader
         title="收件箱"
         description={
-          <span
-            style={{
-              display: "inline-flex",
-              "align-items": "center",
-              gap: "var(--space-2)",
-              "flex-wrap": "wrap",
-            }}
-          >
-            <span data-imbox-counts>
-              {/* Phone: the three-part count wraps to two lines at 375px and
-                  pushes the first message off the fold, so only the number
-                  that needs acting on survives. */}
+          // 两行固定结构，不是「一行太长就换行」。
+          //
+          // 阅读栏打开时列表列要窄 ~380px，一行式描述会在那一刻折成两行，把
+          // 下面整条列表往下顶 —— 用户看到的就是「点开邮件，列表抖一下」。两行
+          // + 每行 nowrap 之后，列变窄不改变这段的高度，列表一颗像素都不动。
+          <span class="imbox-stats" data-imbox-counts>
+            <span class="imbox-stats-line">
+              {/* Phone keeps only the numbers that need acting on. */}
               <Show
                 when={!isMobile()}
                 fallback={
                   <>
-                    {recentLabel()} 封待读
-                    <Show when={older() > 0}>
-                      <span
-                        data-imbox-older-unread
-                        style={{ color: "var(--text-muted)" }}
-                      >
-                        {" "}
-                        · 更早 {older()} 封未读
-                      </span>
-                    </Show>
+                    {recentLabel()} 封待读 · {props.unreadTotal} 封未读
                   </>
                 }
               >
-                最近 30 天 {recentLabel()} 封待读 ·{" "}
-                {unreadCapped() ? (
-                  <>
-                    {unreadLabel()} 封未读
-                  </>
-                ) : (
-                  <>
-                    {readTotal(props.unreadTotal, props.total)} 已读
-                  </>
-                )}{" "}
-                · {props.total} 总数
+                最近 30 天 {recentLabel()} 封待读
                 <Show when={older() > 0}>
-                  <span
-                    data-imbox-older-unread
-                    style={{ color: "var(--text-muted)" }}
-                  >
-                    {" "}
-                    · 更早 {older()} 封未读
+                  <span data-imbox-older-unread>
+                    {" "}· 更早 {older()} 封未读
                   </span>
                 </Show>
               </Show>
             </span>
             <Show when={!isMobile()}>
-              <span
-                style={{
-                  "font-size": "var(--text-micro)",
-                  color: "var(--text-muted)",
-                  padding: "2px 8px",
-                  background: "var(--paper-mid)",
-                  "border-radius": "var(--radius-pill)",
-                  "font-weight": "700",
-                  "white-space": "nowrap",
-                }}
-                data-active-sort
-              >
+              <span class="imbox-stats-line imbox-stats-muted">
+                {unreadCapped() ? (
+                  // 未读被 LIMIT 截断，「已读 = 总数 − 未读」就不成立了，
+                  // 所以只说未读上限和总数，不给一个算不出来的已读数。
+                  <>
+                    {unreadLabel()} 封未读 · {props.total} 总数
+                  </>
+                ) : (
+                  <>
+                    {readTotal(props.unreadTotal, props.total)} 已读 ·{" "}
+                    {props.total} 总数
+                  </>
+                )}
+              </span>
+              <span class="imbox-stats-pill" data-active-sort>
                 {SORT_LABELS[props.activeSort]}
               </span>
             </Show>
@@ -2312,6 +2288,9 @@ function BundleCard(props: BundleCardProps) {
   const stateClass = () =>
     allSelected() ? "selected" : someSelected() ? "indeterminate" : "";
 
+  /** Unread members of this bundle — what the badge shows. */
+  const bundleUnread = () => props.bundle.messages.filter((m) => m.unread).length;
+
   const expanded = () => props.isOpen;
 
   return (
@@ -2361,7 +2340,13 @@ function BundleCard(props: BundleCardProps) {
             </span>
           </div>
         </div>
-        <span class="feed-card-bundle-count">{props.bundle.messages.length}</span>
+        {/* 未读数，不是这一摞的总封数。
+            「· N 封邮件」已经把总数说过了，徽标再重复一遍总数，用户就会把它
+            读成「N 封未读」—— 然后点开一封发现它纹丝不动，以为已读没生效。
+            没有未读时干脆不显示，和侧栏徽标同一个道理。 */}
+        <Show when={bundleUnread() > 0}>
+          <span class="feed-card-bundle-count">{bundleUnread()}</span>
+        </Show>
         {/* Expand affordance — without a visible chevron the bundle
             drawer was only discoverable by accident. */}
         <span

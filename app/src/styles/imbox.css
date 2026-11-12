@@ -358,27 +358,69 @@
 
 .feed-section-action:hover { text-decoration: underline; }
 
+/* Header statistics: two fixed lines, never a wrapping paragraph.
+ *
+ * The list column narrows by the reading-pane width when a message opens. A
+ * one-line description re-wrapped at that moment and pushed the whole list
+ * down — the reported "click a mail and the list shakes". Two nowrap lines
+ * give the block a height that cannot change with the column width. */
+.imbox-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.imbox-stats-line {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.imbox-stats-muted { color: var(--text-muted); }
+
+.imbox-stats [data-imbox-older-unread] { color: var(--text-muted); }
+
+/* Sort indicator — an always-present pill, so its presence never changes the
+   block's height (see the note above). */
+.imbox-stats-pill {
+  align-self: flex-start;
+  margin-top: 4px;
+  font-size: var(--text-micro);
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--text-muted);
+  padding: 2px 8px;
+  background: var(--paper-mid);
+  border-radius: var(--radius-pill);
+}
+
 /* Quick-filter chip row above the Imbox list. Always mounted: a filter that
-   empties the list must not also remove its own off switch. Wraps rather than
-   overflowing at 375px, where four chips + 一起读 do not fit on one line. */
+   empties the list must not also remove its own off switch.
+   Never wraps — wrapping would change the row's height when the reading pane
+   narrows the column, moving every card below it. Horizontal scroll instead. */
 .imbox-chips {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: var(--space-2);
   padding: var(--space-1) 0 var(--space-2);
-  /* Sticky, like the tab bar it replaced: past a few dozen rows, switching
-     filter means scrolling back to the top otherwise. */
+  overflow-x: auto;
+  scrollbar-width: none;
   position: sticky;
   top: 0;
   z-index: 5;
   background: var(--paper);
 }
 
+.imbox-chips::-webkit-scrollbar { display: none; }
+
 .imbox-chips .feed-section-action {
-  margin-left: var(--space-2);
+  margin-left: auto;
   min-height: 28px;
+  white-space: nowrap;
 }
 
 .bubble-up-banner {
@@ -416,7 +458,7 @@
    * painted at all. contain-intrinsic-size must equal the row's natural
    * height to keep the scrollbar stable. */
   content-visibility: auto;
-  contain-intrinsic-size: auto 88px;
+  contain-intrinsic-size: auto 90px;
   contain: layout style;
 
   display: flex;
@@ -684,6 +726,11 @@
   background: var(--palm-soft);
   border-radius: var(--radius-pill);
   padding: 4px 10px;
+  /* Never wrap and never shrink: the reading pane narrows the list by ~380px,
+     and a wrapped pill made every row below it taller — the list visibly
+     jumped when a message was opened. */
+  white-space: nowrap;
+  flex: 0 0 auto;
   border: 0;
   cursor: pointer;
 }

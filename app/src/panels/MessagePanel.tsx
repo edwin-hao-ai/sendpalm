@@ -209,23 +209,28 @@ export function MessagePanel(props: { messageId: string }) {
     void refetchAttachments();
   });
 
-  // One guard per message id: `refetchMessage` below flips the resource back to
-  // "refreshing", during which `message()` still returns the previous value —
-  // i.e. `unread: true` again. Without this the effect fires a second
-  // markOpenedRead on the same message, which doubles the counters cascade and
-  // pushes `\Seen` to IMAP twice.
-  const markedRead = new Set<string>();
+  // `refetchMessage` below flips the resource back to "refreshing", during which
+  // `message()` still returns the previous value — i.e. `unread: true` again.
+  // Guard against re-entering on that stale read (it would push `\Seen` twice and
+  // double the counters cascade). The guard is cleared as soon as we *observe*
+  // the row as read, so a message the user marks unread again (`u`) is still
+  // marked read the next time they open it.
+  const markingRead = new Set<string>();
   createEffect(() => {
     const m = message();
-    if (m && m.unread && !markedRead.has(m.id)) {
-      markedRead.add(m.id);
-      void markOpenedRead(m).then(() => {
-        // Refresh our own resource so the header stops showing 未读 — no
-        // global refreshTick, so the Imbox list does not refetch its whole
-        // page when the user simply opens a message.
-        void refetchMessage();
-      });
+    if (!m) return;
+    if (!m.unread) {
+      markingRead.delete(m.id);
+      return;
     }
+    if (markingRead.has(m.id)) return;
+    markingRead.add(m.id);
+    void markOpenedRead(m).then(() => {
+      // Refresh our own resource so the header stops showing 未读 — no
+      // global refreshTick, so the Imbox list does not refetch its whole
+      // page when the user simply opens a message.
+      void refetchMessage();
+    });
   });
 
   const contactsById = createMemo<Record<string, Contact>>(() => {

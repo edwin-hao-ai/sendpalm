@@ -210,13 +210,14 @@ test.describe("Imbox — single view focus", () => {
     await seedAndOpen(page, contacts, messages);
 
     // Header reflects the full DB count (500), proving the query returned
-    // the right total. Bundle detection collapses the 50 unread from the
-    // same sender into a single card, so the rendered DOM has 1 bundle
-    // + the previously-seen page (50 read messages from this single
-    // sender — for a multi-sender dataset this would be less).
-    await expect(
-      page.locator("text=/最近 30 天 \\d+ 封待读 · \\d+ 已读 · \\d+ 总数/"),
-    ).toBeVisible();
+    // the right total. The counts are two fixed lines (opening a mail must not
+    // re-wrap them and push the list down), so assert line by line.
+    await expect(page.locator("[data-imbox-counts]")).toContainText(
+      /最近 30 天 \d+ 封待读/,
+    );
+    await expect(page.locator("[data-imbox-counts]")).toContainText(
+      /\d+ 已读 · \d+ 总数/,
+    );
     // Read mail and unread mail live in ONE list now (the 「新邮件 / 已读」 tab
     // pair went away on 11/12 — a row no longer moves when you open it). The
     // four chips and one collapsed bundle are the visible signals the dataset
@@ -586,6 +587,111 @@ test.describe("Imbox — single view focus", () => {
     await expect(
       page.locator("[data-feed-card='message'][data-message-id='m_allread_1']"),
     ).toBeVisible();
+  });
+
+  test("opening a mail does not move anything above or below it", async ({
+    page,
+  }) => {
+    // 阅读栏打开时列表列会窄 ~380px。以前头部一行式统计和 chip 行会在这个
+    // 瞬间折行，把整条列表往下顶 —— 用户看到的就是「点开邮件，列表抖一下」。
+    // 现在统计是两行固定结构、chip 行不换行，所以：
+    //   1. 打开前后的垂直几何必须一模一样；
+    //   2. 统计行和 chip 行必须在窄列下仍然是单行（折行才是抖动的原因）。
+    // 窄视口 + 三四位数的计数，才是真实邮箱里的那种压力。
+    await page.setViewportSize({ width: 900, height: 800 });
+    // One sender per message: 3+ from the same sender would collapse into a
+    // bundle and there would be no ordinary rows to measure.
+    const contacts: SeedContact[] = [];
+    const messages: SeedMessage[] = [];
+    for (let d = 0; d < 150; d++) {
+      contacts.push(
+        makeContact({ id: `sc${d}`, name: `发件人 ${d}` }),
+      );
+      messages.push(
+        makeMessage({
+          id: `m_stable_${d}`,
+          pid: `sc${d}`,
+          subj: `第 ${d} 封`,
+          prev: "正文第一行",
+          st: isoDaysAgo(d, 10),
+          unread: true,
+          bucket: "imbox",
+          direction: "in",
+        }),
+      );
+    }
+    await seedAndOpen(page, contacts, messages);
+
+    const geometry = () =>
+      page.evaluate(() => {
+        const rect = (sel: string) =>
+          document.querySelector(sel)?.getBoundingClientRect() ?? null;
+        const lineBoxCount = (sel: string) => {
+          const el = document.querySelector(sel) as HTMLElement | null;
+          if (!el) return -1;
+          // 单行 = 高度约等于 line-height；折行会是它的两倍。
+          const lh = parseFloat(getComputedStyle(el).lineHeight) || 20;
+          return Math.round(el.getBoundingClientRect().height / lh);
+        };
+        const rowTops = [
+          ...document.querySelectorAll("[data-feed-card='message']"),
+        ]
+          .slice(0, 5)
+          .map((el) => Math.round(el.getBoundingClientRect().top));
+        return {
+          stats: Math.round(rect(".imbox-stats")?.height ?? -1),
+          chips: Math.round(rect(".imbox-chips")?.height ?? -1),
+          statsLines: lineBoxCount(".imbox-stats-line"),
+          rowTops,
+        };
+      });
+
+    await expect(page.locator("[data-imbox-counts]")).toBeVisible();
+    await expect(
+      page.locator("[data-feed-card='message']").first(),
+    ).toBeVisible();
+    const start = await geometry();
+
+    // 单行断言：统计行在窄列下不许折行（折行就是列表抖动的来源）。
+    expect(start.statsLines, "header statistics wrapped").toBe(1);
+
+    await page.locator("[data-feed-card='message']").first().click();
+    await expect(page.locator("#detail-panel.open")).toBeVisible();
+    await page.waitForTimeout(600);
+    const end = await geometry();
+
+    expect(start.stats, "header statistics were not rendered").toBeGreaterThan(0);
+    expect(end.stats, "header statistics changed height").toBe(start.stats);
+    expect(end.chips, "chip row changed height").toBe(start.chips);
+    // 用户看到的是「视线里的行有没有跳」，而不是文档总高度 —— 后者受
+    // content-visibility 的懒测量影响，会在视口外的行上合理地微调。
+    expect(end.rowTops, "rows moved on screen").toEqual(start.rowTops);
+  });
+
+  test("opening a mail inside a bundle decrements the bundle's unread badge", async ({
+    page,
+  }) => {
+    // 徽标以前显示的是这一摞的总封数，所以点开一封它永远不变 —— 用户把它读成
+    // 「未读数」后就以为已读没生效。现在徽标数的是未读成员，而且抽屉行的
+    // 未读圆点也必须跟着消失。
+    const { contacts, messages } = makeImboxDataset();
+    await seedAndOpen(page, contacts, messages);
+
+    const bundle = page.locator("[data-feed-card='bundle']").first();
+    await expect(bundle).toBeVisible({ timeout: 10_000 });
+    await bundle.click();
+
+    const badge = bundle.locator(".feed-card-bundle-count");
+    // 50 of the 500 seeded messages are unread.
+    await expect(badge).toHaveText("50");
+
+    const row = page.locator('[data-bundle-row="m_appledeveloper_0"]');
+    await expect(row.locator("[data-unread='true']")).toHaveCount(1);
+    await row.click();
+    await expect(page.locator("#detail-panel.open")).toBeVisible();
+
+    await expect(badge).toHaveText("49");
+    await expect(row.locator("[data-unread='false']")).toHaveCount(1);
   });
 
   test("keyboard: j/k move cursor, Enter opens", async ({ page }) => {
