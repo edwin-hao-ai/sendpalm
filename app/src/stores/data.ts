@@ -1105,15 +1105,11 @@ export async function countUnreadByBucket(
 export async function countMessagesByAccount(
   bucket: MessageBucket,
   accountIds: string[],
-  options: { unreadOnly?: boolean; readOnly?: boolean } = {},
+  options: { unreadOnly?: boolean } = {},
 ): Promise<Record<string, number>> {
   const db = await getDb();
   const out: Record<string, number> = {};
-  const unreadClause = options.unreadOnly
-    ? " AND unread = 1"
-    : options.readOnly
-      ? " AND unread = 0"
-      : "";
+  const unreadClause = options.unreadOnly ? " AND unread = 1" : "";
   await Promise.all(
     accountIds.map(async (id) => {
       const rows = await db.select<Array<{ total: number }>>(
@@ -1326,13 +1322,6 @@ export interface ListMessagesOptions {
   bucket?: MessageBucket;
   direction?: "in" | "out";
   unreadOnly?: boolean;
-  /** Filter to messages that have been read (`unread = 0`). Mutually
-   *  exclusive with `unreadOnly`; if both are set, `unreadOnly` wins.
-   *  Used by the Imbox "Previously seen" tab so it has its own
-   *  paginated slice instead of sharing the same loaded window as
-   *  "New for you" (which capped read messages at PAGE_SIZE rows and
-   *  hid anything older). */
-  readOnly?: boolean;
   replyLaterOnly?: boolean;
   setAsideOnly?: boolean;
   bubbleUpOnly?: boolean;
@@ -1463,10 +1452,6 @@ export async function listMessagesPaged(
   }
   if (options.unreadOnly) {
     where.push("unread = 1");
-  } else if (options.readOnly) {
-    // readOnly is mutually exclusive with unreadOnly — fall back to the
-    // unread branch above if both are set.
-    where.push("unread = 0");
   }
   if (options.replyLaterOnly) {
     where.push("reply_later = 1");

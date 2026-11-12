@@ -129,13 +129,6 @@ describe("countMessagesByAccount", () => {
     expect(counts).toEqual({ work: 1, private: 1 });
   });
 
-  it("counts read only when asked (the 已读 tab badge)", async () => {
-    const counts = await countMessagesByAccount("imbox", ["work", "private"], {
-      readOnly: true,
-    });
-    expect(counts).toEqual({ work: 1, private: 0 });
-  });
-
   it("returns {} for no accounts without querying", async () => {
     expect(await countMessagesByAccount("imbox", [])).toEqual({});
   });
