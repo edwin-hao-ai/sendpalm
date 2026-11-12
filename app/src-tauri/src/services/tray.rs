@@ -312,6 +312,28 @@ pub fn refresh_tray_menu(app: &AppHandle) {
     });
 }
 
+/// One line per unread mail in the tray menu.
+///
+/// No leading glyph: native menus do not carry per-item icons, and a `✉`
+/// emoji renders at a different optical size and baseline than the label — it
+/// read as a tiny misaligned button in front of each subject. The three rows
+/// are already grouped under the header, between two separators.
+///
+/// Long subjects are cut with an ellipsis instead of being silently chopped at
+/// a character count, so a truncated subject never looks like a complete one.
+pub fn mail_item_label(subj: &str) -> String {
+    const MAX_CHARS: usize = 30;
+    if subj.is_empty() {
+        return "(无主题)".to_string();
+    }
+    if subj.chars().count() <= MAX_CHARS {
+        return subj.to_string();
+    }
+    let mut out: String = subj.chars().take(MAX_CHARS - 1).collect();
+    out.push('…');
+    out
+}
+
 fn build_menu(
     app: &AppHandle,
     pending: i64,
@@ -332,12 +354,7 @@ fn build_menu(
         builder = builder.item(&none);
     } else {
         for (id, subj, _) in mails {
-            let label = if subj.is_empty() {
-                "(无主题)".to_string()
-            } else {
-                subj.chars().take(28).collect()
-            };
-            let mi = item(&format!("open-message:{id}"), format!("✉ {label}"), true);
+            let mi = item(&format!("open-message:{id}"), mail_item_label(subj), true);
             builder = builder.item(&mi);
         }
     }
@@ -395,5 +412,23 @@ mod tests {
         assert_eq!(unread_badge_title(-1, true), None);
         assert_eq!(unread_badge_title(120, true), Some("99+".to_string()));
         assert_eq!(unread_badge_title(3, false), None);
+    }
+
+    #[test]
+    fn mail_labels_have_no_glyph_and_truncate_with_an_ellipsis() {
+        assert_eq!(mail_item_label(""), "(无主题)");
+        assert_eq!(mail_item_label("Hi"), "Hi");
+        // Exactly at the limit: no ellipsis, nothing cut.
+        let exact = "a".repeat(30);
+        assert_eq!(mail_item_label(&exact), exact);
+        // Over the limit: 29 characters + one ellipsis = 30 display cells.
+        let long = "B".repeat(60);
+        let label = mail_item_label(&long);
+        assert_eq!(label.chars().count(), 30);
+        assert!(label.ends_with('…'));
+        // A CJK subject must be cut by characters, not bytes (panics on the
+        // old `take(28)` + `…` shape if any byte index split a glyph).
+        let cjk = "探索香港迪士尼乐园限定好物".repeat(4);
+        assert_eq!(mail_item_label(&cjk).chars().count(), 30);
     }
 }

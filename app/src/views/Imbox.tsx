@@ -631,20 +631,31 @@ export function Imbox() {
    *      its real chronological place instead of being pinned to the top.
    */
   const scrollToRow = (messageId: string, bundleId?: string) => {
-    // One frame later: on the first reveal the row is inserted by this same
-    // update, and scrolling before layout would target the previous geometry.
-    requestAnimationFrame(() => {
-      const row =
-        document.querySelector<HTMLElement>(
-          `[data-message-id="${CSS.escape(messageId)}"]`,
-        ) ??
-        (bundleId
-          ? document.querySelector<HTMLElement>(
-              `[data-bundle-id="${CSS.escape(bundleId)}"]`,
-            )
-          : null);
-      row?.scrollIntoView({ block: "nearest" });
-    });
+    // A mail folded into a sender bundle has no row of its own until the
+    // drawer renders, so retry for a few frames instead of settling for the
+    // bundle header: on a long drawer the header is on screen while the mail
+    // itself is below the fold — the exact complaint this effect answers.
+    //
+    // Scoped to `#main`: the open mail also renders `data-message-id` on its
+    // thread entries inside `#detail-panel`, and `scrollIntoView` on one of
+    // those scrolls the panel instead of the list.
+    const find = (selector: string) =>
+      document.querySelector<HTMLElement>(`#main ${selector}`);
+    let tries = 0;
+    const step = () => {
+      const own = find(`[data-message-id="${CSS.escape(messageId)}"]`);
+      const anchor =
+        own ??
+        (bundleId ? find(`[data-bundle-id="${CSS.escape(bundleId)}"]`) : null);
+      // `block: "nearest"` scrolls only when the row is out of view: an
+      // in-list click (which also lands here) must never re-centre the list.
+      if (own || tries++ >= 4) {
+        anchor?.scrollIntoView({ block: "nearest" });
+        return;
+      }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
   };
 
   /** Move the cursor to `id` and scroll it into view. Returns false when the

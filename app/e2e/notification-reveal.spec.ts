@@ -165,6 +165,13 @@ test("a mail opened from outside the list gets selected and scrolled into view",
 
   await expect(page.locator("#detail-panel")).toContainText("Subject 24");
   await expectRowRevealed(page, `[data-message-id="${target}"]`);
+
+  // The reveal must survive the opens' own side effects: the mail is marked
+  // read and patched in place, which rebuilds the date groups. If that reset
+  // the list's scroll the user would watch the row vanish again one frame
+  // later — assert it is still where the reveal put it.
+  await page.waitForTimeout(1500);
+  await expectRowRevealed(page, `[data-message-id="${target}"]`);
 });
 
 test("a mail folded inside a sender bundle opens the bundle and reveals the row", async ({
@@ -179,5 +186,17 @@ test("a mail folded inside a sender bundle opens the bundle and reveals the row"
   await openFromBell(page, { id: target, title: "Chatty 3" });
 
   await expect(page.locator("#detail-panel")).toContainText("Chatty 3");
+  // The cursor sits on the bundle row (that IS the row for that sender)…
   await expectRowRevealed(page, '[data-bundle-id="c_chatty"]');
+  // …and the mail itself is on screen, not left below the fold of a long
+  // drawer: "scrolled to the bundle header" is not what the user asked for.
+  // Scoped to #main: the same id also appears on the thread entry inside the
+  // detail panel.
+  const drawerRow = page.locator(`#main [data-message-id="${target}"]`);
+  await expect(drawerRow).toBeVisible();
+  const main = await page.locator("#main").boundingBox();
+  const row = await drawerRow.boundingBox();
+  expect(main).not.toBeNull();
+  expect(row).not.toBeNull();
+  expect(row!.y + row!.height).toBeLessThanOrEqual(main!.y + main!.height + 1);
 });
