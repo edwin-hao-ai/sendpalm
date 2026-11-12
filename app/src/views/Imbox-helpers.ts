@@ -94,3 +94,31 @@ export function olderUnread(recentUnread: number, unreadTotal: number): number {
 export function readTotal(unreadTotal: number, total: number): number {
   return Math.max(0, total - unreadTotal);
 }
+
+/** Where a message lives in the rendered list.
+ *
+ *  `index` is the flat row index the cursor uses; `bundleId` is set when the
+ *  message is folded into a sender bundle instead of owning a row. Such a row
+ *  is not in the DOM until the bundle drawer opens, which is why the caller
+ *  needs to know it has to expand one — a plain `querySelector` on
+ *  `[data-message-id]` silently finds nothing there.
+ *
+ *  Returns `null` when the message is not in the loaded window (paginated
+ *  list: only the first N rows exist client-side) or is filtered out by the
+ *  active quick filter / account tab. */
+export function rowAnchorForMessage(
+  items: Item[],
+  messageId: string,
+): { index: number; bundleId?: string } | null {
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!;
+    if ("messages" in item) {
+      if (item.messages.some((m) => m.id === messageId)) {
+        return { index: i, bundleId: item.contactId };
+      }
+    } else if (item.id === messageId) {
+      return { index: i };
+    }
+  }
+  return null;
+}

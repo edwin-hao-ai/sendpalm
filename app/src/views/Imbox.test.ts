@@ -7,6 +7,8 @@ import {
   isImboxListMessage,
   olderUnread,
   readTotal,
+  rowAnchorForMessage,
+  type Bundle,
 } from "./Imbox-helpers";
 
 const today = new Date("2026-08-18T14:00:00Z");
@@ -239,5 +241,41 @@ describe("olderUnread / readTotal", () => {
 
   it("never returns a negative read total", () => {
     expect(readTotal(60, 56)).toBe(0);
+  });
+});
+
+describe("rowAnchorForMessage", () => {
+  // 托盘 / 通知中心打开一封邮件时，列表要能把它定位到某一行：普通邮件是
+  // 自己的一行，被折叠进 sender bundle 的邮件只在抽屉里出现 —— 后者如果
+  // 只按 `[data-message-id]` 找，永远找不到节点，于是「点进去列表没反应」。
+
+  it("finds a plain message row by its flat index", () => {
+    const items: Item[] = [msgItem("a", 0), msgItem("b", 1), msgItem("c", 2)];
+    expect(rowAnchorForMessage(items, "b")).toEqual({ index: 1 });
+  });
+
+  it("reports the bundle id when the message is folded into one", () => {
+    const bundle: Bundle = {
+      contactId: "p1",
+      contact: { id: "p1", name: "Dylan" } as never,
+      messages: [msgItem("m1", 0), msgItem("m2", 1), msgItem("m3", 2)],
+    };
+    const items: Item[] = [msgItem("x", 3), bundle];
+    expect(rowAnchorForMessage(items, "m3")).toEqual({
+      index: 1,
+      bundleId: "p1",
+    });
+  });
+
+  it("returns null for a message outside the loaded window", () => {
+    // 分页只装第一页：更老的邮件不在 items 里，调用方据此去按 id 拉取。
+    const items: Item[] = [msgItem("a", 0)];
+    expect(rowAnchorForMessage(items, "not-loaded")).toBeNull();
+  });
+
+  it("prefers the exact message id over a bundle that contains it", () => {
+    // 同一封信不可能同时在两处，但列表顺序必须稳定：先命中直接行。
+    const items: Item[] = [msgItem("dup", 0)];
+    expect(rowAnchorForMessage(items, "dup")).toEqual({ index: 0 });
   });
 });

@@ -73,6 +73,7 @@ export function NotificationPanel() {
 
   return (
     <div
+      data-notification-panel
       ref={(el) => {
         panelRef = el;
       }}
@@ -294,6 +295,7 @@ function Row(props: {
   };
   return (
     <button
+      data-notification-row
       onClick={onClick}
       style={{
         position: "relative",

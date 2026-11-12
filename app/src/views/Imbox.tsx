@@ -32,6 +32,7 @@ import {
   countRecentUnreadImbox,
   RECENT_UNREAD_CAP,
   countUnreadNewsletters,
+  getMessage,
   listContactsForList,
   listPileMessages,
   moveMessageToBucket,
@@ -74,6 +75,8 @@ import {
   mailSyncIssue,
   setSettingsTab,
   activeAccountId,
+  setActiveAccountId,
+  selectedMessageId,
   bumpCountsTick,
   type MailSyncIssue,
   type ViewName,
@@ -92,6 +95,7 @@ import {
   isImboxListMessage,
   olderUnread,
   readTotal,
+  rowAnchorForMessage,
 } from "./Imbox-helpers";
 import {
   bundleGroupFor,
@@ -591,10 +595,133 @@ export function Imbox() {
 
   /* ── Open message in DetailPanel ──────────────────────────────────── */
 
+  /** Reveal bookkeeping — see the block below. Declared here because `open()`
+   *  (an in-list click) sets the latch to "already visible". */
+  let revealedId: string | null = null;
+  let revealLoadingId: string | null = null;
+  const revealGaveUp = new Set<string>();
+
   const open = (id: string) => {
+    // Opened FROM the list: the row is on screen already, so the reveal below
+    // must not re-centre the scroll or steal the keyboard cursor. Setting the
+    // latch here is what tells the two entry points apart.
+    revealedId = id;
     setSelectedMessageId(id);
     setDetailOpen(true);
   };
+
+  /* ── Reveal a message that was opened from OUTSIDE the list ──────────
+   *
+   *  The tray menu, the tray's mail list and the bell dropdown all do the
+   *  same two writes: `setSelectedMessageId(id)` + `setDetailOpen(true)`
+   *  (bootstrap.ts, NotificationPanel.tsx). The list's highlight is
+   *  `cursorIndex`, which only j/k used to move — so the panel opened a mail
+   *  that the list neither highlighted nor scrolled to, and a mail older than
+   *  the first page was not even rendered. That is the user report: "从托盘
+   *  点进去，列表里没有选中/没有移动到对应位置".
+   *
+   *  Three cases, in order:
+   *   1. The row is in the rendered list  → move the cursor, scroll to it,
+   *      open the sender bundle if the mail is folded inside one.
+   *   2. It is loaded but filtered out     → relax the filter and let the
+   *      effect run again (account tab first: a tab is an explicit scope the
+   *      user picked, a quick filter is a lens on the same mailbox).
+   *   3. It is not in the loaded window    → fetch the row and prepend it.
+   *      `prependByIds` re-sorts by receipt time, so an older mail lands in
+   *      its real chronological place instead of being pinned to the top.
+   */
+  const scrollToRow = (messageId: string, bundleId?: string) => {
+    // One frame later: on the first reveal the row is inserted by this same
+    // update, and scrolling before layout would target the previous geometry.
+    requestAnimationFrame(() => {
+      const row =
+        document.querySelector<HTMLElement>(
+          `[data-message-id="${CSS.escape(messageId)}"]`,
+        ) ??
+        (bundleId
+          ? document.querySelector<HTMLElement>(
+              `[data-bundle-id="${CSS.escape(bundleId)}"]`,
+            )
+          : null);
+      row?.scrollIntoView({ block: "nearest" });
+    });
+  };
+
+  /** Move the cursor to `id` and scroll it into view. Returns false when the
+   *  row is not in the rendered list yet (the caller decides whether to load
+   *  it or leave it). */
+  const revealNow = (id: string): boolean => {
+    const anchor = rowAnchorForMessage(activeList(), id);
+    if (!anchor) return false;
+    revealedId = id;
+    if (anchor.bundleId && !openBundles().has(anchor.bundleId)) {
+      const next = new Set(openBundles());
+      next.add(anchor.bundleId);
+      setOpenBundles(next);
+    }
+    setCursorIndex(anchor.index);
+    scrollToRow(id, anchor.bundleId);
+    return true;
+  };
+
+  /** Fetch a message the paginated window does not hold, then reveal it.
+   *  `prependByIds` re-sorts by receipt time, so an older mail lands in its
+   *  real chronological place instead of being pinned to the top. */
+  const loadAndReveal = async (id: string) => {
+    if (revealGaveUp.has(id) || revealLoadingId === id) return;
+    revealLoadingId = id;
+    try {
+      const m = await getMessage(id).catch(() => null);
+      // Only the Imbox is paginated here; a bell row for a mail that lives in
+      // another bucket (paper trail, drafts…) has no row to reveal at all, and
+      // retrying on every sync tick would be a query per tick.
+      if (!m || m.bucket !== "imbox" || !isImboxListMessage(m)) {
+        revealGaveUp.add(id);
+        return;
+      }
+      // A tab is an explicit scope the user picked; a quick filter is a lens
+      // on the same mailbox. Relax the lens first, then the scope.
+      const contact = contactMap().get(m.pid);
+      const hiddenByFilter =
+        (quickFilter() === "unread" && !m.unread) ||
+        (quickFilter() === "newsletter" && !m.isNewsletter) ||
+        (quickFilter() === "pending" && !isFirstTimeContact(contact));
+      if (hiddenByFilter) {
+        setQuickFilter("all");
+        return;
+      }
+      if (
+        activeAccountId() !== ALL_ACCOUNTS &&
+        m.ac &&
+        m.ac !== activeAccountId()
+      ) {
+        setActiveAccountId(ALL_ACCOUNTS);
+        return;
+      }
+      await paged.prependByIds([id]);
+      // The first page may have landed mid-flight and replaced the prepended
+      // window; if so the effect re-runs when it does and tries again.
+      revealNow(id);
+    } finally {
+      revealLoadingId = null;
+    }
+  };
+
+  createEffect(() => {
+    const id = selectedMessageId();
+    // Track the list so a late page load / prepend re-runs this instead of
+    // leaving the reveal lost.
+    activeList();
+    // Re-selecting the same mail later (tray again) must reveal it again, so
+    // the one-shot latch resets when the selection clears.
+    if (!id) {
+      revealedId = null;
+      return;
+    }
+    if (revealedId === id) return;
+    if (revealNow(id)) return;
+    void loadAndReveal(id);
+  });
 
   /* ── Per-message optimistic actions ───────────────────────────────── */
 
