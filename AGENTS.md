@@ -830,6 +830,42 @@ and script inside the mail frame)
   `srcdoc` — a `position:fixed` div whose text is written by the frame's own script — is enough to tell
   "script ran and CSS applied" from "markup arrived, everything else blocked". Remove it afterwards.
 
+### 11.19 Lessons learned (Session 2026-11-12 — Imbox 合并单列表，未读是视觉而不是容器)
+
+- **一个只为掩盖「行跑掉了」而存在的函数，说明数据模型选错了。** `keepScrollStill` 那 18 行
+  全在处理浏览器因内容变矮而夹紧 `scrollTop`、WebKit 把失去焦点的行滚回视野、打开阅读栏让预览
+  重排——根因是「打开邮件」把行从「新邮件」搬到「已读」。把它换成「行不动、只去掉加粗」之后，
+  这个函数整体删掉，没有替代品。**下次写补丁去掩盖一次视觉跳动之前，先问那个跳动该不该发生。**
+- **区分维度应该是用户做的决定，不是被动状态。** 已读是被动的，归档 / 稍后回复 / 搁置 / 提醒
+  才是决定。Imbox 的容器只该跟着决定走；HEY 的 Imbox 从不因为你「看过」而移走邮件。这条也解释
+  了为什么「一起读」是例外：那里行离开是因为用户进了明确声明的模式，不是点击的副作用。
+- **相减而得的 UI 数字，两侧必须同源同限。** 头部「更早 N 封未读」= 全量未读 − 最近 30 天未读，
+  两个计数以前一个没有账户谓词、一个 `LIMIT 999` 而另一个 `LIMIT 2000`，切换账户或超过 999 就
+  会算出负数或说错话。现在两个都按账户范围查、共用 `RECENT_UNREAD_CAP`。
+- **`$1` 和 `?` 占位符不要混用。** `WHERE timeline_at >= $1 AND ac IN (?)` 里 SQLite 把 `?` 也
+  编到参数 1，cutoff 被绑进 `ac IN (…)` 的第一个槽——带账户范围时计数永远返回 0，而单参数调用
+  一直是对的，所以这个 bug 能潜伏很久。测试一加账户参数就红了。
+- **e2e 的 `[data-feed-card='message']` 包含折叠在 bundle 抽屉里的行。** 抽屉是 CSS 隐藏而非
+  `<Show>` 卸载，所以 `nth(1)` 可能落在一个不可见的行上。要断言「列表里可见的卡片」时加
+  `:not([data-bundle-row])`，要断言筛选真的生效时看头部数字（`[data-imbox-counts]`）而不是数卡片的类名。
+
+### 11.20 Lessons learned (Session 2026-11-12 — 「已读/未读看不出区别」：断言类名不等于断言用户看得见)
+
+- **e2e 断言 `toHaveClass(/unread/)` 只能证明状态变了，不能证明人看得出来。** 那 5 条
+  「点开邮件」的用例全部靠 `.unread` 类名判绿，而真实反馈是「点完没有任何变化」。根因有两层：
+  `--ink` 和 `--text-primary` 是同一个色值（唯一差别只有 700 vs 600 字重，中文 14px 下看不出来），
+  以及 `.feed-card.unread:hover::before { opacity: 0 }` —— **用户点完鼠标正好停在这一行，
+  于是唯一的线索当场消失**。涉及「状态是否可见」的断言要断言**计算样式**（字重差值、颜色、
+  `getComputedStyle(el, "::before")` 的 opacity/width），并覆盖 hover 态；只断言 class 一律不算数。
+- **在悬停上隐藏状态指示器，等于在用户最需要它的那一刻隐藏它。** 那个 `:hover` 规则的理由是
+  「把角落让给多选框」，但两者在布局上并不重叠（点在 12px 内边距里，checkbox 从 20px 起）。
+  先量一下是否真的冲突，再决定要不要藏。
+- **测试和产品行为打架时，改测试之前先读产品那句注释。** `workflows.spec.ts` 里
+  「来源邮件 → 返回」用 `closeDetailPanel` 断言面板消失，而 `openTaskSource` 的注释写着
+  「返回 from the source mail goes back to the task, not to the list」。两者冲突，
+  于是它在 5s 超时边缘反复横跳（单跑绿、全量并发约一半红）。修法是照产品行为断言
+  （落回任务面板 → 再关），而不是把超时调大。
+
 ### 11.21 Lessons learned (Session 2026-11-12 — MCP 发信能力，以及"配置看起来装好了但其实是坏的")
 
 - **MCP 的端口和 token 是随机生成后持久化的，手抄进客户端配置的必然过期。**
@@ -853,42 +889,6 @@ and script inside the mail frame)
   开关落在 `app_settings.agent.allowAgentSend`（缺省=允许），Rust 每次调用都读一次 prefs 文件；
   关闭时返回以 `SEND_DISABLED` 开头的错误信息，并明确让 Agent 退回 `create_draft`。
   验证方式不需要真的发信：把开关关掉、调一次 `send_email`、看到 SEND_DISABLED，再恢复。
-
-### 11.20 Lessons learned (Session 2026-11-12 — 「已读/未读看不出区别」：断言类名不等于断言用户看得见)
-
-- **e2e 断言 `toHaveClass(/unread/)` 只能证明状态变了，不能证明人看得出来。** 那 5 条
-  「点开邮件」的用例全部靠 `.unread` 类名判绿，而真实反馈是「点完没有任何变化」。根因有两层：
-  `--ink` 和 `--text-primary` 是同一个色值（唯一差别只有 700 vs 600 字重，中文 14px 下看不出来），
-  以及 `.feed-card.unread:hover::before { opacity: 0 }` —— **用户点完鼠标正好停在这一行，
-  于是唯一的线索当场消失**。涉及「状态是否可见」的断言要断言**计算样式**（字重差值、颜色、
-  `getComputedStyle(el, "::before")` 的 opacity/width），并覆盖 hover 态；只断言 class 一律不算数。
-- **在悬停上隐藏状态指示器，等于在用户最需要它的那一刻隐藏它。** 那个 `:hover` 规则的理由是
-  「把角落让给多选框」，但两者在布局上并不重叠（点在 12px 内边距里，checkbox 从 20px 起）。
-  先量一下是否真的冲突，再决定要不要藏。
-- **测试和产品行为打架时，改测试之前先读产品那句注释。** `workflows.spec.ts` 里
-  「来源邮件 → 返回」用 `closeDetailPanel` 断言面板消失，而 `openTaskSource` 的注释写着
-  「返回 from the source mail goes back to the task, not to the list」。两者冲突，
-  于是它在 5s 超时边缘反复横跳（单跑绿、全量并发约一半红）。修法是照产品行为断言
-  （落回任务面板 → 再关），而不是把超时调大。
-
-### 11.19 Lessons learned (Session 2026-11-12 — Imbox 合并单列表，未读是视觉而不是容器)
-
-- **一个只为掩盖「行跑掉了」而存在的函数，说明数据模型选错了。** `keepScrollStill` 那 18 行
-  全在处理浏览器因内容变矮而夹紧 `scrollTop`、WebKit 把失去焦点的行滚回视野、打开阅读栏让预览
-  重排——根因是「打开邮件」把行从「新邮件」搬到「已读」。把它换成「行不动、只去掉加粗」之后，
-  这个函数整体删掉，没有替代品。**下次写补丁去掩盖一次视觉跳动之前，先问那个跳动该不该发生。**
-- **区分维度应该是用户做的决定，不是被动状态。** 已读是被动的，归档 / 稍后回复 / 搁置 / 提醒
-  才是决定。Imbox 的容器只该跟着决定走；HEY 的 Imbox 从不因为你「看过」而移走邮件。这条也解释
-  了为什么「一起读」是例外：那里行离开是因为用户进了明确声明的模式，不是点击的副作用。
-- **相减而得的 UI 数字，两侧必须同源同限。** 头部「更早 N 封未读」= 全量未读 − 最近 30 天未读，
-  两个计数以前一个没有账户谓词、一个 `LIMIT 999` 而另一个 `LIMIT 2000`，切换账户或超过 999 就
-  会算出负数或说错话。现在两个都按账户范围查、共用 `RECENT_UNREAD_CAP`。
-- **`$1` 和 `?` 占位符不要混用。** `WHERE timeline_at >= $1 AND ac IN (?)` 里 SQLite 把 `?` 也
-  编到参数 1，cutoff 被绑进 `ac IN (…)` 的第一个槽——带账户范围时计数永远返回 0，而单参数调用
-  一直是对的，所以这个 bug 能潜伏很久。测试一加账户参数就红了。
-- **e2e 的 `[data-feed-card='message']` 包含折叠在 bundle 抽屉里的行。** 抽屉是 CSS 隐藏而非
-  `<Show>` 卸载，所以 `nth(1)` 可能落在一个不可见的行上。要断言「列表里可见的卡片」时加
-  `:not([data-bundle-row])`，要断言筛选真的生效时看头部数字（`[data-imbox-counts]`）而不是数卡片的类名。
 
 ## 12. Agent Skills & Global Protocols
 
