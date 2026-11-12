@@ -1024,8 +1024,33 @@ export async function countRecentUnreadImbox(
   return rows.length;
 }
 
-/** Unread mail per bucket, for the sidebar's right-aligned counts.
+/** The whole Imbox's unread count, any age. The list itself is merged now, so
+ *  this number only feeds the header copy ("未读 / 已读 / 总数").
  *
+ *  Shares `RECENT_UNREAD_CAP` with `countRecentUnreadImbox` on purpose: the
+ *  header's "更早 N 封未读" is the difference of the two, and two different
+ *  ceilings would make that subtraction wrong (or negative) on a big mailbox.
+ *  id-only + LIMIT, same shape as the recent query — the browser MockDb does
+ *  not parse `COUNT(*)`. */
+export async function countImboxUnread(
+  accountIds?: string[],
+): Promise<number> {
+  if (accountIds && accountIds.length === 0) return 0;
+  const db = await getDb();
+  const accountWhere = accountIds
+    ? ` AND ac IN (${accountIds.map(() => "?").join(", ")})`
+    : "";
+  const rows = await db.select<Array<{ id: ID }>>(
+    `SELECT id FROM messages
+      WHERE bucket = 'imbox' AND direction = 'in' AND unread = 1
+        AND deleted_at IS NULL${accountWhere}
+      LIMIT ${RECENT_UNREAD_CAP}`,
+    accountIds ?? [],
+  );
+  return rows.length;
+}
+
+/** Unread mail per bucket, for the sidebar's right-aligned counts.
  *  Three narrow id-only selects instead of one GROUP BY: the browser MockDb
  *  understands simple WHERE clauses, and the number only needs to answer
  *  "which group has something waiting" — the list views carry the exact

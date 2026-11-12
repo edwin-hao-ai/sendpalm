@@ -12,6 +12,7 @@
  *  (e.g. setAside / replyLater excluded upstream). */
 
 import type { Message } from "../types";
+import { RECENT_UNREAD_CAP } from "../stores/data";
 import { bucketLabel, type DateBucketKey } from "../utils/date";
 import { dateBucketInZone, messageTimelineAt } from "../utils/message-dates";
 
@@ -72,4 +73,21 @@ export function isImboxListMessage(
   m: Pick<Message, "setAside" | "replyLater" | "bubbleUpAt">,
 ): boolean {
   return !m.setAside && !m.replyLater && !m.bubbleUpAt;
+}
+
+/** Unread mail outside the "recent" window the header leads with.
+ *
+ *  Returns 0 once `recentUnread` hit `RECENT_UNREAD_CAP`: past the cap the
+ *  query cannot vouch for either number, so subtracting them would be a
+ *  guess dressed as a fact. */
+export function olderUnread(recentUnread: number, unreadTotal: number): number {
+  if (recentUnread >= RECENT_UNREAD_CAP) return 0;
+  return Math.max(0, unreadTotal - recentUnread);
+}
+
+/** Read mail in the Imbox = everything minus the unread rows. Clamped, because
+ *  the two numbers come from separate queries and can disagree for a moment
+ *  while a sync commits. */
+export function readTotal(unreadTotal: number, total: number): number {
+  return Math.max(0, total - unreadTotal);
 }
