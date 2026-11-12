@@ -808,7 +808,13 @@ and script inside the mail frame)
   `~/.cargo/shared-target/debug/bundle/macos/SendPalm.app` while `/Applications/SendPalm.app` sat there
   from August. The user kept launching the old one and reporting bugs that were already fixed. **Check
   what is installed before believing a bug report is new**, and copy the build to `/Applications` when
-  the point is "look at it in the real app".
+  the point is "look at it in the real app". `pkill -x sendpalm-app` does **not** kill
+  `/Applications/SendPalm.app` — its executable path ends in `sendpalm-app` but its process name is
+  `SendPalm`, so `pgrep -x sendpalm-app` reports "no stale app" while the old build is still on screen
+  (and `osascript 'tell application "SendPalm" to activate'` raises the *old* window, not the dev one).
+  Compare `ps ax -o pid,command | grep -i sendpalm` — the `/Applications/...` path in that list is the
+  tell — and bring the dev process forward by pid:
+  `osascript -e 'tell application "System Events" to set frontmost of (first process whose unix id is <pid>) to true'`.
 - **Mail passwords live in the OS keychain, and a rebuilt debug bundle loses them.** macOS binds keychain
   access to the code signature; every `tauri build --debug` re-signs, so the entry the previous build wrote
   becomes unreadable and the app shows 「邮件同步已暂停」. Debug builds now load `app/.env` at startup
