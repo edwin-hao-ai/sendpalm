@@ -1048,7 +1048,30 @@ describe("countRecentUnreadImbox", () => {
     await upsertMessage(
       makeMessage("m-10d", "c1", { unread: true, receivedAt: daysAgo(10) }),
     );
-    expect(await countRecentUnreadImbox(now, 7)).toBe(0);
-    expect(await countRecentUnreadImbox(now, 30)).toBe(1);
+    expect(await countRecentUnreadImbox(now, { days: 7 })).toBe(0);
+    expect(await countRecentUnreadImbox(now, { days: 30 })).toBe(1);
+  });
+
+  it("scopes the count to the selected mailboxes", async () => {
+    // 头部把「最近 30 天待读」和「更早未读」放在一句话里，两个数字必须落在
+    // 同一个账户范围上，否则切换账户后会看到一句自相矛盾的话。
+    await upsertContact(makeContact("c1"));
+    await upsertMessage(
+      makeMessage("m-a", "c1", {
+        unread: true,
+        ac: "work",
+        receivedAt: daysAgo(1),
+      }),
+    );
+    await upsertMessage(
+      makeMessage("m-b", "c1", {
+        unread: true,
+        ac: "private",
+        receivedAt: daysAgo(1),
+      }),
+    );
+    expect(await countRecentUnreadImbox(now, { accountIds: ["work"] })).toBe(1);
+    expect(await countRecentUnreadImbox(now, { accountIds: ["nope"] })).toBe(0);
+    expect(await countRecentUnreadImbox(now, { accountIds: [] })).toBe(0);
   });
 });

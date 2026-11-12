@@ -322,10 +322,10 @@ test("场景：历史未读不计入红点，但仍可在列表里找到", async
   await expect(counts).toContainText("最近 30 天 5 封待读", { timeout: 10_000 });
   await expect(counts).toContainText("更早 3 封未读");
 
-  // 头部是「最近 30 天」的口径，标签页的数字必须说真话——它数的是这个
-  // 标签底下真的有 8 封，不是 5 封（真实数据里最新邮件是两个月前，只数
-  // 30 天会让标签显示 0 而列表里躺着 3,762 封）。
-  await expect(page.locator("[data-imbox-tab='new']")).toContainText("8");
+  // 头部是「最近 30 天」的口径，「未读」chip 的数字必须说真话——它数的是
+  // 整条列表里真的有 8 封未读，不是 5 封（真实数据里最新邮件是两个月前，
+  // 只数 30 天会让 chip 显示 0 而列表里躺着 3,762 封）。
+  await expect(page.locator("[data-imbox-chip='unread']")).toContainText("8");
 
   // ……而历史未读并没有消失：同一位发件人的未读折叠成一张卡片，展开就能
   // 看到那封 400 天前的信，只是它不再催人。

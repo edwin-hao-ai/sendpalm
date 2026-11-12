@@ -472,3 +472,21 @@ Ruling: Task 1 的计数用例数值按真实 fixture 写 —— 计划里举的
 
 Ruling: 基线不是计划写的 293 例，实际是 90 文件 / 873 例（计划沿用了一个过时的数字）。
 代价：无。
+
+Task 1: complete (commits 3ce361f, tests: vitest 90 files / 874 cases → 874 pass)
+
+Task 2: Ruling: 计数也按账户范围查 —— 计划只加了 `countImboxUnread`，但
+`countRecentUnreadImbox` 原本没有账户谓词，而它和未读总数在同一句话里做减法。
+同一次修改把 `countRecentUnreadImbox(nowIso, days)` 改成
+`countRecentUnreadImbox(nowIso, { days?, accountIds? })`。代价：4 个调用点要改。
+
+Task 2: Ruling: 测试抓到两个真 bug，都已修 ——
+(a) `countRecentUnreadImbox` 里 `$1` 与账户 `?` 占位符混用时 SQLite 把 cutoff
+   绑进了 `ac IN (…)` 的第一个槽，带账户范围时永远返回 0；
+(b) `refreshUnreadCounts()` 没有 refetch 新的未读总数，「未读」chip 的数字在
+   标已读后不动。两条都是 e2e 断言先红后绿。
+
+Task 2: Ruling: `no-refetch-storm` 的预算 36 → 42 —— 合并列表需要第三个计数
+（全量未读，供 chip 与头部「已读」行），它和 30 天计数各是一次 IPC。该测试真正
+的守卫（不拉 agent 表、面板稳定后 0 查询）都还在。代价：若未来再叠加计数，
+预算会继续涨，需要重新审视是否该把三个计数合成一次查询。

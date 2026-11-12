@@ -1006,20 +1006,27 @@ export const RECENT_UNREAD_CAP = 2000;
 /** Unread Imbox mail received in the last `days` days. */
 export async function countRecentUnreadImbox(
   nowIso: string,
-  days: number = RECENT_UNREAD_DAYS,
+  options: { days?: number; accountIds?: string[] } = {},
 ): Promise<number> {
+  const { days = RECENT_UNREAD_DAYS, accountIds } = options;
+  if (accountIds && accountIds.length === 0) return 0;
   const db = await getDb();
   const cutoff = new Date(
     Date.parse(nowIso) - days * 86_400_000,
   ).toISOString();
+  const accountWhere = accountIds
+    ? ` AND ac IN (${accountIds.map(() => "?").join(", ")})`
+    : "";
   // id-only + LIMIT, same constraint as countGateCandidates: the browser
-  // MockDb cannot parse COUNT(*).
+  // MockDb cannot parse COUNT(*). All placeholders are `?` on purpose — mixing
+  // `$1` with the account `?`s makes SQLite bind the cutoff into the first
+  // `ac IN (…)` slot, so the scoped count silently came back 0.
   const rows = await db.select<Array<{ id: ID }>>(
     `SELECT id FROM messages
       WHERE bucket = 'imbox' AND direction = 'in' AND unread = 1
-        AND deleted_at IS NULL AND timeline_at >= $1
+        AND deleted_at IS NULL AND timeline_at >= ?${accountWhere}
       LIMIT ${RECENT_UNREAD_CAP}`,
-    [cutoff],
+    [cutoff, ...(accountIds ?? [])],
   );
   return rows.length;
 }
