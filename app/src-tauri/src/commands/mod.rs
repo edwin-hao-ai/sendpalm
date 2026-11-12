@@ -5,7 +5,7 @@ pub mod notification_settings;
 
 use crate::services::providers::{list as provider_list, EmailProvider};
 use crate::services::{
-    imap::ImapClient, load_test_credentials, smtp::SmtpClient, EmailCredentials, SyncReport,
+    imap::ImapClient, load_test_credentials, EmailCredentials, SyncReport,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
@@ -13,7 +13,7 @@ use tokio::sync::OnceCell;
 
 static TEST_CREDS: OnceCell<EmailCredentials> = OnceCell::const_new();
 
-async fn get_creds() -> Result<EmailCredentials, String> {
+pub(crate) async fn get_creds() -> Result<EmailCredentials, String> {
     let creds = TEST_CREDS
         .get_or_try_init(|| async { load_test_credentials() })
         .await
@@ -98,7 +98,6 @@ pub struct OutgoingAttachmentDto {
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn send_message(
-    app: AppHandle,
     to: String,
     subject: String,
     body: String,
@@ -110,65 +109,9 @@ pub async fn send_message(
     from_override: Option<String>,
     in_reply_to: Option<String>,
 ) -> Result<SendResult, String> {
-    // Resolve credentials: prefer the explicit account_id from the From selector;
-    // fall back to the test credentials when no account is selected (dev only).
-    let (creds, outgoing_settings, account_email) = match account_id.as_deref() {
-        Some(id) if !id.is_empty() => {
-            let creds = crate::services::sync_loop::resolve_account_credentials(id).await?;
-            let email = creds.email.clone();
-            let settings = crate::services::sync_loop::load_account_settings_json(id).await?;
-            let outgoing =
-                crate::services::sync_loop::outgoing_settings_from_json(&settings, &email);
-            (creds, outgoing, email)
-        }
-        _ => {
-            let creds = get_creds().await?;
-            let email = creds.email.clone();
-            (creds, Default::default(), email)
-        }
-    };
-    let smtp = SmtpClient::new(creds);
-
-    // Determine effective From: explicit alias wins, then account default display name.
-    let from = if let Some(alias) = from_override.filter(|s| !s.trim().is_empty()) {
-        crate::services::sync_loop::build_from_mailbox(&account_email, &alias)?
-    } else {
-        crate::services::sync_loop::build_from_mailbox(
-            &account_email,
-            &outgoing_settings.default_from_name,
-        )?
-    };
-
-    let split_addrs = |s: Option<String>| {
-        s.unwrap_or_default()
-            .split(',')
-            .map(|p| p.trim().to_string())
-            .filter(|p| !p.is_empty())
-            .collect::<Vec<_>>()
-    };
-    let to_addrs = split_addrs(Some(to));
-    let cc_addrs = split_addrs(cc);
-    let mut bcc_addrs = split_addrs(bcc);
-    if !outgoing_settings.auto_bcc.is_empty() && !bcc_addrs.contains(&outgoing_settings.auto_bcc) {
-        bcc_addrs.push(outgoing_settings.auto_bcc.clone());
-    }
-
-    // Append account signature when configured.
-    let signature_plain = outgoing_settings.signature.as_str();
-    let body = if signature_plain.is_empty() {
-        body
-    } else {
-        format!("{}\n\n--\n{}", body, signature_plain)
-    };
-    let html_body = html_body.map(|html| {
-        if signature_plain.is_empty() {
-            html
-        } else {
-            let signature_html = signature_plain.replace('\n', "<br>");
-            format!("{}<br><br>--<br>{}", html, signature_html)
-        }
-    });
-
+    // Everything this used to do lives in services::outgoing so the MCP
+    // send/reply/forward tools share one implementation of account defaults,
+    // auto-BCC, signature, attachments and the local Sent copy.
     let attachments = attachments
         .into_iter()
         .map(|a| {
@@ -185,53 +128,23 @@ pub async fn send_message(
         })
         .collect::<Result<Vec<_>, String>>()?;
 
-    // Keep a clone for the local Sent copy before SMTP consumes the attachments.
-    let attachments_for_sent = attachments.clone();
-    let id = smtp
-        .send(
-            &from,
-            &to_addrs,
-            &cc_addrs,
-            &bcc_addrs,
-            Some(&outgoing_settings.reply_to),
-            in_reply_to.as_deref(),
-            &subject,
-            &body,
-            html_body,
-            attachments,
-        )
-        .await?;
-
-    // Save a local copy of the sent message so it shows up in the recipient's
-    // contact timeline. We use the first To address as the primary contact.
-    let local_message_id = if let Some(to_email) = to_addrs.first() {
-        if let Ok(pool) = crate::services::sync_loop::open_pool().await {
-            if let Ok(data_dir) = app.path().app_data_dir() {
-                let account_id = account_id.unwrap_or_default();
-                crate::services::sync_loop::save_sent_message(
-                    &pool,
-                    &data_dir,
-                    &account_id,
-                    to_email,
-                    &subject,
-                    &body,
-                    &attachments_for_sent,
-                )
-                .await
-                .ok()
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    let outcome = crate::services::outgoing::send(crate::services::outgoing::SendRequest {
+        to,
+        subject,
+        body,
+        html_body,
+        cc,
+        bcc,
+        account_id,
+        from_override,
+        in_reply_to,
+        attachments,
+    })
+    .await?;
 
     Ok(SendResult {
-        message_id: id,
-        local_message_id,
+        message_id: outcome.message_id,
+        local_message_id: outcome.local_message_id,
     })
 }
 

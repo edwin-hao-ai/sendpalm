@@ -14,6 +14,7 @@ pub mod imap;
 pub mod llm;
 pub mod mailbox_resolver;
 pub mod mcp;
+pub mod outgoing;
 pub mod parser;
 pub mod provider_catalog;
 pub mod providers;

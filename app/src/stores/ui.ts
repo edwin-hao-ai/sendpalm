@@ -441,6 +441,10 @@ export const [appSettings, setAppSettings] = createStore<AppSettings>({
   agent: {
     autoExtractTasks: false,
     taskExtractionEnabledAt: null,
+    /** Agents may send mail through the MCP gateway. Default on: the whole
+     *  point of the gateway is agent-operated mail; turning it off is the
+     *  deliberate act. Read by `services::outgoing::agent_send_allowed`. */
+    allowAgentSend: true,
     memoryEditable: true,
     llm: {
       baseUrl: "",

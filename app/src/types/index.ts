@@ -633,6 +633,10 @@ export interface AppSettings {
   agent: {
     autoExtractTasks: boolean;
     taskExtractionEnabledAt: ISODate | null;
+    /** Whether MCP tools may send/reply/forward. Consumed by the Rust side
+     *  (`services::outgoing::agent_send_allowed`), so it must be written to
+     *  the preferences file, not only held in memory. */
+    allowAgentSend: boolean;
     memoryEditable: boolean;
     /** OpenAI-compatible LLM config. Empty strings mean "use
      *  default provider" — the user can leave apiKey blank for

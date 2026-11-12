@@ -129,7 +129,7 @@ fn positional(args: &[String]) -> Vec<String> {
 async fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let Some(cmd) = argv.first().cloned() else {
-        eprintln!("用法: sendpalm <list|read|search|contact|events|tasks|follow-ups|draft|approve|block|move|mcp-url> …");
+        eprintln!("用法: sendpalm <list|read|search|contact|events|tasks|follow-ups|draft|send|reply|forward|approve|block|move|mcp-url> …");
         std::process::exit(2);
     };
     let rest = &argv[1..];
@@ -202,6 +202,50 @@ async fn main() {
                 args["cc"] = serde_json::json!([cc]);
             }
             call_tool(&ep, "create_draft", args).await
+        }
+        "send" => {
+            let (Some(to), Some(subject), Some(body)) = (
+                arg_value(rest, "--to"),
+                arg_value(rest, "--subject"),
+                arg_value(rest, "--body"),
+            ) else {
+                return fail("用法: sendpalm send --to addr --subject \"…\" --body \"…\" [--cc addr] [--bcc addr] [--account id]");
+            };
+            let mut args = serde_json::json!({ "to": to, "subject": subject, "body": body });
+            for (flag, key) in [("--cc", "cc"), ("--bcc", "bcc"), ("--account", "accountId")] {
+                if let Some(v) = arg_value(rest, flag) {
+                    args[key] = v.into();
+                }
+            }
+            call_tool(&ep, "send_email", args).await
+        }
+        "reply" => {
+            let ids = positional(rest);
+            let (Some(id), Some(body)) = (ids.first(), arg_value(rest, "--body")) else {
+                return fail("用法: sendpalm reply <message-id> --body \"…\" [--all] [--cc addr]");
+            };
+            let mut args = serde_json::json!({ "messageId": id, "body": body });
+            if has_flag(rest, "--all") {
+                args["replyAll"] = true.into();
+            }
+            if let Some(cc) = arg_value(rest, "--cc") {
+                args["cc"] = cc.into();
+            }
+            call_tool(&ep, "reply_email", args).await
+        }
+        "forward" => {
+            let ids = positional(rest);
+            let (Some(id), Some(to)) = (ids.first(), arg_value(rest, "--to")) else {
+                return fail("用法: sendpalm forward <message-id> --to addr [--note \"…\" ] [--cc addr]");
+            };
+            let mut args = serde_json::json!({ "messageId": id, "to": to });
+            if let Some(note) = arg_value(rest, "--note") {
+                args["note"] = note.into();
+            }
+            if let Some(cc) = arg_value(rest, "--cc") {
+                args["cc"] = cc.into();
+            }
+            call_tool(&ep, "forward_email", args).await
         }
         "approve" => match positional(rest).first() {
             Some(email) => {

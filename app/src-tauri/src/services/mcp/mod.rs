@@ -7,6 +7,7 @@
 //! and never logged. Email credentials never leave the keychain — agents
 //! get tool capability, not credentials.
 
+pub mod compose;
 pub mod server;
 pub mod skill;
 pub mod tools;

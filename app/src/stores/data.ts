@@ -3200,6 +3200,9 @@ export async function loadAppSettings(
   if (v?.agent) {
     v.agent.autoExtractTasks = v.agent.autoExtractTasks === true;
     v.agent.taskExtractionEnabledAt = v.agent.taskExtractionEnabledAt ?? null;
+    // Additive: prefs written before agent sending existed must not deserialize
+    // as "off" in the UI while the Rust side treats missing as "on".
+    v.agent.allowAgentSend = v.agent.allowAgentSend !== false;
   }
   // Tray/background prefs: additive feature — older prefs files predate
   // this object, so merge over defaults instead of trusting the file.
@@ -3276,6 +3279,7 @@ export async function loadAppSettings(
       agent: {
         autoExtractTasks: false,
         taskExtractionEnabledAt: null,
+        allowAgentSend: true,
         memoryEditable: true,
         llm: {
           baseUrl: "",

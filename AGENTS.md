@@ -830,6 +830,30 @@ and script inside the mail frame)
   `srcdoc` — a `position:fixed` div whose text is written by the frame's own script — is enough to tell
   "script ran and CSS applied" from "markup arrived, everything else blocked". Remove it afterwards.
 
+### 11.21 Lessons learned (Session 2026-11-12 — MCP 发信能力，以及"配置看起来装好了但其实是坏的")
+
+- **MCP 的端口和 token 是随机生成后持久化的，手抄进客户端配置的必然过期。**
+  `load_or_create_state` 首次启动取一个临时端口写进 `app_kv`，token 是 `sp_<uuid>`；
+  `~/.config/opencode/opencode.jsonc` 里那条却是 `43123` + `sp_tok`（后者只出现在一个单元测试里，
+  是占位符）。表现是「配置里有 sendpalm，但一个工具都没有」，而 `pgrep`/日志一切正常。
+  **不要手写这两项**：应用自带 `services::agent_clients`（会自己判断 OpenCode 的 `.jsonc` 优先规则），
+  入口是 设置 → Agent → 「AI Agent 连接」。要核对现状就看
+  `sqlite3 …/sendpalm.db "select value from app_kv where key='mcp_server'"` 并与配置文件对照，
+  再 `curl` 一次 `initialize`（不带 token 必须 401，带 token 必须回 serverInfo）。
+- **扩展现有能力时，先找"唯一的实现"，而不是复制一份。** 发信原本只有
+  `commands::send_message` 一条路径，且依赖 `AppHandle` 拿数据目录——MCP 工具没有 AppHandle。
+  正确的做法是把整段（账户/别名解析、auto_bcc、签名、附件、In-Reply-To、本地 Sent 副本）
+  移到 `services::outgoing::send`，command 变成薄包装。复制一份的代价是：签名和 auto_bcc
+  在第一个改动日就分叉，而没人会同时读两个文件。
+- **能力变了，教 Agent 的文案必须同一天跟着变，并且要被测试钉住。**
+  `services::mcp::skill.rs` 里那句「Draft, never send」是 v1 的产品决定；工具放开 send 之后，
+  照这份 skill 行事的 Agent 会拒绝发信。现在测试同时断言「有 sendpalm send/reply/forward 与
+  SEND_DISABLED」和「不含 Draft, never send」——文案漂移会红。
+- **给 Agent 开放不可逆能力，闸门要放在"读取成本最低"的地方，并让调用方读得懂拒绝原因。**
+  开关落在 `app_settings.agent.allowAgentSend`（缺省=允许），Rust 每次调用都读一次 prefs 文件；
+  关闭时返回以 `SEND_DISABLED` 开头的错误信息，并明确让 Agent 退回 `create_draft`。
+  验证方式不需要真的发信：把开关关掉、调一次 `send_email`、看到 SEND_DISABLED，再恢复。
+
 ### 11.20 Lessons learned (Session 2026-11-12 — 「已读/未读看不出区别」：断言类名不等于断言用户看得见)
 
 - **e2e 断言 `toHaveClass(/unread/)` 只能证明状态变了，不能证明人看得出来。** 那 5 条

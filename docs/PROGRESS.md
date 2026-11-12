@@ -2,6 +2,15 @@
 
 > Source: prototype-v11.38 (v11.38) — every feature reimplemented as Tauri 2 + SolidJS.
 
+## Agent mail: MCP can now send / reply / forward (2026-11-12)
+
+- The MCP gateway's 14 tools could read and draft but never send. Three tools join it: `send_email`, `reply_email`, `forward_email` (17 total). They really send over SMTP; there is no undo. Reply derives recipients from the original (reply-all adds original To/CC, drops your own address), prefixes `Re:` once (ASCII and full-width colon alike), sets `In-Reply-To` from `rfc_message_id`, and quotes the original. Forward prefixes `Fwd:` once and quotes; attachments are not carried (the `files` rows hold remote URLs, not bytes) and the result says how many were left behind.
+- All sending now goes through one `services::outgoing::send`. The Tauri command and the MCP tools share account/alias resolution, auto-BCC, signature, attachments and the local Sent copy instead of two drifting implementations.
+- Guardrails: every send writes an `agent_audit` row (`mcp.send_email` / `mcp.reply_email` / `mcp.forward_email`); Settings → Agent → 「允许 Agent 直接发信」 (`app_settings.agent.allowAgentSend`, default on) turns the capability off and every call then returns `SEND_DISABLED` telling the agent to create a draft instead. Tool descriptions state plainly that the mail is sent.
+- The `sendpalm` CLI grew `send` / `reply` / `forward`, and the installed SKILL.md no longer says "Draft, never send" — a test pins the doc to the capability so they cannot drift apart again.
+- Also repaired the OpenCode connection: the config pointed at a stale port and the placeholder token `sp_tok`, so the gateway was configured but dead. Verified `initialize` over HTTP (401 without the bearer token, `serverInfo` with it) and `tools/list` returning all 17.
+- Verification: 182 Rust unit tests (13 new: reply/forward derivation, recipients, quoting, tool registry), 875 Vitest, typecheck + lint clean. The gate was verified end-to-end by disabling it and watching `send_email` return `SEND_DISABLED` without sending.
+
 ## Imbox: unread is a visual, not a container (2026-11-12)
 
 - Opening a message no longer rearranges the Imbox. The 「新邮件 / 已读」 tab pair is gone; read and unread mail share one paginated list, unread renders as bold + a dot, and opening a mail leaves the row exactly where it was with only the mark removed.

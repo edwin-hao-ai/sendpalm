@@ -1,10 +1,19 @@
-//! MCP tool surface — reads over the organized mailbox, draft-first
-//! writes, every write audited into `agent_audit` with session_id "mcp".
+//! MCP tool surface — reads over the organized mailbox, writes audited into
+//! `agent_audit` with session_id "mcp".
 //!
-//! v1 deliberately has NO send_email and NO physical delete: agents
-//! draft, humans send (spec 2026-11-03).
+//! v1 deliberately had no send: agents drafted, humans sent (spec 2026-11-03).
+//! That is superseded — the product now targets fully agent-operated mail, so
+//! `send_email` / `reply_email` / `forward_email` exist and really send. Three
+//! guardrails come with them: every send is audited, all of them funnel through
+//! one `services::outgoing::send` (no second SMTP path), and
+//! Settings → Agent → 「允许 Agent 直接发信」 turns the whole capability off
+//! (`SEND_DISABLED` on every call). Still no physical delete.
 
 use sqlx::SqlitePool;
+
+use crate::services::outgoing::{self, SendRequest};
+
+use super::compose;
 
 pub struct ToolDef {
     pub name: &'static str,
@@ -149,6 +158,52 @@ pub fn tool_defs() -> Vec<ToolDef> {
             schema: obj(serde_json::json!({ "email": string_prop("发件人邮箱") }), &["email"]),
         },
         ToolDef {
+            name: "send_email",
+            description: "发送一封新邮件。会真的通过 SMTP 发出去，不可撤回。正文为纯文本；需要富文本时另给 htmlBody。",
+            schema: obj(
+                serde_json::json!({
+                    "to": string_prop("收件人，多个用逗号分隔"),
+                    "subject": string_prop("主题"),
+                    "body": string_prop("纯文本正文"),
+                    "htmlBody": string_prop("HTML 正文（可选）"),
+                    "cc": string_prop("抄送，逗号分隔（可选）"),
+                    "bcc": string_prop("密送，逗号分隔（可选）"),
+                    "accountId": string_prop("从哪个账户发（可选，默认第一个/测试账户）"),
+                    "inReplyTo": string_prop("被回复邮件的 Message-ID（可选）"),
+                }),
+                &["to", "subject", "body"],
+            ),
+        },
+        ToolDef {
+            name: "reply_email",
+            description: "回复一封邮件。会真的发出去。收件人自动取原发件人（replyAll 时加上原收件人与抄送，并去掉你自己），主题自动加 Re:，正文默认带原文引用块，并设置 In-Reply-To。",
+            schema: obj(
+                serde_json::json!({
+                    "messageId": string_prop("被回复的邮件 id"),
+                    "body": string_prop("你的回复（纯文本，引用会自动附在下面）"),
+                    "htmlBody": string_prop("HTML 正文（可选，不传则只发纯文本）"),
+                    "replyAll": { "type": "boolean", "description": "回复全部（默认 false）" },
+                    "cc": string_prop("额外抄送，逗号分隔（可选）"),
+                    "accountId": string_prop("从哪个账户发（可选）"),
+                }),
+                &["messageId", "body"],
+            ),
+        },
+        ToolDef {
+            name: "forward_email",
+            description: "转发一封邮件。会真的发出去。主题自动加 Fwd:，正文默认带原文引用块。附件当前不随转发（返回 attachmentsOmitted 告知数量）。",
+            schema: obj(
+                serde_json::json!({
+                    "messageId": string_prop("被转发的邮件 id"),
+                    "to": string_prop("收件人，多个用逗号分隔"),
+                    "note": string_prop("附言（可选，放在引用之前）"),
+                    "cc": string_prop("抄送，逗号分隔（可选）"),
+                    "accountId": string_prop("从哪个账户发（可选）"),
+                }),
+                &["messageId", "to"],
+            ),
+        },
+        ToolDef {
             name: "move_messages",
             description: "批量移动邮件到指定桶（一次最多 50 封；trash/spam 会带过期时间）。",
             schema: obj(
@@ -206,6 +261,9 @@ pub async fn call_tool(
         "create_clip" => create_clip(pool, &args).await,
         "approve_sender" => approve_sender(pool, &args).await,
         "block_sender" => block_sender(pool, &args).await,
+        "send_email" => send_email(pool, &args).await,
+        "reply_email" => reply_email(pool, &args).await,
+        "forward_email" => forward_email(pool, &args).await,
         "move_messages" => move_messages(pool, &args).await,
         other => Err(format!("unknown tool: {other}")),
     }
@@ -654,6 +712,309 @@ async fn move_messages(
     )
     .await?;
     Ok(serde_json::json!({ "moved": moved, "bucket": bucket }))
+}
+
+/* ── Sending ────────────────────────────────────────────────────────── */
+
+/// Everything a reply or forward needs from the stored original.
+#[derive(Debug)]
+struct Original {
+    subject: String,
+    body: String,
+    /// The account's own addresses (an inbound mail was addressed to us).
+    self_addrs: Vec<String>,
+    cc_addrs: Vec<String>,
+    rfc_message_id: Option<String>,
+    account_id: String,
+    sender_name: String,
+    sender_email: String,
+    sent_at: String,
+    attachment_count: usize,
+}
+
+fn addr_list(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Gate for the whole send capability. Settings → Agent writes
+/// `app_settings.agent.allowAgentSend`; absent means allowed.
+fn ensure_send_allowed() -> Result<(), String> {
+    let dir = crate::services::sync_loop::db_path()
+        .parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| "SEND_DISABLED: app data dir unavailable".to_string())?;
+    if outgoing::agent_send_allowed(&dir) {
+        Ok(())
+    } else {
+        Err("SEND_DISABLED: 设置 → Agent → 「允许 Agent 直接发信」已关闭。请改用 create_draft，由用户在 SendPalm 中发出。".to_string())
+    }
+}
+
+fn flag(args: &serde_json::Value, key: &str) -> bool {
+    args.get(key).and_then(|v| v.as_bool()).unwrap_or(false)
+}
+
+async fn load_original(pool: &SqlitePool, id: &str) -> Result<Original, String> {
+    let row: Option<(
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+        String,
+        String,
+        String,
+        Option<String>,
+    )> = sqlx::query_as(
+        "SELECT subj, COALESCE(body,''), COALESCE(to_addr,''), COALESCE(cc_json,'[]'), \
+                rfc_message_id, COALESCE(ac,''), COALESCE(pid,''), \
+                COALESCE(timeline_at, ''), attachments_json \
+           FROM messages WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| format!("load message: {e}"))?;
+    let Some((subject, body, to_addr, cc_json, rfc_message_id, account_id, pid, sent_at, att_json)) =
+        row
+    else {
+        return Err("INVALID_ARGUMENT: message not found".to_string());
+    };
+
+    let sender: Option<(String, String)> =
+        sqlx::query_as("SELECT name, emails_json FROM contacts WHERE id = ?")
+            .bind(&pid)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| format!("load contact: {e}"))?;
+    let (sender_name, sender_email) = sender
+        .map(|(n, e)| {
+            let first = serde_json::from_str::<Vec<serde_json::Value>>(&e)
+                .ok()
+                .and_then(|arr| arr.into_iter().next())
+                .and_then(|v| {
+                    v.get("value")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string())
+                })
+                .unwrap_or_default();
+            (n, first)
+        })
+        .unwrap_or_default();
+
+    let cc_addrs = serde_json::from_str::<Vec<String>>(&cc_json).unwrap_or_default();
+    let attachment_count = att_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<Vec<serde_json::Value>>(s).ok())
+        .map(|v| v.len())
+        .unwrap_or(0);
+
+    Ok(Original {
+        subject,
+        body,
+        self_addrs: addr_list(&to_addr),
+        cc_addrs,
+        rfc_message_id,
+        account_id,
+        sender_name,
+        sender_email,
+        sent_at,
+        attachment_count,
+    })
+}
+
+async fn send_email(
+    pool: &SqlitePool,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    ensure_send_allowed()?;
+    let to = arg(args, "to").ok_or_else(|| "INVALID_ARGUMENT: to required".to_string())?;
+    let subject =
+        arg(args, "subject").ok_or_else(|| "INVALID_ARGUMENT: subject required".to_string())?;
+    let body = arg(args, "body").ok_or_else(|| "INVALID_ARGUMENT: body required".to_string())?;
+
+    let out = outgoing::send(SendRequest {
+        to: to.to_string(),
+        subject: subject.to_string(),
+        body: body.to_string(),
+        html_body: arg(args, "htmlBody").map(|s| s.to_string()),
+        cc: arg(args, "cc").map(|s| s.to_string()),
+        bcc: arg(args, "bcc").map(|s| s.to_string()),
+        account_id: arg(args, "accountId").map(|s| s.to_string()),
+        from_override: None,
+        in_reply_to: arg(args, "inReplyTo").map(|s| s.to_string()),
+        attachments: Vec::new(),
+    })
+    .await
+    .map_err(|e| format!("send failed: {e}"))?;
+
+    audit(
+        pool,
+        "mcp.send_email",
+        &serde_json::json!({ "to": to, "subject": subject, "messageId": out.message_id }),
+    )
+    .await?;
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "sent": true,
+        "messageId": out.message_id,
+        "localMessageId": out.local_message_id,
+    }))
+}
+
+/// The reply that *would* be sent. Pure so it can be tested without SMTP —
+/// wrong recipients are the failure mode that matters here.
+fn build_reply(
+    orig: &Original,
+    body: &str,
+    reply_all: bool,
+    html_body: Option<String>,
+    extra_cc: Option<String>,
+    account_id: Option<String>,
+) -> Result<SendRequest, String> {
+    let recipients = compose::reply_recipients(
+        &orig.sender_email,
+        &orig.self_addrs,
+        &orig.cc_addrs,
+        &orig.self_addrs,
+        reply_all,
+    );
+    if recipients.is_empty() {
+        return Err(
+            "INVALID_ARGUMENT: could not derive a recipient (only your own address is involved)"
+                .to_string(),
+        );
+    }
+    Ok(SendRequest {
+        to: recipients.join(", "),
+        subject: compose::reply_subject(&orig.subject),
+        body: compose::quoted_body(body, &orig.body, &orig.sender_name, &orig.sent_at),
+        html_body,
+        cc: extra_cc,
+        bcc: None,
+        account_id: account_id.or_else(|| Some(orig.account_id.clone()).filter(|s| !s.is_empty())),
+        from_override: None,
+        in_reply_to: orig.rfc_message_id.clone(),
+        attachments: Vec::new(),
+    })
+}
+
+async fn reply_email(
+    pool: &SqlitePool,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    ensure_send_allowed()?;
+    let id = arg(args, "messageId")
+        .ok_or_else(|| "INVALID_ARGUMENT: messageId required".to_string())?;
+    let body = arg(args, "body").ok_or_else(|| "INVALID_ARGUMENT: body required".to_string())?;
+    let orig = load_original(pool, id).await?;
+
+    let req = build_reply(
+        &orig,
+        body,
+        flag(args, "replyAll"),
+        arg(args, "htmlBody").map(|s| s.to_string()),
+        arg(args, "cc").map(|s| s.to_string()),
+        arg(args, "accountId").map(|s| s.to_string()),
+    )?;
+    let recipients = addr_list(&req.to);
+    let subject = req.subject.clone();
+    let out = outgoing::send(req)
+        .await
+        .map_err(|e| format!("reply failed: {e}"))?;
+
+    audit(
+        pool,
+        "mcp.reply_email",
+        &serde_json::json!({
+            "inReplyTo": id, "to": recipients, "subject": subject,
+            "replyAll": flag(args, "replyAll"), "messageId": out.message_id,
+        }),
+    )
+    .await?;
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "sent": true,
+        "to": recipients,
+        "subject": subject,
+        "messageId": out.message_id,
+        "localMessageId": out.local_message_id,
+    }))
+}
+
+fn build_forward(
+    orig: &Original,
+    to: &str,
+    note: &str,
+    extra_cc: Option<String>,
+    account_id: Option<String>,
+) -> SendRequest {
+    SendRequest {
+        to: to.to_string(),
+        subject: compose::forward_subject(&orig.subject),
+        body: compose::quoted_body(note, &orig.body, &orig.sender_name, &orig.sent_at),
+        html_body: None,
+        cc: extra_cc,
+        bcc: None,
+        account_id: account_id.or_else(|| Some(orig.account_id.clone()).filter(|s| !s.is_empty())),
+        from_override: None,
+        in_reply_to: None,
+        attachments: Vec::new(),
+    }
+}
+
+async fn forward_email(
+    pool: &SqlitePool,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    ensure_send_allowed()?;
+    let id = arg(args, "messageId")
+        .ok_or_else(|| "INVALID_ARGUMENT: messageId required".to_string())?;
+    let to = arg(args, "to").ok_or_else(|| "INVALID_ARGUMENT: to required".to_string())?;
+    let orig = load_original(pool, id).await?;
+
+    let req = build_forward(
+        &orig,
+        to,
+        arg(args, "note").unwrap_or_default(),
+        arg(args, "cc").map(|s| s.to_string()),
+        arg(args, "accountId").map(|s| s.to_string()),
+    );
+    let subject = req.subject.clone();
+    let out = outgoing::send(req)
+        .await
+        .map_err(|e| format!("forward failed: {e}"))?;
+
+    audit(
+        pool,
+        "mcp.forward_email",
+        &serde_json::json!({
+            "forwarded": id, "to": to, "subject": subject,
+            "attachmentsOmitted": orig.attachment_count, "messageId": out.message_id,
+        }),
+    )
+    .await?;
+
+    Ok(serde_json::json!({
+        "ok": true,
+        "sent": true,
+        "subject": subject,
+        "messageId": out.message_id,
+        "localMessageId": out.local_message_id,
+        // 附件目前不随转发（本地只存远程 URL，没有字节可带）。说清楚，别让
+        // agent 以为整封邮件都转过去了。
+        "attachmentsOmitted": orig.attachment_count,
+        "attachmentsNote": if orig.attachment_count > 0 {
+            "原邮件有没有随转发携带的附件，请在 SendPalm 中转发或先下载后手动附上。"
+        } else {
+            ""
+        },
+    }))
 }
 
 #[cfg(test)]

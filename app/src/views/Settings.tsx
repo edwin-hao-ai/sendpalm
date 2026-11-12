@@ -2240,6 +2240,12 @@ function AgentTab() {
       />
       <p style={{ color: "var(--text-muted)", "font-size": "var(--text-caption)" }}>默认关闭。启用后，仅将通过筛选台的新收件箱邮件发送至已配置模型；不会扫描历史邮件。建议需确认才成为任务。</p>
       <Toggle
+        label="允许 Agent 直接发信"
+        checked={s.agent.allowAgentSend}
+        onChange={(v) => setAppSettings("agent", "allowAgentSend", v)}
+      />
+      <p style={{ color: "var(--text-muted)", "font-size": "var(--text-caption)" }}>默认开启。开启后 MCP 工具可直接发送、回复、转发邮件（每次都会记录到审计）；关掉后 Agent 只能创建草稿，由你在这里发出。关闭期间调用会返回 SEND_DISABLED。</p>
+      <Toggle
         label="记忆可编辑"
         checked={s.agent.memoryEditable}
         onChange={(v) => setAppSettings("agent", "memoryEditable", v)}

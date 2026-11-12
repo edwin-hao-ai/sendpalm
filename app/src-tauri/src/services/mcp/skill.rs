@@ -24,6 +24,9 @@ Everything goes through the `sendpalm` CLI (it talks to the running app):
 - `sendpalm events --since YYYY-MM-DD --until YYYY-MM-DD`
 - `sendpalm tasks` / `sendpalm follow-ups`
 - `sendpalm draft --to addr --subject "…" --body "…" [--reply-to <id>] [--cc addr]`
+- `sendpalm send --to addr --subject "…" --body "…" [--cc addr] [--bcc addr] [--account id]` — **sends for real**
+- `sendpalm reply <message-id> --body "…" [--all] [--cc addr]` — **sends for real** (Re:, In-Reply-To, quote)
+- `sendpalm forward <message-id> --to addr [--note "…"] [--cc addr]` — **sends for real** (Fwd:, quote, no attachments)
 - `sendpalm approve <email> [--bucket imbox|feed|paperTrail]` / `sendpalm block <email>`
 - `sendpalm move <id…> --bucket <bucket>` (at most 50 ids)
 
@@ -32,8 +35,13 @@ tell the user to open SendPalm and try again.
 
 ## Etiquette (important)
 
-1. **Draft, never send.** `sendpalm draft` only creates a draft; the user
-   sends it from SendPalm after reviewing. Never claim an email was sent.
+1. **Sending is a real, irreversible send — earn it.** `sendpalm send` /
+   `reply` / `forward` go out over SMTP immediately; there is no undo. Send
+   only what the user asked for, in the words they gave, and never invent a
+   recipient. `sendpalm draft` remains the right call when the user has not
+   clearly said "send it" — draft, then say a draft is waiting for them.
+   The user can disable all sending in Settings → Agent; if a call returns
+   `SEND_DISABLED`, fall back to a draft instead of retrying.
 2. **Respect the Gate.** Unscreened senders are visible so you can advise,
    but approving/blocking is the user's call unless they explicitly ask.
 3. **Dates are the user's.** `timelineAt` is the real server receipt time
@@ -118,8 +126,15 @@ mod tests {
             assert!(dir.join("SKILL.md").is_file());
             assert!(dir.join("sendpalm").is_file());
             let md = std::fs::read_to_string(dir.join("SKILL.md")).unwrap();
-            assert!(md.contains("Draft, never send"));
+            // The pack must teach the current send capability, not the old
+            // "draft only" v1 rule — an agent following stale etiquette would
+            // refuse to send after the tools started supporting it.
             assert!(md.contains("sendpalm draft"));
+            assert!(md.contains("sendpalm send"));
+            assert!(md.contains("sendpalm reply"));
+            assert!(md.contains("sendpalm forward"));
+            assert!(md.contains("SEND_DISABLED"));
+            assert!(!md.contains("Draft, never send"));
             assert!(md.contains("paperTrail"));
             // Idempotent: second install doesn't fail.
             install_skill("claude").unwrap();

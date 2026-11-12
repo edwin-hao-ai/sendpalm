@@ -324,3 +324,119 @@ async fn move_messages_caps_ids_and_whitelists_buckets() {
     assert_eq!(m1.0, "trash");
     assert_eq!(m1.1, 1);
 }
+
+/* ── Sending: reply / forward derivation ──────────────────────────── */
+
+/// Base fixture plus the columns `load_original` reads. The shared schema stays
+/// positional-INSERT friendly for every other tool fixture.
+async fn pool_with_mail_columns() -> SqlitePool {
+    let pool = pool().await;
+    sqlx::raw_sql(
+        "ALTER TABLE messages ADD COLUMN to_addr TEXT NOT NULL DEFAULT '';
+         ALTER TABLE messages ADD COLUMN cc_json TEXT NOT NULL DEFAULT '[]';
+         ALTER TABLE messages ADD COLUMN rfc_message_id TEXT;
+         ALTER TABLE messages ADD COLUMN attachments_json TEXT;",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool
+}
+
+fn original() -> Original {
+    Original {
+        subject: "Q3 budget".to_string(),
+        body: "line one\nline two".to_string(),
+        self_addrs: vec!["me@x.com".to_string()],
+        cc_addrs: vec!["cc@x.com".to_string()],
+        rfc_message_id: Some("<orig@x>".to_string()),
+        account_id: "acct_1".to_string(),
+        sender_name: "Sarah".to_string(),
+        sender_email: "sarah@x.com".to_string(),
+        sent_at: "2026-11-12".to_string(),
+        attachment_count: 0,
+    }
+}
+
+#[test]
+fn tool_defs_expose_send_reply_forward() {
+    let names: Vec<&str> = tool_defs().iter().map(|d| d.name).collect();
+    for wanted in ["send_email", "reply_email", "forward_email"] {
+        assert!(names.contains(&wanted), "{wanted} missing from the tool list");
+    }
+    // A duplicate name would shadow one of the two silently.
+    let mut sorted = names.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), names.len(), "duplicate tool name in tool_defs()");
+}
+
+#[test]
+fn reply_targets_the_sender_and_threads_from_the_original() {
+    let req = build_reply(&original(), "thanks!", false, None, None, None).unwrap();
+    assert_eq!(req.to, "sarah@x.com");
+    assert_eq!(req.subject, "Re: Q3 budget");
+    assert_eq!(req.in_reply_to.as_deref(), Some("<orig@x>"));
+    assert_eq!(req.account_id.as_deref(), Some("acct_1"));
+    assert!(req.body.starts_with("thanks!\n\n"));
+    assert!(req.body.contains("> line one\n> line two"));
+}
+
+#[test]
+fn reply_all_adds_cc_but_never_your_own_address() {
+    let req = build_reply(&original(), "ok", true, None, None, None).unwrap();
+    assert_eq!(req.to, "sarah@x.com, cc@x.com");
+    assert!(!req.to.contains("me@x.com"));
+}
+
+#[test]
+fn reply_refuses_when_only_your_own_address_is_left() {
+    let mut orig = original();
+    orig.sender_email = "me@x.com".to_string();
+    orig.cc_addrs.clear();
+    let err = build_reply(&orig, "hi", true, None, None, None).unwrap_err();
+    assert!(err.starts_with("INVALID_ARGUMENT"), "got {err}");
+}
+
+#[test]
+fn forward_prefixes_once_and_keeps_the_note_on_top() {
+    let req = build_forward(&original(), "bob@x.com", "fyi", None, None);
+    assert_eq!(req.subject, "Fwd: Q3 budget");
+    assert!(req.body.starts_with("fyi\n\n"));
+    assert!(req.body.contains("On 2026-11-12, Sarah wrote:"));
+    // Forwarding starts a new thread; replying to the original would be wrong.
+    assert!(req.in_reply_to.is_none());
+}
+
+#[tokio::test]
+async fn load_original_reads_recipients_and_attachment_count() {
+    let pool = pool_with_mail_columns().await;
+    sqlx::query(
+        "INSERT INTO contacts (id, name, emails_json) VALUES ('c1','Sarah','[{\"value\":\"sarah@x.com\"}]')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO messages (id, pid, subj, body, timeline_at, to_addr, cc_json, rfc_message_id, attachments_json) \
+         VALUES ('m-reply','c1','Q3 budget','body','2026-11-12','me@x.com','[\"cc@x.com\"]','<orig@x>','[\"a1\",\"a2\"]')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let orig = load_original(&pool, "m-reply").await.unwrap();
+    assert_eq!(orig.sender_email, "sarah@x.com");
+    assert_eq!(orig.sender_name, "Sarah");
+    assert_eq!(orig.self_addrs, vec!["me@x.com".to_string()]);
+    assert_eq!(orig.cc_addrs, vec!["cc@x.com".to_string()]);
+    assert_eq!(orig.rfc_message_id.as_deref(), Some("<orig@x>"));
+    assert_eq!(orig.attachment_count, 2);
+}
+
+#[tokio::test]
+async fn load_original_rejects_unknown_id() {
+    let pool = pool_with_mail_columns().await;
+    let err = load_original(&pool, "nope").await.unwrap_err();
+    assert!(err.starts_with("INVALID_ARGUMENT"), "got {err}");
+}
