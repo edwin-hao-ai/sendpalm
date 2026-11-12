@@ -487,11 +487,20 @@
 
 .feed-card.priority-high { box-shadow: inset 4px 0 0 var(--coral); }
 
+/* Read vs unread must be obvious at a glance.
+ *
+ * Colour, not just weight: `--ink` and `--text-primary` are the same hex, so
+ * before this the only difference was 700 vs 500 — invisible in 14px Chinese
+ * (and the unread dot was hidden on :hover, which is exactly where the mouse
+ * sits on the row you just clicked). Unread rows are now the only dark text in
+ * the list; read rows drop to the softer ink. */
 .feed-card.unread .feed-name { font-weight: 700; color: var(--ink); }
 .feed-card.unread .feed-subject { font-weight: 700; color: var(--ink); }
 
 /* Unread is a dot in the gutter, not a coloured border around the row.
- * Hidden while hovering so the multi-select checkbox owns that corner. */
+ * It stays visible while hovering: the reading pane opens on click, so the
+ * cursor rests on the row that just became read — hiding the dot there removed
+ * the only cue the user had. */
 .feed-card.unread::before {
   content: "";
   position: absolute;
@@ -499,15 +508,15 @@
      .select-checkbox margin-left) so the two never collide. Rows are
      `content-visibility:auto`, so anything outside the padding box would
      be clipped. */
-  left: 4px;
-  top: 22px;
-  width: 6px;
-  height: 6px;
+  left: 3px;
+  top: 21px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--palm);
+  /* Ring so the dot still reads over the hover tint and the cursor row. */
+  box-shadow: 0 0 0 2px var(--paper);
 }
-.feed-card.unread:hover::before { opacity: 0; }
-
 /* Section rule: 今天 4 ───────────────────────────── */
 .imbox-date-rule {
   flex: 1;
@@ -544,8 +553,10 @@
 
 .feed-name {
   font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
+  font-weight: 500;
+  /* Read mail sits in the softer ink; unread mail is the only dark text in the
+     list. Weight alone (600 vs 700) is not visible in 14px Chinese. */
+  color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -577,7 +588,7 @@
 .feed-subject {
   font-size: 14px;
   color: var(--text-primary);
-  font-weight: 500;
+  font-weight: 400;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

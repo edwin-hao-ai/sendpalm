@@ -694,6 +694,100 @@ test.describe("Imbox — single view focus", () => {
     await expect(row.locator("[data-unread='false']")).toHaveCount(1);
   });
 
+  test("a read row and an unread row look different, and clicking makes the difference go away", async ({
+    page,
+  }) => {
+    // 之前的 e2e 只断言 class 里有没有 `unread` —— 那断言的是实现，不是用户
+    // 看到的东西。真实反馈是「点完看不出区别」：圆点在 :hover 上被隐藏了，
+    // 而鼠标点完就停在那一行上，于是唯一的线索消失了。
+    // 这条测试量化「一个人能不能看出来」：字重差、以及悬停时圆点必须还在。
+    const contacts = [APPLE_DEV, NEWSPAPER];
+    const messages = [
+      makeMessage({
+        id: "m_look_unread",
+        pid: APPLE_DEV.id,
+        subj: "未读的一封",
+        prev: "正文第一行",
+        st: isoDaysAgo(0, 10),
+        unread: true,
+        bucket: "imbox",
+        direction: "in",
+      }),
+      makeMessage({
+        id: "m_look_read",
+        pid: NEWSPAPER.id,
+        subj: "已读的一封",
+        prev: "正文第一行",
+        st: isoDaysAgo(1, 10),
+        unread: false,
+        bucket: "imbox",
+        direction: "in",
+      }),
+    ];
+    await seedAndOpen(page, contacts, messages);
+
+    type Look = { weight: number; dot: number; color: string };
+    const look = (id: string): Promise<Look> =>
+      page.evaluate((msgId) => {
+        const el = document.querySelector(
+          `[data-feed-card='message'][data-message-id='${msgId}']`,
+        ) as HTMLElement | null;
+        if (!el) throw new Error(`row ${msgId} not found`);
+        const subject = el.querySelector(".feed-subject") as HTMLElement;
+        const name = el.querySelector(".feed-name") as HTMLElement;
+        // 圆点是 ::before，只有 getComputedStyle(el, "::before") 能问到它。
+        const dot = getComputedStyle(el, "::before");
+        return {
+          weight: Number(getComputedStyle(subject).fontWeight),
+          nameColor: getComputedStyle(name).color,
+          dot: dot.content === "none" ? 0 : Number(dot.opacity) * parseFloat(dot.width),
+          color: getComputedStyle(subject).color,
+        };
+      }, id);
+
+    await expect(
+      page.locator("[data-feed-card='message'][data-message-id='m_look_unread']"),
+    ).toBeVisible();
+
+    const unreadRow = page.locator(
+      "[data-feed-card='message'][data-message-id='m_look_unread']",
+    );
+    const readRow = page.locator(
+      "[data-feed-card='message'][data-message-id='m_look_read']",
+    );
+
+    // 1) 未读行必须真的更重（差值要肉眼可辨，不是 600 vs 700 那种）。
+    const unreadRest = await look("m_look_unread");
+    const readLook = await look("m_look_read");
+    expect(
+      unreadRest.weight - readLook.weight,
+      "unread subject is not visibly heavier than a read one",
+    ).toBeGreaterThanOrEqual(200);
+    expect(
+      unreadRest.nameColor,
+      "unread and read sender names are the same colour, so weight is the only cue",
+    ).not.toBe(readLook.nameColor);
+
+    // 2) 圆点在悬停时必须仍然可见 —— 这是「点完看不出变化」的直接原因。
+    await unreadRow.hover();
+    await page.waitForTimeout(220);
+    const hoveredUnread = await look("m_look_unread");
+    expect(
+      hoveredUnread.dot,
+      "unread dot disappears on hover, so the row you just clicked shows nothing",
+    ).toBeGreaterThan(0);
+
+    // 3) 点开之后，这一行必须看起来和已读行一致。
+    await unreadRow.click();
+    await expect(page.locator("#detail-panel.open")).toBeVisible();
+    await expect
+      .poll(async () => (await look("m_look_unread")).weight, { timeout: 5_000 })
+      .toBe(readLook.weight);
+    const afterOpen = await look("m_look_unread");
+    expect(afterOpen.dot, "the dot survived being read").toBe(0);
+    expect(readRow).toBeVisible();
+  });
+
   test("keyboard: j/k move cursor, Enter opens", async ({ page }) => {
     const { contacts, messages } = makeImboxDataset();
     await seedAndOpen(page, contacts, messages);

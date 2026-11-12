@@ -252,7 +252,21 @@ test.describe("Email workflows", () => {
       await page.getByRole("button", { name: /Edited report/ }).click();
       await page.locator("#detail-panel").getByRole("button", { name: "来源邮件" }).click();
       await expect(page.locator("#detail-panel")).toContainText("E2E test subject");
-      await closeDetailPanel(page);
+      // 从「来源邮件」按「返回」是回到它来自的那个任务，而不是关掉面板
+      // （见 services/task-extraction.ts `openTaskSource` 的 rememberCurrentPanel）。
+      // 之前这里直接用 closeDetailPanel 断言面板消失，和产品行为打架，
+      // 在并发负载下约一半概率红。先按返回，如果落回任务面板再从那里关。
+      await page
+        .locator(
+          '#detail-panel [aria-label="返回"], #detail-panel [aria-label="返回列表"]',
+        )
+        .first()
+        .click();
+      await page.waitForTimeout(300);
+      if (await page.locator("#detail-panel").count()) {
+        await expect(page.locator("#detail-panel")).toContainText("任务");
+        await closeDetailPanel(page);
+      }
       await navigateTo(page, "followUps");
       await expect(page.getByRole("heading", { name: "跟进提醒", exact: true })).toBeVisible();
     });

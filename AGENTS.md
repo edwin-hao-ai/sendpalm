@@ -830,6 +830,23 @@ and script inside the mail frame)
   `srcdoc` — a `position:fixed` div whose text is written by the frame's own script — is enough to tell
   "script ran and CSS applied" from "markup arrived, everything else blocked". Remove it afterwards.
 
+### 11.20 Lessons learned (Session 2026-11-12 — 「已读/未读看不出区别」：断言类名不等于断言用户看得见)
+
+- **e2e 断言 `toHaveClass(/unread/)` 只能证明状态变了，不能证明人看得出来。** 那 5 条
+  「点开邮件」的用例全部靠 `.unread` 类名判绿，而真实反馈是「点完没有任何变化」。根因有两层：
+  `--ink` 和 `--text-primary` 是同一个色值（唯一差别只有 700 vs 600 字重，中文 14px 下看不出来），
+  以及 `.feed-card.unread:hover::before { opacity: 0 }` —— **用户点完鼠标正好停在这一行，
+  于是唯一的线索当场消失**。涉及「状态是否可见」的断言要断言**计算样式**（字重差值、颜色、
+  `getComputedStyle(el, "::before")` 的 opacity/width），并覆盖 hover 态；只断言 class 一律不算数。
+- **在悬停上隐藏状态指示器，等于在用户最需要它的那一刻隐藏它。** 那个 `:hover` 规则的理由是
+  「把角落让给多选框」，但两者在布局上并不重叠（点在 12px 内边距里，checkbox 从 20px 起）。
+  先量一下是否真的冲突，再决定要不要藏。
+- **测试和产品行为打架时，改测试之前先读产品那句注释。** `workflows.spec.ts` 里
+  「来源邮件 → 返回」用 `closeDetailPanel` 断言面板消失，而 `openTaskSource` 的注释写着
+  「返回 from the source mail goes back to the task, not to the list」。两者冲突，
+  于是它在 5s 超时边缘反复横跳（单跑绿、全量并发约一半红）。修法是照产品行为断言
+  （落回任务面板 → 再关），而不是把超时调大。
+
 ### 11.19 Lessons learned (Session 2026-11-12 — Imbox 合并单列表，未读是视觉而不是容器)
 
 - **一个只为掩盖「行跑掉了」而存在的函数，说明数据模型选错了。** `keepScrollStill` 那 18 行
