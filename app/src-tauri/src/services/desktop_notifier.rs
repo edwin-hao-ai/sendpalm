@@ -100,10 +100,31 @@ pub async fn notify_new_mail(
     if prefs.sound {
         builder = builder.sound("default");
     }
-    builder
-        .show()
-        .map_err(|e| format!("notification: {e}"))?;
+    builder.show().map_err(|e| {
+        // The caller used to swallow this (`let _ =`), so an OS-level refusal
+        // (permission never granted, which is what macOS reports as "app not
+        // allowed") turned into "新邮件没有任何提示" with nothing anywhere to
+        // explain it. Log once per distinct reason: a denial fails on EVERY
+        // new mail, and printing that per message is how a log becomes noise.
+        let reason = e.to_string();
+        if record_failure_once(&reason) {
+            eprintln!("[sendpalm] desktop notification failed: {reason}");
+        }
+        format!("notification: {reason}")
+    })?;
     Ok(())
+}
+
+/// One log line per distinct failure reason per process. Returns true the
+/// first time a reason is seen. Pure so it can be tested without an OS.
+pub fn record_failure_once(reason: &str) -> bool {
+    static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    if seen.iter().any(|r| r == reason) {
+        return false;
+    }
+    seen.push(reason.to_string());
+    true
 }
 
 /// Mail held back during the current sync pass while digest mode is on.
@@ -132,7 +153,12 @@ pub fn flush_digest(app: &AppHandle, prefs: &NotificationPrefs) {
         return;
     }
     let (title, body) = digest_copy(n);
-    let _ = app.notification().builder().title(title).body(body).show();
+    if let Err(e) = app.notification().builder().title(title).body(body).show() {
+        let reason = e.to_string();
+        if record_failure_once(&reason) {
+            eprintln!("[sendpalm] digest notification failed: {reason}");
+        }
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -174,5 +200,16 @@ mod tests {
         p.quiet_hours_end = "08:00".into();
         assert!(!should_notify(&p, "23:30"));
         assert!(should_notify(&p, "12:00"));
+    }
+
+    #[test]
+    fn a_repeated_notification_failure_is_logged_once() {
+        // A denied OS permission fails on every new mail. The first line is
+        // the useful one; the next thousand hide it.
+        let reason = "test-reason: not authorized (dedupe fixture)";
+        assert!(record_failure_once(reason));
+        assert!(!record_failure_once(reason));
+        // A DIFFERENT reason is still news, even after one was logged.
+        assert!(record_failure_once("test-reason: something else"));
     }
 }

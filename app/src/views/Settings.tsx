@@ -93,7 +93,10 @@ import {
 } from "../utils/theme";
 import {
   ensureNotificationPermission,
+  notificationPermission,
   notifySettingsChanged,
+  openSystemNotificationSettings,
+  type NotificationPermission,
 } from "../services/notifications";
 import { setLocale, type Locale } from "../i18n";
 import {
@@ -3510,22 +3513,97 @@ function BackgroundSettingsTab() {
 
 function PreferencesNotificationsTab() {
   const prefs = () => appSettings.preferences.notifications;
+  // What the OS thinks. Read without prompting on mount so the row reflects
+  // reality: the previous UI only ever showed the user's intent, so an
+  // OS-level denial looked exactly like a working setup (toggle on, silence).
+  const [permission, setPermission] = createSignal<NotificationPermission>();
+  const refreshPermission = async () =>
+    setPermission(await notificationPermission());
+  void refreshPermission();
+  const [opening, setOpening] = createSignal(false);
+
   return (
     <div
       style={{ display: "grid", gap: "var(--space-3)", "max-width": "520px" }}
     >
       <ToggleRow
         label="桌面通知"
-        description="收到新邮件时在系统通知中心弹出。"
+        description="收到新邮件时在系统通知中心弹出。Gate 待审的新发件人默认静默，不会刷屏。"
         checked={prefs().desktop}
         onChange={async (v) => {
           setAppSettings("preferences", "notifications", {
             ...prefs(),
             desktop: v,
           });
-          await ensureNotificationPermission();
+          setPermission(await ensureNotificationPermission());
         }}
       />
+      <Show when={prefs().desktop && permission() === "not-granted"}>
+        <div
+          data-notification-permission
+          style={{
+            display: "grid",
+            gap: "var(--space-2)",
+            padding: "var(--space-3)",
+            "border-radius": "var(--radius-md)",
+            background: "var(--paper-mid)",
+            "border-left": "3px solid var(--orange)",
+          }}
+        >
+          <strong style={{ "font-size": "var(--text-body-sm)" }}>
+            系统还没有允许 SendPalm 发通知
+          </strong>
+          <p
+            style={{
+              "font-size": "var(--text-caption)",
+              color: "var(--text-secondary)",
+            }}
+          >
+            开关是开着的，但 macOS 挡住了横幅——所以「新邮件不弹」。
+            先点下面再试一次；如果系统不再弹询问，说明之前拒绝过，需要去系统设置里手动允许。
+          </p>
+          <div style={{ display: "flex", gap: "var(--space-2)" }}>
+            <button
+              type="button"
+              data-notification-grant
+              onClick={async () => setPermission(await ensureNotificationPermission())}
+              style={{
+                "min-height": "32px",
+                padding: "4px 14px",
+                "border-radius": "var(--radius-pill)",
+                background: "var(--palm)",
+                color: "#fff",
+                "font-size": "var(--text-caption)",
+                "font-weight": 700,
+              }}
+            >
+              再次请求权限
+            </button>
+            <button
+              type="button"
+              data-notification-open-system
+              disabled={opening()}
+              onClick={async () => {
+                setOpening(true);
+                await openSystemNotificationSettings();
+                setOpening(false);
+              }}
+              style={{
+                "min-height": "32px",
+                padding: "4px 14px",
+                "border-radius": "var(--radius-pill)",
+                background: "var(--paper-light)",
+                border: "0.5px solid var(--border)",
+                color: "var(--text-primary)",
+                "font-size": "var(--text-caption)",
+                "font-weight": 600,
+              }}
+            >
+              打开系统设置 › 通知
+            </button>
+          </div>
+        </div>
+      </Show>
       <ToggleRow
         label="摘要模式"
         description="不再每封邮件弹一次通知，改为每轮同步结束后汇总成一条（例如「3 封新邮件」）。静默时段仍然生效。"

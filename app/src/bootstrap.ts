@@ -7,7 +7,10 @@
 
 import { load } from "@tauri-apps/plugin-store";
 import { IS_BROWSER } from "./services/tauri-shim";
-import { maybePromptNotificationPermission } from "./services/notifications";
+import {
+  maybePromptNotificationPermission,
+  syncNotificationPrefs,
+} from "./services/notifications";
 import { applyLockOnBoot } from "./services/app-lock";
 import { applyAppearance } from "./utils/theme";
 import { vaultGetSecret, LLM_API_KEY_VAULT_KEY } from "./services/backend";
@@ -66,6 +69,15 @@ export async function initApp() {
         // Done right after the settings hydrate (not in App.tsx) so the
         // decision reads the persisted value rather than the defaults.
         applyLockOnBoot();
+
+        // Mirror the persisted notification preferences into the Rust sync
+        // loop. The Rust side owns the decision to show an OS banner (it is
+        // the only side that knows a mail is genuinely new), but it holds its
+        // own copy of these flags — and previously that copy was only written
+        // when the user touched a toggle in Settings. So "关掉桌面通知" survived
+        // the file and not the restart: the next launch pinged again with the
+        // defaults until someone opened Settings.
+        void syncNotificationPrefs(settings.preferences.notifications);
 
         // SEC-2: the LLM API key never lives in the prefs file.
         // Load it from the OS keychain at boot so Settings →

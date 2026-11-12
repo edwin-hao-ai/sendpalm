@@ -7,6 +7,11 @@
     "core:default",
     "core:window:allow-start-dragging",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "comment": "macOS 系统设置的深链（通知权限被拒时引导用户去允许）",
+      "allow": [{ "url": "x-apple.systempreferences:*" }]
+    },
     "sql:default",
     "sql:allow-execute",
     "sql:allow-select",
