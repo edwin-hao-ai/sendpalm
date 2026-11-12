@@ -169,6 +169,13 @@ hr {
   padding-top: env(safe-area-inset-top);
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
+  /* Window chrome paints above the side panels. The sync-status and avatar
+     popovers are rendered *inside* this element, so their own `z-index` can
+     never escape this stacking context — putting the bar itself above
+     `#detail-panel` (30) / `#agent-panel` (40) is the only thing that makes
+     them visible. Phones drop back to `--z-sticky`: there the detail panel is
+     a full-screen sheet that must cover the bar. */
+  z-index: var(--z-topbar);
 }
 
 #main {
@@ -257,6 +264,9 @@ hr {
   #topbar {
     height: auto;
     min-height: calc(var(--topbar-height) + env(safe-area-inset-top));
+    /* The detail sheet owns the whole screen here (inset: 0 below), so the
+       bar must not float above it. */
+    z-index: var(--z-sticky);
   }
   #app {
     /* minmax(0, 1fr): a bare 1fr has an auto minimum, so a wide child

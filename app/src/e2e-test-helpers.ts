@@ -101,10 +101,13 @@ async function applySeed(payload: SeedPayload): Promise<void> {
   for (const f of payload.files ?? []) await upsertFile(f);
   for (const s of payload.agentSessions ?? []) await upsertAgentSession(s);
   for (const d of payload.agentDrafts ?? []) await upsertAgentDraft(d);
-  // Bump the global refresh tick so any createResource that already
-  // fired with empty data refetches now that the seed has landed.
-  // Without this, view state and resource cache race the seed.
+  // Bump the global refresh ticks so any createResource that already fired
+  // with empty data refetches now that the seed has landed. Both ticks: views
+  // that only listen to the soft tick (the topbar sync badge, counters) would
+  // otherwise stay on the pre-seed snapshot, and a test that then clicks them
+  // exercises a different state than it thinks.
   bumpRefreshTick();
+  bumpSoftRefreshTick();
 }
 
 if (IS_BROWSER() && typeof window !== "undefined") {

@@ -60,7 +60,9 @@ export function Topbar() {
         "border-bottom": "0.5px solid var(--border)",
         gap: "var(--space-4)",
         position: "relative",
-        "z-index": "var(--z-sticky)",
+        // z-index lives in base.css: the topbar must paint above the side
+        // panels (its popovers are children of this stacking context), except
+        // on phones where the detail sheet is full-screen and covers the bar.
         "-webkit-app-region": "drag",
       }}
       onMouseDown={(e) => {

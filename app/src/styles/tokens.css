@@ -189,6 +189,13 @@
   --z-detail: 30;
   --z-agent: 40;
   --z-popover: 45;
+  /* The topbar is window chrome: its popovers (sync status, avatar menu) open
+     downward over the list and the detail panel, and they are rendered INSIDE
+     the topbar's stacking context. A popover's own z-index can never escape
+     its ancestor's context, so the topbar itself must sit above the panels —
+     otherwise the sync popover is painted under `#detail-panel` (30) and
+     `#agent-panel` (40). Modals (80) still cover it, which is correct. */
+  --z-topbar: 50;
   --z-modal: 80;
   --z-toast: 100;
 }
