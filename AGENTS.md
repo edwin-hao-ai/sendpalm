@@ -917,6 +917,12 @@ and script inside the mail frame)
   画一块实心圆角方板 + 镂空图形，16pt 时镂空细节全部丢失，屏幕上就是一块白/黑方块。
   资产用 `tray-icon-template.svg` 作源（`rsvg-convert -w 32 -h 32`），并把 44×44 改成 32×32；
   Windows/Linux 深色托盘里黑色字形会看不见，所以那边仍用彩色品牌图（`cfg!(target_os)` 分支）。
+- **原生菜单不要放 emoji 图标。** 托盘菜单每行前面加 `✉` 之后，emoji 用自己的光学尺寸和基线渲染，
+  比标签小一圈还偏上，读起来像"每行前面有个错位的小按钮"。菜单项就是纯文本 + 分隔线；
+  超长文本用真省略号（按字符切，CJK 不会切碎），不要静默截断成"看起来完整"的一行。
+- **`data-message-id` 不止列表有：详情面板的 thread 条目也带。** `document.querySelector` 命中的
+  可能是面板里那份，于是 `scrollIntoView` 滚的是面板而不是列表。凡是"在列表里找一行"的选择器都要
+  带 `#main` 前缀；e2e 里同一个查询也要带，否则 strict mode 会同时匹配到两个。
 - **开发态的裸二进制永远不会出现在通知中心。** `pnpm tauri dev` 跑的是
   `~/.cargo/shared-target/debug/sendpalm-app`，不是 `.app` bundle；`UNUserNotificationCenter`
   需要 bundle identifier，所以 dev 里"通知不弹"是环境，不是产品 bug。判断系统是否真的登记过：
