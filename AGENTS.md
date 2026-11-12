@@ -824,6 +824,25 @@ and script inside the mail frame)
   `srcdoc` — a `position:fixed` div whose text is written by the frame's own script — is enough to tell
   "script ran and CSS applied" from "markup arrived, everything else blocked". Remove it afterwards.
 
+### 11.19 Lessons learned (Session 2026-11-12 — Imbox 合并单列表，未读是视觉而不是容器)
+
+- **一个只为掩盖「行跑掉了」而存在的函数，说明数据模型选错了。** `keepScrollStill` 那 18 行
+  全在处理浏览器因内容变矮而夹紧 `scrollTop`、WebKit 把失去焦点的行滚回视野、打开阅读栏让预览
+  重排——根因是「打开邮件」把行从「新邮件」搬到「已读」。把它换成「行不动、只去掉加粗」之后，
+  这个函数整体删掉，没有替代品。**下次写补丁去掩盖一次视觉跳动之前，先问那个跳动该不该发生。**
+- **区分维度应该是用户做的决定，不是被动状态。** 已读是被动的，归档 / 稍后回复 / 搁置 / 提醒
+  才是决定。Imbox 的容器只该跟着决定走；HEY 的 Imbox 从不因为你「看过」而移走邮件。这条也解释
+  了为什么「一起读」是例外：那里行离开是因为用户进了明确声明的模式，不是点击的副作用。
+- **相减而得的 UI 数字，两侧必须同源同限。** 头部「更早 N 封未读」= 全量未读 − 最近 30 天未读，
+  两个计数以前一个没有账户谓词、一个 `LIMIT 999` 而另一个 `LIMIT 2000`，切换账户或超过 999 就
+  会算出负数或说错话。现在两个都按账户范围查、共用 `RECENT_UNREAD_CAP`。
+- **`$1` 和 `?` 占位符不要混用。** `WHERE timeline_at >= $1 AND ac IN (?)` 里 SQLite 把 `?` 也
+  编到参数 1，cutoff 被绑进 `ac IN (…)` 的第一个槽——带账户范围时计数永远返回 0，而单参数调用
+  一直是对的，所以这个 bug 能潜伏很久。测试一加账户参数就红了。
+- **e2e 的 `[data-feed-card='message']` 包含折叠在 bundle 抽屉里的行。** 抽屉是 CSS 隐藏而非
+  `<Show>` 卸载，所以 `nth(1)` 可能落在一个不可见的行上。要断言「列表里可见的卡片」时加
+  `:not([data-bundle-row])`，要断言筛选真的生效时看头部数字（`[data-imbox-counts]`）而不是数卡片的类名。
+
 ## 12. Agent Skills & Global Protocols
 
 SendPalm adopts a set of global agent skills stored in `~/.agents/skills/`. These skills are available to Kimi Code, Claude Code, OpenCode, and any other agent that reads the standard skill directory. **Invoke them by name** when the situation matches their description:

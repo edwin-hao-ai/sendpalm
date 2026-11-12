@@ -490,3 +490,5 @@ Task 2: Ruling: `no-refetch-storm` 的预算 36 → 42 —— 合并列表需要
 （全量未读，供 chip 与头部「已读」行），它和 30 天计数各是一次 IPC。该测试真正
 的守卫（不拉 agent 表、面板稳定后 0 查询）都还在。代价：若未来再叠加计数，
 预算会继续涨，需要重新审视是否该把三个计数合成一次查询。
+
+Task 3: complete (commit cf06e40, tests: vitest → 873 pass, 用例减少 1 例即删除的 readOnly 用例)
