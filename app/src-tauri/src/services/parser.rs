@@ -87,7 +87,7 @@ pub fn parse_email(raw: &[u8]) -> Result<ParsedMessage, String> {
         .any(|h| header_value(&parsed.headers, h).is_some());
 
     let body_text = extract_text(&parsed).unwrap_or_default();
-    let attachments = collect_attachments(&parsed);
+    let attachments = collect_attachments(&parsed, sent_at);
     let body_html = extract_html(&parsed).map(|html| rewrite_inline_images(&html, &attachments));
     let calendar_invite = extract_calendar(&parsed);
 
@@ -237,9 +237,9 @@ fn extract_html(parsed: &ParsedMail<'_>) -> Option<String> {
     None
 }
 
-fn collect_attachments(parsed: &ParsedMail<'_>) -> Vec<ParsedAttachment> {
+fn collect_attachments(parsed: &ParsedMail<'_>, sent_at: Option<DateTime<Utc>>) -> Vec<ParsedAttachment> {
     let mut out = Vec::new();
-    walk_attachments(parsed, &mut out);
+    walk_attachments(parsed, &mut out, sent_at);
     out
 }
 
@@ -321,7 +321,11 @@ pub fn file_type_from_mime(mime: &str) -> &'static str {
     }
 }
 
-fn walk_attachments(m: &ParsedMail<'_>, out: &mut Vec<ParsedAttachment>) {
+fn walk_attachments(
+    m: &ParsedMail<'_>,
+    out: &mut Vec<ParsedAttachment>,
+    sent_at: Option<DateTime<Utc>>,
+) {
     for part in &m.subparts {
         let cd = part.ctype.mimetype.to_lowercase();
         let is_attachment = header_is(&part.headers, "Content-Disposition")
@@ -329,13 +333,8 @@ fn walk_attachments(m: &ParsedMail<'_>, out: &mut Vec<ParsedAttachment>) {
                 .map(|v| v.to_lowercase().contains("attachment"))
                 .unwrap_or(false);
         if is_attachment || (!cd.starts_with("text/") && !cd.starts_with("multipart/")) {
-            let cd_header = header_value_at(&part.headers, "Content-Disposition");
-            let ct_header = header_value_at(&part.headers, "Content-Type");
-            let filename = cd_header
-                .as_deref()
-                .and_then(extract_filename)
-                .or_else(|| ct_header.as_deref().and_then(extract_name))
-                .unwrap_or_else(|| format!("attachment-{}", out.len()));
+            let filename = attachment_filename(part)
+                .unwrap_or_else(|| fallback_attachment_name(&cd, sent_at));
             let content = part.get_body_raw().ok();
             let size = content.as_ref().map(|b| b.len() as u64).unwrap_or(0);
             let content_id = header_value_at(&part.headers, "Content-ID")
@@ -354,36 +353,85 @@ fn walk_attachments(m: &ParsedMail<'_>, out: &mut Vec<ParsedAttachment>) {
                 content,
             });
         }
-        walk_attachments(part, out);
+        walk_attachments(part, out, sent_at);
     }
 }
 
-fn extract_filename(cd: &str) -> Option<String> {
-    let idx = cd.find("filename=")?;
-    let rest = &cd[idx + 9..];
-    let trimmed = rest.trim_start_matches('"').trim_start_matches('\'');
-    let end = trimmed
-        .find(';')
-        .or_else(|| trimmed.find('"'))
-        .or_else(|| trimmed.find('\''))
-        .unwrap_or(trimmed.len());
-    Some(
-        trimmed[..end]
-            .trim_matches(|c| c == '"' || c == '\'')
-            .to_string(),
-    )
+/// The name the sender gave the file, or `None`.
+///
+/// Three shapes arrive in real mail, and the `find("filename=")` slicing this
+/// used to do understood none of them:
+///
+/// ```text
+/// Content-Disposition: attachment; filename="report.pdf"
+/// Content-Disposition: attachment; filename*=UTF-8''%E6%8A%A5%E5%91%8A.pdf
+/// Content-Type: application/pdf; name="=?utf-8?B?5oql5ZGKLnBkZg==?="
+/// ```
+///
+/// mailparse already decodes RFC 2184 continuations, RFC 2231 percent-encoding
+/// and RFC 2047 encoded-words while parsing the parameters, so read them
+/// through it instead of re-implementing the decode. `filename` wins over
+/// `name`: it is the header meant for the attachment.
+fn attachment_filename(part: &ParsedMail<'_>) -> Option<String> {
+    let filename = part
+        .get_content_disposition()
+        .params
+        .get("filename")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    filename.or_else(|| {
+        part.ctype
+            .params
+            .get("name")
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    })
 }
 
-fn extract_name(ct: &str) -> Option<String> {
-    let idx = ct.find("name=")?;
-    let rest = &ct[idx + 5..];
-    let trimmed = rest.trim_start_matches('"').trim_start_matches('\'');
-    let end = trimmed.find(';').unwrap_or(trimmed.len());
-    Some(
-        trimmed[..end]
-            .trim_matches(|c| c == '"' || c == '\'')
-            .to_string(),
-    )
+/// A name a person can read when the sender gave none — bounced mail
+/// (`message/delivery-status`), forwards (`message/rfc822`) and some scanners.
+///
+/// The old fallback was `attachment-0`: no extension, so double-clicking one in
+/// the Files view could not hand it to any app. `类型-日期` plus the extension
+/// the MIME type implies at least opens.
+fn fallback_attachment_name(mime: &str, sent_at: Option<DateTime<Utc>>) -> String {
+    let kind = file_type_from_mime(mime);
+    let stem = if kind == "other" { "attachment" } else { kind };
+    // The message's own date, not the sync date: an attachment from a 2019
+    // mail must not be named after today.
+    let date = sent_at
+        .map(|d| d.format("%Y%m%d").to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    format!("{stem}-{date}.{}", extension_for_mime(mime))
+}
+
+/// The extension a MIME type implies. Only the types that actually show up as
+/// attachments need an entry; everything else falls back to `bin`.
+fn extension_for_mime(mime: &str) -> &'static str {
+    match mime.to_lowercase().as_str() {
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/png" => "png",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/heic" | "image/heif" => "heic",
+        "image/svg+xml" => "svg",
+        "application/pdf" => "pdf",
+        "application/zip" => "zip",
+        "application/gzip" | "application/x-gzip" => "gz",
+        "application/json" => "json",
+        "application/msword" => "doc",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => "docx",
+        "application/vnd.ms-excel" => "xls",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => "xlsx",
+        "application/vnd.ms-powerpoint" => "ppt",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" => "pptx",
+        "message/rfc822" => "eml",
+        "message/delivery-status" => "txt",
+        "text/plain" => "txt",
+        "text/html" => "html",
+        "text/calendar" => "ics",
+        _ => "bin",
+    }
 }
 
 #[cfg(test)]
@@ -552,7 +600,6 @@ Content-Transfer-Encoding: base64\r\n\
         );
         assert!(!html.contains("cid:image001"));
     }
-}
 
     #[test]
     fn detects_newsletter_by_list_headers() {
@@ -563,3 +610,108 @@ Content-Transfer-Encoding: base64\r\n\
         let raw3 = "From: a@a.com\r\nSubject: personal\r\n\r\nbody\r\n";
         assert!(!parse_email(raw3.as_bytes()).unwrap().is_newsletter);
     }
+
+    /// CJK attachments from QQ/163/Feishu arrive as RFC 2231 percent-encoding.
+    /// The old `find("filename=")` slicing returned `UTF-8''%E6%8A%A5…`.
+    #[test]
+    fn decodes_rfc2231_filename() {
+        let raw = "From: a@a.com\r\n\
+Subject: rfc2231\r\n\
+Message-ID: <rfc2231@a.com>\r\n\
+MIME-Version: 1.0\r\n\
+Content-Type: multipart/mixed; boundary=BOUND\r\n\
+\r\n\
+--BOUND\r\n\
+Content-Type: text/plain\r\n\
+\r\n\
+see attached\r\n\
+--BOUND\r\n\
+Content-Type: application/pdf\r\n\
+Content-Disposition: attachment; filename*=UTF-8''%E6%8A%A5%E5%91%8A.pdf\r\n\
+\r\n\
+body\r\n\
+--BOUND--\r\n";
+        let p = parse_email(raw.as_bytes()).unwrap();
+        assert_eq!(p.attachments.len(), 1);
+        assert_eq!(p.attachments[0].filename, "\u{62a5}\u{544a}.pdf");
+    }
+
+    /// Outlook encodes the name as an RFC 2047 word instead.
+    #[test]
+    fn decodes_encoded_word_filename() {
+        let raw = "From: a@a.com\r\n\
+Subject: encoded word\r\n\
+Message-ID: <ew@a.com>\r\n\
+MIME-Version: 1.0\r\n\
+Content-Type: multipart/mixed; boundary=BOUND\r\n\
+\r\n\
+--BOUND\r\n\
+Content-Type: text/plain\r\n\
+\r\n\
+see attached\r\n\
+--BOUND\r\n\
+Content-Type: application/pdf; name=\"=?utf-8?B?5oql5ZGKLnBkZg==?=\"\r\n\
+Content-Disposition: attachment; filename=\"=?utf-8?B?5oql5ZGKLnBkZg==?=\"\r\n\
+\r\n\
+body\r\n\
+--BOUND--\r\n";
+        let p = parse_email(raw.as_bytes()).unwrap();
+        assert_eq!(p.attachments[0].filename, "\u{62a5}\u{544a}.pdf");
+    }
+
+    /// A `name=` on the Content-Type is the only hint some clients give.
+    #[test]
+    fn falls_back_to_the_content_type_name() {
+        let raw = "From: a@a.com\r\n\
+Subject: name only\r\n\
+Message-ID: <no-cd@a.com>\r\n\
+MIME-Version: 1.0\r\n\
+Content-Type: multipart/mixed; boundary=BOUND\r\n\
+\r\n\
+--BOUND\r\n\
+Content-Type: text/plain\r\n\
+\r\n\
+see attached\r\n\
+--BOUND\r\n\
+Content-Type: application/pdf; name=\"invoice.pdf\"\r\n\
+\r\n\
+body\r\n\
+--BOUND--\r\n";
+        let p = parse_email(raw.as_bytes()).unwrap();
+        assert_eq!(p.attachments[0].filename, "invoice.pdf");
+    }
+
+    /// No name at all: the file still has to open, so it gets a readable stem
+    /// (type + the *message's* date) and the extension the MIME type implies.
+    #[test]
+    fn unnamed_attachment_gets_a_readable_name() {
+        let raw = "From: a@a.com\r\n\
+Subject: bounce\r\n\
+Date: Mon, 1 Jan 2024 10:00:00 +0000\r\n\
+Message-ID: <bounce@a.com>\r\n\
+MIME-Version: 1.0\r\n\
+Content-Type: multipart/report; boundary=BOUND\r\n\
+\r\n\
+--BOUND\r\n\
+Content-Type: text/plain\r\n\
+\r\n\
+failed\r\n\
+--BOUND\r\n\
+Content-Type: message/delivery-status\r\n\
+\r\n\
+Action: failed\r\n\
+--BOUND--\r\n";
+        let p = parse_email(raw.as_bytes()).unwrap();
+        assert_eq!(p.attachments[0].filename, "attachment-20240101.txt");
+    }
+
+    #[test]
+    fn unknown_mime_and_missing_date_still_yield_a_usable_name() {
+        assert_eq!(
+            fallback_attachment_name("application/x-weird", None),
+            "attachment-unknown.bin"
+        );
+        assert_eq!(extension_for_mime("message/rfc822"), "eml");
+        assert_eq!(fallback_attachment_name("image/jpeg", None), "image-unknown.jpg");
+    }
+}
