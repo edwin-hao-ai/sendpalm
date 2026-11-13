@@ -152,9 +152,11 @@ async function seedAndOpenMessage(
     .locator('[data-feed-card="message"], [data-feed-card="bundle"]')
     .first()
     .click();
-  // Detail panel uses ⌘O or Enter to open. Click the row already
-  // selects it; pressing Enter opens the message in the DetailPanel.
-  await page.keyboard.press("Enter");
+  // Clicking a row opens the panel by itself (`openAndMarkRead`). The old
+  // extra `Enter` only worked when focus happened to land on the row — under
+  // load the panel sometimes never opened and the iframe wait below timed out,
+  // which read as "the iframe never renders". Wait for the panel instead.
+  await page.locator("#detail-panel").waitFor({ timeout: 10_000 });
   // Wait for the iframe to render. The plain-text fallback appears
   // first, then the sanitized srcdoc iframe. The iframe is the
   // `title="Message body"` element in MessageBodyIframe.
