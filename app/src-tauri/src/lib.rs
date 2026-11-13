@@ -299,16 +299,6 @@ pub fn migrations() -> Vec<Migration> {
     out
 }
 
-/// Mobile entry point.
-///
-/// This attribute MUST sit directly above `run`. It had drifted onto
-/// `install_crypto_provider` (a doc comment was inserted between the
-/// attribute and the function it belonged to), so iOS's `ffi::start_app()`
-/// called the rustls installer, returned, and the process exited voluntarily
-/// about a second after launch — the "black first frame" that looked like a
-/// webview failure. Desktop never noticed because `main.rs` calls `run()`
-/// directly.
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Debug builds only: load `app/.env` so the test mailbox works without a
 /// keychain round-trip.
 ///
@@ -339,6 +329,17 @@ fn load_dev_credentials() {
     }
 }
 
+/// Mobile entry point.
+///
+/// This attribute MUST sit directly above `run`, with nothing — not even a doc
+/// comment — between them. It has now drifted twice (2026-11-09 onto
+/// `install_crypto_provider`, 2026-11-12 onto `load_dev_credentials`), and both
+/// times iOS's `ffi::start_app()` called the wrong function and the process
+/// exited voluntarily seconds after launch: the "black first frame" that looks
+/// like a webview failure. Desktop never noticed because `main.rs` calls
+/// `run()` directly. `mobile_entry_point_stands_directly_above_run` fails the
+/// build if it drifts again.
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     install_crypto_provider();
     #[cfg(debug_assertions)]
@@ -473,6 +474,8 @@ pub fn run() {
             commands::get_attachment_content,
             commands::get_attachment_path,
             commands::notification_settings::notify_settings_changed,
+            commands::notification_settings::notification_target,
+            commands::notification_settings::send_test_notification,
             commands::image_proxy::fetch_image,
             commands::agent_chat,
             commands::llm_list_models,
@@ -510,6 +513,40 @@ pub fn run() {
         std::process::exit(1);
     }
     eprintln!("[sendpalm] tauri run returned");
+}
+
+#[cfg(test)]
+mod entry_point_tests {
+    /// The `#[cfg_attr(mobile, tauri::mobile_entry_point)]` attribute must sit
+    /// directly above `pub fn run()` — no doc comment, no other item between
+    /// them. iOS's `ffi::start_app()` calls whatever the attribute is attached
+    /// to; when it drifted onto a helper, that helper ran, returned, and the
+    /// process exited voluntarily seconds after launch ("black first frame").
+    ///
+    /// A source-level check is the only kind that catches this: it compiles and
+    /// passes every test on desktop either way, because `main.rs` calls `run()`
+    /// directly.
+    #[test]
+    fn mobile_entry_point_stands_directly_above_run() {
+        let source = include_str!("lib.rs");
+        let lines: Vec<&str> = source.lines().collect();
+        let attr = lines
+            .iter()
+            .position(|l| l.contains("tauri::mobile_entry_point"))
+            .expect("the mobile entry point attribute is missing entirely");
+        let next = lines[attr + 1..]
+            .iter()
+            .find(|l| {
+                let t = l.trim();
+                !t.is_empty() && !t.starts_with("//") && !t.starts_with('}')
+            })
+            .map(|l| l.trim())
+            .unwrap_or("");
+        assert!(
+            next == "pub fn run() {",
+            "the attribute must be immediately followed by `pub fn run()`, found `{next}`"
+        );
+    }
 }
 
 #[cfg(test)]

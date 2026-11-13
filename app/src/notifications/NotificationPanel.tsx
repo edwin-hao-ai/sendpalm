@@ -9,17 +9,8 @@ import {
   onMount,
 } from "solid-js";
 import { listNotifications, markAllNotificationsRead } from "../stores/data";
-import {
-  setNotificationsOpen,
-  setView,
-  setSelectedMessageId,
-  setSelectedContactId,
-  setSelectedFileId,
-  setSelectedDraftId,
-  setDetailOpen,
-  setCalendarSelected,
-  setCalendarView,
-} from "../stores/ui";
+import { setNotificationsOpen } from "../stores/ui";
+import { openNotificationRef } from "../services/open-ref";
 import { Icon } from "../components/Icon";
 import { Skeleton } from "../components/Skeleton";
 import { isToday, isYesterday, relativeTime } from "../utils/date";
@@ -270,27 +261,8 @@ function Row(props: {
   const n = () => props.n;
   const onClick = () => {
     const ref = n().ref;
-    if (ref?.type === "contact") {
-      setView("contacts");
-      setSelectedContactId(ref.id);
-      setDetailOpen(true);
-    } else if (ref?.type === "message") {
-      setView("imbox");
-      setSelectedMessageId(ref.id);
-      setDetailOpen(true);
-    } else if (ref?.type === "file") {
-      setView("files");
-      setSelectedFileId(ref.id);
-      setDetailOpen(true);
-    } else if (ref?.type === "draft") {
-      setView("drafts");
-      setSelectedDraftId(ref.id);
-      setDetailOpen(true);
-    } else if (ref?.type === "event") {
-      setView("calendar");
-      setCalendarView("day");
-      setCalendarSelected(new Date());
-    }
+    // Shared with the OS banner's click handler (services/open-ref.ts).
+    if (ref) openNotificationRef(ref);
     setNotificationsOpen(false);
   };
   return (

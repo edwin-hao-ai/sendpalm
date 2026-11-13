@@ -8,6 +8,7 @@
 import { load } from "@tauri-apps/plugin-store";
 import { IS_BROWSER } from "./services/tauri-shim";
 import {
+  listenNotificationClicks,
   maybePromptNotificationPermission,
   syncNotificationPrefs,
 } from "./services/notifications";
@@ -78,6 +79,9 @@ export async function initApp() {
         // the file and not the restart: the next launch pinged again with the
         // defaults until someone opened Settings.
         void syncNotificationPrefs(settings.preferences.notifications);
+        // A click on an OS banner must open that mail (and pull a tray-hidden
+        // window forward), not just focus the app.
+        void listenNotificationClicks();
 
         // SEC-2: the LLM API key never lives in the prefs file.
         // Load it from the OS keychain at boot so Settings →

@@ -117,7 +117,7 @@ pub fn setup_tray(app: &AppHandle, pool: SqlitePool) -> Result<(), String> {
     let tray = TrayIconBuilder::with_id("sendpalm-tray")
         .icon(icon)
         .icon_as_template(cfg!(target_os = "macos"))
-        .menu_on_left_click(true)
+        .show_menu_on_left_click(true)
         .menu(&initial_menu)
         .on_tray_icon_event({
             let app = app.clone();

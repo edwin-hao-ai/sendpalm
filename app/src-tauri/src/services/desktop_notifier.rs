@@ -78,6 +78,7 @@ pub async fn notify_new_mail(
     account_id: &str,
     subject: &str,
     sender: &str,
+    notification_row: Option<i64>,
 ) -> Result<(), String> {
     let now = chrono::Local::now().format("%H:%M").to_string();
     if !should_notify(prefs, &now) {
@@ -97,6 +98,13 @@ pub async fn notify_new_mail(
     };
     let body = format!("From {sender}\n({account_id})");
     let mut builder = app.notification().builder().title(title).body(body);
+    // The click handler gets this integer back, not the message id — hand it
+    // the `notifications.rowid` so `notification_target` can resolve it.
+    // macOS ids are 32-bit; a rowid that overflows (impossible in practice on
+    // a mailbox-sized table) simply stays unnamed and the click is a no-op.
+    if let Some(row) = notification_row.filter(|r| *r > 0 && *r <= i32::MAX as i64) {
+        builder = builder.id(row as i32);
+    }
     if prefs.sound {
         builder = builder.sound("default");
     }

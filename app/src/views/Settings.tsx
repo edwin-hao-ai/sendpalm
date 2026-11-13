@@ -96,6 +96,7 @@ import {
   notificationPermission,
   notifySettingsChanged,
   openSystemNotificationSettings,
+  sendTestNotification,
   type NotificationPermission,
 } from "../services/notifications";
 import { setLocale, type Locale } from "../i18n";
@@ -3521,6 +3522,7 @@ function PreferencesNotificationsTab() {
     setPermission(await notificationPermission());
   void refreshPermission();
   const [opening, setOpening] = createSignal(false);
+  const [testing, setTesting] = createSignal(false);
 
   return (
     <div
@@ -3628,6 +3630,65 @@ function PreferencesNotificationsTab() {
           await notifySettingsChanged({ ...prefs(), sound: v });
         }}
       />
+      <div
+        style={{
+          display: "flex",
+          "align-items": "center",
+          gap: "var(--space-3)",
+          padding: "var(--space-3)",
+          "border-radius": "var(--radius-md)",
+          border: "0.5px solid var(--border)",
+        }}
+      >
+        <div style={{ flex: 1, "min-width": 0 }}>
+          <strong style={{ "font-size": "var(--text-body-sm)" }}>
+            发一条测试通知
+          </strong>
+          <p
+            style={{
+              margin: "var(--space-1) 0 0",
+              "font-size": "var(--text-caption)",
+              color: "var(--text-secondary)",
+            }}
+          >
+            确认系统真的会弹。第一次发的时候 macOS 才会登记 SendPalm
+            并询问是否允许；如果这里报错，说明系统层面被挡住了。
+          </p>
+        </div>
+        <button
+          type="button"
+          data-notification-test
+          disabled={testing()}
+          onClick={async () => {
+            setTesting(true);
+            try {
+              await sendTestNotification();
+              showToast({ message: "已发送测试通知", kind: "success", ttlMs: 3000 });
+              setPermission(await notificationPermission());
+            } catch (e) {
+              showToast({
+                message: "系统没有接受这条通知",
+                kind: "error",
+                detail: e instanceof Error ? e.message : String(e),
+              });
+            } finally {
+              setTesting(false);
+            }
+          }}
+          style={{
+            "min-height": "32px",
+            padding: "4px 14px",
+            "border-radius": "var(--radius-pill)",
+            background: "var(--palm-soft)",
+            color: "var(--palm)",
+            "font-size": "var(--text-caption)",
+            "font-weight": 700,
+            "white-space": "nowrap",
+          }}
+        >
+          {testing() ? "发送中…" : "发送测试通知"}
+        </button>
+      </div>
       <ToggleRow
         label="静默时段"
         description="在指定时段内只显示应用内红点，不弹系统通知。"

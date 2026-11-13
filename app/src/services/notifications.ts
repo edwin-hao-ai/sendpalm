@@ -94,6 +94,73 @@ export async function openSystemNotificationSettings(): Promise<void> {
   });
 }
 
+/** Post one notification now, so the user (and support) can tell whether the
+ *  OS will actually deliver one. Returns the OS error verbatim when it refuses
+ *  — "系统拒绝了" is the answer the Settings row needs. */
+export async function sendTestNotification(): Promise<void> {
+  if (IS_BROWSER()) return;
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("send_test_notification");
+}
+
+/** Open the thing a clicked OS banner points at.
+ *
+ *  The banner only knows an integer id; the Rust side maps it back to the
+ *  in-app notification row and returns its `{ type, id }` ref. Then it is the
+ *  same navigation the bell dropdown does.
+ *
+ *  The window is shown first: the banner is most useful exactly when SendPalm
+ *  is hidden in the tray, and a mail that opens into an invisible window is
+ *  indistinguishable from nothing happening.
+ */
+export async function openNotificationTarget(notificationId: number): Promise<void> {
+  if (IS_BROWSER()) return;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const ref = await invoke<{ type: string; id: string } | null>(
+      "notification_target",
+      { id: notificationId },
+    );
+    if (!ref?.id) return;
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const win = getCurrentWindow();
+    await win.show();
+    await win.unminimize();
+    await win.setFocus();
+    const { openNotificationRef } = await import("./open-ref");
+    openNotificationRef(ref);
+  } catch (err) {
+    // A dead click is worse than a logged one: this is the only trace that the
+    // banner→mail path broke.
+    console.warn("[notifications] opening the clicked banner failed:", err);
+  }
+}
+
+/** Subscribe to OS banner clicks. Registering twice would open the mail twice
+ *  (and the second `setSelectedMessageId` would fight the first), so this is
+ *  guarded and the listener is kept for the lifetime of the app. */
+export async function listenNotificationClicks(): Promise<void> {
+  if (IS_BROWSER()) return;
+  if (notificationClicksBound) return;
+  notificationClicksBound = true;
+  try {
+    const { onAction } = await import("@tauri-apps/plugin-notification");
+    await onAction((event) => {
+      // `tap` is the notification body itself; custom action ids are not
+      // registered yet, so anything else is not ours to handle.
+      if (event.actionId !== "tap") return;
+      const id = event.notification?.id;
+      if (typeof id !== "number") return;
+      void openNotificationTarget(id);
+    });
+  } catch (err) {
+    notificationClicksBound = false;
+    console.warn("[notifications] banner click listener unavailable:", err);
+  }
+}
+
+let notificationClicksBound = false;
+
 /** One-time first-run prompt: after init, offer notifications with the
  *  reason attached. Marks `permissionPrompted` so it never reappears. */
 export function maybePromptNotificationPermission(): void {

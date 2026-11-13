@@ -1829,6 +1829,20 @@ async fn insert_message(
         .await
         .map_err(|e| format!("insert notification uid={uid}: {e}"))?;
 
+        // The OS only reports a 32-bit integer back when the user clicks the
+        // banner, so hand it this row's `rowid`: `notification_target` resolves
+        // it back to `{type, id}` and the same click opens the mail the bell
+        // dropdown would. Without an id the click is anonymous and the banner
+        // is a dead end.
+        let notification_row: Option<i64> = sqlx::query_scalar(
+            "SELECT rowid FROM notifications WHERE id = $1",
+        )
+        .bind(format!("nt_{mid}"))
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten();
+
         // OS-level desktop notification — noise gate: only ping for mail
         // from PEOPLE the user cares about: contacts flagged notify=1, or
         // already-screened senders whose message is not a newsletter.
@@ -1861,6 +1875,7 @@ async fn insert_message(
                 &account.account_id,
                 &title,
                 sender,
+                notification_row,
             )
             .await;
         }
