@@ -566,10 +566,22 @@ test.describe("Email workflows", () => {
     // Scope to the toast: the pile card title is also "已搁置".
     await expect(
       page.getByTestId("toast-success").getByText("已搁置"),
-    ).toBeVisible({
+    ).toBeVisible({ timeout: 5_000 });
+
+    // Take the undo *first*. The toast's action is time-limited, and walking
+    // the pile board below takes long enough on a loaded machine that the
+    // button detached mid-click ("element was detached from the DOM") — a red
+    // test about the toast's lifetime, not about whether 搁置 works.
+    await page.getByTestId("toast-action").click();
+    await expect(page.getByText("已撤销")).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('[data-testid="piles"]')).not.toBeVisible({
       timeout: 5_000,
     });
 
+    // Do it again and check the pile board for real (no undo this time — the
+    // undo path was just asserted above).
+    await page.locator(`[data-message-id="${MESSAGE_ID}"]`).first().hover();
+    await page.locator('#main [aria-label="搁置 (a)"]').first().click();
     await expect(page.locator('[data-testid="piles"]')).toBeVisible({
       timeout: 5_000,
     });
@@ -579,13 +591,6 @@ test.describe("Email workflows", () => {
 
     await page.locator('[data-testid="pile-setAside"]').click();
     await expect(page.locator('[data-pile-item="msg-e2e-001"]')).toBeVisible();
-
-    // Undo the action from the toast.
-    await page.getByTestId("toast-action").click();
-    await expect(page.getByText("已撤销")).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator('[data-testid="piles"]')).not.toBeVisible({
-      timeout: 5_000,
-    });
   });
 
   test("Thread-first detail expands older message and shows both bodies", async ({
