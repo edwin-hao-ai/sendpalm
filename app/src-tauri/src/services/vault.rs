@@ -8,6 +8,7 @@
 //! Each account gets its own entry under the service id `com.sendpalm.app`
 //! with the account id as the username. Passwords never touch our SQL store.
 
+#[cfg(not(target_os = "ios"))]
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -20,31 +21,117 @@ pub struct VaultEntry {
     pub password: String,
 }
 
+
+// ── iOS ──────────────────────────────────────────────────────────────
+//
+// `keyring` v3 does not support iOS at all: the crate compiles, and every call
+// fails at runtime. On the phone that surfaced as "添加邮箱之后会报错" — the
+// account row was written, `set_password` failed, so the first sync had no
+// credentials and imported nothing. Security.framework is present on iOS, so the
+// same generic-password items are written through it directly.
+#[cfg(target_os = "ios")]
+mod platform {
+    use security_framework::passwords::{
+        delete_generic_password, get_generic_password, set_generic_password,
+    };
+
+    /// errSecItemNotFound: the account simply has no password yet.
+    const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
+
+    /// A phone has no console, so keychain failures are also written beside the
+    /// database — `devicectl device copy from` can read the app container.
+    fn note(message: &str) {
+        use std::io::Write;
+        let path = std::env::temp_dir().join("keychain.log");
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let _ = writeln!(f, "{message}");
+        }
+    }
+
+    pub fn set(service: &str, account_id: &str, password: &str) -> Result<(), String> {
+        // Replace any previous item; `set_generic_password` upserts on iOS but a
+        // stale item written by an older build can make it fail with
+        // errSecDuplicateItem.
+        let _ = delete_generic_password(service, account_id);
+        set_generic_password(service, account_id, password.as_bytes()).map_err(|e| {
+            note(&format!("set({account_id}) failed: {e} (code {})", e.code()));
+            format!("keychain set: {e}")
+        })
+    }
+
+    pub fn get(service: &str, account_id: &str) -> Result<Option<String>, String> {
+        match get_generic_password(service, account_id) {
+            Ok(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).into_owned())),
+            Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => {
+                note(&format!("get({account_id}): item not found"));
+                Ok(None)
+            }
+            Err(e) => {
+                note(&format!("get({account_id}) failed: {e} (code {})", e.code()));
+                Err(format!("keychain get: {e}"))
+            }
+        }
+    }
+
+    pub fn delete(service: &str, account_id: &str) -> Result<(), String> {
+        match delete_generic_password(service, account_id) {
+            Ok(()) => Ok(()),
+            Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(()),
+            Err(e) => Err(format!("keychain delete: {e}")),
+        }
+    }
+}
+
 /// Save or update a password for `account_id`.
 pub fn set_password(account_id: &str, password: &str) -> Result<(), String> {
+    #[cfg(target_os = "ios")]
+    {
+        return platform::set(SERVICE_ID, account_id, password);
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
     let entry = Entry::new(SERVICE_ID, account_id).map_err(|e| format!("keyring entry: {e}"))?;
     entry
         .set_password(password)
         .map_err(|e| format!("keyring set: {e}"))
+    }
 }
 
 /// Load the password for `account_id`. Returns `Ok(None)` if missing.
 pub fn get_password(account_id: &str) -> Result<Option<String>, String> {
-    let entry = Entry::new(SERVICE_ID, account_id).map_err(|e| format!("keyring entry: {e}"))?;
-    match entry.get_password() {
-        Ok(p) => Ok(Some(p)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("keyring get: {e}")),
+    #[cfg(target_os = "ios")]
+    {
+        return platform::get(SERVICE_ID, account_id);
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let entry = Entry::new(SERVICE_ID, account_id).map_err(|e| format!("keyring entry: {e}"))?;
+        match entry.get_password() {
+            Ok(p) => Ok(Some(p)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(format!("keyring get: {e}")),
+        }
     }
 }
 
 /// Delete a password entry.
 pub fn delete_password(account_id: &str) -> Result<(), String> {
-    let entry = Entry::new(SERVICE_ID, account_id).map_err(|e| format!("keyring entry: {e}"))?;
-    match entry.delete_credential() {
-        Ok(()) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("keyring delete: {e}")),
+    #[cfg(target_os = "ios")]
+    {
+        return platform::delete(SERVICE_ID, account_id);
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        let entry = Entry::new(SERVICE_ID, account_id).map_err(|e| format!("keyring entry: {e}"))?;
+        match entry.delete_credential() {
+            Ok(()) => Ok(()),
+            Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(format!("keyring delete: {e}")),
+        }
     }
 }
 

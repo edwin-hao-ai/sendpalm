@@ -212,8 +212,30 @@ fn log_problem_once(signature: &str, message: impl FnOnce() -> String) {
     if reported.iter().any(|s| s == signature) {
         return;
     }
-    eprintln!("{}", message());
+    let text = message();
+    eprintln!("{}", text);
+    note_for_device(&text);
     reported.push(signature.to_string());
+}
+
+/// iOS has no console a Mac can read, so the same problem lines are also
+/// appended to `tmp/sync.log` inside the app container, where
+/// `devicectl device copy from` can fetch them. This is how "sync imported
+/// nothing" was diagnosed on the phone.
+fn note_for_device(text: &str) {
+    #[cfg(target_os = "ios")]
+    {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(std::env::temp_dir().join("sync.log"))
+        {
+            let _ = writeln!(f, "{} {text}", chrono::Local::now().format("%H:%M:%S"));
+        }
+    }
+    #[cfg(not(target_os = "ios"))]
+    let _ = text;
 }
 
 /// Credentials work again — a later breakage must be reported again.

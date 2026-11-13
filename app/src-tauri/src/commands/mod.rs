@@ -694,3 +694,31 @@ pub async fn imap_set_seen(message_id: String, seen: bool) -> Result<(), String>
     let client = ImapClient::new(creds);
     client.set_seen(&folder, uid as u32, seen).await
 }
+
+/// Test-only: the account bootstrap an automated run asks for.
+///
+/// iOS has no way to type into the app from a script (XCUITest's WebKit
+/// accessibility snapshots time out on a real iPhone), and the two things that
+/// actually break on a phone are the keychain write and the first IMAP sync —
+/// neither of which is provable from a simulator. `verify-ios-device.sh` launches
+/// the app with these variables and the frontend then runs the *real* code path
+/// (`upsertAccount` -> `vaultSave` -> `syncNow`), skipping only the form.
+///
+/// Returns None unless both variables are set, so a normal launch is untouched.
+#[derive(Debug, serde::Serialize)]
+pub struct E2eSeedAccount {
+    pub email: String,
+    pub password: String,
+    pub provider: String,
+}
+
+#[tauri::command]
+pub fn e2e_seed_account() -> Option<E2eSeedAccount> {
+    let email = std::env::var("SENDPALM_E2E_SEED_EMAIL").ok()?;
+    let password = std::env::var("SENDPALM_E2E_SEED_PASSWORD").ok()?;
+    if email.trim().is_empty() || password.is_empty() {
+        return None;
+    }
+    let provider = std::env::var("SENDPALM_E2E_SEED_PROVIDER").unwrap_or_else(|_| "feishu".into());
+    Some(E2eSeedAccount { email, password, provider })
+}

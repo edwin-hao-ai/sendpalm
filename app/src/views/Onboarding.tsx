@@ -33,7 +33,7 @@ interface Step {
 const STEPS: Step[] = [
   {
     title: "欢迎来到 SendPalm",
-    body: "一个安静的、HEY 风格的本地优先邮件客户端。连接你的现有邮箱，用「分门别类」的方式处理邮件，而不是被收件箱淹没。",
+    body: "一个安静的、本地优先的邮件客户端。连接你的现有邮箱，用「分门别类」的方式处理邮件，而不是被收件箱淹没。",
     icon: "ph-sparkle",
     color: "var(--palm)",
     cta: "开始",
@@ -55,7 +55,7 @@ const STEPS: Step[] = [
     highlight: { label: "数据存放", value: "只存在你的电脑上" },
   },
   {
-    title: "HEY 工作流，本地运行",
+    title: "分类处理，本地运行",
     body: "Gate（筛选台）替你拦住陌生寄件人；稍后回复、搁置、提醒一键盘点；黄色便签直接贴在邮件上；跟进提醒自动追踪未回复的对话。⌘K 全局搜索，j/k 在列表里穿梭。",
     icon: "ph-paper-plane-tilt",
     color: "var(--orange)",

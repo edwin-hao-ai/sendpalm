@@ -507,6 +507,7 @@ pub fn run() {
             commands::notification_settings::send_test_notification,
             commands::notification_settings::notification_permission_state,
             commands::notification_settings::request_notification_permission,
+            commands::e2e_seed_account,
             commands::image_proxy::fetch_image,
             commands::agent_chat,
             commands::llm_list_models,

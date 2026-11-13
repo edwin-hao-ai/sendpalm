@@ -175,8 +175,34 @@ impl From<ProviderTemplate> for EmailProvider {
     }
 }
 
+/// Providers in the order a user should see them.
+///
+/// Overseas first, then the Chinese providers, then "custom" last: the primary
+/// market is outside China, and the add-account dropdown is the first thing a
+/// new user opens. Ordering here (not in the frontend) keeps every surface —
+/// the dropdown, the onboarding chips, any future picker — in agreement.
+const DISPLAY_ORDER: &[&str] = &[
+    "gmail",
+    "icloud",
+    "outlook",
+    "yahoo",
+    "fastmail",
+    "feishu",
+    "qq",
+    "netease-163",
+    "netease-126",
+    "custom",
+];
+
 pub fn list() -> Vec<EmailProvider> {
-    TEMPLATES.iter().map(|t| EmailProvider::from(*t)).collect()
+    let mut out: Vec<EmailProvider> = TEMPLATES.iter().map(|t| EmailProvider::from(*t)).collect();
+    out.sort_by_key(|p| {
+        DISPLAY_ORDER
+            .iter()
+            .position(|id| *id == p.id)
+            .unwrap_or(DISPLAY_ORDER.len())
+    });
+    out
 }
 
 pub fn by_id(id: &str) -> Option<EmailProvider> {

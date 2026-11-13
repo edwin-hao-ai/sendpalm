@@ -83,6 +83,12 @@ export async function initApp() {
         // window forward), not just focus the app.
         void listenNotificationClicks();
 
+        // Automated device runs hand a mailbox in through the environment and
+        // this runs the real add-a-mailbox path (see services/e2e-seed.ts).
+        void import("./services/e2e-seed").then(({ maybeSeedAccount }) =>
+          maybeSeedAccount(),
+        );
+
         // SEC-2: the LLM API key never lives in the prefs file.
         // Load it from the OS keychain at boot so Settings →
         // Agent can show the placeholder. The vault is the only

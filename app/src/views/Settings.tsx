@@ -781,13 +781,18 @@ function formatRelative(iso: string): string {
   return `${Math.floor(diff / 86_400_000)} 天前`;
 }
 
+// Shown as chips on the empty "add a mailbox" screen. Overseas first, matching
+// the provider dropdown's order (providers::DISPLAY_ORDER).
 const PROVIDER_WALL = [
+  "Gmail",
+  "iCloud",
+  "Outlook",
+  "Yahoo",
+  "Fastmail",
   "飞书",
   "QQ 邮箱",
   "网易 163",
   "网易 126",
-  "iCloud",
-  "Fastmail",
   "企业邮箱",
 ];
 
