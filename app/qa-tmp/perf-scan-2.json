@@ -1,137 +1,137 @@
 {
-  "generatedAt": "2026-08-21T13:19:51.250Z",
+  "generatedAt": "2026-11-12T15:03:46.996Z",
   "viewSwitch": [
     {
       "view": "imbox",
-      "mountMs": 41.1000000089407,
+      "mountMs": 50.10000002384186,
       "longTasks": 0,
       "longTaskMaxMs": 0,
-      "frameAvg": 16.621978021912522,
-      "frameP95": 18.599999994039536,
-      "frameMax": 18.900000005960464
+      "frameAvg": 16.704444444179536,
+      "frameP95": 18.300000071525574,
+      "frameMax": 20.100000023841858
     },
     {
       "view": "drafts",
-      "mountMs": 68.09999999403954,
+      "mountMs": 61.800000071525574,
       "longTasks": 0,
       "longTaskMaxMs": 0,
-      "frameAvg": 16.78555555558867,
-      "frameP95": 18.399999991059303,
-      "frameMax": 27.299999997019768
+      "frameAvg": 16.79111111164093,
+      "frameP95": 17.40000009536743,
+      "frameMax": 27.600000023841858
     },
     {
       "view": "files",
-      "mountMs": 59.099999994039536,
+      "mountMs": 59.200000047683716,
       "longTasks": 0,
       "longTaskMaxMs": 0,
-      "frameAvg": 16.784444444378217,
-      "frameP95": 18.299999997019768,
-      "frameMax": 27.200000002980232
+      "frameAvg": 16.785555554760826,
+      "frameP95": 17.799999952316284,
+      "frameMax": 27.09999990463257
     },
     {
       "view": "clips",
-      "mountMs": 66.40000000596046,
+      "mountMs": 86.5,
       "longTasks": 0,
       "longTaskMaxMs": 0,
-      "frameAvg": 16.784444444543787,
-      "frameP95": 17.5,
-      "frameMax": 27.400000005960464
+      "frameAvg": 16.757777776983048,
+      "frameP95": 17.799999952316284,
+      "frameMax": 24.199999928474426
     },
     {
       "view": "followUps",
-      "mountMs": 62.1000000089407,
+      "mountMs": 57.700000047683716,
       "longTasks": 0,
       "longTaskMaxMs": 0,
-      "frameAvg": 16.788888888888888,
-      "frameP95": 18.399999991059303,
-      "frameMax": 27.599999994039536
+      "frameAvg": 16.775555555025736,
+      "frameP95": 17.799999952316284,
+      "frameMax": 25.399999976158142
     },
     {
       "view": "companies",
-      "mountMs": 39.5,
+      "mountMs": 36,
       "longTasks": 0,
       "longTaskMaxMs": 0,
-      "frameAvg": 16.764444444411332,
-      "frameP95": 18.399999991059303,
-      "frameMax": 25.5
+      "frameAvg": 16.788888888888888,
+      "frameP95": 17.700000047683716,
+      "frameMax": 27.09999990463257
     },
     {
       "view": "insights",
-      "mountMs": 69.09999999403954,
+      "mountMs": 66.5,
       "longTasks": 0,
       "longTaskMaxMs": 0,
-      "frameAvg": 16.776666666732893,
-      "frameP95": 18.400000005960464,
-      "frameMax": 26.5
+      "frameAvg": 17.35287356376648,
+      "frameP95": 22.800000071525574,
+      "frameMax": 48.700000047683716
     },
     {
       "view": "calendar",
-      "mountMs": 63.5,
+      "mountMs": 58.300000071525574,
       "longTasks": 0,
       "longTaskMaxMs": 0,
-      "frameAvg": 16.792222222189107,
-      "frameP95": 18.5,
-      "frameMax": 27.899999991059303
+      "frameAvg": 16.766666666666666,
+      "frameP95": 17.899999976158142,
+      "frameMax": 25.700000047683716
     },
     {
       "view": "settings",
-      "mountMs": 42.80000001192093,
+      "mountMs": 41.10000002384186,
       "longTasks": 0,
       "longTaskMaxMs": 0,
-      "frameAvg": 16.794444444444444,
-      "frameP95": 18.600000008940697,
-      "frameMax": 28.100000008940697
+      "frameAvg": 16.80777777698305,
+      "frameP95": 17.700000047683716,
+      "frameMax": 29.299999952316284
     },
     {
       "view": "paperTrail",
-      "mountMs": 41.29999999701977,
+      "mountMs": 70.79999995231628,
       "longTasks": 0,
       "longTaskMaxMs": 0,
-      "frameAvg": 16.77888888882266,
-      "frameP95": 18.599999994039536,
-      "frameMax": 26.799999997019768
+      "frameAvg": 16.75111111137602,
+      "frameP95": 17.600000023841858,
+      "frameMax": 24.200000047683716
     },
     {
       "view": "spam",
-      "mountMs": 56.400000005960464,
+      "mountMs": 56.40000009536743,
       "longTasks": 0,
       "longTaskMaxMs": 0,
-      "frameAvg": 16.707777777810893,
-      "frameP95": 18.5,
-      "frameMax": 20.200000002980232
+      "frameAvg": 16.762222222487132,
+      "frameP95": 17.799999952316284,
+      "frameMax": 23.899999976158142
     },
     {
       "view": "trash",
-      "mountMs": 39.30000001192093,
+      "mountMs": 56.5,
       "longTasks": 0,
       "longTaskMaxMs": 0,
-      "frameAvg": 16.76222222232156,
-      "frameP95": 18.599999994039536,
-      "frameMax": 25.30000001192093
+      "frameAvg": 16.771111110846203,
+      "frameP95": 18,
+      "frameMax": 25.399999976158142
     }
   ],
   "scrollImbox": {
-    "avgFrameMs": 16.6471074379919,
-    "p95FrameMs": 18.400000005960464,
-    "maxFrameMs": 18.600000008940697,
+    "avgFrameMs": 16.66916666726271,
+    "p95FrameMs": 17.600000023841858,
+    "maxFrameMs": 19.300000071525574,
     "droppedFrames": 0,
     "longTasks": [],
     "longTaskMaxMs": 0,
-    "samples": 121
+    "samples": 120
   },
   "scrollMessagePanel": {
-    "avgFrameMs": 16.57685950423075,
-    "p95FrameMs": 18.5,
-    "maxFrameMs": 18.599999994039536,
-    "droppedFrames": 0,
+    "avgFrameMs": 16.790000000596045,
+    "p95FrameMs": 18,
+    "maxFrameMs": 51.10000002384186,
+    "droppedFrames": 1,
     "longTasks": [],
     "longTaskMaxMs": 0,
-    "samples": 121
+    "samples": 120
   },
   "scrollCalendarYear": {
-    "avgFrameMs": 16.632231404958677,
-    "p95FrameMs": 18.5,
-    "maxFrameMs": 18.600000008940697,
+    "avgFrameMs": 16.620661157221832,
+    "p95FrameMs": 17.800000071525574,
+    "maxFrameMs": 18.800000071525574,
     "droppedFrames": 0,
     "longTasks": [],
     "longTaskMaxMs": 0,
