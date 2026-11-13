@@ -33,7 +33,11 @@ export async function notificationPermission(): Promise<NotificationPermission> 
     const state = await invoke<string>("notification_permission_state");
     if (state === "granted") return "granted";
     if (state === "not-granted" || state === "not-determined") return "not-granted";
-    if (state === "unsupported") return "unsupported";
+    // "unsupported" from Rust means "this platform is not handled natively" —
+    // on iOS the OS dialog is the plugin's job, so fall through to it.
+    if (state === "unsupported") {
+      /* fall through */
+    }
   } catch {
     /* older backend: fall through to the plugin's answer */
   }

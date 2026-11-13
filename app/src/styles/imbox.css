@@ -827,3 +827,60 @@
   padding: 20px 12px;
   contain-intrinsic-size: auto 104px;
 }
+
+/* ── Touch targets on the Imbox header ──────────────────────────────
+ * The chip row and the sync / 一起读 buttons were 22-28 px tall — visually
+ * fine, but a thumb cannot hit a 22 px strip reliably (WCAG 2.5.5 asks for
+ * 44 px on touch). The audit in e2e/mobile-ui-audit.spec.ts flags them; the
+ * fix grows the HIT area only where the pointer is a finger, so desktop keeps
+ * its denser look. */
+@media (pointer: coarse) {
+  [data-imbox-chips] [data-imbox-chip],
+  [data-imbox-header] button,
+  .imbox-sync-button,
+  .imbox-read-together {
+    min-height: 44px;
+  }
+  /* A chip is a text pill: keep the painted height, extend the tappable box. */
+  [data-imbox-chips] [data-imbox-chip] {
+    display: inline-flex;
+    align-items: center;
+    padding-block: 0;
+    margin-block: -8px; /* cancel the extra height so the row keeps its rhythm */
+  }
+}
+
+/* ── Chips row on a phone ───────────────────────────────────────────
+ * 全部 / 未读 / 订阅 / 新面孔 / 一起读 is wider than 390px, so the last one
+ * used to be sliced at the right edge. Let the row scroll horizontally, keep a
+ * gutter so the final chip is fully reachable, and fade the edge so it is
+ * obvious there is more. */
+@media (max-width: 767px) {
+  [data-imbox-chips] {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding-right: var(--space-5);
+  }
+  [data-imbox-chips]::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* ── Long press on a phone ──────────────────────────────────────────
+ * A long press on a row is OUR gesture (it opens the drop targets), but iOS
+ * also fires its own text-selection callout — the dark "copy / look up" bubble
+ * that landed on top of the row in the screenshot. Suppress the native one on
+ * list rows only: the mail body inside the reader must stay selectable. */
+@media (pointer: coarse) {
+  .feed-card,
+  .feed-card * {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  /* Taps should react immediately instead of waiting for a double-tap-zoom. */
+  .feed-card {
+    touch-action: manipulation;
+  }
+}

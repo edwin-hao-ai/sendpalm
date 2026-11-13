@@ -53,7 +53,11 @@ pub async fn request_notification_permission() -> Result<bool, String> {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        Ok(false)
+        // Deliberately an error, not Ok(false): the frontend only falls back to
+        // the notification plugin when the invoke FAILS. Returning false here
+        // meant iOS never called requestPermission() at all, so the OS dialog
+        // never appeared and 「开启通知」 looked broken.
+        Err("unsupported".into())
     }
 }
 

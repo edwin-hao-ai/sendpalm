@@ -78,9 +78,15 @@ export function Topbar() {
         if (el?.closest("button, a, input, textarea, select, [role='button']")) {
           return;
         }
-        void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-          void getCurrentWindow().startDragging();
-        });
+        // Window dragging is a desktop affordance: on iOS the window plugin is
+        // not initialised, and the rejected promise surfaced as a runtime-error
+        // bar on every launch ("Plugin window not initialized").
+        if (isMobile()) return;
+        void import("@tauri-apps/api/window")
+          .then(({ getCurrentWindow }) => getCurrentWindow().startDragging())
+          .catch(() => {
+            /* desktop-only; never worth an error bar */
+          });
       }}
     >
       <div
@@ -610,9 +616,12 @@ export function SyncBadge() {
             left: isMobile() ? "12px" : undefined,
             right: isMobile() ? "12px" : "0",
             "min-width": isMobile() ? undefined : "280px",
-            background: GLASS_BG,
-            "backdrop-filter": GLASS_BLUR,
-            "-webkit-backdrop-filter": GLASS_BLUR,
+            // Opaque on a phone: the glass recipe let the header text ("131 封待
+            // 读", the chips) show straight through the panel — unreadable, and
+            // it looked like the panel was layered wrong rather than styled.
+            background: isMobile() ? "var(--paper-light)" : GLASS_BG,
+            "backdrop-filter": isMobile() ? undefined : GLASS_BLUR,
+            "-webkit-backdrop-filter": isMobile() ? undefined : GLASS_BLUR,
             border: "0.5px solid var(--border)",
             "border-radius": "var(--radius-md)",
             "box-shadow": "0 8px 24px rgba(0,0,0,0.12)",
