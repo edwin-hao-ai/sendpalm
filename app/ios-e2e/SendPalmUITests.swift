@@ -17,6 +17,10 @@ final class SendPalmUITests: XCTestCase {
     continueAfterFailure = false
     app = XCUIApplication()
     app.launchEnvironment["SENDPALM_E2E"] = "1"
+    // The background IMAP loop keeps the app's main thread busy right after
+    // launch, and an accessibility snapshot taken while it is busy times out
+    // ("Timed out while evaluating UI query"). Tests drive sync themselves.
+    app.launchEnvironment["SENDPALM_DISABLE_BACKGROUND_SYNC"] = "1"
     app.launch()
   }
 
@@ -33,7 +37,7 @@ final class SendPalmUITests: XCTestCase {
   }
 
   /// The app is a webview; everything lives under it.
-  private func webView(timeout: TimeInterval = 30) -> XCUIElement {
+  private func webView(timeout: TimeInterval = 90) -> XCUIElement {
     let web = app.webViews.firstMatch
     XCTAssertTrue(
       web.waitForExistence(timeout: timeout),
@@ -72,6 +76,28 @@ final class SendPalmUITests: XCTestCase {
   }
 
   // MARK: - the actual suite
+
+  /// Native-level smoke test: no queries into the webview's accessibility tree.
+  ///
+  /// XCUITest has to ask WebKit for a full accessibility snapshot to resolve
+  /// `app.webViews...`, and on a real iPhone that snapshot times out
+  /// ("Timed out while evaluating UI query") once the webview holds a real
+  /// Imbox. Screenshots and app state do not need it, so this test is the
+  /// reliable device check: it proves the process launched, stayed in the
+  /// foreground, and paints — the "black first frame" class of regression —
+  /// and leaves a picture in the result bundle.
+  func test00_NativeLaunchSmoke() {
+    XCTAssertTrue(app.wait(for: .runningForeground, timeout: 60), "app never reached the foreground")
+    // Give the webview a few seconds to boot and paint.
+    Thread.sleep(forTimeInterval: 12)
+    XCTAssertEqual(app.state, .runningForeground, "app left the foreground within 12s of launch")
+    shoot("00-launch")
+    // Still alive after another pause: the 2026-11-09/13 regressions exited
+    // `main` roughly 5s in, so a second sample is the actual assertion.
+    Thread.sleep(forTimeInterval: 8)
+    XCTAssertEqual(app.state, .runningForeground, "app exited within 20s of launch")
+    shoot("00-launch-still-alive")
+  }
 
   /// The app must boot into the Imbox with mail in it. This is the check that
   /// the 2026-11-09/11-13 "black first frame" regressions would have failed:

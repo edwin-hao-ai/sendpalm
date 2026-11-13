@@ -7,6 +7,7 @@ import {
   setOnboardingStep,
   setOnboardingCompleted,
   setSettingsTab,
+  setAccountsAddRequested,
   setView,
 } from "../stores/ui";
 import { load } from "@tauri-apps/plugin-store";
@@ -106,6 +107,7 @@ export function Onboarding() {
     setOnboardingResumeStep(2);
     setOnboardingStep(null);
     setSettingsTab("accounts");
+    setAccountsAddRequested(true);
     setView("settings");
   };
 

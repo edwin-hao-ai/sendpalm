@@ -17,6 +17,7 @@ import {
   setDetailOpen,
   setSelectedDraftId,
   setSettingsTab,
+  setAccountsAddRequested,
   setView,
   showToast,
   setComposeOpen,
@@ -112,6 +113,7 @@ export function DraftPanel(props: { draftId: string }) {
             label: "去设置",
             run: () => {
               setSettingsTab("accounts");
+    setAccountsAddRequested(true);
               setView("settings");
             },
           },

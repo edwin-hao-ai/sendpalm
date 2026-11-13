@@ -74,6 +74,7 @@ import {
   agentPanelOpen,
   mailSyncIssue,
   setSettingsTab,
+  setAccountsAddRequested,
   activeAccountId,
   setActiveAccountId,
   selectedMessageId,
@@ -1287,6 +1288,7 @@ export function Imbox() {
               data-open-accounts
               onClick={() => {
                 setSettingsTab("accounts");
+    setAccountsAddRequested(true);
                 setView("settings");
               }}
               style={{
@@ -1842,6 +1844,7 @@ function EmptyState(props: { hasAccount: boolean }) {
           data-empty-add-account
           onClick={() => {
             setSettingsTab("accounts");
+    setAccountsAddRequested(true);
             setView("settings");
           }}
           style={{

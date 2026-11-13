@@ -16,6 +16,7 @@ import {
   view,
   setView,
   setSettingsTab,
+  setAccountsAddRequested,
   setHelpOpen,
   setErrorLogOpen,
   setErrorLogOpened,
@@ -161,14 +162,16 @@ export function Topbar() {
           "-webkit-app-region": "no-drag",
         }}
       >
-        <button
-          onClick={() => setCommandPaletteOpen(!commandPaletteOpen())}
-          title="命令面板 (⌘K)"
-          aria-label="命令面板"
-          style={iconButtonStyle(isMobile())}
-        >
-          <Icon name="ph-lightning" size={18} />
-        </button>
+        <Show when={!isMobile()}>
+          <button
+            onClick={() => setCommandPaletteOpen(!commandPaletteOpen())}
+            title="命令面板 (⌘K)"
+            aria-label="命令面板"
+            style={iconButtonStyle(isMobile())}
+          >
+            <Icon name="ph-lightning" size={18} />
+          </button>
+        </Show>
         <NotificationBell
           onClick={() => setNotificationsOpen(!notificationsOpen())}
         />
@@ -205,9 +208,13 @@ function AvatarMenu() {
   });
   const [open, setOpen] = createSignal(false);
 
+  // The avatar is the *person*, so the profile name wins. The first account's
+  // label is a mailbox description ("邮箱", "edwin@sendpalm.com") and putting
+  // it in a 28px circle rendered two full-width glyphs jammed together.
   const displayName = () =>
+    appSettings.profile.displayName?.trim() ||
+    accounts()?.[0]?.displayName?.trim() ||
     accounts()?.[0]?.label ||
-    appSettings.profile.displayName ||
     "我";
 
   const close = () => setOpen(false);
@@ -488,6 +495,7 @@ export function SyncBadge() {
   const goToAccounts = () => {
     setOpen(false);
     setSettingsTab("accounts");
+    setAccountsAddRequested(true);
     setView("settings");
   };
 
@@ -592,10 +600,16 @@ export function SyncBadge() {
           data-sync-popover
           onClick={(e) => e.stopPropagation()}
           style={{
-            position: "absolute",
-            top: "calc(100% + 6px)",
-            right: "0",
-            "min-width": "280px",
+            // Phone: a viewport-anchored sheet, so it can never hang off the
+            // edge no matter where the pill sits. Tablet/desktop: anchored to
+            // the pill as before.
+            position: isMobile() ? "fixed" : "absolute",
+            top: isMobile()
+              ? "calc(env(safe-area-inset-top) + var(--topbar-height) + 6px)"
+              : "calc(100% + 6px)",
+            left: isMobile() ? "12px" : undefined,
+            right: isMobile() ? "12px" : "0",
+            "min-width": isMobile() ? undefined : "280px",
             background: GLASS_BG,
             "backdrop-filter": GLASS_BLUR,
             "-webkit-backdrop-filter": GLASS_BLUR,

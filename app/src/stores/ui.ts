@@ -325,6 +325,12 @@ export const mailCredentialsNeeded = () =>
 
 export const [settingsTab, setSettingsTab] =
   createSignal<SettingsTab>("profile");
+/** One-shot: the previous screen asked for the *add mailbox* form, not just the
+ *  accounts tab. Consumed by Settings → 账户, which opens the form and clears
+ *  it. Without this, "添加邮箱账户" dropped the user on a page whose next step
+ *  they had to guess. */
+export const [accountsAddRequested, setAccountsAddRequested] =
+  createSignal(false);
 export const [peopleFilter, setPeopleFilter] =
   createSignal<PeopleFilter>("all");
 export const [peopleGroupBy, setPeopleGroupBy] =

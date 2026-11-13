@@ -158,6 +158,25 @@
         }
       }
 
+      // Tauri command errors arrive as plain objects, and `String({})` is
+      // "[object Object]" — which is what the phone showed instead of the one
+      // sentence that mattered (a -34018 keychain failure). Turn anything into
+      // something a human can act on.
+      function describeError(reason) {
+        if (reason === null || reason === undefined) return String(reason);
+        if (typeof reason === "string") return reason;
+        if (reason instanceof Error) {
+          return (reason.name ? reason.name + ": " : "") + (reason.message || "");
+        }
+        try {
+          var message = reason.message || reason.error || reason.detail || reason.reason;
+          if (typeof message === "string" && message) return message;
+          var json = JSON.stringify(reason);
+          if (json && json !== "{}") return json;
+        } catch (_) {}
+        return Object.prototype.toString.call(reason);
+      }
+
       function reportError(message) {
         window.__sendpalmBootErrors.push(message);
         try {
@@ -174,7 +193,7 @@
       });
       window.addEventListener("unhandledrejection", function (e) {
         if (isBenignError(e.reason)) return;
-        reportError("Unhandled: " + String(e.reason));
+        reportError("Unhandled: " + describeError(e.reason));
       });
     </script>
   </head>

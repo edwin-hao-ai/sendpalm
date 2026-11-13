@@ -153,9 +153,12 @@ else
   echo "==> device $UDID"
 fi
 
-ONLY_ARGS=()
+# macOS bash 3.2 + `set -u`: an empty array expands as an unbound variable, so
+# build the argument list without relying on array expansion of nothing.
 if [[ -n "$ONLY" ]]; then
-  ONLY_ARGS=(-only-testing:"$TEST_TARGET/$ONLY")
+  set -- -only-testing:"$TEST_TARGET/$ONLY"
+else
+  set --
 fi
 
 RESULT="$PWD/$GEN/build/e2e-$(date +%Y%m%d-%H%M%S).xcresult"
@@ -173,7 +176,7 @@ xcodebuild test \
   DEVELOPMENT_TEAM=5XNDF727Y6 \
   CODE_SIGN_STYLE=Automatic \
   SENDPALM_SKIP_RUST_BUILD=1 \
-  "${ONLY_ARGS[@]}" \
+  "$@" \
   > /tmp/sendpalm-ios-e2e.log 2>&1
 STATUS=$?
 set -e

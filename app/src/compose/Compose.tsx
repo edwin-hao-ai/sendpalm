@@ -42,6 +42,7 @@ import {
   showToast,
   setView,
   setSettingsTab,
+  setAccountsAddRequested,
 } from "../stores/ui";
 import { sendEmailViaBackend } from "../services/backend";
 import type { Draft, ScheduledSend, Snippet } from "../types";
@@ -190,6 +191,7 @@ export function Compose() {
 
   const goToAccountSettings = () => {
     setSettingsTab("accounts");
+    setAccountsAddRequested(true);
     setView("settings");
   };
 

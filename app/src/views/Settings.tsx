@@ -15,7 +15,7 @@ import {
   useContext,
 } from "solid-js";
 import { useViewport } from "../utils/gestures";
-import { ACCOUNT_COLORS, nextAccountColor } from "../utils/accounts";
+import { ACCOUNT_COLORS, emailAccounts, nextAccountColor } from "../utils/accounts";
 import {
   listAccounts,
   upsertAccount,
@@ -91,6 +91,7 @@ import {
   applyAppearance,
   type Density,
 } from "../utils/theme";
+import { accountsAddRequested, setAccountsAddRequested } from "../stores/ui";
 import {
   ensureNotificationPermission,
   notificationPermission,
@@ -796,6 +797,15 @@ function AccountsTab() {
   const [adding, setAdding] = createSignal(false);
   const [syncingId, setSyncingId] = createSignal<string | null>(null);
 
+  // "添加邮箱账户" from the topbar / the empty Imbox means *this form*, not this
+  // page. Open it and clear the intent so a later visit is not hijacked.
+  createEffect(() => {
+    if (accountsAddRequested()) {
+      setAccountsAddRequested(false);
+      setAdding(true);
+    }
+  });
+
   const onSave = async (a: Account) => {
     await upsertAccount(a);
     await refetch();
@@ -872,6 +882,59 @@ function AccountsTab() {
         </div>
       </Show>
 
+      {/* First-run guidance. "添加账户" used to be a button with no explanation
+          of what the user needs in hand, which is where most IMAP setups stall:
+          providers reject the login password and want an app-specific one. */}
+      <Show when={!hasAccounts() && !adding()}>
+        <div
+          data-account-guide
+          style={{
+            display: "grid",
+            gap: "var(--space-2)",
+            padding: "var(--space-4)",
+            "margin-bottom": "var(--space-4)",
+            background: "var(--paper-light)",
+            border: "0.5px solid var(--border)",
+            "border-radius": "var(--radius-md)",
+          }}
+        >
+          <strong style={{ "font-size": "var(--text-body-sm)" }}>
+            添加邮箱需要三样东西
+          </strong>
+          <Show when={!onboardingResumeStep()}>
+            <span
+              style={{
+                "font-size": "var(--text-caption)",
+                color: "var(--text-secondary)",
+              }}
+            >
+              {emailAccounts(accounts() ?? []).length > 0
+                ? "再连一个邮箱，收件箱会合并显示。"
+                : "连上之后，收件箱会自动同步。"}
+            </span>
+          </Show>
+          <ol
+            style={{
+              margin: 0,
+              "padding-left": "1.2em",
+              "font-size": "var(--text-caption)",
+              color: "var(--text-secondary)",
+              "line-height": 1.7,
+            }}
+          >
+            <li>邮箱地址（例如 you@company.com）</li>
+            <li>
+              该邮箱的 <strong>IMAP / SMTP 主机</strong>
+              （选服务商后会自动填好，飞书、Gmail、QQ 都在列表里）
+            </li>
+            <li>
+              <strong>专用密码 / 授权码</strong> —— 多数服务商不接受登录密码：
+              Gmail、iCloud、飞书要「app-specific password」，QQ / 163 / 126
+              要在网页版设置里开 IMAP 并复制授权码
+            </li>
+          </ol>
+        </div>
+      </Show>
       <div
         style={{
           display: "flex",
