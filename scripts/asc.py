@@ -224,16 +224,19 @@ def cmd_version(c: Client, version: str) -> None:
         print(f"version {version} exists: {existing[0]['id']}")
         return
     # A freshly created app already has its first version in
-    # PREPARE_FOR_SUBMISSION; Apple refuses to CREATE another one (409
-    # ENTITY_ERROR.RELATIONSHIP.INVALID). Point the caller at it instead.
+    # PREPARE_FOR_SUBMISSION, and Apple refuses to CREATE another one while that
+    # state holds (409 ENTITY_ERROR.RELATIONSHIP.INVALID). Point the caller at
+    # what exists instead of throwing: the version string is often just "1.0"
+    # where the caller assumed "1.0.0".
     all_versions = c.get(f"/apps/{app['id']}/appStoreVersions?limit=10").get("data", [])
-    for v in all_versions:
-        print(
-            f"existing version {v['attributes'].get('versionString')} "
-            f"({v['attributes'].get('appStoreState')}): {v['id']} — "
-            f"create that version string, or push metadata to this one",
-            file=sys.stderr,
-        )
+    if all_versions:
+        for v in all_versions:
+            print(
+                f"existing version {v['attributes'].get('versionString')} "
+                f"({v['attributes'].get('appStoreState')}): {v['id']} — "
+                f"use this string with push-metadata",
+            )
+        return
     res = c.post("/appStoreVersions", {
         "data": {
             "type": "appStoreVersions",

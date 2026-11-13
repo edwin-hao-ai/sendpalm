@@ -1,5 +1,5 @@
 {
-  "_comment": "SendPalm App Store Connect metadata. bundleId com.sendpalm.app (App ID GNNTFW59LK). The ASC app record must be created once in the web UI (the public API cannot create apps); after that scripts/asc.py push-metadata pushes this file. URLs point at sendpalm.com — the DNS A record still has to be pointed at the web host.",
+  "_comment": "SendPalm App Store Connect metadata. bundleId com.sendpalm.app (App Store ID GNNTFW59LK, ASC app 6834244601). Apple creates version 1.0 itself; scripts/asc.py push-metadata 1.0 pushes this file. URLs point at sendpalm.com — the DNS A record still has to be pointed at the web host.",
   "bundleId": "com.sendpalm.app",
   "platform": "IOS",
   "primaryLocale": "en-US",
