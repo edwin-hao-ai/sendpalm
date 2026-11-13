@@ -187,11 +187,15 @@ async function resetPerf(page: Page) {
 async function readPerf(page: Page): Promise<PerfWindow> {
   return page.evaluate(() => {
     const w = window as unknown as { __scrollPerf: PerfWindow };
+    // `performance.memory` is Chromium-only and the property is
+    // `usedJSHeapSize`. Reading a misspelt one made every heap number in the
+    // report `NaN` → `null` in JSON, and `heapStable` therefore always false:
+    // the memory half of this report has never measured anything.
     const perf = (performance as unknown as { memory?: { usedJSHeapSize: number } })
       .memory;
     return {
       longTasks: w.__scrollPerf.longTasks.slice(),
-      heapMB: perf ? perf.mem_usedJSHeapSize / 1024 / 1024 : 0,
+      heapMB: perf && perf.usedJSHeapSize ? perf.usedJSHeapSize / 1024 / 1024 : 0,
     };
   });
 }

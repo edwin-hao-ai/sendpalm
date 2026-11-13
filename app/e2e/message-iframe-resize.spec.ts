@@ -158,10 +158,16 @@ async function seedAndOpenMessage(
   // Wait for the iframe to render. The plain-text fallback appears
   // first, then the sanitized srcdoc iframe. The iframe is the
   // `title="Message body"` element in MessageBodyIframe.
+  //
+  // 10 s, not 5: `htmlEmailSrcdoc` sanitises on a deferred tick (`setTimeout(0)`,
+  // §11.6) and the panel's chunk is fetched lazily (§11.9), so on a loaded
+  // machine — the full suite runs one worker — 5 s was observed to time out
+  // while the app itself was fine. The wait is still on the real element, so a
+  // genuinely missing iframe still fails.
   await page
     .locator('iframe[data-email-body-html]')
     .first()
-    .waitFor({ timeout: 5_000 });
+    .waitFor({ timeout: 10_000 });
 }
 
 test.beforeAll(async () => {
