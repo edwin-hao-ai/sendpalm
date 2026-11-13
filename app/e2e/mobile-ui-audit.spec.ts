@@ -15,6 +15,7 @@
  *   5. bottom chrome must not cover the last row of the page
  */
 import { test, expect, type Page } from "@playwright/test";
+import { navigateToView } from "./navigation";
 
 const ACCT = "acct_mobile_audit";
 
@@ -231,7 +232,10 @@ test.describe("mobile UI audit (iPhone 13 · 390x844)", () => {
 
   test("form fields use at least 16px text (iOS zoom guard)", async ({ page }) => {
     await boot(page);
-    await page.locator('[data-nav-view="settings"]').first().click();
+    // At 390 px the sidebar is a bottom bar plus a "更多" sheet: a direct
+    // `[data-nav-view="settings"]` click waits forever (the element lives
+    // inside the closed sheet). `navigateToView` knows both layouts.
+    await navigateToView(page, "settings");
     await page.waitForTimeout(400);
     const tooSmall = await page.evaluate(() => {
       const out: string[] = [];
