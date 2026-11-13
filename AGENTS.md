@@ -936,6 +936,47 @@ and script inside the mail frame)
   读 `isPermissionGranted()` 显示真实状态并提供「再次请求权限 / 打开系统设置」，Rust 的 ping 取
   `意图 && 授权`，失败日志按"同因只记一次"打印（`record_failure_once`），否则每封新邮件一行。
 
+### 11.23 Lessons learned (Session 2026-11-13 — ASC 只能建 Bundle ID、ad-hoc 签名让通知彻底失效)
+
+- **App Store Connect API 能建 App Store ID，不能建 App 记录。** `POST /v1/bundleIds`
+  可以（`com.sendpalm.app` → `GNNTFW59LK`），`POST /v1/apps` 返回
+  `403 FORBIDDEN_ERROR: The resource 'apps' does not allow 'CREATE'`（允许的操作只有
+  GET_COLLECTION / GET_INSTANCE / UPDATE）。新 App 必须先在网页端建一次，之后
+  `scripts/asc.py version|push-metadata` 才能跑。查现有 App 列表用
+  `python3 scripts/asc.py whoami`（team `5XNDF727Y6`，key `DDG3CJL762`）。
+- **ad-hoc 签名的 .app 永远不会出现在通知中心。** `tauri build` 出来的 bundle 是
+  `Signature=adhoc, Info.plist=not bound, TeamIdentifier=not set`，`Identifier` 甚至是
+  `sendpalm_app-<hash>` 而不是 bundle id。后果是 `requestAuthorization` 直接返回
+  false（连系统对话框都不弹）、`com.apple.ncprefs` 里永远没有条目、`show()` 全部静默丢弃。
+  用 `codesign --force --sign "Developer ID Application: …" --identifier <bundle-id>` 签过
+  之后立刻 `authorized=true` 并正常出横幅。**任何"通知不弹"的排查，第一步是
+  `codesign -dv <app>`**，不是怀疑权限代码。
+- **`tauri-plugin-notification` 的桌面 macOS 后端已经失效。** 它走
+  `notify-rust → mac-notification-sys`，后者 still 用 `NSUserNotificationCenter`
+  （macOS 11 起废弃）。要看的话：`~/.cargo/registry/src/*/mac-notification-sys-*/objc/notify.m`。
+  现在的实现是 `app/src-tauri/src/services/mac_notify.rs`（UNUserNotificationCenter：
+  requestAuthorization / getNotificationSettings / addNotificationRequest / delegate 回调），
+  delegate 把点击事件 emit 成 `notification:action`，前端复用铃铛那套跳转
+  （`services/open-ref.ts`）。
+- **调试构建读钥匙串会卡住整个同步循环，而且没有日志。** macOS 把条目 ACL 绑到代码签名上，
+  每次重建签名都变；`vault::get_password` 于是弹出"请输入登录钥匙串密码"的系统模态，
+  同步循环阻塞在它后面 —— 表现是"启动了、没有 IMAP 日志、也没有错误"。修法是 debug
+  构建先读 `.env`（`resolve_credentials` 的第 0 步），根本不去碰钥匙串。
+- **`mobile_entry_point` 属性第二次漂移。** 又一次被 doc 注释挤到辅助函数上，
+  iOS 启动 ~5 秒后 `main` 返回（`launchd_sim: exited due to exit(0)`、
+  `RBSProcessExitContext| voluntary`）。桌面完全无感，因为 `main.rs` 直接调 `run()`。
+  现在 `entry_point_tests::mobile_entry_point_stands_directly_above_run` 读源码、断言
+  属性下一行必须是 `pub fn run() {`，漂移就红。
+- **iOS 模拟器不是"能不能编译"的问题，是"启不启动"的问题。** 编译绿了但黑屏，必须
+  看 `xcrun simctl spawn <udid> log show --predicate 'eventMessage CONTAINS "SendPalm"'`
+  里的 exit 原因；`app/scripts/verify-ios.sh` 会在启动后检查进程是否还活着。
+- **iPad 模拟器在这台机器上不可用**：已有 iPad 设备 data 目录缺失（
+  "device's data is no longer present"），新建 pairing 在 headless 下 WebKit 渲染超时。
+  iPad 布局走桌面 Playwright 的 tablet viewport。
+- **驱动 GUI 验证系统对话框很脆。** 焦点会被别的进程抢走，坐标要按 2x 截图换算，
+  同一个按钮有时点两次才生效（第一次只激活窗口）。能不加 UI 依赖就别加：这次最后靠
+  `SENDPALM_NOTIFY_SELFTEST=1`（启动即 requestAuthorization + post 一条）才拿到确定结论。
+
 ## 12. Agent Skills & Global Protocols
 
 SendPalm adopts a set of global agent skills stored in `~/.agents/skills/`. These skills are available to Kimi Code, Claude Code, OpenCode, and any other agent that reads the standard skill directory. **Invoke them by name** when the situation matches their description:

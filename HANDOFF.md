@@ -1,87 +1,90 @@
-# Handoff — 托盘/通知修复 + iOS + App Store Connect（2026-11-13 夜）
+# Handoff — 托盘/通知 + iOS + App Store Connect（2026-11-13 夜）
 
-## 状态
+> 醒来先看「现在能直接用」和「需要你 1 分钟」两节，其余是细节。
 
-- 分支：`main`（本地领先 origin 20 个 commit，**尚未 push**）
-- 已提交：托盘点开定位、顶栏浮层层叠、托盘图标/菜单、通知权限与点击、iOS 启动修复、
-  ASC 工具与双语元数据、iOS 模拟器截图
-- 桌面端验证：Rust 191 tests / Vitest 887 / `eslint --max-warnings=0` / Playwright 190 passed
-- iOS 模拟器：iPhone 18 Pro 启动、渲染、真 IMAP 同步均通过
-  （`docs/ios-screenshots/ios-20261113-imbox.png`）
+## 现在能直接用
 
-## 唯一硬阻塞：ASC 里还没有 SendPalm 这个 App
+- `/Applications/SendPalm.app` 已替换为**签过名**的 debug 构建（见下），邮件同步和
+  macOS 系统通知都在工作。旧的 `2026-11-11` 版本备份在 `/tmp/SendPalm-2026-11-11.app`。
+- 系统通知已授权（`com.sendpalm.app` 已登记，`authorized=true`）。设置 → 通知里有
+  「发送测试通知」按钮，随时可以自测。
+- 分支 `main`，本地领先 origin **23 个 commit，尚未 push**。
 
-Apple 的公开 API **不能创建 App 记录**：
+## 需要你 1 分钟（ASC 唯一的硬阻塞）
 
-```
-POST https://api.appstoreconnect.apple.com/v1/apps
-403 FORBIDDEN_ERROR — The resource 'apps' does not allow 'CREATE'.
-                 Allowed operations are: GET_COLLECTION, GET_INSTANCE, UPDATE
-```
+Apple 的公开 API **不能创建 App 记录**（`POST /v1/apps` 返回
+`403 The resource 'apps' does not allow 'CREATE'`），而且这台机器上的浏览器**没有登录
+App Store Connect**（打开 apps 页面直接跳登录页）。所以这一步只能你手动：
 
-已经做完的部分：
-
-- App Store ID（Bundle ID）`com.sendpalm.app` 已通过 API 注册成功（id `GNNTFW59LK`）
-- 凭据可用：`~/.config/mddock/ios-release.env`（team `5XNDF727Y6`，key `DDG3CJL762`）
-- 工具：`scripts/asc.py`（`whoami` / `bundle-ids` / `app` / `builds` / `version` / `push-metadata`）
-- 元数据：`scripts/ios-metadata.json`（en-US + zh-Hans，URL 全部指向 sendpalm.com）
-
-**需要你手动做一步（1 分钟）**：
-
-1. 打开 https://appstoreconnect.apple.com/apps → 左上「+」→ 新建 App
-   - 平台：iOS
-   - 名称：`SendPalm`（若被占用，改成 `SendPalm 邮件`，我会同步改元数据里的 `name`）
-   - 主要语言：English (U.S.)
-   - Bundle ID：选 `com.sendpalm.app`
-   - SKU：`sendpalm`
-   - 用户访问权限：完全访问权限
-2. 建好后告诉我，我执行：
+1. https://appstoreconnect.apple.com/apps → 左上「+」→ 新建 App
+   - 平台 iOS · 名称 `SendPalm`（被占用就 `SendPalm 邮件`，我同步改元数据）·
+     主要语言 English (U.S.) · Bundle ID `com.sendpalm.app` · SKU `sendpalm` ·
+     用户访问权限：完全访问权限
+2. 建好后跑：
    ```bash
    python3 scripts/asc.py version 1.0.0
-   python3 scripts/asc.py push-metadata 1.0.0
+   python3 scripts/asc.py push-metadata 1.0.0     # 中英双语，URL 指向 sendpalm.com
    ```
-   然后上传 build（见下）。
+3. 上传 build（App 记录建好之后才能传）：
+   ```bash
+   cd app && pnpm tauri ios build --target aarch64 -- --export-method app-store-connect
+   xcrun altool --upload-app -f src-tauri/gen/apple/build/arm64/SendPalm.ipa -t ios \
+     --apiKey DDG3CJL762 --apiIssuer a28bcef1-d045-49f2-b86e-81aebe6b6b25
+   ```
+
+已完成的部分：Bundle ID（App Store ID）`com.sendpalm.app` 已注册（`GNNTFW59LK`）；
+凭据 `~/.config/mddock/ios-release.env`（team `5XNDF727Y6`）可用；`scripts/asc.py`
+有 whoami / bundle-ids / app / builds / version / push-metadata；
+`scripts/ios-metadata.json` 中英双语就绪。
 
 ## 域名 sendpalm.com
 
-元数据里用的都是 `https://sendpalm.com` 和 `https://sendpalm.com/support`。
-Apple 审核时会点开 Support URL，所以 DNS 绑定 + 至少一个能打开的页面要在**提交审核前**就绪。
-（现在 DNS 有没有 A 记录我没查——你说过明天绑到服务器。）
+元数据里全部用 `https://sendpalm.com` 与 `https://sendpalm.com/support`。Apple 审核会
+点开 Support URL，所以**提交审核前**要能访问（DNS 你说今天绑）。我没有改动 DNS。
 
-## iOS 真机（iPhone 12）
+## iOS
 
-> 状态：**未做**。原因：这台机器上还没给 `com.sendpalm.app` 配 development team /
-> 描述文件，而且真机第一次装需要在你手机上点「信任」。等手机接上后执行：
->
-> 1. 在 `app/src-tauri/tauri.conf.json` 的 `bundle.iOS.developmentTeam` 填 `5XNDF727Y6`
->    （或 `gen/apple/project.yml` 里加 `DEVELOPMENT_TEAM`）
-> 2. `cd app && pnpm exec tauri ios build --debug --target aarch64 -- --allowProvisioningUpdates`
-> 3. `xcrun devicectl device install app --device <UDID> <path>/SendPalm.app`
->
-> 已连接的两台设备：`Edwin Hao的iPhone`（00008110-00140CA12611401E）、`iPhone`
-> （00008101-001E69D03A63003A）——其中一台应是你说的 iPhone 12。
+- **模拟器已验证**：iPhone 18 Pro（iOS 27.1）启动 → 引导页 → 收件箱真邮件
+  （`docs/ios-screenshots/ios-20261113-imbox.png`）。顺带修掉一个老坑：`mobile_entry_point`
+  属性又被插在 doc 注释后面（§11.12 第二次复发），iOS 启动 4.9 秒后 `main` 返回导致黑屏。
+  现在有源码级守护测试 `entry_point_tests::mobile_entry_point_stands_directly_above_run`。
+- **iPad 模拟器这台机器上不可用**：原有 iPad 设备的 data 目录缺失，新建的 iPad Pro +
+  iOS 27.2 组合在 headless 下 WebKit 渲染超时（白屏）。iPad 布局由桌面 Playwright 的
+  tablet viewport 覆盖。
+- **iPhone 12 真机未做**：这台机器还没给 `com.sendpalm.app` 配 development team /
+  描述文件。手机接上后：
+  1. `tauri.conf.json` 的 `bundle.iOS.developmentTeam` 填 `5XNDF727Y6`
+  2. `cd app && pnpm exec tauri ios build --debug --target aarch64 -- --allowProvisioningUpdates`
+  3. `xcrun devicectl device install app --device <UDID> <path>/SendPalm.app`
+  已连接的设备：`Edwin Hao的iPhone`(00008110-00140CA12611401E)、`iPhone`(00008101-001E69D03A63003A)。
 
-## 上传 build 到 ASC（App 记录建好之后）
+## 这一夜修了什么
 
-```bash
-cd app && pnpm tauri ios build --target aarch64 -- --export-method app-store-connect
-# 产物在 src-tauri/gen/apple/build/arm64/SendPalm.ipa
-xcrun altool --upload-app -f <ipa> -t ios \
-  --apiKey DDG3CJL762 --apiIssuer a28bcef1-d045-49f2-b86e-81aebe6b6b25
-```
+1. **托盘点开邮件 → 列表选中并滚到位置**（`rowAnchorForMessage` + reveal effect，含
+   bundle 展开、分页外邮件按 id 拉取、快筛/账户 tab 自动放开）。真机和 e2e 都验证过。
+2. **「N 个账户」浮层被详情面板盖住**（`--z-topbar: 50`，手机断点回落）。
+3. **托盘图标**：方板 → 透明画布上的纸飞机（32×32 模板图）；菜单每行的 `✉` 去掉，
+   超长主题用真省略号。
+4. **通知链路**（最大的一块）：
+   - 属性/偏好：启动时把偏好同步给 Rust（原来关掉通知、重启又弹）。
+   - 权限：设置里显示真实状态 +「再次请求权限 / 打开系统设置」。
+   - 横条点击能打开那封邮件（`notification_target` + `services/open-ref.ts`，与铃铛共用一套跳转）。
+   - **真正的根因**：app 是 ad-hoc 签名（`Identifier=sendpalm_app-<hash>`、`Info.plist=not bound`），
+     macOS 根本不登记它；插件那条 `notify-rust → NSUserNotificationCenter` 在当前 macOS 上也已失效。
+     现在用 `services/mac_notify.rs`（UNUserNotificationCenter）+ **Developer ID 签名**，
+     `authorized=true`、自检横幅和真邮件横幅都出得来。
+5. **调试构建不再碰钥匙串**（先读 `.env`）：签名一变，钥匙串条目就读不到，而
+   `get_password` 会弹系统对话框要登录密码 —— 同步循环就卡在那个模态后面，且没有任何日志。
 
-## 已知未处理 / 需要决策
+## 已知未处理
 
-1. **macOS 通知仍是 2.5 层的问题**：`tauri-plugin-notification` 在 macOS 上走
-   `notify-rust → mac-notification-sys → NSUserNotificationCenter`（Apple 已废弃的 API）。
-   release 构建里它会把通知归到 `com.sendpalm.app`，debug 构建里被硬编码归到
-   `com.apple.Terminal`。因此：**只有 release 构建能真正弹系统通知**。
-   我把 release .app 建好并装了 `/Applications`（备份在 `/tmp/SendPalm-2026-11-11.app`）。
-   注意 release 构建不读 `.env`，邮件密码要走钥匙串：
-   `cd app/src-tauri && cargo test --test install_mail_password -- --ignored`
-2. **Gate 待审的首次发件人不弹通知**（`should_ping_os` 的产品决定）。291 位待审时这等于
-   大部分新邮件静默。要不要给个开关，你定。
-3. **iPad 模拟器在这台机器上不可用**：现有 iPad 设备的 data 目录缺失（`simctl` 报
-   "device's data is no longer present"），新建的 iPad Pro + iOS 27.2 组合在 headless 下
-   WebKit 渲染超时（白屏）。iPad 布局目前由桌面 Playwright 的 tablet viewport 覆盖。
-4. **菜单栏徽标**仍是 `99+`（Gate 待审数）。想更安静可以改成只在有新未读时显示一个小圆点。
+1. **横条点击"打开那封邮件"这一步我没有肉眼验证**（横幅只停留几秒，抓不准点击时机）。
+   代码路径：delegate → `notification:action` → `openNotificationTarget(row)` →
+   `notification_target` → 与铃铛同一个跳转（该跳转有单测和 e2e）。你下次点一下就知道了。
+2. Gate 待审的首次发件人默认不弹（`should_ping_os` 的产品决定）。291 位待审时等于大部分
+   新邮件静默。要不要给开关，你定。
+3. 菜单栏徽标仍是 `99+`（Gate 待审数）。
+4. Release 构建（`/Users/edwinhao/.cargo/shared-target/release/bundle/macos/SendPalm.app`，
+   已签名）需要你**在设置里重新输入一次邮箱密码**（钥匙串条目绑定签名），之后再用
+   `scripts/build-macos.sh` 重建就一直是同一个签名、不会再丢。当前 `/Applications` 里放的是
+   debug 构建（读 `.env`，不需要密码）。
