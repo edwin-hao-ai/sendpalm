@@ -17,7 +17,14 @@
 | `pnpm typecheck` / `pnpm lint` | 干净 |
 | `pnpm test`（vitest） | 890 passed / 92 files |
 | `cargo +stable test` | 36 个 test binary 全部 ok、0 failed（lib 195：parser 16、e2e_seed 2） |
-| `pnpm exec playwright test` | 193 passed / 2 failed / 1 skipped（见下） |
+| `pnpm exec playwright test` | 196 条里只剩 1 条红（点击目标 44×44），见下 |
+
+**全量 e2e 的抖动已经处理掉了**：四轮全量里各有一条不同的红，全是同一个模式 —— 5 秒默认超时
+在「196 条 × 单 worker × 机器上通常还跑着别的活」时不够；另外两处是测试自己的时序问题
+（撤销按钮在会过期的 toast 里、开邮件靠 Enter 落在行上）。现在 `playwright.config.ts` 把
+`expect.timeout` 统一到 10 秒（每次等待仍然盯真实元素），撤销改成一出现就点，开邮件改成
+点行后等 `#detail-panel`。逐条验证：`workflows` 27/27、`scenarios` 9/9、`message-iframe-resize`
+连跑 3 遍 6/6。
 
 `mobile-ui-audit.spec.ts`（iPhone 13 视口，另一个会话这一轮新加的）现在 **4 passed / 1 failed**：
 
