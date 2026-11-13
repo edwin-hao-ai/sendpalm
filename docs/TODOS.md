@@ -35,7 +35,9 @@
 - [x] 一起读卡内滚动条：改细轨（`scrollbar-width: thin` + 主题色），不再压在卡片右边缘
 - [x] 深色模式 Gate 批量面板底栏：补 `--paper` 表面 + 圆角，不再和卡片糊在一起
 - [x] 快捷键帮助收录不可重绑的键：⌘↵ 发送、日历 ←→↑↓ / Enter
-- [ ] 新用户首次配置邮箱引导实测（AddAccountModal 流程没人真走过）
+- [x] 新用户首次配置邮箱引导实测（`e2e/account-add.spec.ts` 钉住"浏览器预览不谎报成功"；
+      iPhone 12 真机走同一条 `upsertAccount → vaultSave → syncNow` 路径加过账号，
+      见 `docs/ios-screenshots/ios-20261113-003713.png`）
 - [x] 日历键盘导航：←/→ 一天（周视图一周、年视图一月）、↑/↓ 一周、Enter 打开当天第一场；
       输入框/对话框内不抢键
 - [x] 通知音效：设置里可关声音只留横幅（`notifications.sound`，随偏好传给 Rust）
@@ -223,16 +225,27 @@ PRD §3.19 还剩三项，本次**删除**而不是补一个会撒谎的界面�
 - **自动下载附件（autoDownloadAttachments）**：应用里没有「自动下载」路径——附件字节
   始终按需取。补一个预取反而和 §11.7 的省内存方向相反。
 
-### 2026-11-10 审计新发现（未修，按优先级）
+### 2026-11-10 审计新发现（2026-11-13 复核）
 
-- **附件名是 UUID**（`8CA8CD55-…-A9041D4A461D.jpeg`）。IMAP 同步下来的附件没有落
-  `Content-Disposition` 的 filename，落库时用了内部 id 当 name，所以文件页一整屏都是
-  UUID，看不出是什么文件。修法在解析侧：`services/parser.rs` 取 `filename*`/`name`
-  参数，缺省时用 `类型-日期` 生成可读名；存量数据需要一次回填。
-- **重复联系人**：同一地址出现多行（ASICS ×2、App Store Connect ×2、Apple ×5）。
-  Gate 卡片已经按小写邮箱去重，但联系人列表没有。要么落库时按 email 去重合并，
-  要么在列表里按 email 折叠并标注"3 条记录"。
+- [x] **附件名是 UUID** —— 修完并在真库上复核。`services/parser.rs` 现在读 mailparse 已经
+  解好的 `filename` / `name` 参数，`filename*=UTF-8''…`（QQ/163/飞书发 CJK 附件）和
+  `=?utf-8?B?…?=` 都能解；没有文件名时（退信、`message/rfc822`）从 `attachment-0`
+  改成 `类型-日期.扩展名`。复核：库里 3,740 个附件，UUID 形状的 25 个是发件人自己起的
+  （Apple Mail 的写法），`attachment-N` 只剩 7 个 `message/*` 分片——本来就不该有文件名。
+  没有做存量回填：旧行连原始头部都没留，按 `类型-日期` 批量改名只会把发件人给的真名覆盖掉。
+- [x] **重复联系人** —— 复核后不成立：按小写邮箱分组，346 位联系人**0 组重复**。
+  当时看到的 "Apple ×5 / Stripe ×5" 是**同名不同地址**（billing@、support@、invoices@），
+  列表按 email 折叠会把它们折成一行，属于错修，所以没动。
 - **文件页仍然整表取 3740 行**（936 KB）再在前端窗口渲染。DOM 侧已经封顶 120 张，
   但 IPC 负载没变；要彻底解决得把筛选下沉到 SQL 并做 keyset 分页。
 - **`insights` 每次进入 10 条查询**，其中一条取近 366 天最多 20000 封的消息切片
   （有上限，但仍是单次最大负载）。目前可接受，增长到 10 万封时需要预聚合。
+
+### 2026-11-13 上架前缺口（都不在代码里）
+
+- **App Store 截图**：ASC 至少要 6.9"/6.5" iPhone 一套，需要单独出图并上传。
+- **`PrivacyInfo.xcprivacy`**：`app/src-tauri/gen/apple/` 是生成目录且在 `.gitignore` 里，
+  加隐私清单要动生成工程 + 构建脚本（AGENTS §11.23 同类的活）。
+- **App 隐私问卷**：ASC 网页端填。
+- **Support URL 可达**：元数据里是 `https://sendpalm.com/support`，DNS 未绑。
+

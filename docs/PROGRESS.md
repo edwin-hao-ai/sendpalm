@@ -4117,3 +4117,35 @@ CSS 背景被拦下就**永久丢失**——头图用背景图实现的 newslett
 另外补了上一段那条**"重建后要重输密码"**的根治：debug 构建启动时自己加载 `app/.env`（`CARGO_MANIFEST_DIR` 编译期固化，从 `~/.cargo/shared-target/...` 或 `/Applications` 启动都能找到），release 构建不读任何文件取密码。验证方式是先用 `security delete-generic-password` 删掉钥匙串条目再启动——日志出现 `dev credentials loaded`，账户循环正常起来，没有横幅。
 
 验证：TS 865、Rust 全绿、lint/tsc 干净。
+
+### 2026-11-13 交接落地：Rust 验证先修好、附件名、真机诊断
+
+这一轮从"读交接 → 落地"开始，结果第一件事是**验证本身坏了**：`NotificationPrefs` 新增
+`ping_first_senders` 之后，`tests/desktop_notifier_test.rs` 还在手写结构体字面量，整套
+`cargo test` 连编译都过不去。编译失败和测试失败的区别很关键——它会把后面所有 Rust 验证
+一起挡住，而 `pnpm test` 全绿会让人以为仓库是好的。
+
+- **附件文件名**：`filename*=UTF-8''%E6%8A%A5%E5%91%8A.pdf`（QQ / 163 / 飞书发 CJK 附件
+  都这么写）以前被 `find("filename=")` 切片成 `UTF-8''%E6%8A%A5…`，`=?utf-8?B?…?=` 原样
+  落库。mailparse 解析参数时已经把 RFC 2184 续行、RFC 2231 百分号编码、RFC 2047
+  encoded-word 都解好了，所以直接读 `filename` / `name`，不再自己实现解码。
+  完全没有文件名时（退信、`message/rfc822`、部分扫描仪）从 `attachment-0`（无扩展名，
+  双击打不开）换成 `类型-日期.扩展名`，日期取**邮件自己的**日期而不是同步日期。
+- **`e2e_seed_account` 收进 debug**：这个命令从环境变量里读邮箱密码，release 构建里
+  等于给任何能启动 App 的进程留了个后门。现在 `cfg!(debug_assertions)` 直接返回 None，
+  并把"两半都有才建"提成纯函数 `seed_from_env` + 2 个测试。
+- **真机诊断**：`sync_now` 的凭据解析与连接失败也写进 `tmp/sync.log`（`keychain.log` 同理），
+  手机没有 Mac 能读的 console，`devicectl device copy from` 是唯一出口。
+- **复核两条过期 TODO**：附件 UUID 已修（真库 3,740 个附件里 UUID 形状的 25 个是发件人自己
+  起的名，`attachment-N` 只剩 7 个 `message/*` 分片）；"重复联系人"不成立（按小写邮箱分组
+  0 组重复，当时看到的同名是 billing@/support@ 这些不同地址），所以**没有**去按 email 折叠。
+- **预览模式谎报"已连接"**（全量 e2e 抓到的回归）：浏览器 shim 对所有不认识的命令回答 `null`，
+  而 `vault_save` 这种返回 `()` 的命令**成功也是 `null`**，于是 `vaultSave` 在预览模式返回 true，
+  添加邮箱走完"真实连接"分支并弹出「已连接」。改成 shim 对三个 keychain 写入命令 reject，
+  并新增 `tauri-shim.test.ts` 把 shim 的回答契约（读→空数据、写→reject、未知→null）钉住。
+- **性能报告里的堆是假的**：`readPerf` 读 `performance.memory.mem_usedJSHeapSize`（正确属性名是
+  `usedJSHeapSize`），于是报告里堆一直 `null`、`heapStable` 永远 false —— "24h 内存曲线"那条
+  待办其实从来没有数据。修好后即时可读：37.8 MB → 37.8 MB（Δ0 MB）。
+
+验证：`tsc` / `eslint --max-warnings=0` 干净、`vitest 890`（92 文件）、`cargo test` 35 套件全绿
+（含 parser 16 条、e2e_seed 2 条）、Playwright 全量 189 passed / 1 skipped。

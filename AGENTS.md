@@ -977,6 +977,45 @@ and script inside the mail frame)
   同一个按钮有时点两次才生效（第一次只激活窗口）。能不加 UI 依赖就别加：这次最后靠
   `SENDPALM_NOTIFY_SELFTEST=1`（启动即 requestAuthorization + post 一条）才拿到确定结论。
 
+### 11.24 Lessons learned (Session 2026-11-13 夜 第二段 — 交接落地：编译级失败、附件名、并发会话)
+
+- **`cargo test` 编不过和测试失败是两个量级的事故，而它伪装成"没跑"。** 给
+  `NotificationPrefs` 加 `ping_first_senders` 之后，`tests/desktop_notifier_test.rs` 还在
+  手写结构体字面量 —— 整套 Rust 验证在编译阶段就停了，而 `pnpm test` 全绿让人以为仓库是好的。
+  **规则：任何给结构体加字段的改动，提交前必须跑一次整套 `cargo test`（不是 `--lib`）；
+  测试里构造这种"还会有新字段"的类型时用 `..Default::default()`，不要逐字段抄。**
+- **不要手写 MIME 参数解析。** `find("filename=")` 切出来的值在 `filename*=UTF-8''%E6%8A%A5…`
+  （QQ/163/飞书发 CJK 附件都是这个形状）和 `=?utf-8?B?…?=` 上都是废的。mailparse 解析参数时
+  已经把 RFC 2184 续行、RFC 2231 百分号编码、RFC 2047 encoded-word 解好了，读
+  `part.get_content_disposition().params` / `part.ctype.params` 即可。同类教训：**先看依赖
+  库已经做了什么，再决定要不要自己写解码。**
+- **回退名要有扩展名。** `attachment-0` 这种没有扩展名的兜底名，在 Files 页双击不会交给任何
+  App —— "看得见但用不了"比没有更糟。兜底名至少给到 `类型-日期.扩展名`，日期取**邮件**的日期。
+- **从环境变量读凭据的能力必须锁在 debug 构建里。** `e2e_seed_account` 读
+  `SENDPALM_E2E_SEED_PASSWORD`，release 里留着它等于给任何能启动 App 的进程一个塞凭据的后门；
+  `if !cfg!(debug_assertions) { return None; }` 一行就够，并把解析逻辑提成纯函数以便测试。
+- **同一棵工作树上可能有第二个会话在写。** 这一轮 `commands/mod.rs` 和 `sync_loop.rs` 里出现了
+  我没有写的改动（`sync_now` 的设备日志），而 `git log` 在我跑测试的十几分钟里多出两个提交。
+  对策：**每次提交前 `git log --oneline -3` + `git status --short` 看一眼**，`git add` 用显式
+  路径而不是 `git add -A`，提交小步快跑；发现别人的半成品混在同一文件里时，按"同一件事"合并
+  成一条诚实的提交（并在 body 里写清楚），而不是硬拆 hunk 把工作切成两半。
+- **返回 `()` 的命令，"成功"和"没做"在 JS 侧都是 `null`。** 这是同一个 bug 的两面：真机上
+  `r !== null` 把每次成功读成失败（§11.23 的 `vaultSave`），浏览器 shim 里同一个 `null` 又把
+  "根本没有钥匙串"读成成功（添加邮箱在预览模式直接说「已连接」）。**浏览器 shim 对不可执行的
+  写操作要 reject，不要回 `null`**；并把 shim 的回答契约写成测试（`tauri-shim.test.ts`）。
+- **"测量了"这句话要有数字支撑。** 滚动性能报告里 `heapStable` 一直是 false、堆数字一直是
+  `null`，因为读的属性名拼错了（`mem_usedJSHeapSize` vs `usedJSHeapSize`）—— 一份永远为假
+  的指标比没有指标更糟，它让"24h 内存增长"这种问题看起来查过了。**断言/报告里出现 null 或
+  永远同一个值时，先怀疑测量代码本身。**
+
+- **磁盘满会伪装成编译错误。** `failed to write query cache … No space left on device (os error 28)`
+  出现在 `cargo` 输出里，第一反应不该是"代码有问题"。可再生的都删：`DerivedData/*`、
+  `shared-target/debug/incremental`、`shared-target/aarch64-apple-ios`、
+  `src-tauri/gen/apple/build`（这台机器因此从 117 MB 回到 8.8 GB）。
+- **复核过的旧 TODO 要写"为什么不再成立"，不是打个勾。** "重复联系人"这一条按小写邮箱分组
+  是 0 组重复，当时看到的 "Apple ×5" 是 billing@/support@ 这些不同地址同名 —— 照原方案折叠
+  会把三个真实地址压成一行。**过期待办要么修，要么写清证据后删，别留着让人再修一次。**
+
 ## 12. Agent Skills & Global Protocols
 
 SendPalm adopts a set of global agent skills stored in `~/.agents/skills/`. These skills are available to Kimi Code, Claude Code, OpenCode, and any other agent that reads the standard skill directory. **Invoke them by name** when the situation matches their description:
