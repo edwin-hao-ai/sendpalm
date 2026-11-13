@@ -196,7 +196,7 @@ mod tests {
     #[tokio::test]
     async fn repairs_existing_rows_and_ignores_local_rows() {
         let pool = fresh_pool().await;
-        let updated = run(&pool, 3, 9, |start, _end| {
+        let updated = run(&pool, 3, 9, |_start, _end| {
             futures::future::ok(vec![
                 row(1, "2026-01-01T10:00:00Z", "2026-01-01T10:00:05Z"),
                 row(3, "2026-01-03T10:00:00Z", "2026-01-03T10:00:09Z"),

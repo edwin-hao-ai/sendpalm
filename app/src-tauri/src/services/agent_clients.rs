@@ -494,8 +494,6 @@ mod tests {
         });
     }
 
-    use super::*;
-
     #[test]
     fn strip_jsonc_removes_comments_but_keeps_urls() {
         let src = r#"{

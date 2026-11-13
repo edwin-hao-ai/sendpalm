@@ -10,6 +10,9 @@ fn prefs(desktop: bool, quiet: bool, start: &str, end: &str) -> NotificationPref
         quiet_hours_enabled: quiet,
         quiet_hours_start: start.to_string(),
         quiet_hours_end: end.to_string(),
+        // Stranger pings are decided by `sync_loop::should_ping_os`; the
+        // timing rules these tests exercise do not read it.
+        ping_first_senders: false,
     }
 }
 
