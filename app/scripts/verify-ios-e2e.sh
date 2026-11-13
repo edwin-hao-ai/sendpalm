@@ -45,6 +45,12 @@ if [[ ! -f "$LIB" ]]; then
   exit 1
 fi
 
+# `xcodebuild` embeds whatever frontend bundle is already in gen/apple/assets —
+# it never runs the Tauri build hook. Without this line the tests (and any manual
+# launch of the resulting app) run YESTERDAY's UI while the sources say otherwise.
+echo "==> rebuilding the frontend bundle"
+pnpm build >/dev/null
+
 echo "==> injecting the UI test target"
 mkdir -p "$GEN/UITests"
 cp ios-e2e/SendPalmUITests.swift "$GEN/UITests/SendPalmUITests.swift"

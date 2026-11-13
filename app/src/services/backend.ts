@@ -152,8 +152,19 @@ export async function vaultSave(
   accountId: string,
   password: string,
 ): Promise<boolean> {
-  const r = await safeInvoke<void>("vault_save", { accountId, password });
-  return r !== null;
+  // `vault_save` returns `()`, and a Tauri command returning nothing resolves to
+  // `null` — so `r !== null` reported FAILURE for every successful write. The
+  // add-a-mailbox flow then showed 「密码存入系统钥匙串失败」 (or, worse, silently
+  // skipped the connection check behind a "browser preview" toast) on every
+  // platform, including the phone. Success == the promise resolved.
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("vault_save", { accountId, password });
+    return true;
+  } catch (err) {
+    console.warn("[vault] vault_save failed:", err);
+    return false;
+  }
 }
 
 export async function vaultLoad(accountId: string): Promise<string | null> {
@@ -161,8 +172,14 @@ export async function vaultLoad(accountId: string): Promise<string | null> {
 }
 
 export async function vaultDelete(accountId: string): Promise<boolean> {
-  const r = await safeInvoke<void>("vault_delete", { accountId });
-  return r !== null;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("vault_delete", { accountId });
+    return true;
+  } catch (err) {
+    console.warn("[vault] vault_delete failed:", err);
+    return false;
+  }
 }
 
 // ── Generic keychain secrets (SEC-2) ──
@@ -172,8 +189,16 @@ export async function vaultDelete(accountId: string): Promise<boolean> {
 // `sendpalm.prefs.json` file; they live in the OS keychain only.
 
 export async function vaultSetSecret(key: string, value: string): Promise<boolean> {
-  const r = await safeInvoke<void>("vault_set_secret", { key, value });
-  return r !== null;
+  // Same null-is-success trap as `vaultSave` above: the command returns `()`,
+  // which arrives as `null`. Resolving at all means the keychain accepted it.
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("vault_set_secret", { key, value });
+    return true;
+  } catch (err) {
+    console.warn("[vault] vault_set_secret failed:", err);
+    return false;
+  }
 }
 
 export async function vaultGetSecret(key: string): Promise<string | null> {
