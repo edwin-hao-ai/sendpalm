@@ -4147,5 +4147,6 @@ CSS 背景被拦下就**永久丢失**——头图用背景图实现的 newslett
   `usedJSHeapSize`），于是报告里堆一直 `null`、`heapStable` 永远 false —— "24h 内存曲线"那条
   待办其实从来没有数据。修好后即时可读：37.8 MB → 37.8 MB（Δ0 MB）。
 
-验证：`tsc` / `eslint --max-warnings=0` 干净、`vitest 890`（92 文件）、`cargo test` 35 套件全绿
-（含 parser 16 条、e2e_seed 2 条）、Playwright 全量 189 passed / 1 skipped。
+验证：`tsc` / `eslint --max-warnings=0` 干净、`vitest 890`（92 文件）、`cargo test` 全套绿
+（36 个 test binary，含 parser 16 条、e2e_seed 2 条）、Playwright 全量 193 passed / 2 failed / 1 skipped —— 两条红的是同一棵工作树上另一个会话刚加的移动端审计断言
+（点击目标 44×44、表单字号 16px），它对应的 UI 修复当时还没提交，不属于这一轮的改动。

@@ -10,13 +10,13 @@
   「发送测试通知」按钮，随时可以自测。
 - 分支 `main`，**已 push 到 origin**（此前的提交也在这一轮一起推上去了）。
 - 验证矩阵（本机，2026-11-13 夜）：`tsc` 干净、`eslint --max-warnings=0` 干净、
-  `vitest` 890 通过（92 个文件）、`cargo test` 35 个套件全绿、`playwright` 见下。
+  `vitest` 890 通过（92 个文件）、`cargo test` 全套绿、`playwright` 见下。
 
 | 套件 | 结果 |
 |---|---|
 | `pnpm typecheck` / `pnpm lint` | 干净 |
 | `pnpm test`（vitest） | 890 passed / 92 files |
-| `cargo +stable test` | 35 套件全绿（lib 195，含 parser 16、e2e_seed 2） |
+| `cargo +stable test` | 36 个 test binary 全部 ok、0 failed（lib 195：parser 16、e2e_seed 2） |
 | `pnpm exec playwright test` | 193 passed / 2 failed / 1 skipped（见下） |
 
 `mobile-ui-audit.spec.ts`（iPhone 13 视口）里两条断言当时是红的：**点击目标 < 44×44px**
