@@ -13,6 +13,8 @@ Usage:
     scripts/asc.py app                    # show the app record if it exists
     scripts/asc.py metadata <json>        # push store metadata for a version
     scripts/asc.py builds                 # recent build uploads
+    scripts/asc.py version 1.0.0          # create the App Store version to attach a build
+    scripts/asc.py push-metadata 1.0.0    # push scripts/ios-metadata.json (both locales)
 
 The App Store Connect API cannot create an app record (`POST /v1/apps` is not
 part of the public API). `create-app` therefore reports exactly what Apple
@@ -210,6 +212,82 @@ def cmd_create_app(c: Client) -> None:
         raise
 
 
+def cmd_version(c: Client, version: str) -> None:
+    app = find_app(c)
+    if not app:
+        sys.exit("no app record — create it in the web UI first")
+    existing = c.get(
+        f"/apps/{app['id']}/appStoreVersions?filter[platform]=IOS"
+        f"&filter[versionString]={version}&limit=5"
+    ).get("data", [])
+    if existing:
+        print(f"version {version} exists: {existing[0]['id']}")
+        return
+    res = c.post("/appStoreVersions", {
+        "data": {
+            "type": "appStoreVersions",
+            "attributes": {"platform": "IOS", "versionString": version},
+            "relationships": {"app": {"data": {"type": "apps", "id": app["id"]}}},
+        }
+    })
+    print(f"created version {version}: {res['data']['id']}")
+
+
+def cmd_push_metadata(c: Client, version: str) -> None:
+    app = find_app(c)
+    if not app:
+        sys.exit("no app record — create it in the web UI first")
+    meta = json.loads((Path(__file__).resolve().parent / "ios-metadata.json").read_text())
+    versions = c.get(
+        f"/apps/{app['id']}/appStoreVersions?filter[platform]=IOS"
+        f"&filter[versionString]={version}&limit=5"
+    ).get("data", [])
+    if not versions:
+        sys.exit(f"version {version} not found — run `asc.py version {version}` first")
+    version_id = versions[0]["id"]
+
+    locs = c.get(f"/appStoreVersions/{version_id}/appStoreVersionLocalizations?limit=20")
+    existing = {l["attributes"]["locale"]: l["id"] for l in locs.get("data", [])}
+    for locale, attrs in meta["locales"].items():
+        attributes = {
+            k: attrs[k]
+            for k in ("description", "keywords", "marketingUrl", "supportUrl", "promotionalText")
+            if k in attrs
+        }
+        if locale in existing:
+            loc_id = existing[locale]
+            c.patch(f"/appStoreVersionLocalizations/{loc_id}", {
+                "data": {"type": "appStoreVersionLocalizations", "id": loc_id,
+                         "attributes": attributes}})
+            print(f"  updated {locale}")
+        else:
+            attributes["locale"] = locale
+            c.post("/appStoreVersionLocalizations", {
+                "data": {"type": "appStoreVersionLocalizations", "attributes": attributes,
+                         "relationships": {"appStoreVersion": {
+                             "data": {"type": "appStoreVersions", "id": version_id}}}}})
+            print(f"  created {locale}")
+
+    # Name + subtitle are app-level (appInfoLocalizations), not per version.
+    infos = c.get(f"/apps/{app['id']}/appInfos").get("data", [])
+    if infos:
+        info_id = infos[0]["id"]
+        info_locs = c.get(f"/appInfos/{info_id}/appInfoLocalizations?limit=20")
+        info_existing = {l["attributes"]["locale"]: l["id"] for l in info_locs.get("data", [])}
+        for locale, attrs in meta["locales"].items():
+            attrs2 = {k: attrs[k] for k in ("name", "subtitle") if k in attrs}
+            loc_id = info_existing.get(locale)
+            if not attrs2 or not loc_id:
+                continue
+            try:
+                c.patch(f"/appInfoLocalizations/{loc_id}", {
+                    "data": {"type": "appInfoLocalizations", "id": loc_id,
+                             "attributes": attrs2}})
+                print(f"  app info {locale}: {', '.join(attrs2)}")
+            except urllib.error.HTTPError as e:
+                print(f"  app info {locale}: HTTP {e.code} (locked version?)", file=sys.stderr)
+
+
 def cmd_builds(c: Client) -> None:
     app = find_app(c)
     if not app:
@@ -224,18 +302,27 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "command",
-        choices=["whoami", "bundle-ids", "app", "create-app", "builds"],
+        choices=["whoami", "bundle-ids", "app", "create-app", "builds",
+                 "version", "push-metadata"],
     )
+    parser.add_argument("version", nargs="?", help="marketing version, e.g. 1.0.0")
     args = parser.parse_args()
     load_env()
     c = Client()
-    {
-        "whoami": cmd_whoami,
-        "bundle-ids": cmd_bundle_ids,
-        "app": cmd_app,
-        "create-app": cmd_create_app,
-        "builds": cmd_builds,
-    }[args.command](c)
+    if args.command in ("version", "push-metadata") and not args.version:
+        sys.exit(f"`{args.command}` needs a version, e.g. `asc.py {args.command} 1.0.0`")
+    if args.command == "version":
+        cmd_version(c, args.version)
+    elif args.command == "push-metadata":
+        cmd_push_metadata(c, args.version)
+    else:
+        {
+            "whoami": cmd_whoami,
+            "bundle-ids": cmd_bundle_ids,
+            "app": cmd_app,
+            "create-app": cmd_create_app,
+            "builds": cmd_builds,
+        }[args.command](c)
 
 
 if __name__ == "__main__":
