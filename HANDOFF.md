@@ -19,10 +19,15 @@
 | `cargo +stable test` | 36 个 test binary 全部 ok、0 failed（lib 195：parser 16、e2e_seed 2） |
 | `pnpm exec playwright test` | 193 passed / 2 failed / 1 skipped（见下） |
 
-`mobile-ui-audit.spec.ts`（iPhone 13 视口）里两条断言当时是红的：**点击目标 < 44×44px**
-（同步按钮 58×24、某个图标按钮 30×30）和**表单字号 < 16px**（iOS 会自动放大）。这两条是
-同一棵工作树上另一个会话刚加的断言，而修复当时还只存在于工作区（未提交），所以没有随这次
-push 上来。修的时候按 AGENTS §6 的 44×44 来，别去放宽断言。
+`mobile-ui-audit.spec.ts`（iPhone 13 视口，另一个会话这一轮新加的）现在 **4 passed / 1 failed**：
+
+- 「表单字号 ≥ 16px」本来是红在**测试自己**身上：它直接点 `[data-nav-view="settings"]`，
+  而 390px 下这个元素在收起的「更多」浮层里，于是点到超时、什么也没测。改成走
+  `navigateToView` 后是绿的（设置页的输入框本来就都 ≥16px）。
+- **「点击目标 ≥ 44×44」仍然是红的**，这是真的：Imbox 头部的 chips 只有 22px 高、
+  同步按钮 58×24、图标按钮 30×30。修法不是给 CSS 加一行 —— AGENTS §6 要求 44×44，
+  而 `docs/TODOS.md` 里另一条又要求把手机上的 chips 收进筛选面板，两者是同一个决策，
+  所以留给下一次（或正在改 `Imbox.tsx` 的那个会话）。**别去放宽断言。**
 
 
 ## 需要你 1 分钟
