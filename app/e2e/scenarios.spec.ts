@@ -114,7 +114,12 @@ test("场景：用户用一起读清空未读，并跳过订阅邮件", async ({
   );
 
   await page.getByRole("button", { name: "一起读" }).click();
-  await expect(page.getByText("第 1 / 2 封")).toBeVisible();
+  // 10 s, not the 5 s default: Read Together is a lazy chunk (§11.9) and then
+  // fetches its queue + the first body, so on a loaded machine — the full suite
+  // runs one worker — the counter was observed to miss 5 s while the view
+  // itself was fine (it passes in isolation). Still a real element, so a
+  // genuinely broken read-together flow still fails.
+  await expect(page.getByText("第 1 / 2 封")).toBeVisible({ timeout: 10_000 });
 
   // 打开"跳过订阅邮件"——只剩真人邮件。
   await page.locator("[data-skip-newsletter]").click();
