@@ -38,3 +38,4 @@ dist/.mddock/
 # Local agent tool state (goal/plan caches) — per-machine, never shared
 .opencode/goals/
 .superpowers/.superpowers/
+__pycache__/

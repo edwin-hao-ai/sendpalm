@@ -1,0 +1,26 @@
+{
+  "_comment": "SendPalm App Store Connect metadata. bundleId com.sendpalm.app (App ID GNNTFW59LK). The ASC app record must be created once in the web UI (the public API cannot create apps); after that scripts/asc.py push-metadata pushes this file. URLs point at sendpalm.com — the DNS A record still has to be pointed at the web host.",
+  "bundleId": "com.sendpalm.app",
+  "platform": "IOS",
+  "primaryLocale": "en-US",
+  "locales": {
+    "en-US": {
+      "name": "SendPalm",
+      "subtitle": "Calm email, calendar & people",
+      "description": "SendPalm is a calm place to deal with email. Mail from people you know lands in one Imbox; everything else waits in the Screener until you decide what it is. No badges shouting at you, no threading you have to untangle — just the mail that matters, and the people behind it.\n\nDESIGNED TO BE QUIET\n• The Imbox, not the inbox. Mail from people stays in one list; newsletters and cold outreach go to the Paper Trail and the Screener instead of interrupting you.\n• Bundles fold a chatty sender into one row. Three or more unread from the same person become a single line you can open when you want.\n• Piles instead of snooze tricks: Reply Later, Set Aside, and Bubble Up put a mail where you will actually see it again.\n• Read Together reads your unread mail one card at a time, focused reply keeps one conversation on screen.\n\nEVERY MAILBOX, ONE PLACE\n• Any IMAP account: iCloud, Gmail, Outlook, Yahoo, Fastmail, Feishu, QQ, 163 and 126 — including the app-specific passwords and authorization codes those providers require.\n• Several accounts merge into one Imbox; a tab narrows to a single mailbox whenever you want.\n• Real IMAP sync in the background, with attachments, clickable links, and remote images held back until you ask for them.\n\nPEOPLE, NOT ADDRESSES\n• Every sender becomes a contact with their mail, files and meetings in one place.\n• Insights show who you actually talk to and who has gone quiet.\n• Calendar invites in the mail become events automatically, with a reply you can send from the event.\n\nAN AGENT THAT WORKS IN YOUR MAIL\n• Connect Claude Code, Codex or any MCP client over a local gateway: let it read your mail, draft replies, search, and — if you allow it — send.\n• Every action it takes is written to an audit log you can read.\n\nYOUR DATA STAYS YOURS\n• Local-first: mail is stored on your device in SQLite. Nothing is uploaded to us; there is no SendPalm server and no account to create.\n• Passwords live in the system keychain.\n• Your AI provider is the one you configure — bring your own key.\n\nSendPalm is a mail client for people who want to be done with mail, not live in it.",
+      "keywords": "email,mail client,imap,calendar,contacts,inbox zero,newsletter,screener,productivity,agent,ai mail",
+      "marketingUrl": "https://sendpalm.com",
+      "supportUrl": "https://sendpalm.com/support",
+      "promotionalText": "A calm mail client: one Imbox for people, a Screener for everyone else, bundles that fold a chatty sender into one row, and an agent that can actually work in your mail."
+    },
+    "zh-Hans": {
+      "name": "SendPalm 邮件",
+      "subtitle": "安静的邮件、日历与人脉",
+      "description": "SendPalm 是一个让你安静处理邮件的地方。认识的人寄来的邮件进「收件箱」，其余的先进「筛选台」，等你决定它是什么。没有催命的小红点，也不需要你去理清一串串会话——只剩真正要紧的信，和信后面的人。\n\n【为「安静」而设计】\n• 收件箱只管人：人的邮件留在一条列表里；订阅与冷推销进「单据」和「筛选台」，不再打断你。\n• 同一发件人三封以上未读会自动折叠成一行（bundle），想读时展开即可。\n• 用「稍后回复」「已搁置」「气泡提醒」取代假装的稍后处理——邮件会回到你真会看到的位置。\n• 「一起读」一封一封读未读邮件，「专注回复」把一段对话留在屏幕中间。\n\n【多个邮箱，一个地方】\n• 任何 IMAP 邮箱：iCloud、Gmail、Outlook、Yahoo、Fastmail、飞书、QQ、163、126——包括这些服务商要求的专用密码与授权码。\n• 多个账户合并进同一个收件箱；想看单个邮箱时切一个标签就行。\n• 后台真 IMAP 同步，附件、可点击链接都在，外部图片默认不加载。\n\n【是人，不是地址】\n• 每个发件人都是一个联系人：他的邮件、文件、会议都在一处。\n• 「洞察」告诉你真正在联系谁、谁已经安静了。\n• 邮件里的日程邀请自动变成日历事件，可以直接在事件里回复。\n\n【一个真的能干活的 Agent】\n• 通过本地网关接入 Claude Code、Codex 或任何 MCP 客户端：读信、起草回复、搜索，你允许的话还能直接发信。\n• 它的每一次操作都写进审计日志，你可以翻。\n\n【数据是你的】\n• 本地优先：邮件以 SQLite 存在你自己的设备上，我们不上传、也没有 SendPalm 服务器、不用注册账号。\n• 密码放在系统钥匙串里。\n• AI 用你自己配置的服务商，密钥也由你自己保管。\n\nSendPalm 给那些想「处理完邮件就走」的人，而不是住在收件箱里的人。",
+      "keywords": "邮件,邮箱,IMAP,日历,联系人,收件箱,订阅,筛选,效率,AI,agent",
+      "marketingUrl": "https://sendpalm.com",
+      "supportUrl": "https://sendpalm.com/support",
+      "promotionalText": "安静的邮件客户端：人的邮件进一个收件箱，其余先过筛选台；同一发件人自动折叠；还能让 Agent 真的在邮件里干活。"
+    }
+  }
+}
