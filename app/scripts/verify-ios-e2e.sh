@@ -155,14 +155,30 @@ fi
 
 # macOS bash 3.2 + `set -u`: an empty array expands as an unbound variable, so
 # build the argument list without relying on array expansion of nothing.
+ONLY_ARG=()
 if [[ -n "$ONLY" ]]; then
-  set -- -only-testing:"$TEST_TARGET/$ONLY"
-else
-  set --
+  # target/class/test — without the class the filter matches nothing and
+  # xcodebuild reports "Executed 0 tests" as a success.
+  ONLY_ARG=(-only-testing:"$TEST_TARGET/SendPalmUITests/$ONLY")
 fi
 
 RESULT="$PWD/$GEN/build/e2e-$(date +%Y%m%d-%H%M%S).xcresult"
 mkdir -p "$(dirname "$RESULT")"
+
+# Credentials for the add-mailbox flow. Kept out of the repo: pass them in the
+# environment, e.g.
+#   SENDPALM_E2E_EMAIL=you@example.com SENDPALM_E2E_PASSWORD=xxxx ./scripts/verify-ios-e2e.sh --test test05_AddMailboxWithRealCredentials
+# TEST_RUNNER_* prefixes export them into the UI-test process.
+RUNNER_ENV=()
+if [[ -n "${SENDPALM_E2E_EMAIL:-}" ]]; then
+  RUNNER_ENV+=("TEST_RUNNER_SENDPALM_E2E_EMAIL=$SENDPALM_E2E_EMAIL")
+fi
+if [[ -n "${SENDPALM_E2E_PASSWORD:-}" ]]; then
+  RUNNER_ENV+=("TEST_RUNNER_SENDPALM_E2E_PASSWORD=$SENDPALM_E2E_PASSWORD")
+fi
+# bash 3.2 + `set -u`: expanding an empty array is an "unbound variable" error,
+# and the `${arr[@]:-}` workaround injects one empty argument, which xcodebuild
+# reads as an action ("Unknown build action ''"). Only expand when non-empty.
 
 echo "==> xcodebuild test"
 set +e
@@ -176,7 +192,8 @@ xcodebuild test \
   DEVELOPMENT_TEAM=5XNDF727Y6 \
   CODE_SIGN_STYLE=Automatic \
   SENDPALM_SKIP_RUST_BUILD=1 \
-  "$@" \
+  ${RUNNER_ENV[@]+"${RUNNER_ENV[@]}"} \
+  ${ONLY_ARG[@]+"${ONLY_ARG[@]}"} \
   > /tmp/sendpalm-ios-e2e.log 2>&1
 STATUS=$?
 set -e

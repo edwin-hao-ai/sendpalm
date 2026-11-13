@@ -77,6 +77,76 @@ final class SendPalmUITests: XCTestCase {
 
   // MARK: - the actual suite
 
+  /// The flow that was broken on the phone: add a mailbox with a real
+  /// app-specific password and let it sync.
+  ///
+  /// This is the regression guard for the -34018 keychain failure (an empty
+  /// entitlements file meant `vault::set_password` could not write, the account
+  /// was saved without a password, and the first sync died). It runs on a fresh
+  /// install because a fresh install is also the state a new user is in.
+  ///
+  /// Credentials come from the environment so they stay out of the repo:
+  ///   SENDPALM_E2E_EMAIL / SENDPALM_E2E_PASSWORD
+  func test05_AddMailboxWithRealCredentials() throws {
+    let email = ProcessInfo.processInfo.environment["SENDPALM_E2E_EMAIL"] ?? ""
+    let password = ProcessInfo.processInfo.environment["SENDPALM_E2E_PASSWORD"] ?? ""
+    try XCTSkipIf(email.isEmpty || password.isEmpty, "SENDPALM_E2E_EMAIL/PASSWORD not set")
+
+    // First run: the wizard. Skip it — this test is about the mailbox, not the tour.
+    if let skip = waitForAnyText(["跳过", "Skip"], timeout: 25) {
+      skip.tap()
+    }
+
+    // Empty Imbox: the pill is an "add an account" affordance.
+    if let add = waitForAnyText(["添加邮箱账户 →", "添加邮箱账户", "添加账户"], timeout: 30) {
+      add.tap()
+    } else {
+      XCTFail("no add-account affordance on the empty Imbox")
+      return
+    }
+
+    // The intent opens the form directly; the email field is the anchor.
+    guard let emailField = waitForAnyText(["you@example.com", "邮箱地址"], timeout: 30) else {
+      XCTFail("the add-mailbox form did not open")
+      return
+    }
+    if emailField.elementType == .staticText {
+      // The label; the input is the text field that follows it.
+      let field = app.webViews.firstMatch.textFields.firstMatch
+      field.tap()
+      field.typeText(email)
+    } else {
+      emailField.tap()
+      emailField.typeText(email)
+    }
+
+    // Password field is the only secure field in the form.
+    let secure = app.webViews.firstMatch.secureTextFields.firstMatch
+    XCTAssertTrue(secure.waitForExistence(timeout: 15), "no password field in the add form")
+    secure.tap()
+    secure.typeText(password)
+
+    // Save.
+    tapText(["添加", "保存", "连接"])
+
+    // Success is the account row (the address) showing up in the list.
+    XCTAssertNotNil(
+      waitForAnyText([email, "已连接", "从未同步", "刚刚"], timeout: 40),
+      "the account was not added"
+    )
+    shoot("06-account-added")
+
+    // And the proof that the password really landed in the keychain: a sync that
+    // does not immediately fail with a credentials error.
+    tapText(["立即同步", "同步"])
+    XCTAssertNotNil(
+      waitForAnyText(["封未读", "收件箱", "同步中", "正在收取"], timeout: 60),
+      "the first sync never reported anything"
+    )
+    shoot("07-after-first-sync")
+    XCTAssertEqual(app.state, .runningForeground)
+  }
+
   /// Native-level smoke test: no queries into the webview's accessibility tree.
   ///
   /// XCUITest has to ask WebKit for a full accessibility snapshot to resolve
