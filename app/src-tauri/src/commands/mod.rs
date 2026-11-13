@@ -27,7 +27,15 @@ pub async fn sync_now(
     account_id: String,
     mailbox: String,
 ) -> Result<SyncReport, String> {
-    let creds = crate::services::sync_loop::resolve_account_credentials(&account_id).await?;
+    let creds = match crate::services::sync_loop::resolve_account_credentials(&account_id).await {
+        Ok(c) => c,
+        Err(e) => {
+            crate::services::sync_loop::note_for_device(&format!(
+                "sync_now({account_id}): credentials failed: {e}"
+            ));
+            return Err(e);
+        }
+    };
     let client = ImapClient::new(creds);
     let state = app.state::<crate::services::state::SyncStateStore>();
     let prev = state.get(&account_id);
@@ -42,10 +50,17 @@ pub async fn sync_now(
             error_code: None,
         },
     );
+    crate::services::sync_loop::note_for_device(&format!(
+        "sync_now({account_id}/{mailbox}): connecting, last_uid={}",
+        prev.last_uid
+    ));
     let result = client.sync(&mailbox, prev.last_uid).await;
     let bundle = match result {
         Ok(b) => b,
         Err(e) => {
+            crate::services::sync_loop::note_for_device(&format!(
+                "sync_now({account_id}/{mailbox}): FAILED: {e}"
+            ));
             let code = crate::services::sync_loop::sync_error_code_pub(&e);
             let needs_credentials = matches!(
                 code,
@@ -690,7 +705,15 @@ pub async fn imap_set_seen(message_id: String, seen: bool) -> Result<(), String>
     if folder.is_empty() {
         return Ok(());
     }
-    let creds = crate::services::sync_loop::resolve_account_credentials(&account_id).await?;
+    let creds = match crate::services::sync_loop::resolve_account_credentials(&account_id).await {
+        Ok(c) => c,
+        Err(e) => {
+            crate::services::sync_loop::note_for_device(&format!(
+                "sync_now({account_id}): credentials failed: {e}"
+            ));
+            return Err(e);
+        }
+    };
     let client = ImapClient::new(creds);
     client.set_seen(&folder, uid as u32, seen).await
 }
@@ -700,9 +723,11 @@ pub async fn imap_set_seen(message_id: String, seen: bool) -> Result<(), String>
 /// iOS has no way to type into the app from a script (XCUITest's WebKit
 /// accessibility snapshots time out on a real iPhone), and the two things that
 /// actually break on a phone are the keychain write and the first IMAP sync —
-/// neither of which is provable from a simulator. `verify-ios-device.sh` launches
-/// the app with these variables and the frontend then runs the *real* code path
-/// (`upsertAccount` -> `vaultSave` -> `syncNow`), skipping only the form.
+/// neither of which is provable from a simulator. So a device run launches the
+/// debug build with these variables (`xcrun devicectl device process launch
+/// --console --environment-variables …`, see HANDOFF.md) and the frontend then
+/// runs the *real* code path (`upsertAccount` -> `vaultSave` -> `syncNow`),
+/// skipping only the form.
 ///
 /// Returns None unless both variables are set, so a normal launch is untouched.
 #[derive(Debug, serde::Serialize)]
@@ -714,11 +739,64 @@ pub struct E2eSeedAccount {
 
 #[tauri::command]
 pub fn e2e_seed_account() -> Option<E2eSeedAccount> {
-    let email = std::env::var("SENDPALM_E2E_SEED_EMAIL").ok()?;
-    let password = std::env::var("SENDPALM_E2E_SEED_PASSWORD").ok()?;
-    if email.trim().is_empty() || password.is_empty() {
+    // A shipped build must never read a mailbox password out of the process
+    // environment: whoever launched the app would be able to hand it
+    // credentials. Device runs build with `--debug`, so they keep working and a
+    // release build falls through to the normal add-a-mailbox flow.
+    if !cfg!(debug_assertions) {
         return None;
     }
-    let provider = std::env::var("SENDPALM_E2E_SEED_PROVIDER").unwrap_or_else(|_| "feishu".into());
-    Some(E2eSeedAccount { email, password, provider })
+    seed_from_env(
+        std::env::var("SENDPALM_E2E_SEED_EMAIL").ok(),
+        std::env::var("SENDPALM_E2E_SEED_PASSWORD").ok(),
+        std::env::var("SENDPALM_E2E_SEED_PROVIDER").ok(),
+    )
+}
+
+/// The pure half: both halves have to be present and non-blank, otherwise a
+/// normal launch (or a half-set environment) seeds nothing.
+fn seed_from_env(
+    email: Option<String>,
+    password: Option<String>,
+    provider: Option<String>,
+) -> Option<E2eSeedAccount> {
+    let email = email.filter(|e| !e.trim().is_empty())?;
+    let password = password.filter(|p| !p.is_empty())?;
+    let provider = provider
+        .filter(|p| !p.trim().is_empty())
+        .unwrap_or_else(|| "feishu".into());
+    Some(E2eSeedAccount {
+        email: email.trim().to_string(),
+        password,
+        provider,
+    })
+}
+
+#[cfg(test)]
+mod e2e_seed_tests {
+    use super::seed_from_env;
+
+    fn some(s: &str) -> Option<String> {
+        Some(s.to_string())
+    }
+
+    #[test]
+    fn seeds_only_when_both_halves_are_present() {
+        assert!(seed_from_env(None, some("pw"), None).is_none());
+        assert!(seed_from_env(some("me@example.com"), None, None).is_none());
+        assert!(seed_from_env(some("  "), some("pw"), None).is_none());
+        assert!(seed_from_env(some("me@example.com"), some(""), None).is_none());
+    }
+
+    #[test]
+    fn defaults_the_provider_and_trims_the_address() {
+        let seed = seed_from_env(some(" me@example.com "), some("pw"), None).unwrap();
+        assert_eq!(seed.email, "me@example.com");
+        assert_eq!(seed.provider, "feishu");
+        // A blank provider is the same as an absent one.
+        let seed = seed_from_env(some("me@example.com"), some("pw"), some("  ")).unwrap();
+        assert_eq!(seed.provider, "feishu");
+        let seed = seed_from_env(some("me@example.com"), some("pw"), some("qq")).unwrap();
+        assert_eq!(seed.provider, "qq");
+    }
 }

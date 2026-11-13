@@ -222,7 +222,7 @@ fn log_problem_once(signature: &str, message: impl FnOnce() -> String) {
 /// appended to `tmp/sync.log` inside the app container, where
 /// `devicectl device copy from` can fetch them. This is how "sync imported
 /// nothing" was diagnosed on the phone.
-fn note_for_device(text: &str) {
+pub(crate) fn note_for_device(text: &str) {
     #[cfg(target_os = "ios")]
     {
         use std::io::Write;
@@ -2962,7 +2962,9 @@ pub async fn backfill_imap_identity(pool: &SqlitePool) -> Result<u32, String> {
 
     let mut updated = 0u32;
     for (id, ac) in rows {
-        let Some(rest) = id.strip_prefix("imap_") else { continue };
+        if id.strip_prefix("imap_").is_none() {
+            continue;
+        }
         // Account folders to try, longest-slug first so "Sent Items" wins
         // over "Sent" when both could prefix-match.
         let settings = load_account_settings_json(&ac).await.unwrap_or_default();

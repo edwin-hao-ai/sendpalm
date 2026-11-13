@@ -4487,6 +4487,7 @@ dependencies = [
  "rustls",
  "rustls-native-certs",
  "rustls-pki-types",
+ "security-framework 3.7.0",
  "serde",
  "serde_json",
  "sha2",
