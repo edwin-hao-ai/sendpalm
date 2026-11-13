@@ -10,32 +10,34 @@
   「发送测试通知」按钮，随时可以自测。
 - 分支 `main`，本地领先 origin **23 个 commit，尚未 push**。
 
-## 需要你 1 分钟（ASC 唯一的硬阻塞）
+## ASC：App 记录已建好，元数据已推
 
-Apple 的公开 API **不能创建 App 记录**（`POST /v1/apps` 返回
-`403 The resource 'apps' does not allow 'CREATE'`），而且这台机器上的浏览器**没有登录
-App Store Connect**（打开 apps 页面直接跳登录页）。所以这一步只能你手动：
+| 项目 | 值 |
+|---|---|
+| ASC App | `SendPalm`，id **6834244601** |
+| Bundle ID（App Store ID） | `com.sendpalm.app` → `GNNTFW59LK` |
+| 版本 | **`1.0`**（Apple 建 App 时自己建的，状态 PREPARE_FOR_SUBMISSION；不能再 POST 一个 1.0.0） |
+| 元数据 | en-US + zh-Hans 已推送（名称/副标题/描述/keywords/support+marketing URL） |
 
-1. https://appstoreconnect.apple.com/apps → 左上「+」→ 新建 App
-   - 平台 iOS · 名称 `SendPalm`（被占用就 `SendPalm 邮件`，我同步改元数据）·
-     主要语言 English (U.S.) · Bundle ID `com.sendpalm.app` · SKU `sendpalm` ·
-     用户访问权限：完全访问权限
-2. 建好后跑：
-   ```bash
-   python3 scripts/asc.py version 1.0.0
-   python3 scripts/asc.py push-metadata 1.0.0     # 中英双语，URL 指向 sendpalm.com
-   ```
-3. 上传 build（App 记录建好之后才能传）：
-   ```bash
-   cd app && pnpm tauri ios build --target aarch64 -- --export-method app-store-connect
-   xcrun altool --upload-app -f src-tauri/gen/apple/build/arm64/SendPalm.ipa -t ios \
-     --apiKey DDG3CJL762 --apiIssuer a28bcef1-d045-49f2-b86e-81aebe6b6b25
-   ```
+```bash
+python3 scripts/asc.py app            # 看记录
+python3 scripts/asc.py builds         # 看上传过的 build
+python3 scripts/asc.py push-metadata 1.0   # 改完 ios-metadata.json 再推一次
+```
 
-已完成的部分：Bundle ID（App Store ID）`com.sendpalm.app` 已注册（`GNNTFW59LK`）；
-凭据 `~/.config/mddock/ios-release.env`（team `5XNDF727Y6`）可用；`scripts/asc.py`
-有 whoami / bundle-ids / app / builds / version / push-metadata；
-`scripts/ios-metadata.json` 中英双语就绪。
+**上传 build**：
+```bash
+cd app && pnpm tauri ios build --target aarch64 --export-method app-store-connect --ci
+xcrun altool --upload-app -f src-tauri/gen/apple/build/arm64/SendPalm.ipa -t ios \
+  --apiKey DDG3CJL762 --apiIssuer a28bcef1-d045-49f2-b86e-81aebe6b6b25
+```
+
+踩到并修掉的两个坑（都在 AGENTS §11.23 里）：
+- release 设备构建链接失败 `Undefined symbols _init_plugin_*` —— opener / clipboard-manager
+  的 Swift 入口在 Xcode 27 下没导出，升到 2.5.0 / 2.7.3（notification 2.6.0 修过同一个问题）。
+- 磁盘：iOS release 构建 + 之前所有 target 会把 `/` 写到 100%（`No space left on device`
+  被 LLVM 报成 IO failure）。`rm -rf ~/.cargo/shared-target/aarch64-apple-ios-sim`
+  + DerivedData 腾出 5G 才够。
 
 ## 域名 sendpalm.com
 
