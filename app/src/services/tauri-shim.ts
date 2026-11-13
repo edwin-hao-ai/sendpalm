@@ -27,6 +27,22 @@ if (!IS_TAURI && typeof window !== "undefined") {
       currentWebview: { label: "main" },
     },
     invoke: (cmd: string, args?: unknown): Promise<unknown> => {
+      // There is no OS keychain in a browser. These three commands return `()`
+      // in Tauri, which arrives in JS as a resolved `null` — and a resolved
+      // `null` is exactly what "success" looks like for a unit-returning
+      // command. Answering `null` here therefore made `vaultSave` report
+      // success, and the add-a-mailbox flow claimed a connection it had never
+      // tried. Reject instead: "no keychain" is the one browser answer that
+      // must never be mistaken for "done".
+      if (
+        cmd === "vault_save" ||
+        cmd === "vault_delete" ||
+        cmd === "vault_set_secret"
+      ) {
+        return Promise.reject(
+          new Error(`${cmd}: no OS keychain in the browser preview`),
+        );
+      }
       let result: unknown;
       switch (cmd) {
         // The screener's "以后都这样" writes a rule and reports its id back, so
