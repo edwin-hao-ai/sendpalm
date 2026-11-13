@@ -18,9 +18,23 @@ export interface NotificationPrefs {
  *  Settings pane. `ensureNotificationPermission()` is what tells them apart. */
 export type NotificationPermission = "granted" | "not-granted" | "unsupported";
 
-/** Read the OS permission WITHOUT prompting. Safe to call on mount. */
+/** Read the OS permission WITHOUT prompting. Safe to call on mount.
+ *
+ *  Asks Rust first: on macOS the plugin answers from the deprecated
+ *  NSUserNotification world, where an app that never registered with the
+ *  notification centre still reports "granted" — so the Settings row could
+ *  never tell the user the truth. */
 export async function notificationPermission(): Promise<NotificationPermission> {
   if (IS_BROWSER()) return "unsupported";
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const state = await invoke<string>("notification_permission_state");
+    if (state === "granted") return "granted";
+    if (state === "not-granted" || state === "not-determined") return "not-granted";
+    if (state === "unsupported") return "unsupported";
+  } catch {
+    /* older backend: fall through to the plugin's answer */
+  }
   try {
     const { isPermissionGranted } = await import(
       "@tauri-apps/plugin-notification"
@@ -54,19 +68,24 @@ export async function ensureNotificationPermission(): Promise<NotificationPermis
     return notificationPermission();
   }
 
-  const { isPermissionGranted, requestPermission } = await import(
-    "@tauri-apps/plugin-notification"
-  );
-
-  let granted = await isPermissionGranted();
-  // A denied app is not re-prompted by macOS, so `requestPermission` returns
-  // "denied" immediately. Calling it is still correct: on a first run it is
-  // the only way to get the dialog.
-  if (!granted) {
-    try {
-      granted = (await requestPermission()) === "granted";
-    } catch {
-      granted = false;
+  // Rust owns the request on macOS: it talks to UNUserNotificationCenter,
+  // which is the only API that can put the system dialog on screen (and the
+  // only one that knows the answer afterwards).
+  let granted: boolean;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    granted = await invoke<boolean>("request_notification_permission");
+  } catch {
+    const { isPermissionGranted, requestPermission } = await import(
+      "@tauri-apps/plugin-notification"
+    );
+    granted = await isPermissionGranted();
+    if (!granted) {
+      try {
+        granted = (await requestPermission()) === "granted";
+      } catch {
+        granted = false;
+      }
     }
   }
   // Rust decides whether to ping; it must always know the user's intent. When
@@ -152,6 +171,13 @@ export async function listenNotificationClicks(): Promise<void> {
       const id = event.notification?.id;
       if (typeof id !== "number") return;
       void openNotificationTarget(id);
+    });
+    // macOS posts through UNUserNotificationCenter (see services/mac_notify.rs),
+    // whose delegate emits the in-app notification row directly.
+    const { listen } = await import("@tauri-apps/api/event");
+    await listen<{ row: number }>("notification:action", (event) => {
+      const row = event.payload?.row;
+      if (typeof row === "number") void openNotificationTarget(row);
     });
   } catch (err) {
     notificationClicksBound = false;

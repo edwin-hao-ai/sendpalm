@@ -63,3 +63,12 @@ bytes = "1"
 http = "1"
 sha2 = "0.10"
 url = "2"
+
+# macOS notifications: UNUserNotificationCenter directly. The notification
+# plugin's desktop backend still posts through NSUserNotificationCenter, which
+# Apple deprecated in macOS 11 and which silently delivers nothing here.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSDictionary", "NSValue", "NSBundle", "block2"] }
+objc2-user-notifications = "0.3"
+block2 = "0.6"

@@ -361,6 +361,35 @@ pub fn run() {
         .setup(|app| {
             eprintln!("[sendpalm] setup begin");
             app.manage(SyncStateStore::new());
+            // macOS: install the notification click delegate before any banner
+            // is posted (the centre holds it weakly, so it is parked in
+            // managed state right there).
+            #[cfg(target_os = "macos")]
+            services::mac_notify::install(app.handle());
+            // Diagnostic entry point, same shape as SENDPALM_DISABLE_BACKGROUND_SYNC
+            // and SENDPALM_E2E_NETWORK: request notification permission and post
+            // one banner at boot. The Settings 「发送测试通知」 button is the
+            // normal path; this exists because the system permission dialog can
+            // only be observed (and accepted) by a human, and an automated
+            // check needs the request to fire without a click.
+            #[cfg(target_os = "macos")]
+            if std::env::var("SENDPALM_NOTIFY_SELFTEST").as_deref() == Ok("1") {
+                eprintln!("[sendpalm] notify self-test: requesting authorization");
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let granted = services::mac_notify::request_authorization();
+                    eprintln!("[sendpalm] notify self-test: authorized={granted}");
+                    match services::mac_notify::post(
+                        "SendPalm 通知自检",
+                        "看到这条说明系统通知链路是通的。",
+                        None,
+                    ) {
+                        Ok(()) => eprintln!("[sendpalm] notify self-test: posted"),
+                        Err(e) => eprintln!("[sendpalm] notify self-test: post failed: {e}"),
+                    }
+                    let _ = &handle;
+                });
+            }
             let disable = std::env::var("SENDPALM_DISABLE_BACKGROUND_SYNC")
                 .ok()
                 .map(|v| v == "1")
@@ -476,6 +505,8 @@ pub fn run() {
             commands::notification_settings::notify_settings_changed,
             commands::notification_settings::notification_target,
             commands::notification_settings::send_test_notification,
+            commands::notification_settings::notification_permission_state,
+            commands::notification_settings::request_notification_permission,
             commands::image_proxy::fetch_image,
             commands::agent_chat,
             commands::llm_list_models,

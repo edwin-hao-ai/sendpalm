@@ -30,6 +30,10 @@ pub mod sync_loop;
 #[cfg(desktop)]
 pub mod tray;
 pub mod vault;
+// macOS 桌面通知走 UNUserNotificationCenter（见模块头部注释：插件那条
+// NSUserNotification 路径在当前 macOS 上已经失效）。只在 macOS 编译。
+#[cfg(target_os = "macos")]
+pub mod mac_notify;
 
 use serde::{Deserialize, Serialize};
 

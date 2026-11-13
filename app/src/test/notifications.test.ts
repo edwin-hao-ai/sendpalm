@@ -54,13 +54,17 @@ describe("notification permission vs. user intent", () => {
    *  them — pinging while the OS refuses produces a silent no-op per new mail,
    *  and the user has no way to find out why. */
   function mockEnv(granted: boolean) {
-    const invoke = vi.fn().mockResolvedValue(undefined);
+    // Rust owns the request now: `request_notification_permission` answers,
+    // `notify_settings_changed` is fire-and-forget.
+    const invoke = vi.fn((command: string) =>
+      Promise.resolve(command === "request_notification_permission" ? granted : undefined),
+    );
     const requestPermission = vi
       .fn()
       .mockResolvedValue(granted ? "granted" : "denied");
     vi.doMock("../services/tauri-shim", () => ({ IS_BROWSER: () => false }));
     vi.doMock("@tauri-apps/plugin-notification", () => ({
-      isPermissionGranted: vi.fn().mockResolvedValue(false),
+      isPermissionGranted: vi.fn().mockResolvedValue(granted),
       requestPermission,
     }));
     vi.doMock("@tauri-apps/api/core", () => ({ invoke }));

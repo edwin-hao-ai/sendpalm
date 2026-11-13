@@ -97,30 +97,46 @@ pub async fn notify_new_mail(
         subject.to_string()
     };
     let body = format!("From {sender}\n({account_id})");
-    let mut builder = app.notification().builder().title(title).body(body);
-    // The click handler gets this integer back, not the message id — hand it
-    // the `notifications.rowid` so `notification_target` can resolve it.
-    // macOS ids are 32-bit; a rowid that overflows (impossible in practice on
-    // a mailbox-sized table) simply stays unnamed and the click is a no-op.
-    if let Some(row) = notification_row.filter(|r| *r > 0 && *r <= i32::MAX as i64) {
-        builder = builder.id(row as i32);
+    // macOS: the plugin's backend (notify-rust → NSUserNotificationCenter) is
+    // inert on current macOS, so post through UNUserNotificationCenter and
+    // carry the in-app notification row so a click can open that mail.
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app; // the plugin handle is only used by the non-macOS path
+        crate::services::mac_notify::post(&title, &body, notification_row).map_err(|e| {
+            let reason = e.clone();
+            if record_failure_once(&reason) {
+                eprintln!("[sendpalm] desktop notification failed: {reason}");
+            }
+            format!("notification: {reason}")
+        })?;
+        return Ok(());
     }
-    if prefs.sound {
-        builder = builder.sound("default");
-    }
-    builder.show().map_err(|e| {
-        // The caller used to swallow this (`let _ =`), so an OS-level refusal
-        // (permission never granted, which is what macOS reports as "app not
-        // allowed") turned into "新邮件没有任何提示" with nothing anywhere to
-        // explain it. Log once per distinct reason: a denial fails on EVERY
-        // new mail, and printing that per message is how a log becomes noise.
-        let reason = e.to_string();
-        if record_failure_once(&reason) {
-            eprintln!("[sendpalm] desktop notification failed: {reason}");
+    #[cfg(not(target_os = "macos"))]
+    {
+        let mut builder = app.notification().builder().title(title).body(body);
+        // The click handler gets this integer back, not the message id — hand
+        // it the `notifications.rowid` so `notification_target` can resolve it.
+        if let Some(row) = notification_row.filter(|r| *r > 0 && *r <= i32::MAX as i64) {
+            builder = builder.id(row as i32);
         }
-        format!("notification: {reason}")
-    })?;
-    Ok(())
+        if prefs.sound {
+            builder = builder.sound("default");
+        }
+        builder.show().map_err(|e| {
+            // The caller used to swallow this (`let _ =`), so an OS-level
+            // refusal turned into "新邮件没有任何提示" with nothing anywhere to
+            // explain it. Log once per distinct reason: a denial fails on
+            // EVERY new mail, and printing that per message is how a log
+            // becomes noise.
+            let reason = e.to_string();
+            if record_failure_once(&reason) {
+                eprintln!("[sendpalm] desktop notification failed: {reason}");
+            }
+            format!("notification: {reason}")
+        })?;
+        Ok(())
+    }
 }
 
 /// One log line per distinct failure reason per process. Returns true the

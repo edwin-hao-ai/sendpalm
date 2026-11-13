@@ -635,8 +635,31 @@ async fn resolve_credentials(
     // `resolve_credentials` runs before any explicit `load_test_credentials()`.
     let _ = dotenvy::dotenv();
 
-    // 1. Prefer the OS keyring.
-    let password = match vault::get_password(account_id) {
+    // 0. Debug builds prefer the dev credentials in `.env` when the account
+    //    matches. Reading the keyring FIRST looks harmless but is not: macOS
+    //    binds the entry to the code signature, so a rebuild makes it
+    //    unreadable and `get_password` blocks on a system dialog asking for the
+    //    login password — the sync loop then hangs behind that modal with no
+    //    log line at all. A developer with `.env` should never see the dialog.
+    #[cfg(debug_assertions)]
+    let dev_password: Option<String> = {
+        let test_email = std::env::var("SENDPALM_TEST_EMAIL").unwrap_or_default();
+        if !test_email.is_empty() && email == test_email {
+            std::env::var("SENDPALM_TEST_PASSWORD")
+                .ok()
+                .filter(|p| !p.is_empty())
+        } else {
+            None
+        }
+    };
+    #[cfg(not(debug_assertions))]
+    let dev_password: Option<String> = None;
+
+    // 1. Prefer the OS keyring — unless a debug build already has the dev
+    //    credentials (step 0 above).
+    let password = match dev_password {
+        Some(password) => password,
+        None => match vault::get_password(account_id) {
         Ok(Some(p)) => p,
         Ok(None) => {
             // 2. Dev convenience: if no keyring entry, fall back to the test
@@ -668,6 +691,7 @@ async fn resolve_credentials(
                 return Err(format!("keychain access denied: {e}"));
             }
         }
+        },
     };
 
     let settings: serde_json::Value = settings_json

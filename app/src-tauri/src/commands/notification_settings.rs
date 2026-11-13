@@ -25,6 +25,36 @@ pub async fn notify_settings_changed(
     Ok(())
 }
 
+/// Real macOS authorization state ("granted" / "not-granted" /
+/// "not-determined" / "unsupported"). The notification plugin answers from the
+/// deprecated NSUserNotification world, where an app that never registered
+/// still reports "granted" — which is why the Settings row could never show the
+/// truth.
+#[tauri::command]
+pub async fn notification_permission_state() -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        return Ok(crate::services::mac_notify::permission_state().to_string());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok("unsupported".to_string())
+    }
+}
+
+/// Ask the OS for permission (macOS shows the system dialog the first time).
+#[tauri::command]
+pub async fn request_notification_permission() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        return Ok(crate::services::mac_notify::request_authorization());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(false)
+    }
+}
+
 /// Post one notification immediately, using the same builder as a real mail.
 ///
 /// Two reasons this is a product feature rather than a debug hook:
@@ -36,6 +66,17 @@ pub async fn notify_settings_changed(
 ///    suppressed it" — the error comes back to Settings and is shown.
 #[tauri::command]
 pub async fn send_test_notification(app: AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app; // macOS posts natively; the plugin handle is unused here
+        return crate::services::mac_notify::post(
+            "SendPalm 通知测试",
+            "看到这条说明系统通知是通的。点一下会切回 SendPalm。",
+            None,
+        );
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
     use tauri_plugin_notification::NotificationExt;
     let store = app.state::<crate::services::state::SyncStateStore>();
     let prefs = store.notification_prefs();
@@ -50,6 +91,7 @@ pub async fn send_test_notification(app: AppHandle) -> Result<(), String> {
     builder
         .show()
         .map_err(|e| format!("系统拒绝了这条通知：{e}"))
+    }
 }
 
 /// Where a clicked desktop notification should take the user.
