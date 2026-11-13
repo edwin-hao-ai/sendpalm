@@ -333,8 +333,14 @@ fn walk_attachments(
                 .map(|v| v.to_lowercase().contains("attachment"))
                 .unwrap_or(false);
         if is_attachment || (!cd.starts_with("text/") && !cd.starts_with("multipart/")) {
-            let filename = attachment_filename(part)
-                .unwrap_or_else(|| fallback_attachment_name(&cd, sent_at));
+            let filename = match attachment_filename(part) {
+                Some(name) => name,
+                // A bounce carries several `message/*` parts that all fall back
+                // to the same `类型-日期` name; number the repeats so two rows in
+                // Files are still tellable apart. Sender-given names are left
+                // alone — renaming what the sender chose is not our call.
+                None => unique_within_message(fallback_attachment_name(&cd, sent_at), out),
+            };
             let content = part.get_body_raw().ok();
             let size = content.as_ref().map(|b| b.len() as u64).unwrap_or(0);
             let content_id = header_value_at(&part.headers, "Content-ID")
@@ -432,6 +438,26 @@ fn extension_for_mime(mime: &str) -> &'static str {
         "text/calendar" => "ics",
         _ => "bin",
     }
+}
+
+/// Append `-2`, `-3`, … when the fallback name is already taken inside this
+/// message. Bounded on purpose: an attachment list is never thousands long, and
+/// a loop that cannot fail is better than one that the compiler has to trust.
+fn unique_within_message(base: String, existing: &[ParsedAttachment]) -> String {
+    if !existing.iter().any(|a| a.filename == base) {
+        return base;
+    }
+    let (stem, ext) = match base.rsplit_once('.') {
+        Some((stem, ext)) => (stem.to_string(), format!(".{ext}")),
+        None => (base, String::new()),
+    };
+    for n in 2..1000 {
+        let candidate = format!("{stem}-{n}{ext}");
+        if !existing.iter().any(|a| a.filename == candidate) {
+            return candidate;
+        }
+    }
+    format!("{stem}-999{ext}")
 }
 
 #[cfg(test)]
@@ -713,5 +739,31 @@ Action: failed\r\n\
         );
         assert_eq!(extension_for_mime("message/rfc822"), "eml");
         assert_eq!(fallback_attachment_name("image/jpeg", None), "image-unknown.jpg");
+    }
+
+    /// A bounce carries report + delivery-status + the original mail: all three
+    /// are unnamed, so the second one must not reuse the first one's name.
+    #[test]
+    fn repeated_fallback_names_are_numbered() {
+        let raw = "From: a@a.com\r\n\
+Subject: bounce\r\n\
+Date: Mon, 1 Jan 2024 10:00:00 +0000\r\n\
+Message-ID: <bounce2@a.com>\r\n\
+MIME-Version: 1.0\r\n\
+Content-Type: multipart/report; boundary=BOUND\r\n\
+\r\n\
+--BOUND\r\n\
+Content-Type: message/delivery-status\r\n\
+\r\n\
+Action: failed\r\n\
+--BOUND\r\n\
+Content-Type: message/delivery-status\r\n\
+\r\n\
+Action: failed again\r\n\
+--BOUND--\r\n";
+        let p = parse_email(raw.as_bytes()).unwrap();
+        assert_eq!(p.attachments.len(), 2);
+        assert_eq!(p.attachments[0].filename, "attachment-20240101.txt");
+        assert_eq!(p.attachments[1].filename, "attachment-20240101-2.txt");
     }
 }
