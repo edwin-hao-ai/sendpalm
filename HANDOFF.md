@@ -17,7 +17,12 @@
 | `pnpm typecheck` / `pnpm lint` | 干净 |
 | `pnpm test`（vitest） | 890 passed / 92 files |
 | `cargo +stable test` | 35 套件全绿（lib 195，含 parser 16、e2e_seed 2） |
-| `pnpm exec playwright test` | 见「这一轮」最后一节 |
+| `pnpm exec playwright test` | 193 passed / 2 failed / 1 skipped（见下） |
+
+`mobile-ui-audit.spec.ts`（iPhone 13 视口）里两条断言当时是红的：**点击目标 < 44×44px**
+（同步按钮 58×24、某个图标按钮 30×30）和**表单字号 < 16px**（iOS 会自动放大）。这两条是
+同一棵工作树上另一个会话刚加的断言，而修复当时还只存在于工作区（未提交），所以没有随这次
+push 上来。修的时候按 AGENTS §6 的 44×44 来，别去放宽断言。
 
 
 ## 需要你 1 分钟
@@ -140,3 +145,6 @@ xcrun altool --upload-app -f src-tauri/gen/apple/build/arm64/SendPalm.ipa -t ios
    签名稳定就不会再丢。当前 `/Applications` 放的是 debug 构建（读 `.env`，不需要密码）。
 5. **文件页仍然整表取 3740 行**（936 KB）再在前端窗口渲染；要彻底解决得把筛选下沉到 SQL
    并做 keyset 分页。属于动数据路径的活，跳过。
+6. **两条移动端审计断言是红的**（见上表）：`mobile-ui-audit.spec.ts` 的 44×44 点击目标与
+   16px 表单字号。断言本身是对的（AGENTS §6），缺的是 UI 修复。
+
