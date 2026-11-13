@@ -3630,6 +3630,18 @@ function PreferencesNotificationsTab() {
           await notifySettingsChanged({ ...prefs(), sound: v });
         }}
       />
+      <ToggleRow
+        label="新发件人也提醒"
+        description="默认只提醒已经通过筛选台的人。打开后，第一次给你写信的人也会弹通知（订阅邮件仍然静默）。筛选台积压很多时，建议打开。"
+        checked={prefs().firstSenders ?? false}
+        onChange={async (v) => {
+          setAppSettings("preferences", "notifications", {
+            ...prefs(),
+            firstSenders: v,
+          });
+          await notifySettingsChanged({ ...prefs(), firstSenders: v });
+        }}
+      />
       <div
         style={{
           display: "flex",

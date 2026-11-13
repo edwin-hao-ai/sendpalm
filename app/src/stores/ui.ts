@@ -424,6 +424,9 @@ export const [appSettings, setAppSettings] = createStore<AppSettings>({
       quietHoursEnabled: false,
       quietHoursStart: "22:00",
       quietHoursEnd: "08:00",
+      // Off by default: the Gate is a screener. Turning it on means "tell me
+      // when a stranger writes" — newsletters stay silent either way.
+      firstSenders: false,
       permissionPrompted: false,
     },
     gateGuideSeen: false,

@@ -16,6 +16,12 @@ pub struct NotificationPrefs {
     pub quiet_hours_enabled: bool,
     pub quiet_hours_start: String, // "HH:MM" 24h
     pub quiet_hours_end: String,
+    /// Ping for mail from a sender the Gate has not screened yet. Off by
+    /// default: a screener-based client is quiet about strangers by design,
+    /// but then nobody learns the mail arrived — and with a few hundred pending
+    /// senders that means most new mail is silent. Newsletters stay silent
+    /// either way.
+    pub ping_first_senders: bool,
 }
 
 impl Default for NotificationPrefs {
@@ -29,6 +35,7 @@ impl Default for NotificationPrefs {
             quiet_hours_enabled: false,
             quiet_hours_start: "22:00".to_string(),
             quiet_hours_end: "08:00".to_string(),
+            ping_first_senders: false,
         }
     }
 }

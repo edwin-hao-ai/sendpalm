@@ -42,7 +42,8 @@
       "icons/icon.ico"
     ],
     "iOS": {
-      "minimumSystemVersion": "15.0"
+      "minimumSystemVersion": "15.0",
+      "developmentTeam": "5XNDF727Y6"
     }
   },
   "plugins": {

@@ -598,6 +598,8 @@ export interface AppSettings {
       quietHoursEnabled: boolean;
       quietHoursStart: string;
       quietHoursEnd: string;
+      /** Ping for mail from a sender the Gate has not screened yet. */
+      firstSenders?: boolean;
       /** True once the user has seen (and acted on or dismissed) the
        *  first-run notification prompt. Stops the prompt reappearing. */
       permissionPrompted?: boolean;

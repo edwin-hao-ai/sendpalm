@@ -10,6 +10,8 @@ export interface NotificationPrefs {
   quietHoursEnabled: boolean;
   quietHoursStart: string;
   quietHoursEnd: string;
+  /** Ping for mail from a sender the Gate has not screened yet. */
+  firstSenders?: boolean;
 }
 
 /** What the OS thinks of us. The plugin can only answer "granted or not", so
@@ -237,6 +239,8 @@ export async function notifySettingsChanged(
       quietHoursEnabled: prefs.quietHoursEnabled,
       quietHoursStart: prefs.quietHoursStart,
       quietHoursEnd: prefs.quietHoursEnd,
+      // Tauri 2 maps camelCase → snake_case on the way in.
+      pingFirstSenders: prefs.firstSenders,
     });
   } catch (err) {
     // Not fatal (the next toggle retries), but never silent: a swallowed IPC

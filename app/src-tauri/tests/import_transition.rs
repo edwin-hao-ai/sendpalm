@@ -239,15 +239,27 @@ use sendpalm_app_lib::services::sync_loop::{
 
 #[test]
 fn a_message_from_a_person_pings_by_default() {
-    assert!(should_ping_os(false, true, false, false));
-    assert!(should_ping_os(true, false, true, false));
+    assert!(should_ping_os(false, true, false, false, false));
+    assert!(should_ping_os(true, false, true, false, false));
 }
 
 #[test]
 fn newsletters_and_strangers_stay_silent_by_default() {
     // Not opted in, and either unscreened or a newsletter.
-    assert!(!should_ping_os(false, false, false, false));
-    assert!(!should_ping_os(false, true, true, false));
+    assert!(!should_ping_os(false, false, false, false, false));
+    assert!(!should_ping_os(false, true, true, false, false));
+}
+
+#[test]
+fn a_first_time_sender_pings_when_the_user_asks_for_it() {
+    // With a few hundred pending senders, the default means "most new mail is
+    // silent" — the opt-in exists so the user can decide, and newsletters stay
+    // silent whichever way it is set.
+    assert!(should_ping_os(false, false, false, false, true));
+    assert!(!should_ping_os(false, false, true, false, true));
+    // The quiet window (and the post-import window) still wins: it is about
+    // the user's stated silence, not about noise triage.
+    assert!(!should_ping_os(false, false, false, true, true));
 }
 
 #[test]
@@ -256,13 +268,13 @@ fn the_quiet_window_silences_everything_but_the_explicit_opt_in() {
         [(false, true, false), (false, false, false), (false, true, true)]
     {
         assert!(
-            !should_ping_os(notify, screened, is_newsletter, true),
+            !should_ping_os(notify, screened, is_newsletter, true, false),
             "quiet window must suppress notify={notify} screened={screened} newsletter={is_newsletter}"
         );
     }
     // A contact the user explicitly asked to be notified about still pings —
     // the quiet window is about noise, not about going deaf.
-    assert!(should_ping_os(true, false, true, true));
+    assert!(should_ping_os(true, false, true, true, false));
 }
 
 #[test]

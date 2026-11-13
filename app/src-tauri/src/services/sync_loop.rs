@@ -145,11 +145,17 @@ pub fn should_ping_os(
     screened: bool,
     is_newsletter: bool,
     os_quiet: bool,
+    ping_first_senders: bool,
 ) -> bool {
     if os_quiet {
         return notify;
     }
-    notify || (screened && !is_newsletter)
+    // A first-time sender is the one mail a screener-based client would
+    // otherwise swallow: it sits in the Gate and nothing says it arrived. The
+    // toggle exists because the alternative (Alerting on every stranger) is
+    // how people turn notifications off forever — newsletters stay silent
+    // either way.
+    notify || (screened && !is_newsletter) || (ping_first_senders && !is_newsletter)
 }
 
 /// How many senders did the import quietly approve?
@@ -1873,6 +1879,8 @@ async fn insert_message(
         // Newsletter/promo mail (List-*) arrives silently into the lists —
         // otherwise a busy mailbox drowns the notification center and the
         // user disables notifications entirely.
+        let store = app.state::<crate::services::state::SyncStateStore>();
+        let prefs = store.notification_prefs();
         let flags: Option<(i64, i64)> = sqlx::query_as(
             "SELECT notify, screened FROM contacts WHERE id = $1",
         )
@@ -1887,12 +1895,11 @@ async fn insert_message(
                     screened == 1,
                     parsed.is_newsletter,
                     phase.os_quiet,
+                    prefs.ping_first_senders,
                 )
             })
             .unwrap_or(false);
         if ping {
-            let store = app.state::<crate::services::state::SyncStateStore>();
-            let prefs = store.notification_prefs();
             let _ = crate::services::desktop_notifier::notify_new_mail(
                 app,
                 &prefs,

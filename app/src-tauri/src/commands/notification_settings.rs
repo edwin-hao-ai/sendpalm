@@ -11,6 +11,7 @@ pub async fn notify_settings_changed(
     quiet_hours_enabled: bool,
     quiet_hours_start: String,
     quiet_hours_end: String,
+    ping_first_senders: bool,
 ) -> Result<(), String> {
     let prefs = NotificationPrefs {
         desktop_enabled,
@@ -19,6 +20,7 @@ pub async fn notify_settings_changed(
         quiet_hours_enabled,
         quiet_hours_start,
         quiet_hours_end,
+        ping_first_senders,
     };
     let store = app.state::<crate::services::state::SyncStateStore>();
     store.set_notification_prefs(prefs);

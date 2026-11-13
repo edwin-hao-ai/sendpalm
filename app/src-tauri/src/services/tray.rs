@@ -70,13 +70,17 @@ pub fn read_background_prefs(app: &AppHandle) -> BackgroundPrefs {
     prefs
 }
 
-/// macOS tray title carrying the unread badge ("3" / "99+"). Other
-/// platforms show the count in the menu header instead — pure fn, tested.
+/// macOS tray title carrying the unread badge.
+///
+/// A real count while it means something, a single dot once the badge would
+/// just be wallpaper. "99+" was three wide glyphs of permanent noise in the
+/// menu bar for a number nobody reads ("291 位待审" reads the same as 350).
+/// Other platforms show the count in the menu header instead — pure fn, tested.
 pub fn unread_badge_title(count: i64, enabled: bool) -> Option<String> {
     if !enabled || count <= 0 {
         None
     } else if count > 99 {
-        Some("99+".to_string())
+        Some("•".to_string())
     } else {
         Some(count.to_string())
     }
@@ -410,7 +414,10 @@ mod tests {
         assert_eq!(unread_badge_title(3, true), Some("3".to_string()));
         assert_eq!(unread_badge_title(0, true), None);
         assert_eq!(unread_badge_title(-1, true), None);
-        assert_eq!(unread_badge_title(120, true), Some("99+".to_string()));
+        // Past two digits the number stops being information: a dot says
+        // "something is waiting" without spending the menu bar on it.
+        assert_eq!(unread_badge_title(120, true), Some("•".to_string()));
+        assert_eq!(unread_badge_title(99, true), Some("99".to_string()));
         assert_eq!(unread_badge_title(3, false), None);
     }
 
